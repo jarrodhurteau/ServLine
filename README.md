@@ -117,3 +117,29 @@ git commit -m "Day 2: SQLite schema + seed + /db/health wired"
    git add .
    git commit -m "Day 3: API endpoints for restaurants, menus, and menu_items"
 ✅ Day 3 is complete when all 3 endpoints return JSON as expected and commit is saved.
+
+---
+
+## 🔵 Day 4: Portal UI (Restaurants → Menus → Items) Read-Only
+
+- **New HTML pages (with navigation):**
+  - `/restaurants` → list of restaurants
+  - `/restaurants/<id>/menus` → menus for a restaurant
+  - `/menus/<id>/items` → items in a menu
+- Added **Jinja templates**:
+  - `base.html` (layout + nav)
+  - `restaurants.html`, `menus.html`, `items.html`
+- Navigation links and breadcrumbs connect the flow.
+
+**Acceptance Demo (Day 4)**  
+1. Restart infra (Stop → Start tasks in VS Code).  
+2. Visit:
+   - `/restaurants` → seeded restaurant appears  
+   - `/restaurants/1/menus` → seeded menu appears  
+   - `/menus/1/items` → seeded items appear  
+3. All pages link correctly, styled in basic dark theme.  
+4. Lock into Git:
+   ```bash
+   git add .
+   git commit -m "Day 4: Portal UI (restaurants → menus → items) read-only"
+✅ Day 4 is complete when the restaurant → menus → items flow works in browser and commit is saved.
