@@ -143,3 +143,18 @@ git commit -m "Day 2: SQLite schema + seed + /db/health wired"
    git add .
    git commit -m "Day 4: Portal UI (restaurants → menus → items) read-only"
 ✅ Day 4 is complete when the restaurant → menus → items flow works in browser and commit is saved.
+
+---
+
+## 🟣 Day 4.5: Tailwind CDN + Base Tokens (No Layout Changes)
+
+- Added **Tailwind CSS (CDN)** to templates.
+- Defined base **design tokens** (colors, shadow, radius) in an inline Tailwind config.
+- Kept existing CSS to avoid visual shifts; only minimal utility classes added.
+
+**Acceptance Demo (Day 4.5)**
+1. Restart infra (Stop → Start tasks in VS Code).
+2. Open the homepage and restaurants pages — they should look the **same** (no layout changes).
+3. View page source and confirm Tailwind is loaded.
+4. We’re now ready to style future components (Hero, Cards, Buttons) without touching backend logic.
+✅ Day 4.5 is complete when Tailwind is present in page source and the site still looks unchanged.

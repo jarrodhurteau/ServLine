@@ -4,6 +4,38 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}ServLine Portal{% endblock %}</title>
+
+    <!-- Tailwind CSS (CDN) — Day 4.5 style step, no layout changes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Minimal Tailwind theme tokens for later use
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b1220',
+              panel: '#111a2f',
+              ink: '#e8eefc',
+              muted: '#9fb0d1',
+              line: '#1f2a44',
+              brand: {
+                50: '#eaf2ff',
+                500: '#7aa2ff',
+                600: '#5a86f7',
+              }
+            },
+            boxShadow: {
+              card: '0 8px 24px rgba(0,0,0,.25)',
+            },
+            borderRadius: {
+              xl: '14px',
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- Existing inline CSS kept to avoid visual shifts -->
     <style>
       :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; }
       * { box-sizing: border-box; }
@@ -23,10 +55,10 @@
     </style>
     {% block head %}{% endblock %}
   </head>
-  <body>
+  <body class="bg-bg text-ink">
     <div class="nav">
       <div class="brand"><a href="/">ServLine Portal</a></div>
-      <div><a href="/restaurants">Restaurants</a></div>
+      <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
     </div>
     <div class="wrap">
       {% block content %}{% endblock %}
