@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Items · {{ menu.name }} · {{ restaurant.name }} · ServLine{% endblock %}
+{% block content %}
+  <p class="crumbs">
+    <a href="/restaurants">Restaurants</a> ›
+    <a href="/restaurants/{{ restaurant.id }}/menus">{{ restaurant.name }}</a> ›
+    {{ menu.name }}
+  </p>
+  <div class="card">
+    <h1>Items — {{ menu.name }}</h1>
+    <ul class="list">
+      {% for it in items %}
+        <li class="row">
+          <div>
+            <div>{{ it.name }}</div>
+            {% if it.description %}<div class="muted">{{ it.description }}</div>{% endif %}
+          </div>
+          <div class="muted">
+            ${{ '%.2f'|format(it.price_cents/100) }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

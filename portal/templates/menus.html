@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Menus · {{ restaurant.name }} · ServLine{% endblock %}
+{% block content %}
+  <p class="crumbs"><a href="/restaurants">Restaurants</a> › {{ restaurant.name }}</p>
+  <div class="card">
+    <h1>Menus — {{ restaurant.name }}</h1>
+    <ul class="list">
+      {% for m in menus %}
+        <li class="row">
+          <div><a href="/menus/{{ m.id }}/items">{{ m.name }}</a></div>
+          <div class="muted">#{{ m.id }}</div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

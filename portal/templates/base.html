@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}ServLine Portal{% endblock %}</title>
+    <style>
+      :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; }
+      * { box-sizing: border-box; }
+      html,body { height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+      a { color:#b7cdfb; text-decoration:none; }
+      a:hover { text-decoration:underline; }
+      .nav { display:flex; gap:16px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; }
+      .brand { font-weight:700; letter-spacing:.3px; }
+      .wrap { max-width:960px; margin:24px auto; padding:0 16px; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+      .list { margin:0; padding:0; list-style:none; }
+      .row { display:flex; align-items:center; justify-content:space-between; padding:12px 10px; border-bottom:1px dashed var(--line); }
+      .row:last-child { border-bottom:none; }
+      .crumbs { color:var(--muted); margin:0 0 10px; font-size:14px; }
+      h1,h2 { margin:0 0 10px; }
+      .muted { color:var(--muted); }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <div class="nav">
+      <div class="brand"><a href="/">ServLine Portal</a></div>
+      <div><a href="/restaurants">Restaurants</a></div>
+    </div>
+    <div class="wrap">
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>

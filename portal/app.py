@@ -35,7 +35,7 @@ def db_health():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# --- API endpoints ---
+# --- JSON API ---
 
 @app.get("/api/restaurants")
 def get_restaurants():
@@ -63,9 +63,40 @@ def get_menu_items(menu_id):
             abort(404, description="No items found for that menu")
         return jsonify([dict(r) for r in rows])
 
+# --- HTML Pages (Portal UI) ---
+
 @app.get("/")
 def index():
     return render_template("index.html")
+
+@app.get("/restaurants")
+def restaurants_page():
+    with db_connect() as conn:
+        rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
+    return render_template("restaurants.html", restaurants=rows)
+
+@app.get("/restaurants/<int:rest_id>/menus")
+def menus_page(rest_id):
+    with db_connect() as conn:
+        rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
+        menus = conn.execute(
+            "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,)
+        ).fetchall()
+    if not rest:
+        abort(404)
+    return render_template("menus.html", restaurant=rest, menus=menus)
+
+@app.get("/menus/<int:menu_id>/items")
+def items_page(menu_id):
+    with db_connect() as conn:
+        menu = conn.execute("SELECT * FROM menus WHERE id=?", (menu_id,)).fetchone()
+        if not menu:
+            abort(404)
+        rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)).fetchone()
+        items = conn.execute(
+            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,)
+        ).fetchall()
+    return render_template("items.html", restaurant=rest, menu=menu, items=items)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

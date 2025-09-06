@@ -96,3 +96,24 @@ Copy code
 git add .
 git commit -m "Day 2: SQLite schema + seed + /db/health wired"
 ✅ Day 2 is complete when the JSON response shows the seeded counts and commit is saved.
+
+---
+
+## 🟠 Day 3: API Endpoints for Restaurants + Menus
+
+- **New API routes:**
+  - `GET /api/restaurants` → list all active restaurants
+  - `GET /api/restaurants/<id>/menus` → list menus for a restaurant
+  - `GET /api/menus/<id>/items` → list items for a menu
+
+**Acceptance Demo (Day 3)**  
+1. Restart infra (Stop → Start tasks in VS Code).  
+2. Open:
+   - `/api/restaurants` → seeded restaurant(s)  
+   - `/api/restaurants/1/menus` → seeded menu(s)  
+   - `/api/menus/1/items` → seeded menu items  
+3. Lock into Git:  
+   ```bash
+   git add .
+   git commit -m "Day 3: API endpoints for restaurants, menus, and menu_items"
+✅ Day 3 is complete when all 3 endpoints return JSON as expected and commit is saved.
