@@ -18,18 +18,10 @@
               ink: '#e8eefc',
               muted: '#9fb0d1',
               line: '#1f2a44',
-              brand: {
-                50: '#eaf2ff',
-                500: '#7aa2ff',
-                600: '#5a86f7',
-              }
+              brand: { 50: '#eaf2ff', 500: '#7aa2ff', 600: '#5a86f7' }
             },
-            boxShadow: {
-              card: '0 8px 24px rgba(0,0,0,.25)',
-            },
-            borderRadius: {
-              xl: '14px',
-            }
+            boxShadow: { card: '0 8px 24px rgba(0,0,0,.25)' },
+            borderRadius: { xl: '14px' }
           }
         }
       }
@@ -52,8 +44,32 @@
       .crumbs { color:var(--muted); margin:0 0 10px; font-size:14px; }
       h1,h2 { margin:0 0 10px; }
       .muted { color:var(--muted); }
-      /* small utility so the right side pushes over */
       .ml-auto { margin-left: auto; }
+
+      /* --- Readability fixes for forms (black text on white fields) --- */
+      select.form-select,
+      input.form-control,
+      textarea.form-control,
+      select,
+      input[type="text"],
+      input[type="number"],
+      input[type="email"],
+      input[type="password"],
+      textarea {
+        color: #000 !important;              /* force black text */
+        background-color: #fff;              /* ensure contrast on dark theme */
+      }
+      /* options inside dropdown list */
+      select.form-select option,
+      select option {
+        color: #000 !important;
+        background-color: #fff;
+      }
+      /* placeholder color for inputs */
+      input::placeholder, textarea::placeholder {
+        color: #666;                         /* darker placeholder for legibility */
+        opacity: 1;
+      }
     </style>
     {% block head %}{% endblock %}
   </head>
@@ -61,6 +77,7 @@
     <div class="nav">
       <div class="brand"><a href="/">ServLine Portal</a></div>
       <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
+      <div><a href="/import" class="hover:underline">Import</a></div> <!-- NEW: quick access to Upload Picture/PDF -->
 
       <!-- Right-aligned auth controls -->
       <div class="ml-auto">

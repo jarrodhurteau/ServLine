@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Import Menu{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 700px;">
+  <h1 class="mt-4 mb-3">Import a Menu</h1>
+  <p class="muted mb-4">Choose the file type you have. We’ll turn it into a draft you can review and publish.</p>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- Upload Picture -->
+    <div class="card">
+      <h2 class="text-lg mb-2">Upload Picture</h2>
+      <form action="/api/menus/import" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="image/png,image/jpeg" required
+               class="form-control mb-3" />
+        <button class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">
+          Upload Image
+        </button>
+      </form>
+      <p class="small muted mt-2">JPEG or PNG. Great for phone photos.</p>
+    </div>
+
+    <!-- Upload PDF -->
+    <div class="card">
+      <h2 class="text-lg mb-2">Upload PDF</h2>
+      <form action="/api/menus/import" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="application/pdf" required
+               class="form-control mb-3" />
+        <button class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">
+          Upload PDF
+        </button>
+      </form>
+      <p class="small muted mt-2">If your menu is a digital PDF, we extract text directly.</p>
+    </div>
+  </div>
+
+  <div class="mt-6">
+    <a href="/drafts" class="hover:underline">View Drafts</a>
+  </div>
+</div>
+{% endblock %}

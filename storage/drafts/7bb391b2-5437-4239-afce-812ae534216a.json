@@ -1,0 +1,666 @@
+{
+  "job_id": "7bb391b2-5437-4239-afce-812ae534216a",
+  "restaurant_id": null,
+  "currency": "USD",
+  "categories": [
+    {
+      "name": "Pizza",
+      "items": [
+        {
+          "name": "10\" (6 Slices} $7.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "12\" (8 Slices) $9.99 si.e",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "14\" {8 Slices) $n.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 14.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "16\" Round (8 Slices) $14.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 17.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "16\" Square (16 Slices) $18.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 21.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Shoat (24 Slices) $24.99",
+          "description": "FREE Toppings: Popperent, Muchroome and Green Poppers",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 29.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Extra Toppings",
+      "items": [
+        {
+          "name": "10\" and 12\"",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "14\u00b0 and 16\"",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "16\" Square",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Shoot wast 03d",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 75.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Loaded Potato",
+      "items": [
+        {
+          "name": "6 Sticks",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 7.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "12 Sticks",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 1.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "18 Sticks",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 15.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "24 Sticks",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 18.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Full Sheet",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 24.49
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Sandwiches",
+      "items": [
+        {
+          "name": "Meatball",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Sausage",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Philly Cheese",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 7.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Fish Sandwich",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 7.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Salads",
+      "items": [
+        {
+          "name": "Side Salad",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Garden Salad",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Chef Salad",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.49
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Grilled Chicken Salad",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 8.49
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Crispy Chicken Salad",
+          "description": "Dressings: Italian, Ranch, French, Blue",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 8.49
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Apps & Sides",
+      "items": [
+        {
+          "name": "French Fries",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Jolos",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Fried Mushrooms",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Fried Onion Rings",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Fried Mozzarella",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 4.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Jalapefo Poppers",
+          "description": "Go.",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 4.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "PUB CHIPS w/Ranch Dip Tem)",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 4.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Spaghetti & Meatballs",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Cavatelli & Meatballs",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Mostaccioli & Meatballs",
+          "description": "www.samspizza44444.com",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Fried Chicken Chicken Wings",
+      "items": [
+        {
+          "name": "4 $7.99 $8.99 6 $7.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 5.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "8 $14.99 $16.99 12 $13.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "12 $20.99 $24.99 25 $27.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 18.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "16 $26.99 $s1g99 50 $55.99",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 88.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "20",
+          "description": "CHICKEN DINNERS SEAFOOD DINNERS",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 39.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "2pc. Dark (Log & Thigh) 4.99 Shrimp Dinner",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 9.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "2pc. Breast $8.99 White Fish Dinner",
+          "description": "Spc. Whole Wings . Choice of Fries or JoJos",
+          "sizes": [
+            {
+              "name": "Cod",
+              "price": 11.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "$",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Sam'S Specials",
+      "items": [
+        {
+          "name": "peppers",
+          "description": "Tiger Special Available: Every Day",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 10.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "& 12 Wings 1 flavor,",
+          "description": "qT",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 19.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "ehin E { Spaghetti & Meatballs",
+          "description": "Avail : Every Day",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "peppers",
+          "description": "Thursday Special",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 11.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "w/dip",
+          "description": "Friday Family Special",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "$",
+          "description": "Weekender Available: Friday, Saturday @ Sunday",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 31.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "Pint of Dip & Half A Tray of JoJos",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 54.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "peppers, & 4pc. Chicken & JoJos",
+          "description": "Available; Saturday @ Sunday",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "green peppers & 25 wings | favor",
+          "description": "ONLINE ORDERING NOW AVAILABLE",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 39.99
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    }
+  ],
+  "source": {
+    "type": "upload",
+    "file": "7bb391b2-5437-4239-afce-812ae534216a_sams_pizza_menu.png",
+    "ocr_engine": "tesseract+columns",
+    "confidence": 1.0
+  },
+  "created_at": "2025-09-06T21:56:42+00:00"
+}

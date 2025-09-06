@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Raw OCR — {{ job_id }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; }
+    .bar { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+    .btn { padding:6px 12px; border:1px solid #ccc; border-radius:4px; background:#f7f7f7; cursor:pointer; }
+    pre.raw {
+      white-space: pre-wrap;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 13px; line-height: 1.4;
+      border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button class="btn" id="copyAll">Copy All</button>
+    <div style="color:#666">Job: <strong>{{ job_id }}</strong></div>
+  </div>
+
+  <pre class="raw" id="rawBlock">{{ raw_text }}</pre>
+
+  <script>
+    document.getElementById('copyAll').onclick = async () => {
+      const txt = document.getElementById('rawBlock').innerText;
+      await navigator.clipboard.writeText(txt);
+      alert('Copied to clipboard!');
+    };
+  </script>
+</body>
+</html>

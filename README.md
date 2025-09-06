@@ -202,3 +202,48 @@ git commit -m "Day 2: SQLite schema + seed + /db/health wired"
    git add .
    git commit -m "Day 6: Basic auth (login/logout) + protected admin routes"
 ✅ Day 6 is complete when the Add Item form is only reachable after login, and logout removes access.
+
+🔴 Day 7: OCR Import + Raw Viewer
+
+Added OCR import flow:
+
+Upload image/PDF via /import
+
+Background worker saves draft JSON + raw OCR text
+
+New drafts list page (/drafts) shows uploaded jobs
+
+New raw OCR viewer:
+
+Route: /drafts/<job_id>/raw
+
+Monospace formatting + Copy All button
+
+Tested with Sam’s Pizza menu:
+
+Verified OCR output stored + viewable
+
+Logged common OCR issues (price misreads, garbled specials, missing descriptions)
+
+Decided to build Draft Editor MVP in Day 8 to handle structured cleanup
+
+Acceptance Demo (Day 7)
+
+Upload menu at /import.
+
+Wait for job status → draft_created.
+
+Visit /drafts → see new job.
+
+Click into /drafts/<job_id>/raw → raw OCR text displayed, copyable.
+
+Compare with source menu → observe OCR quirks.
+
+Lock into Git:
+
+git add .
+git commit -m "Day 7: OCR import + raw viewer with Sam's Pizza test"
+git tag v0.0.7-day7
+
+
+✅ Day 7 is complete when raw OCR is viewable in browser and ready for cleanup on Day 8.

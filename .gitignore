@@ -15,3 +15,6 @@ infra/current_url.txt
 
 # VS Code settings
 .vscode/
+
+# Uploaded menu files (binary user content)
+uploads/

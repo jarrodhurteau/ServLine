@@ -1,0 +1,613 @@
+{
+  "job_id": "9d5b7495-1c8d-4ba9-9adb-2b0a5f4236c2",
+  "restaurant_id": null,
+  "currency": "USD",
+  "categories": [
+    {
+      "name": "Vet)",
+      "items": [
+        {
+          "name": "h",
+          "description": "Sos Se Tr pe eT ay",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 8.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "S",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Additional",
+      "items": [
+        {
+          "name": "1",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.0
+            },
+            {
+              "name": "One Size",
+              "price": 475.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "N",
+          "description": "Personal Pies",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 31.0
+            },
+            {
+              "name": "One Size",
+              "price": 33.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "S",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 81225.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "W",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 16.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "B",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 81795.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Topping",
+      "items": [
+        {
+          "name": "1",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "N",
+          "description": "Sicilian sae (Square)... eecceecsseeeseeee MAQiNAl cece",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.75
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "E",
+          "description": "CruSlINA ooo. eee",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 9625.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "C",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 9650.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "B",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 86.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "S",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 96.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "M",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "G",
+          "description": "(Available Tues. & Fri. Only)",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 96.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Pilza",
+      "items": [
+        {
+          "name": "t",
+          "description": "- - a J Mozzarella cheese and tomato sauce.",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 18.0
+            },
+            {
+              "name": "One Size",
+              "price": 8.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "a",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 22.05
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "(",
+          "description": "- -",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.0
+            },
+            {
+              "name": "One Size",
+              "price": 18.0
+            },
+            {
+              "name": "One Size",
+              "price": 9.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Mozzarella Cheese And Tomato Sauce.",
+      "items": [
+        {
+          "name": "M",
+          "description": "\u2014_t Fresh plum tomato sauce and fresh mozzarella. Ham, Peppers, Mushrooms, Garlic, Extra Cheese, Anchovies",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.0
+            },
+            {
+              "name": "One Size",
+              "price": 13.0
+            },
+            {
+              "name": "One Size",
+              "price": 18.0
+            },
+            {
+              "name": "One Size",
+              "price": 31.25
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "C",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 18.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "1",
+          "description": "or More House Special:",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 6.5
+            },
+            {
+              "name": "One Size",
+              "price": 2.0
+            },
+            {
+              "name": "S",
+              "price": 8.75
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "G",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 33.0
+            },
+            {
+              "name": "One Size",
+              "price": 3250.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "1",
+          "description": "-",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "W",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.25
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "G",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 16.95
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "C",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 91425.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "C",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 12.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "$",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 2.5
+            },
+            {
+              "name": "One Size",
+              "price": 1.0
+            },
+            {
+              "name": "One Size",
+              "price": 4.75
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "Oat,",
+      "items": [
+        {
+          "name": "$",
+          "description": "SSIS | tage? eee: te ea ia a all ee fe : <",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 3.75
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "O",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 35.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "I",
+      "items": [
+        {
+          "name": "B",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 6.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "B",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 0.0
+            },
+            {
+              "name": "One Size",
+              "price": 96.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "\u00a9",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 4.95
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "9",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 25.0
+            },
+            {
+              "name": "One Size",
+              "price": 6.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "S",
+          "description": "",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 8.5
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "T",
+          "description": "- Vanilla Chip - Lemon - Rainbow",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 8.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        },
+        {
+          "name": "G",
+          "description": "Change Without Ylotice",
+          "sizes": [
+            {
+              "name": "One Size",
+              "price": 0.0
+            }
+          ],
+          "options": [],
+          "tags": []
+        }
+      ]
+    }
+  ],
+  "source": {
+    "type": "upload",
+    "file": "9d5b7495-1c8d-4ba9-9adb-2b0a5f4236c2_internet_pizza_menu.png",
+    "ocr_engine": "tesseract",
+    "confidence": 1.0
+  },
+  "created_at": "2025-09-06T20:14:41+00:00"
+}
