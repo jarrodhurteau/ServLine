@@ -158,3 +158,23 @@ git commit -m "Day 2: SQLite schema + seed + /db/health wired"
 3. View page source and confirm Tailwind is loaded.
 4. We’re now ready to style future components (Hero, Cards, Buttons) without touching backend logic.
 ✅ Day 4.5 is complete when Tailwind is present in page source and the site still looks unchanged.
+
+---
+
+## 🟢 Day 5: Admin Forms (Add Menu Items)
+
+- Added **form routes**:
+  - `GET /menus/<id>/items/new` → show form
+  - `POST /menus/<id>/items/new` → save new item
+- New template: `item_form.html` with Tailwind-styled inputs + button.
+- Items insert into SQLite and appear immediately.
+
+**Acceptance Demo (Day 5)**
+1. Restart infra (Stop → Start tasks in VS Code).
+2. Visit `/menus/1/items/new`, fill out a form (e.g., “Mozzarella Sticks”).
+3. Submit → redirected to `/menus/1/items` and see the new item in the list.
+4. Lock into Git:
+   ```bash
+   git add .
+   git commit -m "Day 5: Admin forms (add menu items)"
+✅ Day 5 is complete when new items can be added via form and appear in the menu immediately.
