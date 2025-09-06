@@ -1,0 +1,17 @@
+# --- Root-level .gitignore ---
+# Global ignores for the ServLine project
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Infra scratch files
+infra/.pids
+infra/current_url.txt
+
+# Env secrets
+.env
+
+# VS Code settings
+.vscode/

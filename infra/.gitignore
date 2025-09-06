@@ -1,0 +1,4 @@
+# --- Local infra/.gitignore ---
+# Ignore generated files in infra/
+.pids
+current_url.txt
