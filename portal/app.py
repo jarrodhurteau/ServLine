@@ -1,11 +1,11 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, abort
 import sqlite3
 from pathlib import Path
 
 app = Flask(__name__)
 
 # --- DB path ---
-ROOT = Path(__file__).resolve().parents[1]       # servline/
+ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "storage" / "servline.db"
 
 def db_connect():
@@ -34,6 +34,34 @@ def db_health():
         return jsonify({"status": "ok", "data": data})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
+
+# --- API endpoints ---
+
+@app.get("/api/restaurants")
+def get_restaurants():
+    with db_connect() as conn:
+        rows = conn.execute("SELECT * FROM restaurants WHERE active=1").fetchall()
+        return jsonify([dict(r) for r in rows])
+
+@app.get("/api/restaurants/<int:rest_id>/menus")
+def get_menus(rest_id):
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM menus WHERE restaurant_id=? AND active=1", (rest_id,)
+        ).fetchall()
+        if not rows:
+            abort(404, description="No menus found for that restaurant")
+        return jsonify([dict(r) for r in rows])
+
+@app.get("/api/menus/<int:menu_id>/items")
+def get_menu_items(menu_id):
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1", (menu_id,)
+        ).fetchall()
+        if not rows:
+            abort(404, description="No items found for that menu")
+        return jsonify([dict(r) for r in rows])
 
 @app.get("/")
 def index():
