@@ -178,3 +178,27 @@ git commit -m "Day 2: SQLite schema + seed + /db/health wired"
    git add .
    git commit -m "Day 5: Admin forms (add menu items)"
 ✅ Day 5 is complete when new items can be added via form and appear in the menu immediately.
+
+---
+
+## 🟤 Day 6: Basic Auth (Login/Logout) + Protected Admin Routes
+
+- Added **login** + **logout** routes with session-based auth (dev-only).
+- Protected admin pages (e.g., **Add Item** form) so only logged-in users can access.
+- Navbar shows **Login/Logout** based on session state.
+
+**Dev Credentials**
+- **Username:** `admin`
+- **Password:** `letmein`  
+*(Dev-only; to be replaced with real auth later.)*
+
+**Acceptance Demo (Day 6)**
+1. Restart infra (Stop → Start tasks in VS Code).
+2. Visit `/login`, sign in with `admin / letmein`.
+3. Go to `/menus/1/items/new` — form should load (no redirect).
+4. **Logout**, then try `/menus/1/items/new` — should redirect to `/login`.
+5. Lock into Git:
+   ```bash
+   git add .
+   git commit -m "Day 6: Basic auth (login/logout) + protected admin routes"
+✅ Day 6 is complete when the Add Item form is only reachable after login, and logout removes access.

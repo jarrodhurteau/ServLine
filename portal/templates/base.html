@@ -52,6 +52,8 @@
       .crumbs { color:var(--muted); margin:0 0 10px; font-size:14px; }
       h1,h2 { margin:0 0 10px; }
       .muted { color:var(--muted); }
+      /* small utility so the right side pushes over */
+      .ml-auto { margin-left: auto; }
     </style>
     {% block head %}{% endblock %}
   </head>
@@ -59,7 +61,21 @@
     <div class="nav">
       <div class="brand"><a href="/">ServLine Portal</a></div>
       <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
+
+      <!-- Right-aligned auth controls -->
+      <div class="ml-auto">
+        {% if session.get('user') %}
+          <form method="post" action="/logout" style="display:inline">
+            <button class="bg-panel border border-line px-3 py-1 rounded-xl hover:underline">
+              Logout
+            </button>
+          </form>
+        {% else %}
+          <a href="/login" class="hover:underline">Login</a>
+        {% endif %}
+      </div>
     </div>
+
     <div class="wrap">
       {% block content %}{% endblock %}
     </div>
