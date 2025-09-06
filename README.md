@@ -67,3 +67,32 @@ powershell
 Copy code
 ngrok config add-authtoken <YOUR_TOKEN>
 Task output also writes the current public URL to infra/current_url.txt.
+
+## 🟢 Day 2: SQLite + DB Health
+
+- **Added SQLite database** at `storage/servline.db`
+- **Schema:** `restaurants`, `menus`, `menu_items`
+- **Seed data:** one demo restaurant, menu, and 2 items
+- **New endpoint:**  
+  - `GET /db/health` → returns counts of restaurants, menus, and menu items
+
+**Acceptance Demo (Day 2)**  
+1. Run `python storage/init_db.py` to create + seed the DB.  
+2. Restart infra (Stop → Start tasks in VS Code).  
+3. Open `https://<ngrok>/db/health` → expect:  
+   ```json
+   {
+     "status": "ok",
+     "data": {
+       "restaurants": 1,
+       "menus": 1,
+       "menu_items": 2
+     }
+   }
+Lock into Git:
+
+bash
+Copy code
+git add .
+git commit -m "Day 2: SQLite schema + seed + /db/health wired"
+✅ Day 2 is complete when the JSON response shows the seeded counts and commit is saved.
