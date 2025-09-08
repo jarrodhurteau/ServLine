@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Uploads{% endblock %}
+{% block content %}
+<h1 class="mb-3">Uploads</h1>
+
+{% if files|length == 0 %}
+  <p>No files in <code>/uploads</code>.</p>
+{% else %}
+<form method="post" action="{{ url_for('uploads_delete') }}">
+  <div class="mb-2">
+    <button type="submit">Delete Selected (to Recycle Bin)</button>
+    <a href="{{ url_for('uploads_trash_page') }}" style="margin-left:1rem;">Open Recycle Bin</a>
+  </div>
+
+  <table border="1" cellpadding="6" cellspacing="0">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+        <th>Filename</th>
+        <th>Size</th>
+        <th>Modified</th>
+        <th>Preview</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in files %}
+      <tr>
+        <td><input type="checkbox" name="names" value="{{ f.name }}"></td>
+        <td>{{ f.name }}</td>
+        <td>{{ (f.size/1024)|round(1) }} KB</td>
+        <td>{{ f.modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        <td>
+          {% if f.name.lower().endswith(('.png','.jpg','.jpeg')) %}
+            <a href="{{ url_for('serve_upload', filename=f.name) }}" target="_blank">Open</a>
+          {% else %}
+            <em>n/a</em>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+{% endif %}
+
+<script>
+function toggleAll(box){
+  const checks = document.querySelectorAll('input[name="names"]');
+  checks.forEach(c => c.checked = box.checked);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Recycle Bin{% endblock %}
+{% block content %}
+<h1 class="mb-3">Recycle Bin</h1>
+
+<div class="mb-2">
+  <a href="{{ url_for('uploads_page') }}">Back to Uploads</a>
+</div>
+
+{% if trashed|length == 0 %}
+  <p>Recycle Bin is empty.</p>
+{% else %}
+<form method="post" action="{{ url_for('uploads_restore') }}" style="margin-bottom:1rem;">
+  <button type="submit">Restore Selected</button>
+  <table border="1" cellpadding="6" cellspacing="0">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+        <th>Filename</th>
+        <th>Trash Path</th>
+        <th>Size</th>
+        <th>Trashed At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in trashed %}
+      <tr>
+        <td><input type="checkbox" name="trash_paths" value="{{ t.trash_path }}"></td>
+        <td>{{ t.name }}</td>
+        <td><code>{{ t.trash_path }}</code></td>
+        <td>{{ (t.size/1024)|round(1) }} KB</td>
+        <td>{{ t.modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+<div class="mb-2">
+  <form method="post" action="{{ url_for('uploads_clean_raw') }}" style="display:inline"
+        onsubmit="return confirm('Move ALL raw artifacts (storage/drafts/raw and storage/raw) into the Recycle Bin?');">
+    <button type="submit">Clean Raw Artifacts → Bin</button>
+  </form>
+
+  <!-- NEW: sweep all draft JSONs into the drafts bin -->
+  <form method="post" action="{{ url_for('uploads_clean_drafts') }}" style="display:inline; margin-left: 12px;"
+        onsubmit="return confirm('Move ALL draft JSONs (storage/drafts) into the Recycle Bin?');">
+    <button type="submit">Clean Draft JSONs → Bin</button>
+  </form>
+
+  <form method="post" action="{{ url_for('uploads_empty_trash') }}" style="display:inline; margin-left: 12px;"
+        onsubmit="return confirm('Empty Recycle Bin permanently?');">
+    <button type="submit">Empty Recycle Bin</button>
+  </form>
+</div>
+{% endif %}
+
+<script>
+function toggleAll(box){
+  const checks = document.querySelectorAll('input[name="trash_paths"]');
+  checks.forEach(c => c.checked = box.checked);
+}
+</script>
+{% endblock %}

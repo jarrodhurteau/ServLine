@@ -1,4 +1,3 @@
-
 ---
 
 ## 🚀 Day 1: Portal Skeleton
@@ -52,43 +51,48 @@
 
 ---
 
-## 🚀 Day 7: Draft Flow Setup
+## 🚀 Day 7: Draft Flow + Uploads Recycle Bin
 
-- Portal routes for `/drafts`, `/drafts/<id>`, `/drafts/<id>/publish`
-- Draft JSONs reviewable in the portal
-- Publish → inserts new menu & items into DB
-- OCR health endpoint (`/ocr/health`)
-- Raw OCR viewer (`/drafts/<id>/raw`)
+- **Draft Flow Setup**
+  - Portal routes for `/drafts`, `/drafts/<id>`, `/drafts/<id>/publish`
+  - Draft JSONs reviewable in the portal
+  - Publish → inserts new menu & items into DB
+  - OCR health endpoint (`/ocr/health`)
+  - Raw OCR viewer (`/drafts/<id>/raw`)
 
----
+- **Uploads Recycle Bin**
+  - Deleting from `/uploads` moves files to `uploads/.trash/<timestamp>/FILE`.
+  - Restoring returns them to `uploads/` (auto-renames to `NAME (restored N).ext` on conflict).
+  - Empty Trash clears `uploads/.trash` and also empties artifact trash bins.
 
-## 🚀 Day 8: Upload → Import Jobs → Draft JSON
+- **Artifact Sweep tied to uploads**
+  - On delete, related OCR artifacts are trashed:
+    - Draft JSON → `storage/drafts/.trash/<timestamp>/draft_*.json`
+    - Raw OCR (new) → `storage/drafts/raw/.trash/<timestamp>/JOBID.txt`
+    - Raw OCR (legacy) → `storage/raw/.trash/<timestamp>/...`
+  - Orphan draft JSONs whose `source.file` matches the deleted upload are also trashed.
 
-- **DB**
-  - New `import_jobs` table to track uploads & OCR pipeline
-  - Fields: `id`, `restaurant_id`, `filename`, `status`, `draft_path`, `error`, timestamps
-- **Portal**
-  - New pages:
-    - `/import` → upload menu (image or PDF)
-    - `/imports` → track import jobs
-  - Navbar updated with **Import / Imports / Drafts**
-- **Pipeline**
-  - Upload saved to `/uploads/`
-  - `import_jobs` row created
-  - Background OCR worker runs (stub for now)
-  - Draft JSON written to `storage/drafts/`
-- **Verification**
-  - Jobs progress `pending → processing → done`
-  - Drafts visible on `/drafts/<id>` and can be published into real menu/items
-- **Git**
-  - `.gitignore` updated to exclude `/uploads/`, `/storage/drafts/`, and `servline.db`
+- **Imports list hygiene**
+  - `/imports` hides rows with `status='deleted'`.
+  - Bulk cleanup: `GET|POST /imports/cleanup` marks jobs as `deleted` if their original upload file is missing.
+  - Per-job soft delete: `POST /imports/<job_id>/delete`.
+
+- **Status sync**
+  - Deleting an upload → `import_jobs.status = 'deleted'` for that filename.
+  - Restoring from trash → `import_jobs.status = 'restored'`.
+
+- **Security/serving**
+  - Direct access to anything under `.trash` is blocked by the upload file server.
+
+- **Touched files**
+  - `portal/app.py` only (templates unchanged).
 
 ---
 
 ## ✅ Next Steps
 
-- Day 9: Draft Editor UI for cleaning up OCR output  
-- Day 10: Real OCR v1 (Tesseract for images, pdfplumber for PDFs)  
-- Day 11+: Improve heuristics, categories, sizes, etc.
+- Day 8: Draft Editor UI for cleaning OCR output  
+- Day 9: Real OCR v1 (Tesseract for images, pdfplumber for PDFs)  
+- Day 10+: Improve heuristics, categories, sizes, etc.
 
 ---
