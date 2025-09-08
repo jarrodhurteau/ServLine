@@ -18,3 +18,7 @@ infra/current_url.txt
 
 # Uploaded menu files (binary user content)
 uploads/
+
+# Day 8: Draft JSONs + DB file
+storage/drafts/
+storage/servline.db

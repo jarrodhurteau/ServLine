@@ -28,3 +28,19 @@ CREATE TABLE IF NOT EXISTS menu_items (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE
 );
+
+-- Day 8: Import Jobs (track uploaded menu files + OCR results)
+CREATE TABLE IF NOT EXISTS import_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  restaurant_id INTEGER,                    -- optional link to restaurant
+  filename TEXT NOT NULL,                   -- uploaded file name
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending | processing | done | failed
+  draft_path TEXT,                          -- relative path to storage/drafts/*.json
+  error TEXT,                               -- error notes if OCR fails
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_import_jobs_created ON import_jobs(created_at);

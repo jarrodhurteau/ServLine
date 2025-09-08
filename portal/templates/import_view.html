@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Import #{{ job.id }}</h1>
+<p><strong>File:</strong> {{ job.filename }}</p>
+<p><strong>Status:</strong> {{ job.status }}</p>
+<p><strong>Created:</strong> {{ job.created_at }} &nbsp; <strong>Updated:</strong> {{ job.updated_at }}</p>
+{% if job.error %}<p style="color:red"><strong>Error:</strong> {{ job.error }}</p>{% endif %}
+<hr/>
+<h3>Draft Preview</h3>
+{% if draft %}
+  <pre style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
+{% else %}
+  <em>No draft available yet.</em>
+{% endif %}
+{% endblock %}

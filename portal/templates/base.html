@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}ServLine Portal{% endblock %}</title>
 
-    <!-- Tailwind CSS (CDN) — Day 4.5 style step, no layout changes -->
+    <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      // Minimal Tailwind theme tokens for later use
       tailwind.config = {
         theme: {
           extend: {
@@ -27,7 +26,6 @@
       }
     </script>
 
-    <!-- Existing inline CSS kept to avoid visual shifts -->
     <style>
       :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; }
       * { box-sizing: border-box; }
@@ -46,7 +44,7 @@
       .muted { color:var(--muted); }
       .ml-auto { margin-left: auto; }
 
-      /* --- Readability fixes for forms (black text on white fields) --- */
+      /* Forms readability */
       select.form-select,
       input.form-control,
       textarea.form-control,
@@ -56,18 +54,16 @@
       input[type="email"],
       input[type="password"],
       textarea {
-        color: #000 !important;              /* force black text */
-        background-color: #fff;              /* ensure contrast on dark theme */
+        color: #000 !important;
+        background-color: #fff;
       }
-      /* options inside dropdown list */
       select.form-select option,
       select option {
         color: #000 !important;
         background-color: #fff;
       }
-      /* placeholder color for inputs */
       input::placeholder, textarea::placeholder {
-        color: #666;                         /* darker placeholder for legibility */
+        color: #666;
         opacity: 1;
       }
     </style>
@@ -77,7 +73,9 @@
     <div class="nav">
       <div class="brand"><a href="/">ServLine Portal</a></div>
       <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
-      <div><a href="/import" class="hover:underline">Import</a></div> <!-- NEW: quick access to Upload Picture/PDF -->
+      <div><a href="/import" class="hover:underline">Import</a></div>
+      <div><a href="/imports" class="hover:underline">Imports</a></div>
+      <div><a href="/drafts" class="hover:underline">Drafts</a></div> <!-- NEW: drafts link -->
 
       <!-- Right-aligned auth controls -->
       <div class="ml-auto">

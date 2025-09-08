@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Import Jobs{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 980px;">
+  <div class="flex items-center justify-between mt-4 mb-3">
+    <h1>Import Jobs</h1>
+    <div class="flex items-center gap-3">
+      <a href="/import" class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">New Import</a>
+      <a href="/ocr/health" class="hover:underline text-sm muted">OCR Health</a>
+    </div>
+  </div>
+
+  {% if jobs and jobs|length %}
+    <div class="overflow-x-auto border border-line rounded-2xl">
+      <table class="w-full text-left">
+        <thead>
+          <tr class="bg-panel">
+            <th class="px-3 py-2">ID</th>
+            <th class="px-3 py-2">File</th>
+            <th class="px-3 py-2">Status</th>
+            <th class="px-3 py-2">Created</th>
+            <th class="px-3 py-2">Updated</th>
+            <th class="px-3 py-2">Draft</th>
+            <th class="px-3 py-2">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in jobs %}
+          <tr class="border-t border-line">
+            <td class="px-3 py-2">{{ j.id }}</td>
+            <td class="px-3 py-2"><code class="text-xs">{{ j.filename }}</code></td>
+            <td class="px-3 py-2">
+              {% set s = (j.status or '').lower() %}
+              <span class="px-2 py-1 rounded-full text-xs border
+                           {% if s in ['done','published'] %} border-green-500 text-green-600
+                           {% elif s in ['processing','pending'] %} border-yellow-500 text-yellow-600
+                           {% elif s in ['failed','error'] %} border-red-500 text-red-600
+                           {% else %} border-gray-400 text-gray-600 {% endif %}">
+                {{ j.status }}
+              </span>
+            </td>
+            <td class="px-3 py-2 text-sm">{{ j.created_at }}</td>
+            <td class="px-3 py-2 text-sm">{{ j.updated_at }}</td>
+            <td class="px-3 py-2 text-xs">
+              {% if j.draft_path %}
+                <code>{{ j.draft_path }}</code>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 text-sm">
+              <div class="flex items-center gap-3">
+                <a href="{{ url_for('imports_view', job_id=j.id) }}" class="hover:underline">View</a>
+                <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="hover:underline">Raw</a>
+                {% if j.status in ('done','published') %}
+                  <a href="{{ url_for('draft_review_page', job_id=j.id) }}" class="hover:underline">Review Draft</a>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card p-6 border border-line rounded-2xl">
+      <p class="mb-3">No imports yet.</p>
+      <a href="/import" class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">Start an Import</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

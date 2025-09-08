@@ -47,24 +47,9 @@ def allowed_file(filename: str) -> bool:
 def db_connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # ensure FK enforcement on this connection
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
-
-# --- DB bootstrap: ensure import_jobs table exists ---
-def ensure_import_jobs_table():
-    with db_connect() as conn:
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS import_jobs (
-            job_id TEXT PRIMARY KEY,
-            filename TEXT NOT NULL,
-            status TEXT NOT NULL,
-            error TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-        """)
-        conn.commit()
-
-ensure_import_jobs_table()
 
 # --- Auth helper ---
 def login_required(view_func):
@@ -163,86 +148,102 @@ def get_menu_items(menu_id):
 def _now_iso():
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
-def _update_job(job_id: str, status: str, error: str | None = None):
+def create_import_job(filename: str, restaurant_id: int | None = None) -> int:
     with db_connect() as conn:
-        conn.execute(
-            "UPDATE import_jobs SET status=?, error=?, updated_at=? WHERE job_id=?",
-            (status, error, _now_iso(), job_id),
-        )
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO import_jobs (restaurant_id, filename, status, created_at, updated_at)
+            VALUES (?, ?, 'pending', datetime('now'), datetime('now'))
+        """, (restaurant_id, filename))
+        job_id = cur.lastrowid
+        conn.commit()
+        return int(job_id)
+
+def update_import_job(job_id: int, **fields):
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields.keys())
+    values = list(fields.values())
+    # always touch updated_at
+    sets = f"{sets}, updated_at=datetime('now')"
+    with db_connect() as conn:
+        conn.execute(f"UPDATE import_jobs SET {sets} WHERE id=?", (*values, job_id))
         conn.commit()
 
-def _insert_job(job_id: str, filename: str):
+def get_import_job(job_id: int):
     with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO import_jobs (job_id, filename, status, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, filename, "saved", None, _now_iso(), _now_iso()),
-        )
-        conn.commit()
+        row = conn.execute("SELECT * FROM import_jobs WHERE id=?", (job_id,)).fetchone()
+        return row
 
-def _draft_path(job_id: str) -> Path:
-    return DRAFTS_FOLDER / f"{job_id}.json"
+def list_import_jobs(limit: int = 100):
+    with db_connect() as conn:
+        return conn.execute("""
+            SELECT * FROM import_jobs
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
 
-def _process_import_job(job_id: str, saved_file_path: Path):
-    """
-    Background worker: for JPG/PNG -> OCR (Tesseract) -> draft JSON.
-    PDFs still use the temporary stub for now.
-    """
+def _abs_from_rel(rel_path: str | None) -> Path | None:
+    if not rel_path:
+        return None
+    p = ROOT / rel_path
+    return p
+
+def _save_draft_json(job_id: int, draft: dict) -> str:
+    """Write draft JSON to storage/drafts and return RELATIVE path stored in DB."""
+    draft_name = f"draft_{job_id}_{uuid.uuid4().hex[:8]}.json"
+    abs_path = DRAFTS_FOLDER / draft_name
+    with open(abs_path, "w", encoding="utf-8") as f:
+        json.dump(draft, f, indent=2)
+    # store relative to repo root
+    rel_path = str(abs_path.relative_to(ROOT))
+    return rel_path
+
+def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
+    """Background OCR stub: mark processing, emit a simple draft, mark done."""
     try:
+        update_import_job(job_id, status="processing")
+
         suffix = saved_file_path.suffix.lower()
-
         if suffix in (".png", ".jpg", ".jpeg"):
-            # ---- Real OCR path for images
-            _update_job(job_id, "processing_ocr")
-            try:
-                from .ocr_worker import run_image_pipeline
-            except ImportError:
-                # Fallback: allow absolute import if user placed ocr_worker next to app.py
-                from ocr_worker import run_image_pipeline
-
-            raw_text, draft = run_image_pipeline(saved_file_path, job_id)
-
-            # Save raw OCR text for debugging
-            raw_dir = DRAFTS_FOLDER / "raw"
-            raw_dir.mkdir(parents=True, exist_ok=True)
-            (raw_dir / f"{job_id}.txt").write_text(raw_text, encoding="utf-8")
-
-        else:
-            # ---- Temporary stub for PDFs/other types (we'll swap to pdfplumber next)
-            _update_job(job_id, "processing_ocr")
-            time.sleep(1.0)
+            # Placeholder "OCR" path; wire your real OCR later
+            time.sleep(0.8)
             draft = {
                 "job_id": job_id,
-                "restaurant_id": None,
-                "currency": "USD",
+                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "tesseract_stub"},
+                "extracted_at": _now_iso(),
                 "categories": [
-                    {
-                        "name": "Pizzas",
-                        "items": [
-                            {"name": "Cheese Pizza", "description": "", "sizes": [{"name": "Large", "price": 14.99}], "options": [], "tags": []},
-                            {"name": "Pepperoni Pizza", "description": "", "sizes": [{"name": "Large", "price": 16.49}], "options": [], "tags": []}
-                        ]
-                    },
-                    {
-                        "name": "Drinks",
-                        "items": [
-                            {"name": "Soda", "description": "20oz bottle", "sizes": [{"name": "One Size", "price": 2.49}], "options": [], "tags": []}
-                        ]
-                    }
-                ],
-                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "stub", "confidence": 0.42},
-                "created_at": _now_iso()
+                    {"name": "Pizzas", "items": [
+                        {"name": "Cheese Pizza", "description": "", "sizes": [{"name": "Small", "price": 9.99}, {"name": "Large", "price": 14.99}]},
+                        {"name": "Pepperoni Pizza", "description": "", "sizes": [{"name": "Small", "price": 10.99}, {"name": "Large", "price": 16.49}]}
+                    ]}
+                ]
+            }
+        else:
+            # PDF or other: stub for now
+            time.sleep(0.8)
+            draft = {
+                "job_id": job_id,
+                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "pdf_stub"},
+                "extracted_at": _now_iso(),
+                "categories": [
+                    {"name": "Pizzas", "items": [
+                        {"name": "Cheese Pizza", "sizes": [{"name": "Large", "price": 14.99}]},
+                        {"name": "Pepperoni Pizza", "sizes": [{"name": "Large", "price": 16.49}]}
+                    ]},
+                    {"name": "Drinks", "items": [
+                        {"name": "Soda", "description": "20oz bottle", "sizes": [{"name": "One Size", "price": 2.49}]}
+                    ]}
+                ]
             }
 
-        # Write the draft JSON
-        with open(_draft_path(job_id), "w", encoding="utf-8") as f:
-            json.dump(draft, f, indent=2)
-
-        _update_job(job_id, "draft_created")
+        rel_draft_path = _save_draft_json(job_id, draft)
+        update_import_job(job_id, status="done", draft_path=rel_draft_path)
 
     except Exception as e:
-        _update_job(job_id, "error", error=str(e))
+        update_import_job(job_id, status="failed", error=str(e))
 
-# Upload route
+# Upload route (JSON API) — returns job id
 @app.post("/api/menus/import")
 @login_required
 def import_menu():
@@ -257,19 +258,20 @@ def import_menu():
         if not allowed_file(file.filename):
             return jsonify({"error": "Unsupported file type. Allowed: jpg, jpeg, png, pdf"}), 400
 
-        job_id = str(uuid.uuid4())
-
         base_name = secure_filename(file.filename) or "upload"
-        safe_name = f"{job_id}_{base_name}"
-        save_path = UPLOAD_FOLDER / safe_name
-
+        # Save first with the original name; job id is created after
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        _insert_job(job_id, safe_name)
-        t = threading.Thread(target=_process_import_job, args=(job_id, save_path), daemon=True)
+        # create job using the saved filename (we keep the stored name)
+        job_id = create_import_job(tmp_name, restaurant_id=None)
+
+        # kick off OCR (background)
+        t = threading.Thread(target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True)
         t.start()
 
-        return jsonify({"job_id": job_id, "status": "saved", "file": safe_name}), 200
+        return jsonify({"job_id": job_id, "status": "pending", "file": tmp_name}), 200
 
     except RequestEntityTooLarge:
         return jsonify({"error": "File too large. Try a smaller image or raise MAX_CONTENT_LENGTH."}), 413
@@ -277,34 +279,16 @@ def import_menu():
         return jsonify({"error": f"Server error while saving upload: {e}"}), 500
 
 # Check job status
-@app.get("/api/menus/import/<job_id>/status")
+@app.get("/api/menus/import/<int:job_id>/status")
 @login_required
 def import_status(job_id):
-    with db_connect() as conn:
-        row = conn.execute("SELECT * FROM import_jobs WHERE job_id=?", (job_id,)).fetchone()
-        if not row:
-            abort(404, description="Job not found")
-        data = dict(row)
-    data["draft_ready"] = _draft_path(job_id).exists()
+    row = get_import_job(job_id)
+    if not row:
+        abort(404, description="Job not found")
+    data = dict(row)
+    abs_draft = _abs_from_rel(row["draft_path"])
+    data["draft_ready"] = bool(abs_draft and abs_draft.exists())
     return jsonify(data)
-
-# List drafts (MVP JSON)
-@app.get("/api/menus/drafts")
-@login_required
-def list_drafts():
-    drafts = []
-    for p in DRAFTS_FOLDER.glob("*.json"):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                draft = json.load(f)
-                drafts.append({
-                    "job_id": draft.get("job_id"),
-                    "file": draft.get("source", {}).get("file"),
-                    "categories": [c.get("name") for c in draft.get("categories", [])]
-                })
-        except Exception:
-            pass
-    return jsonify({"drafts": drafts})
 
 # ------------------------
 # HTML Pages (Portal UI)
@@ -360,7 +344,6 @@ def new_item_form(menu_id):
         menu = conn.execute("SELECT * FROM menus WHERE id=?", (menu_id,)).fetchone()
         if not menu:
             abort(404)
-        # FIX: parameter tuple (trailing comma)
         rest = conn.execute(
             "SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)
         ).fetchone()
@@ -434,49 +417,61 @@ def dev_upload_form():
     """
 
 # ------------------------
-# Drafts (HTML list page) + Upload preview
+# Imports pages (Day 8)
 # ------------------------
-@app.get("/drafts")
+@app.get("/imports")
 @login_required
-def drafts_page():
-    draft_rows = []
-    statuses = {}
-    with db_connect() as conn:
-        for row in conn.execute("SELECT job_id, status, updated_at FROM import_jobs"):
-            statuses[row["job_id"]] = {"status": row["status"], "updated_at": row["updated_at"]}
+def imports():
+    jobs = list_import_jobs()
+    return render_template("imports.html", jobs=jobs)
 
-    for p in DRAFTS_FOLDER.glob("*.json"):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
+@app.get("/imports/raw/<int:job_id>")
+@login_required
+def imports_raw(job_id):
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+    draft_path = row["draft_path"]
+    if not draft_path:
+        return jsonify({"job_id": job_id, "status": row["status"], "message": "No draft file yet"}), 200
+    abs_path = _abs_from_rel(draft_path)
+    if not abs_path or not abs_path.exists():
+        return jsonify({"error": "Draft path missing on disk", "draft_path": draft_path}), 500
+    with open(abs_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return jsonify(data)
+
+@app.get("/imports/view/<int:job_id>")
+@login_required
+def imports_view(job_id):
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+    draft = None
+    if row["draft_path"]:
+        abs_path = _abs_from_rel(row["draft_path"])
+        if abs_path and abs_path.exists():
+            with open(abs_path, "r", encoding="utf-8") as f:
                 draft = json.load(f)
-            job_id = draft.get("job_id")
-            source_file = (draft.get("source", {}) or {}).get("file")
-            categories = [c.get("name") for c in draft.get("categories", [])]
-            st = statuses.get(job_id, {"status": "unknown", "updated_at": "unknown"})
-            draft_rows.append({
-                "job_id": job_id,
-                "source_file": source_file,
-                "categories": categories,
-                "status": st["status"],
-                "updated_at": st["updated_at"],
-            })
-        except Exception:
-            pass
+    return render_template("import_view.html", job=row, draft=draft)
 
-    draft_rows.sort(key=lambda d: d.get("updated_at", ""), reverse=True)
-    return render_template("drafts.html", drafts=draft_rows)
-
+# ------------------------
+# Upload serving
+# ------------------------
 @app.get("/uploads/<path:filename>")
 @login_required
 def serve_upload(filename):
     return send_from_directory(str(UPLOAD_FOLDER), filename, as_attachment=False)
 
 # ---------- Helpers for review/publish ----------
-def _load_draft(job_id: str):
-    p = _draft_path(job_id)
-    if not p.exists():
+def _load_draft_json_by_job(job_id: int):
+    row = get_import_job(job_id)
+    if not row or not row["draft_path"]:
         abort(404, description="Draft not found")
-    with open(p, "r", encoding="utf-8") as f:
+    abs_path = _abs_from_rel(row["draft_path"])
+    if not abs_path or not abs_path.exists():
+        abort(404, description="Draft file missing on disk")
+    with open(abs_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def _is_image(name: str) -> bool:
@@ -484,31 +479,30 @@ def _is_image(name: str) -> bool:
     return n.endswith(".png") or n.endswith(".jpg") or n.endswith(".jpeg")
 
 # ------------------------
-# Draft Review page
+# Draft Review page (by job id)
 # ------------------------
-@app.get("/drafts/<job_id>")
+@app.get("/drafts/<int:job_id>")
 @login_required
 def draft_review_page(job_id):
-    draft = _load_draft(job_id)
+    draft = _load_draft_json_by_job(job_id)
     with db_connect() as conn:
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY id"
         ).fetchall()
 
-    preview_url = None
+    # try to preview original uploaded image if available
     src_file = (draft.get("source", {}) or {}).get("file")
-    if src_file and _is_image(src_file):
-        preview_url = url_for("serve_upload", filename=src_file)
+    preview_url = url_for("serve_upload", filename=src_file) if src_file and _is_image(src_file) else None
 
     return render_template("draft_review.html", draft=draft, restaurants=restaurants, preview_url=preview_url)
 
 # ------------------------
 # Publish draft -> create menu + items
 # ------------------------
-@app.post("/drafts/<job_id>/publish")
+@app.post("/drafts/<int:job_id>/publish")
 @login_required
 def publish_draft(job_id):
-    draft = _load_draft(job_id)
+    draft = _load_draft_json_by_job(job_id)
     restaurant_id = request.form.get("restaurant_id")
     menu_name = (request.form.get("menu_name") or "").strip() or f"Imported {datetime.utcnow().date()}"
 
@@ -556,18 +550,19 @@ def publish_draft(job_id):
         conn.commit()
 
     try:
-        _update_job(job_id, "published")
+        update_import_job(job_id, status="published")
     except Exception:
         pass
 
     return redirect(url_for("items_page", menu_id=menu_id))
 
 # ------------------------
-# Raw OCR viewer (styled, copyable)
+# Raw OCR viewer (styled, copyable) — optional if you save raw text
 # ------------------------
-@app.get("/drafts/<job_id>/raw")
+@app.get("/drafts/<int:job_id>/raw")
 @login_required
 def view_raw(job_id):
+    # If you save raw OCR text, it can live under storage/drafts/raw/{job_id}.txt
     raw_file = DRAFTS_FOLDER / "raw" / f"{job_id}.txt"
     if not raw_file.exists():
         abort(404, description="Raw OCR not found for that job")
@@ -575,7 +570,7 @@ def view_raw(job_id):
     return render_template("raw.html", raw_text=raw_text, job_id=job_id)
 
 # ------------------------
-# Import page (two simple forms: picture or PDF)
+# Import page (simple forms)
 # ------------------------
 @app.get("/import")
 @login_required

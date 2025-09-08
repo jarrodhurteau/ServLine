@@ -2,40 +2,46 @@
 {% block title %}Import Menu{% endblock %}
 
 {% block content %}
-<div class="container" style="max-width: 700px;">
-  <h1 class="mt-4 mb-3">Import a Menu</h1>
-  <p class="muted mb-4">Choose the file type you have. We’ll turn it into a draft you can review and publish.</p>
+<div class="container" style="max-width: 760px;">
+  <h1 class="mt-4 mb-2">Import a Menu</h1>
+  <p class="muted mb-4">
+    Upload a photo or PDF. We’ll create a draft you can review and publish into your menus.
+  </p>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     <!-- Upload Picture -->
-    <div class="card">
-      <h2 class="text-lg mb-2">Upload Picture</h2>
+    <div class="card p-4 border border-line rounded-2xl">
+      <h2 class="text-lg mb-2">Upload Image</h2>
       <form action="/api/menus/import" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="image/png,image/jpeg" required
-               class="form-control mb-3" />
+        <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control mb-3" />
         <button class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">
           Upload Image
         </button>
       </form>
-      <p class="small muted mt-2">JPEG or PNG. Great for phone photos.</p>
+      <p class="small muted mt-2">PNG or JPG. Great for phone photos of printed menus.</p>
     </div>
 
     <!-- Upload PDF -->
-    <div class="card">
+    <div class="card p-4 border border-line rounded-2xl">
       <h2 class="text-lg mb-2">Upload PDF</h2>
       <form action="/api/menus/import" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="application/pdf" required
-               class="form-control mb-3" />
+        <input type="file" name="file" accept="application/pdf" required class="form-control mb-3" />
         <button class="bg-panel border border-line px-3 py-2 rounded-xl hover:underline">
           Upload PDF
         </button>
       </form>
-      <p class="small muted mt-2">If your menu is a digital PDF, we extract text directly.</p>
+      <p class="small muted mt-2">For digital menus. We’ll extract text and structure a draft.</p>
     </div>
   </div>
 
-  <div class="mt-6">
-    <a href="/drafts" class="hover:underline">View Drafts</a>
+  <div class="mt-6 flex items-center gap-4">
+    <a href="/imports" class="hover:underline">View Import Jobs</a>
+    <span class="muted">•</span>
+    <a href="/ocr/health" class="hover:underline">OCR Health</a>
+  </div>
+
+  <div class="mt-4 text-xs muted">
+    Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.
   </div>
 </div>
 {% endblock %}
