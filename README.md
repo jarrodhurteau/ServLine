@@ -51,39 +51,39 @@
 
 ---
 
-## 🚀 Day 7: Draft Flow + Uploads Recycle Bin
+## 🚀 Day 7: Draft Flow Setup
 
-- **Draft Flow Setup**
-  - Portal routes for `/drafts`, `/drafts/<id>`, `/drafts/<id>/publish`
+- **Draft review & publish**
+  - Routes: `/drafts`, `/drafts/<id>`, `/drafts/<id>/publish`
   - Draft JSONs reviewable in the portal
-  - Publish → inserts new menu & items into DB
-  - OCR health endpoint (`/ocr/health`)
-  - Raw OCR viewer (`/drafts/<id>/raw`)
+  - Publish inserts new menu & items into DB
+- **Diagnostics**
+  - OCR health endpoint: `/ocr/health`
+  - Raw OCR viewer: `/drafts/<id>/raw`
 
-- **Uploads Recycle Bin**
+---
+
+## 🚀 Day 8: Uploads Recycle Bin + Imports Hygiene
+
+- **Recycle Bin for uploads**
   - Deleting from `/uploads` moves files to `uploads/.trash/<timestamp>/FILE`.
   - Restoring returns them to `uploads/` (auto-renames to `NAME (restored N).ext` on conflict).
   - Empty Trash clears `uploads/.trash` and also empties artifact trash bins.
-
-- **Artifact Sweep tied to uploads**
+- **Artifact sweep tied to uploads**
   - On delete, related OCR artifacts are trashed:
     - Draft JSON → `storage/drafts/.trash/<timestamp>/draft_*.json`
     - Raw OCR (new) → `storage/drafts/raw/.trash/<timestamp>/JOBID.txt`
     - Raw OCR (legacy) → `storage/raw/.trash/<timestamp>/...`
   - Orphan draft JSONs whose `source.file` matches the deleted upload are also trashed.
-
-- **Imports list hygiene**
+- **Imports list cleanup**
   - `/imports` hides rows with `status='deleted'`.
-  - Bulk cleanup: `GET|POST /imports/cleanup` marks jobs as `deleted` if their original upload file is missing.
+  - Bulk cleanup: `GET|POST /imports/cleanup` marks jobs as `deleted` if the original upload file is missing.
   - Per-job soft delete: `POST /imports/<job_id>/delete`.
-
 - **Status sync**
   - Deleting an upload → `import_jobs.status = 'deleted'` for that filename.
   - Restoring from trash → `import_jobs.status = 'restored'`.
-
 - **Security/serving**
   - Direct access to anything under `.trash` is blocked by the upload file server.
-
 - **Touched files**
   - `portal/app.py` only (templates unchanged).
 
@@ -91,8 +91,8 @@
 
 ## ✅ Next Steps
 
-- Day 8: Draft Editor UI for cleaning OCR output  
-- Day 9: Real OCR v1 (Tesseract for images, pdfplumber for PDFs)  
-- Day 10+: Improve heuristics, categories, sizes, etc.
+- **Day 9:** Draft Editor UI for cleaning OCR output  
+- **Day 10:** Real OCR v1 (Tesseract for images, pdfplumber for PDFs)  
+- **Day 11+:** Improve heuristics, categories, sizes, etc.
 
 ---
