@@ -67,7 +67,20 @@ servline/
 - **Secure Serving**: block `.trash` from direct access
 - E2E tested: Upload → Delete → Recycle Bin → Restore/Empty
 
+## 🚀 Day 9: Draft Review & Publish (Complete)
+- Draft Review page: view OCR’d draft JSON in a human-friendly UI
+- Preview uploaded menu image/PDF alongside parsed draft
+- Dropdown to assign draft → restaurant
+- Publish button: insert draft categories/items into live `menus` + `menu_items` tables
+- Status tracking: mark import_jobs as `published`
+- Raw OCR viewer for debugging (`/drafts/<job_id>/raw`)
+- ✅ **Complete**
+
 ---
 
-✅ **Day 8 complete** — system stable with recycle bin & cleanup flows.  
-🔜 **Day 9 (Polish)** — UI/UX tweaks (contrast, navbar, smoother flows, auto-refresh, notices).  
+## 🔜 Day 10: Polish (UI/UX Improvements)
+- Contrast fixes (text readability)
+- Navbar & easier navigation between pages
+- Stay-on-page flows (uploads/imports return to portal instead of raw JSON)
+- Auto-refresh import status
+- User-facing notices/alerts for actions (delete, restore, publish)
