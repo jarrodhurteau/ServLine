@@ -32,15 +32,19 @@ CREATE TABLE IF NOT EXISTS menu_items (
 -- Day 8: Import Jobs (track uploaded menu files + OCR results)
 CREATE TABLE IF NOT EXISTS import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  restaurant_id INTEGER,                    -- optional link to restaurant
-  filename TEXT NOT NULL,                   -- uploaded file name
-  status TEXT NOT NULL DEFAULT 'pending',   -- pending | processing | done | failed
-  draft_path TEXT,                          -- relative path to storage/drafts/*.json
-  error TEXT,                               -- error notes if OCR fails
+  restaurant_id INTEGER,                      -- optional link to restaurant
+  filename TEXT NOT NULL,                     -- original uploaded file name
+  source_path TEXT,                           -- full relative path (uploads/... or uploads/.trash/...)
+  status TEXT NOT NULL DEFAULT 'pending',     -- processing state: pending | processing | done | failed
+  lifecycle TEXT NOT NULL DEFAULT 'active',   -- visibility state: active | deleted (trash)
+  trashed_at TEXT,                            -- ISO time when moved to .trash
+  draft_path TEXT,                            -- relative path to storage/drafts/*.json
+  error TEXT,                                 -- error notes if OCR fails
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
-CREATE INDEX IF NOT EXISTS idx_import_jobs_created ON import_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_import_jobs_status    ON import_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_import_jobs_lifecycle ON import_jobs(lifecycle);
+CREATE INDEX IF NOT EXISTS idx_import_jobs_created   ON import_jobs(created_at);

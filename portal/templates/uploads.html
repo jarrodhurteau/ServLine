@@ -1,39 +1,49 @@
 {% extends "base.html" %}
 {% block title %}Uploads{% endblock %}
 {% block content %}
+
 <h1 class="mb-3">Uploads</h1>
+
+<div class="mb-3" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+  <a class="btn" href="{{ url_for('imports') }}">Imports</a>
+  <a class="btn" href="{{ url_for('uploads_trash_page') }}">Open Recycle Bin</a>
+  <form method="post" action="{{ url_for('artifacts_sweep') }}" style="display:inline;">
+    <button type="submit" class="btn">Artifact Sweep</button>
+  </form>
+</div>
 
 {% if files|length == 0 %}
   <p>No files in <code>/uploads</code>.</p>
 {% else %}
 <form method="post" action="{{ url_for('uploads_delete') }}">
-  <div class="mb-2">
-    <button type="submit">Delete Selected (to Recycle Bin)</button>
-    <a href="{{ url_for('uploads_trash_page') }}" style="margin-left:1rem;">Open Recycle Bin</a>
+  <div class="mb-2" style="display:flex; gap:.5rem; align-items:center;">
+    <button type="submit" class="btn btn-danger">Delete Selected (to Recycle Bin)</button>
+    <a class="btn" href="{{ url_for('uploads_trash_page') }}">Open Recycle Bin</a>
+    <span class="muted" style="margin-left:auto;">{{ files|length }} file{{ '' if files|length == 1 else 's' }}</span>
   </div>
 
-  <table border="1" cellpadding="6" cellspacing="0">
+  <table border="0" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse;">
     <thead>
-      <tr>
-        <th><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
-        <th>Filename</th>
-        <th>Size</th>
-        <th>Modified</th>
-        <th>Preview</th>
+      <tr style="border-bottom:1px solid #eee;">
+        <th style="padding:8px 10px;"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+        <th style="padding:8px 10px; text-align:left;">Filename</th>
+        <th style="padding:8px 10px; text-align:left;">Size</th>
+        <th style="padding:8px 10px; text-align:left;">Modified</th>
+        <th style="padding:8px 10px; text-align:left;">Preview</th>
       </tr>
     </thead>
     <tbody>
       {% for f in files %}
-      <tr>
-        <td><input type="checkbox" name="names" value="{{ f.name }}"></td>
-        <td>{{ f.name }}</td>
-        <td>{{ (f.size/1024)|round(1) }} KB</td>
-        <td>{{ f.modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-        <td>
+      <tr style="border-bottom:1px solid #f3f3f3;">
+        <td style="padding:8px 10px;"><input type="checkbox" name="names" value="{{ f.name }}"></td>
+        <td style="padding:8px 10px;"><code>{{ f.name }}</code></td>
+        <td style="padding:8px 10px;">{{ (f.size/1024)|round(1) }} KB</td>
+        <td style="padding:8px 10px;">{{ f.modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        <td style="padding:8px 10px;">
           {% if f.name.lower().endswith(('.png','.jpg','.jpeg')) %}
-            <a href="{{ url_for('serve_upload', filename=f.name) }}" target="_blank">Open</a>
+            <a href="{{ url_for('serve_upload', filename=f.name) }}" target="_blank" rel="noopener">Open</a>
           {% else %}
-            <em>n/a</em>
+            <em class="muted">n/a</em>
           {% endif %}
         </td>
       </tr>
@@ -49,4 +59,11 @@ function toggleAll(box){
   checks.forEach(c => c.checked = box.checked);
 }
 </script>
+
+<style>
+  .btn { display:inline-block; padding:8px 12px; border:1px solid #ddd; background:#fafafa; border-radius:6px; cursor:pointer; text-decoration:none; color:inherit; }
+  .btn-danger { border-color:#e0b; color:#b00; }
+  .muted { color:#777; }
+</style>
+
 {% endblock %}

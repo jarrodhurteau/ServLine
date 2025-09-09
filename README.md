@@ -1,98 +1,73 @@
+# ServLine
+
+The ServLine project is a portal + API + AI brain system for restaurant call handling.  
+This repo follows a phased build plan (Day 1 → onward), with Git commits marking each milestone.
+
+---
+
+## 📁 Folder Structure
+
+servline/  
+├── portal/ # Flask portal website  
+│   ├── app.py  
+│   ├── requirements.txt  
+│   └── templates/  
+├── infra/ # Infra scripts (ngrok, Flask runner, stop scripts)  
+│   ├── run_infra.ps1  
+│   └── stop_infra.ps1  
+├── storage/ # DB + schema + drafts  
+│   ├── schema.sql  
+│   ├── init_db.py  
+│   ├── seed_dev.sql  
+│   ├── servline.db  
+│   └── drafts/  
+├── uploads/ # User-uploaded menu files (+ .trash bin)  
+└── README.md
+
 ---
 
 ## 🚀 Day 1: Portal Skeleton
-
-- **Endpoints**
-  - `GET /` → simple “ServLine Portal online” page
-  - `GET /health` → returns `{ "status": "ok" }`
-- **Infra**
-  - VS Code tasks run `infra/run_infra.ps1` on folder open
-  - Ngrok + Flask auto-start, Twilio webhook update
-
----
+- Endpoints: `/`, `/health`
+- Infra: ngrok + Flask auto-start, Twilio webhook update
 
 ## 🚀 Day 2: Restaurants & Menus
-
-- Added tables: `restaurants`, `menus`, `menu_items`
-- Portal pages to list restaurants, menus, items
+- Tables: `restaurants`, `menus`, `menu_items`
+- Portal pages: list restaurants, menus, items
 - API endpoints under `/api/...`
 
----
-
 ## 🚀 Day 3: Menu Items + UI
-
-- Added menu item listing
-- Added new item form
-- Price stored as cents for accuracy
-
----
+- Menu item listing page
+- New item form
+- Prices stored as cents for accuracy
 
 ## 🚀 Day 4: Git + POS Handshake
+- Git version control + fallback saves
+- POS order send/handshake scaffolding
 
-- Git version control set up
-- Fallback Git saves
-- POS order send/handshake scaffolding in place
-
----
-
-## 🚀 Day 5: Admin Forms
-
-- Portal form to add menu items
-- Items linked to menus and restaurants
-- Validations for price, required fields
-
----
+## 🚀 Day 5: Router Polish
+- Once-only welcome
+- Gentle reprompts
+- Per-shop POS logging & upsell events
 
 ## 🚀 Day 6: Auth
+- Login/logout routes
+- Session-based protection for portal pages
 
-- Login / Logout added
-- Session-based auth for protected routes
-- Default dev creds: `admin / letmein`
+## 🚀 Day 7: Uploads + OCR Stub
+- Uploads folder wired
+- OCR health endpoint
+- Import flow stubbed (image/PDF → draft JSON)
 
----
-
-## 🚀 Day 7: Draft Flow Setup
-
-- **Draft review & publish**
-  - Routes: `/drafts`, `/drafts/<id>`, `/drafts/<id>/publish`
-  - Draft JSONs reviewable in the portal
-  - Publish inserts new menu & items into DB
-- **Diagnostics**
-  - OCR health endpoint: `/ocr/health`
-  - Raw OCR viewer: `/drafts/<id>/raw`
-
----
-
-## 🚀 Day 8: Uploads Recycle Bin + Imports Hygiene
-
-- **Recycle Bin for uploads**
-  - Deleting from `/uploads` moves files to `uploads/.trash/<timestamp>/FILE`.
-  - Restoring returns them to `uploads/` (auto-renames to `NAME (restored N).ext` on conflict).
-  - Empty Trash clears `uploads/.trash` and also empties artifact trash bins.
-- **Artifact sweep tied to uploads**
-  - On delete, related OCR artifacts are trashed:
-    - Draft JSON → `storage/drafts/.trash/<timestamp>/draft_*.json`
-    - Raw OCR (new) → `storage/drafts/raw/.trash/<timestamp>/JOBID.txt`
-    - Raw OCR (legacy) → `storage/raw/.trash/<timestamp>/...`
-  - Orphan draft JSONs whose `source.file` matches the deleted upload are also trashed.
-- **Imports list cleanup**
-  - `/imports` hides rows with `status='deleted'`.
-  - Bulk cleanup: `GET|POST /imports/cleanup` marks jobs as `deleted` if the original upload file is missing.
-  - Per-job soft delete: `POST /imports/<job_id>/delete`.
-- **Status sync**
-  - Deleting an upload → `import_jobs.status = 'deleted'` for that filename.
-  - Restoring from trash → `import_jobs.status = 'restored'`.
-- **Security/serving**
-  - Direct access to anything under `.trash` is blocked by the upload file server.
-- **Touched files**
-  - `portal/app.py` only (templates unchanged).
+## 🚀 Day 8: Uploads Recycle Bin + Imports Cleanup
+- **Recycle Bin**: soft-delete uploads into `/uploads/.trash`
+- **Restore**: bring trashed files back into `/uploads`
+- **Empty Bin**: permanently delete all trashed uploads/artifacts
+- **Artifact Sweep**: sweep raw + draft junk into proper `.trash`
+- **Imports Cleanup**: per-job delete + orphan cleanup
+- **Secure Serving**: block `.trash` from direct access
+- E2E tested: Upload → Delete → Recycle Bin → Restore/Empty
 
 ---
 
-## ✅ Next Steps
-
-- **Day 9:** Draft Editor UI for cleaning OCR output  
-- **Day 10:** Real OCR v1 (Tesseract for images, pdfplumber for PDFs)  
-- **Day 11+:** Improve heuristics, categories, sizes, etc.
-
----
+✅ **Day 8 complete** — system stable with recycle bin & cleanup flows.  
+🔜 **Day 9 (Polish)** — UI/UX tweaks (contrast, navbar, smoother flows, auto-refresh, notices).  

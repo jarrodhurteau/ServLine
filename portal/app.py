@@ -1,4 +1,5 @@
-from flask import Flask, jsonify, render_template, abort, request, redirect, url_for, session, send_from_directory 
+# portal/app.py
+from flask import Flask, jsonify, render_template, abort, request, redirect, url_for, session, send_from_directory
 import sqlite3
 from pathlib import Path
 from functools import wraps
@@ -9,6 +10,7 @@ import time
 import json
 import shutil
 from datetime import datetime
+from typing import Optional, Iterable, Tuple
 
 # safer filename + big-file error handling
 from werkzeug.utils import secure_filename
@@ -21,8 +23,8 @@ import pytesseract
 app = Flask(__name__)
 
 # --- Config (dev) ---
-app.config["SECRET_KEY"] = "dev-secret-change-me"   # replace later with an env var
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # ~20 MB
+app.config["SECRET_KEY"] = "dev-secret-change-me"          # replace later with env var
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024        # ~20 MB
 DEV_USERNAME = "admin"
 DEV_PASSWORD = "letmein"
 
@@ -59,13 +61,74 @@ ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "pdf"}
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+# ------------------------
+# DB helpers (align with schema.sql: status only)
+# ------------------------
 def db_connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
-# --- Auth helper ---
+def create_import_job(filename: str, restaurant_id: Optional[int] = None) -> int:
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO import_jobs (restaurant_id, filename, status, created_at, updated_at)
+            VALUES (?, ?, 'pending', datetime('now'), datetime('now'))
+            """,
+            (restaurant_id, filename),
+        )
+        job_id = cur.lastrowid
+        conn.commit()
+        return int(job_id)
+
+def update_import_job(job_id: int, **fields):
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields.keys())
+    values = list(fields.values())
+    sets = f"{sets}, updated_at=datetime('now')"
+    with db_connect() as conn:
+        conn.execute(f"UPDATE import_jobs SET {sets} WHERE id=?", (*values, job_id))
+        conn.commit()
+
+def get_import_job(job_id: int):
+    with db_connect() as conn:
+        return conn.execute("SELECT * FROM import_jobs WHERE id=?", (job_id,)).fetchone()
+
+def list_import_jobs(limit: int = 100, include_deleted: bool = False):
+    with db_connect() as conn:
+        if include_deleted:
+            sql = """
+                SELECT * FROM import_jobs
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+            """
+            args = (limit,)
+        else:
+            sql = """
+                SELECT * FROM import_jobs
+                WHERE COALESCE(status,'') != 'deleted'
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+            """
+            args = (limit,)
+        return conn.execute(sql, args).fetchall()
+
+def _jobs_for_upload_filename(upload_name: str):
+    with db_connect() as conn:
+        return conn.execute(
+            "SELECT id, draft_path FROM import_jobs WHERE filename=?", (upload_name,),
+        ).fetchall()
+
+# ------------------------
+# Auth helper
+# ------------------------
 def login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
@@ -112,6 +175,7 @@ def db_health():
                 "restaurants": count("restaurants"),
                 "menus": count("menus"),
                 "menu_items": count("menu_items"),
+                "import_jobs": count("import_jobs"),
             }
         return jsonify({"status": "ok", "data": data})
     except Exception as e:
@@ -130,7 +194,7 @@ def get_restaurants():
 def get_menus(rest_id):
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM menus WHERE restaurant_id=? AND active=1", (rest_id,)
+            "SELECT * FROM menus WHERE restaurant_id=? AND active=1", (rest_id,),
         ).fetchall()
         if not rows:
             abort(404, description="No menus found for that restaurant")
@@ -140,7 +204,7 @@ def get_menus(rest_id):
 def get_menu_items(menu_id):
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1", (menu_id,)
+            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1", (menu_id,),
         ).fetchall()
         if not rows:
             abort(404, description="No items found for that menu")
@@ -149,73 +213,25 @@ def get_menu_items(menu_id):
 # ------------------------
 # Import flow: Upload -> Job -> Worker -> Draft JSON
 # ------------------------
-def _now_iso():
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
-
-def create_import_job(filename: str, restaurant_id: int | None = None) -> int:
-    with db_connect() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO import_jobs (restaurant_id, filename, status, created_at, updated_at)
-            VALUES (?, ?, 'pending', datetime('now'), datetime('now'))
-        """, (restaurant_id, filename))
-        job_id = cur.lastrowid
-        conn.commit()
-        return int(job_id)
-
-def update_import_job(job_id: int, **fields):
-    if not fields:
-        return
-    sets = ", ".join(f"{k}=?" for k in fields.keys())
-    values = list(fields.values())
-    sets = f"{sets}, updated_at=datetime('now')"
-    with db_connect() as conn:
-        conn.execute(f"UPDATE import_jobs SET {sets} WHERE id=?", (*values, job_id))
-        conn.commit()
-
-def get_import_job(job_id: int):
-    with db_connect() as conn:
-        return conn.execute("SELECT * FROM import_jobs WHERE id=?", (job_id,)).fetchone()
-
-# >>> CHANGED: hide deleted by default
-def list_import_jobs(limit: int = 100, include_deleted: bool = False):
-    with db_connect() as conn:
-        if include_deleted:
-            sql = """
-                SELECT * FROM import_jobs
-                ORDER BY datetime(created_at) DESC
-                LIMIT ?
-            """
-            args = (limit,)
-        else:
-            sql = """
-                SELECT * FROM import_jobs
-                WHERE COALESCE(status,'') NOT IN ('deleted')
-                ORDER BY datetime(created_at) DESC
-                LIMIT ?
-            """
-            args = (limit,)
-        return conn.execute(sql, args).fetchall()
-
-def _abs_from_rel(rel_path: str | None) -> Path | None:
+def _abs_from_rel(rel_path: Optional[str]) -> Optional[Path]:
     if not rel_path:
         return None
-    return ROOT / rel_path
+    return (ROOT / rel_path).resolve()
 
 def _save_draft_json(job_id: int, draft: dict) -> str:
     draft_name = f"draft_{job_id}_{uuid.uuid4().hex[:8]}.json"
     abs_path = DRAFTS_FOLDER / draft_name
     with open(abs_path, "w", encoding="utf-8") as f:
         json.dump(draft, f, indent=2)
-    return str(abs_path.relative_to(ROOT))
+    return str(abs_path.relative_to(ROOT)).replace("\\", "/")
 
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
 
-        suffix = saved_file_path.suffix.lower()
-        if suffix in (".png", ".jpg", ".jpeg"):
-            time.sleep(0.8)
+        # (Stubbed OCR for dev)
+        time.sleep(0.8)
+        if saved_file_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
             draft = {
                 "job_id": job_id,
                 "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "tesseract_stub"},
@@ -228,7 +244,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 ]
             }
         else:
-            time.sleep(0.8)
             draft = {
                 "job_id": job_id,
                 "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "pdf_stub"},
@@ -246,14 +261,13 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
         rel_draft_path = _save_draft_json(job_id, draft)
 
-        # OPTIONAL raw dump for debugging:
+        # OPTIONAL raw dump for debugging
         try:
             (RAW_FOLDER / f"{job_id}.txt").write_text("stub raw OCR\n", encoding="utf-8")
         except Exception:
             pass
 
         update_import_job(job_id, status="done", draft_path=rel_draft_path)
-
     except Exception as e:
         update_import_job(job_id, status="failed", error=str(e))
 
@@ -275,7 +289,7 @@ def import_menu():
         save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        job_id = create_import_job(tmp_name, restaurant_id=None)
+        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
 
         t = threading.Thread(target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True)
         t.start()
@@ -317,7 +331,7 @@ def menus_page(rest_id):
     with db_connect() as conn:
         rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
         menus = conn.execute(
-            "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,)
+            "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,),
         ).fetchall()
     if not rest:
         abort(404)
@@ -331,44 +345,9 @@ def items_page(menu_id):
             abort(404)
         rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)).fetchone()
         items = conn.execute(
-            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,)
+            "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,),
         ).fetchall()
         return render_template("items.html", restaurant=rest, menu=menu, items=items)
-
-# ------------------------
-# Day 5: Admin Forms (Add Menu Items)
-# ------------------------
-@app.get("/menus/<int:menu_id>/items/new")
-@login_required
-def new_item_form(menu_id):
-    with db_connect() as conn:
-        menu = conn.execute("SELECT * FROM menus WHERE id=?", (menu_id,)).fetchone()
-        if not menu:
-            abort(404)
-        rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)).fetchone()
-    return render_template("item_form.html", restaurant=rest, menu=menu)
-
-@app.post("/menus/<int:menu_id>/items/new")
-@login_required
-def create_item(menu_id):
-    name = (request.form.get("name") or "").strip()
-    description = (request.form.get("description") or "").strip()
-    price_raw = (request.form.get("price") or "0").strip()
-
-    if not name:
-        abort(400, description="Name is required")
-    try:
-        price_cents = int(round(float(price_raw) * 100))
-    except ValueError:
-        abort(400, description="Price must be a number")
-
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO menu_items (menu_id, name, description, price_cents) VALUES (?, ?, ?, ?)",
-            (menu_id, name, description, price_cents),
-        )
-        conn.commit()
-    return redirect(url_for("items_page", menu_id=menu_id))
 
 # ------------------------
 # Day 6: Auth (Login / Logout)
@@ -414,12 +393,12 @@ def dev_upload_form():
     """
 
 # ------------------------
-# Imports pages
+# Imports pages (Day 8 behaviors)
 # ------------------------
 @app.get("/imports")
 @login_required
 def imports():
-    jobs = list_import_jobs()  # deleted are hidden by default
+    jobs = list_import_jobs()  # hide status='deleted'
     return render_template("imports.html", jobs=jobs)
 
 @app.get("/imports/raw/<int:job_id>")
@@ -452,15 +431,13 @@ def imports_view(job_id):
                 draft = json.load(f)
     return render_template("import_view.html", job=row, draft=draft)
 
-# >>> NEW: bulk cleanup route to hide orphaned jobs
+# --- Cleanup & per-job delete (soft delete via status) ---
 @app.route("/imports/cleanup", methods=["GET", "POST"])
 @login_required
 def imports_cleanup():
     """Soft-delete any import_jobs whose original upload file is gone."""
     with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT id, filename, COALESCE(status,'') AS st FROM import_jobs"
-        ).fetchall()
+        rows = conn.execute("SELECT id, filename, COALESCE(status,'') AS st FROM import_jobs").fetchall()
         to_delete = [
             r["id"]
             for r in rows
@@ -474,7 +451,6 @@ def imports_cleanup():
             conn.commit()
     return redirect(url_for("imports"))
 
-# >>> NEW: per-job delete route
 @app.post("/imports/<int:job_id>/delete")
 @login_required
 def imports_delete_job(job_id):
@@ -487,7 +463,7 @@ def imports_delete_job(job_id):
     return redirect(url_for("imports"))
 
 # ------------------------
-# Serving uploads
+# Serving uploads (secure; block .trash)
 # ------------------------
 @app.get("/uploads/<path:filename>")
 @login_required
@@ -499,7 +475,340 @@ def serve_upload(filename):
         abort(403)
     return send_from_directory(str(UPLOAD_FOLDER), filename, as_attachment=False)
 
-# ---------- Helpers ----------
+# ------------------------
+# Upload Management (Recycle Bin) + Artifact cleanup
+# ------------------------
+def _safe_in_uploads(path: Path) -> bool:
+    try:
+        return str(path.resolve()).startswith(str(UPLOAD_FOLDER.resolve()))
+    except Exception:
+        return False
+
+def _is_direct_child_file(p: Path) -> bool:
+    return p.parent.resolve() == UPLOAD_FOLDER.resolve() and p.is_file()
+
+def _list_uploads_files():
+    files = []
+    for p in UPLOAD_FOLDER.iterdir():
+        if p.name == ".trash":
+            continue
+        if p.is_file():
+            stat = p.stat()
+            files.append({
+                "name": p.name,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime),
+            })
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    return files
+
+def _list_trash_files():
+    results = []
+    try:
+        trash_root = TRASH_FOLDER.resolve()
+        if not trash_root.exists():
+            return results
+
+        for root, _, filenames in os.walk(trash_root, topdown=True):
+            try:
+                root_path = Path(root).resolve()
+            except Exception:
+                continue
+
+            for fname in filenames:
+                try:
+                    p = (root_path / fname).resolve()
+                    if not str(p).startswith(str(trash_root)):
+                        continue
+                    try:
+                        st = p.stat()
+                        mtime = datetime.fromtimestamp(st.st_mtime)
+                        size = st.st_size
+                    except FileNotFoundError:
+                        continue
+                    except Exception:
+                        continue
+
+                    try:
+                        rel = p.relative_to(trash_root)
+                    except Exception:
+                        rel = p.name
+
+                    results.append({
+                        "trash_path": str(rel).replace("\\", "/"),
+                        "name": p.name,
+                        "size": size,
+                        "modified": mtime,
+                        "modified_iso": mtime.isoformat(timespec="seconds"),
+                    })
+                except Exception:
+                    continue
+    except Exception:
+        return []
+
+    results.sort(key=lambda x: x.get("modified", datetime.min), reverse=True)
+    return results
+
+def _batch_trash_dir() -> Path:
+    return TRASH_FOLDER / datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+def _mark_jobs_for_upload(upload_name: str, new_status: str):
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE import_jobs SET status=?, updated_at=datetime('now') WHERE filename=?",
+            (new_status, upload_name),
+        )
+        conn.commit()
+
+def _iter_draft_json_files():
+    for p in DRAFTS_FOLDER.iterdir():
+        if p.name in (".trash", "raw"):
+            continue
+        if p.is_file() and p.suffix.lower() == ".json":
+            yield p
+
+def _trash_draft_file(p: Path, ts: str):
+    dest_dir = TRASH_DRAFTS / ts
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(p), str(dest_dir / p.name))
+    except Exception:
+        pass
+
+def _trash_job_artifacts_for_upload(upload_name: str):
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # any draft json that references this upload
+    u = upload_name.lower()
+    for p in _iter_draft_json_files():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            src_file = (((data or {}).get("source") or {}).get("file") or "").strip()
+            if Path(src_file).name.lower() == u:
+                _trash_draft_file(p, ts)
+        except Exception:
+            continue
+    # raw dumps with filename hints
+    def _sweep_raw_dir(src_root: Path, trash_root: Path):
+        if not src_root.exists():
+            return
+        dest_dir = trash_root / ts
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for p in list(src_root.iterdir()):
+            if p.name == ".trash":
+                continue
+            try:
+                name_lower = p.name.lower()
+                if u in name_lower:
+                    shutil.move(str(p), str(dest_dir / p.name))
+            except Exception:
+                continue
+    _sweep_raw_dir(RAW_FOLDER, TRASH_RAW)
+    _sweep_raw_dir(LEGACY_RAW_FOLDER, LEGACY_TRASH_RAW)
+
+def _sweep_all_raw_to_trash() -> int:
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    total = 0
+    for src_root, trash_root in [(RAW_FOLDER, TRASH_RAW), (LEGACY_RAW_FOLDER, LEGACY_TRASH_RAW)]:
+        if not src_root.exists():
+            continue
+        dest_dir = trash_root / ts
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for p in list(src_root.iterdir()):
+            if p.name == ".trash":
+                continue
+            try:
+                shutil.move(str(p), str(dest_dir / p.name))
+                total += 1
+            except Exception:
+                continue
+    return total
+
+def _sweep_all_drafts_to_trash() -> int:
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    total = 0
+    for p in list(_iter_draft_json_files()):
+        try:
+            _trash_draft_file(p, ts)
+            total += 1
+        except Exception:
+            continue
+    return total
+
+def _move_to_trash(names: Iterable[str]) -> Iterable[str]:
+    """Move given upload filenames into /uploads/.trash/<batch>/ and mark related jobs deleted."""
+    batch_dir = _batch_trash_dir()
+    batch_dir.mkdir(parents=True, exist_ok=True)
+
+    moved: list[str] = []
+    for raw in names:
+        name = secure_filename(Path(raw).name)
+        if not name:
+            continue
+        src = (UPLOAD_FOLDER / name).resolve()
+        if not _safe_in_uploads(src) or not _is_direct_child_file(src) or not src.exists():
+            continue
+        dest = batch_dir / name
+        try:
+            shutil.move(str(src), str(dest))
+            moved.append(name)
+            _mark_jobs_for_upload(name, "deleted")
+            _trash_job_artifacts_for_upload(name)
+        except Exception:
+            continue
+    return moved
+
+def _restore_from_trash(trash_paths: Iterable[str]) -> Iterable[Tuple[str, str]]:
+    """Restore files from /uploads/.trash by relative trash paths and mark jobs restored."""
+    restored: list[Tuple[str, str]] = []
+    for rel in trash_paths:
+        rel_path = (TRASH_FOLDER / rel).resolve()
+        if not str(rel_path).startswith(str(TRASH_FOLDER.resolve())):
+            continue
+        if not rel_path.exists() or not rel_path.is_file():
+            continue
+
+        original_name = rel_path.name
+        dest = UPLOAD_FOLDER / original_name
+        if dest.exists():
+            base = dest.stem
+            ext = dest.suffix
+            idx = 1
+            while True:
+                candidate = UPLOAD_FOLDER / f"{base} (restored {idx}){ext}"
+                if not candidate.exists():
+                    dest = candidate
+                    break
+                idx += 1
+        try:
+            shutil.move(str(rel_path), str(dest))
+            _mark_jobs_for_upload(original_name, "restored")
+            restored.append((original_name, dest.name))
+        except Exception:
+            continue
+    return restored
+
+def _empty_dir_tree(path: Path) -> int:
+    deleted = 0
+    if not path.exists():
+        return 0
+    for child in list(path.iterdir()):
+        try:
+            if child.is_file():
+                child.unlink()
+                deleted += 1
+            elif child.is_dir():
+                count = 0
+                for _, _, files in os.walk(child):
+                    count += len(files)
+                shutil.rmtree(child, ignore_errors=True)
+                deleted += count
+        except Exception:
+            continue
+    return deleted
+
+def _sweep_artifacts() -> dict:
+    moved = []
+    def _move(pattern: str):
+        for p in ROOT.glob(f"storage/{pattern}"):
+            if p.is_file():
+                dest = DRAFTS_FOLDER / p.name
+                try:
+                    shutil.move(str(p), str(dest))
+                    moved.append(str(dest.relative_to(ROOT)).replace("\\", "/"))
+                except Exception:
+                    pass
+    _move("*.jsonl")
+    _move("*.tmp")
+    _move("*.raw.json")
+    _move("*.ocr.txt")
+    # move loose raw files to their trash buckets
+    def _sweep_raw_dir(src_root: Path, trash_root: Path):
+        if not src_root.exists():
+            return
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        dest_dir = trash_root / ts
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for p in list(src_root.iterdir()):
+            if p.name == ".trash":
+                continue
+            try:
+                shutil.move(str(p), str(dest_dir / p.name))
+                moved.append(str((dest_dir / p.name).relative_to(ROOT)).replace("\\", "/"))
+            except Exception:
+                pass
+    _sweep_raw_dir(RAW_FOLDER, TRASH_RAW)
+    _sweep_raw_dir(LEGACY_RAW_FOLDER, LEGACY_TRASH_RAW)
+    return {"moved": moved, "count": len(moved)}
+
+@app.get("/uploads")
+@login_required
+def uploads_page():
+    files = _list_uploads_files()
+    return render_template("uploads.html", files=files)
+
+@app.post("/uploads/delete")
+@login_required
+def uploads_delete():
+    names = request.form.getlist("names")
+    if not names:
+        abort(400, description="No files selected")
+    _move_to_trash(names)
+    return redirect(url_for("uploads_page"))
+
+@app.get("/uploads/trash")
+@login_required
+def uploads_trash_page():
+    err_note = ""
+    trashed = []
+    try:
+        trashed = _list_trash_files()
+        if not isinstance(trashed, list):
+            trashed = []
+    except Exception as e:
+        err_note = f"Note: failed to enumerate recycle bin ({e.__class__.__name__}). Showing empty list."
+        trashed = []
+    return render_template("uploads_trash.html", trashed=trashed, err_note=err_note)
+
+@app.post("/uploads/restore")
+@login_required
+def uploads_restore():
+    paths = request.form.getlist("trash_paths")
+    if not paths:
+        abort(400, description="No trash items selected")
+    _restore_from_trash(paths)
+    return redirect(url_for("uploads_trash_page"))
+
+@app.post("/uploads/empty_trash")
+@login_required
+def uploads_empty_trash():
+    total = 0
+    for p in (TRASH_FOLDER, TRASH_DRAFTS, TRASH_RAW, LEGACY_TRASH_RAW):
+        total += _empty_dir_tree(p)
+    return redirect(url_for("uploads_trash_page"))
+
+# --- Buttons referenced by template ---
+@app.post("/uploads/clean_raw")
+@login_required
+def uploads_clean_raw():
+    _sweep_all_raw_to_trash()
+    return redirect(url_for("uploads_trash_page"))
+
+@app.post("/uploads/clean_drafts")
+@login_required
+def uploads_clean_drafts():
+    _sweep_all_drafts_to_trash()
+    return redirect(url_for("uploads_trash_page"))
+
+# --- Artifact Sweep button on bin page ---
+@app.post("/admin/artifacts/sweep")
+@login_required
+def artifacts_sweep():
+    report = _sweep_artifacts()
+    return jsonify({"status": "ok", **report})
+
+# ------------------------
+# Draft Review & Publish
+# ------------------------
 def _load_draft_json_by_job(job_id: int):
     row = get_import_job(job_id)
     if not row or not row["draft_path"]:
@@ -514,9 +823,6 @@ def _is_image(name: str) -> bool:
     n = (name or "").lower()
     return n.endswith(".png") or n.endswith(".jpg") or n.endswith(".jpeg")
 
-# ------------------------
-# Draft Review page
-# ------------------------
 @app.get("/drafts/<int:job_id>")
 @login_required
 def draft_review_page(job_id):
@@ -529,9 +835,6 @@ def draft_review_page(job_id):
     preview_url = url_for("serve_upload", filename=src_file) if src_file and _is_image(src_file) else None
     return render_template("draft_review.html", draft=draft, restaurants=restaurants, preview_url=preview_url)
 
-# ------------------------
-# Publish draft -> create menu + items
-# ------------------------
 @app.post("/drafts/<int:job_id>/publish")
 @login_required
 def publish_draft(job_id):
@@ -605,302 +908,15 @@ def view_raw(job_id):
     abort(404, description="Raw OCR not found for that job")
 
 # ------------------------
-# Upload Management (Recycle Bin) + Artifact cleanup
-# ------------------------
-
-def _safe_in_uploads(path: Path) -> bool:
-    try:
-        return str(path.resolve()).startswith(str(UPLOAD_FOLDER.resolve()))
-    except Exception:
-        return False
-
-def _is_direct_child_file(p: Path) -> bool:
-    return p.parent.resolve() == UPLOAD_FOLDER.resolve() and p.is_file()
-
-def _list_uploads_files():
-    files = []
-    for p in UPLOAD_FOLDER.iterdir():
-        if p.name == ".trash":
-            continue
-        if p.is_file():
-            stat = p.stat()
-            files.append({
-                "name": p.name,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime),
-            })
-    files.sort(key=lambda x: x["modified"], reverse=True)
-    return files
-
-def _list_trash_files():
-    results = []
-    for root, _, filenames in os.walk(TRASH_FOLDER):
-        for fname in filenames:
-            p = Path(root) / fname
-            rel = p.relative_to(TRASH_FOLDER)
-            stat = p.stat()
-            results.append({
-                "trash_path": str(rel).replace("\\", "/"),
-                "name": fname,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime),
-            })
-    results.sort(key=lambda x: x["modified"], reverse=True)
-    return results
-
-def _jobs_for_upload_filename(upload_name: str):
-    with db_connect() as conn:
-        return conn.execute(
-            "SELECT id, draft_path FROM import_jobs WHERE filename=?", (upload_name,)
-        ).fetchall()
-
-# --- Draft JSON sweeping/matching helpers ---
-def _iter_draft_json_files():
-    for p in DRAFTS_FOLDER.iterdir():
-        if p.name in (".trash", "raw"):
-            continue
-        if p.is_file() and p.suffix.lower() == ".json":
-            yield p
-
-def _trash_draft_file(p: Path, ts: str):
-    dest_dir = TRASH_DRAFTS / ts
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        shutil.move(str(p), str(dest_dir / p.name))
-    except Exception:
-        pass
-
-def _scan_orphan_drafts_by_source(upload_name: str, ts: str):
-    u = upload_name.lower()
-    for p in _iter_draft_json_files():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            src_file = (((data or {}).get("source") or {}).get("file") or "").strip()
-            if not src_file:
-                continue
-            base = Path(src_file).name.lower()
-            if base == u:
-                _trash_draft_file(p, ts)
-        except Exception:
-            continue
-
-def _trash_job_artifacts_for_upload(upload_name: str, ts: str):
-    rows = _jobs_for_upload_filename(upload_name)
-    for r in rows:
-        job_id = r["id"]
-
-        draft_rel = r["draft_path"]
-        if draft_rel:
-            abs_draft = _abs_from_rel(draft_rel)
-            if abs_draft and abs_draft.exists():
-                _trash_draft_file(abs_draft, ts)
-
-        for raw_root, raw_trash in [(RAW_FOLDER, TRASH_RAW), (LEGACY_RAW_FOLDER, LEGACY_TRASH_RAW)]:
-            p_exact = raw_root / f"{job_id}.txt"
-            if p_exact.exists():
-                dest_dir = raw_trash / ts
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    shutil.move(str(p_exact), str(dest_dir / p_exact.name))
-                except Exception:
-                    pass
-            try:
-                for p in raw_root.iterdir():
-                    if not p.is_file():
-                        continue
-                    name_lower = p.name.lower()
-                    if str(job_id) in name_lower or upload_name.lower() in name_lower:
-                        dest_dir = raw_trash / ts
-                        dest_dir.mkdir(parents=True, exist_ok=True)
-                        try:
-                            shutil.move(str(p), str(dest_dir / p.name))
-                        except Exception:
-                            pass
-            except FileNotFoundError:
-                pass
-
-    _scan_orphan_drafts_by_source(upload_name, ts)
-
-# >>> NEW: mark jobs by upload filename
-def _mark_jobs_for_upload(upload_name: str, new_status: str):
-    with db_connect() as conn:
-        conn.execute(
-            "UPDATE import_jobs SET status=?, updated_at=datetime('now') WHERE filename=?",
-            (new_status, upload_name),
-        )
-        conn.commit()
-
-# >>> CHANGED: return moved filenames so we can mark jobs deleted
-def _move_to_trash(names: list[str]) -> list[str]:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    batch_dir = TRASH_FOLDER / ts
-    batch_dir.mkdir(parents=True, exist_ok=True)
-    moved_names: list[str] = []
-    for raw in names:
-        name = secure_filename(Path(raw).name)
-        if not name:
-            continue
-        src = (UPLOAD_FOLDER / name).resolve()
-        if not _safe_in_uploads(src) or not _is_direct_child_file(src) or not src.exists():
-            continue
-        dest = batch_dir / name
-        try:
-            shutil.move(str(src), str(dest))
-            moved_names.append(name)
-            _trash_job_artifacts_for_upload(name, ts)
-        except Exception:
-            continue
-    return moved_names
-
-# >>> CHANGED: return (original_name, restored_name) pairs; mark jobs by original name
-def _restore_from_trash(trash_paths: list[str]) -> list[tuple[str, str]]:
-    restored_pairs: list[tuple[str, str]] = []
-    for rel in trash_paths:
-        rel_path = TRASH_FOLDER / rel
-        try:
-            rel_resolved = rel_path.resolve()
-        except Exception:
-            continue
-        if not str(rel_resolved).startswith(str(TRASH_FOLDER.resolve())):
-            continue
-        if not rel_resolved.exists() or not rel_resolved.is_file():
-            continue
-
-        original_name = rel_resolved.name  # this is the upload filename as it was when trashed
-        dest = UPLOAD_FOLDER / original_name
-        if dest.exists():
-            base = dest.stem
-            ext = dest.suffix
-            idx = 1
-            while True:
-                candidate = UPLOAD_FOLDER / f"{base} (restored {idx}){ext}"
-                if not candidate.exists():
-                    dest = candidate
-                    break
-                idx += 1
-        try:
-            shutil.move(str(rel_resolved), str(dest))
-            restored_pairs.append((original_name, dest.name))
-        except Exception:
-            continue
-    return restored_pairs
-
-def _empty_dir_tree(path: Path) -> int:
-    deleted = 0
-    for child in list(path.iterdir()):
-        try:
-            if child.is_file():
-                child.unlink()
-                deleted += 1
-            elif child.is_dir():
-                count = 0
-                for _, _, files in os.walk(child):
-                    count += len(files)
-                shutil.rmtree(child, ignore_errors=True)
-                deleted += count
-        except Exception:
-            continue
-    return deleted
-
-def _empty_trash() -> int:
-    total = 0
-    total += _empty_dir_tree(TRASH_FOLDER)
-    total += _empty_dir_tree(TRASH_DRAFTS)
-    total += _empty_dir_tree(TRASH_RAW)
-    total += _empty_dir_tree(LEGACY_TRASH_RAW)
-    return total
-
-def _sweep_all_raw_to_trash() -> int:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    total = 0
-    for src_root, trash_root in [(RAW_FOLDER, TRASH_RAW), (LEGACY_RAW_FOLDER, LEGACY_TRASH_RAW)]:
-        if not src_root.exists():
-            continue
-        dest_dir = trash_root / ts
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        for p in list(src_root.iterdir()):
-            if p.name == ".trash":
-                continue
-            try:
-                shutil.move(str(p), str(dest_dir / p.name))
-                total += 1
-            except Exception:
-                continue
-    return total
-
-def _sweep_all_drafts_to_trash() -> int:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    total = 0
-    for p in list(_iter_draft_json_files()):
-        try:
-            _trash_draft_file(p, ts)
-            total += 1
-        except Exception:
-            continue
-    return total
-
-@app.get("/uploads")
-@login_required
-def uploads_page():
-    files = _list_uploads_files()
-    return render_template("uploads.html", files=files)
-
-@app.post("/uploads/delete")
-@login_required
-def uploads_delete():
-    names = request.form.getlist("names")
-    if not names:
-        abort(400, description="No files selected")
-    moved = _move_to_trash(names)
-    # mark jobs deleted for each moved upload name
-    for name in moved:
-        _mark_jobs_for_upload(name, "deleted")
-    return redirect(url_for("uploads_page"))
-
-@app.get("/uploads/trash")
-@login_required
-def uploads_trash_page():
-    trashed = _list_trash_files()
-    return render_template("uploads_trash.html", trashed=trashed)
-
-@app.post("/uploads/restore")
-@login_required
-def uploads_restore():
-    paths = request.form.getlist("trash_paths")
-    if not paths:
-        abort(400, description="No trash items selected")
-    restored = _restore_from_trash(paths)
-    # mark jobs restored based on the original (pre-trash) filename
-    for original_name, _restored_name in restored:
-        _mark_jobs_for_upload(original_name, "restored")
-    return redirect(url_for("uploads_trash_page"))
-
-@app.post("/uploads/empty_trash")
-@login_required
-def uploads_empty_trash():
-    _empty_trash()
-    return redirect(url_for("uploads_trash_page"))
-
-@app.post("/uploads/clean_raw")
-@login_required
-def uploads_clean_raw():
-    _sweep_all_raw_to_trash()
-    return redirect(url_for("uploads_trash_page"))
-
-@app.post("/uploads/clean_drafts")
-@login_required
-def uploads_clean_drafts():
-    _sweep_all_drafts_to_trash()
-    return redirect(url_for("uploads_trash_page"))
-
-# ------------------------
-# Import page (simple forms)
+# Simple Import landing page (optional)
 # ------------------------
 @app.get("/import")
 @login_required
 def import_page():
     return render_template("import.html")
 
+# ------------------------
+# Run
+# ------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
