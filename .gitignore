@@ -22,3 +22,4 @@ uploads/
 # Day 8: Draft JSONs + DB file
 storage/drafts/
 storage/servline.db
+storage/*.db
