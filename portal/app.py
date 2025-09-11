@@ -1,5 +1,8 @@
 # portal/app.py
-from flask import Flask, jsonify, render_template, abort, request, redirect, url_for, session, send_from_directory
+from flask import (
+    Flask, jsonify, render_template, abort, request, redirect, url_for,
+    session, send_from_directory, flash
+)
 import sqlite3
 from pathlib import Path
 from functools import wraps
@@ -65,6 +68,17 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
 # ------------------------
+# Template globals
+# ------------------------
+@app.context_processor
+def inject_globals():
+    """Provide `now` and `show_admin` to all templates."""
+    return {
+        "now": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "show_admin": bool(session.get("user")),
+    }
+
+# ------------------------
 # DB helpers (align with schema.sql: status only)
 # ------------------------
 def db_connect():
@@ -123,7 +137,8 @@ def list_import_jobs(limit: int = 100, include_deleted: bool = False):
 def _jobs_for_upload_filename(upload_name: str):
     with db_connect() as conn:
         return conn.execute(
-            "SELECT id, draft_path FROM import_jobs WHERE filename=?", (upload_name,),
+            "SELECT id, draft_path FROM import_jobs WHERE filename=?",
+            (upload_name,),
         ).fetchall()
 
 # ------------------------
@@ -350,7 +365,7 @@ def items_page(menu_id):
         return render_template("items.html", restaurant=rest, menu=menu, items=items)
 
 # ------------------------
-# Day 6: Auth (Login / Logout)
+# Day 6: Auth (Login / Logout) — PRG + flashes
 # ------------------------
 @app.get("/login")
 def login():
@@ -363,12 +378,16 @@ def login_post():
     nxt = request.form.get("next") or url_for("index")
     if username == DEV_USERNAME and password == DEV_PASSWORD:
         session["user"] = {"username": username}
-        return redirect(nxt)
-    return render_template("login.html", error="Invalid credentials", next=request.form.get("next"))
+        flash("Welcome back!", "success")
+        return redirect(nxt)  # PRG
+    flash("Invalid credentials", "error")
+    # Redirect back to login to avoid re-POST on refresh (PRG)
+    return redirect(url_for("login", next=request.form.get("next") or ""))
 
 @app.post("/logout")
 def logout():
     session.clear()
+    flash("You have been logged out.", "info")
     return redirect(url_for("index"))
 
 # ------------------------
@@ -380,14 +399,47 @@ def dev_upload_form():
     return """
     <!doctype html>
     <html>
-      <head><meta charset="utf-8"><title>Dev Upload Test</title></head>
-      <body style="font-family: sans-serif; padding: 2rem; max-width: 640px;">
-        <h2>Dev Upload Test</h2>
-        <p>Pick an image or PDF and submit to <code>/api/menus/import</code>.</p>
-        <form action="/api/menus/import" method="post" enctype="multipart/form-data">
-          <input type="file" name="file" accept="image/*,.pdf" />
-          <button type="submit">Upload</button>
-        </form>
+      <head>
+        <meta charset="utf-8">
+        <title>Dev Upload Test</title>
+        <style>
+          :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; --brand:#7aa2ff; --brandH:#5a86f7; }
+          * { box-sizing: border-box; }
+          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+          .wrap { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+          .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+          h2 { margin: 0 0 8px; }
+          p { margin: 0 0 12px; color: var(--muted); }
+          .btn {
+            display: inline-block; padding: 8px 14px; border-radius: 12px;
+            border: 1px solid var(--brand); background: var(--brand);
+            color: #000; font-weight: 600; cursor: pointer; text-decoration: none;
+            transition: background .2s, border-color .2s;
+          }
+          .btn:hover { background: var(--brandH); border-color: var(--brandH); }
+          .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+          .mt-3{ margin-top: .75rem; } .mt-4{ margin-top: 1rem; }
+          input[type="file"] { color: #000; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+          code { color: #b7cdfb; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="card">
+            <h2>Dev Upload Test</h2>
+            <p>Pick an image or PDF and submit to <code>/api/menus/import</code>.</p>
+
+            <form class="mt-3" action="/api/menus/import" method="post" enctype="multipart/form-data">
+              <input type="file" name="file" accept="image/*,.pdf" required />
+              <div class="mt-3 row">
+                <button type="submit" class="btn">Upload</button>
+                <a href="/import" class="btn">Back to Import</a>
+              </div>
+            </form>
+
+            <p class="mt-4">Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.</p>
+          </div>
+        </div>
       </body>
     </html>
     """
@@ -449,6 +501,7 @@ def imports_cleanup():
                 [(jid,) for jid in to_delete],
             )
             conn.commit()
+    flash("Imports cleanup completed.", "success")
     return redirect(url_for("imports"))
 
 @app.post("/imports/<int:job_id>/delete")
@@ -460,6 +513,7 @@ def imports_delete_job(job_id):
             (job_id,),
         )
         conn.commit()
+    flash(f"Job #{job_id} moved to deleted.", "success")
     return redirect(url_for("imports"))
 
 # ------------------------
@@ -753,6 +807,7 @@ def uploads_delete():
     if not names:
         abort(400, description="No files selected")
     _move_to_trash(names)
+    flash(f"Moved {len(names)} file(s) to Recycle Bin.", "success")
     return redirect(url_for("uploads_page"))
 
 @app.get("/uploads/trash")
@@ -775,7 +830,8 @@ def uploads_restore():
     paths = request.form.getlist("trash_paths")
     if not paths:
         abort(400, description="No trash items selected")
-    _restore_from_trash(paths)
+    restored = list(_restore_from_trash(paths))
+    flash(f"Restored {len(restored)} file(s).", "success")
     return redirect(url_for("uploads_trash_page"))
 
 @app.post("/uploads/empty_trash")
@@ -784,19 +840,22 @@ def uploads_empty_trash():
     total = 0
     for p in (TRASH_FOLDER, TRASH_DRAFTS, TRASH_RAW, LEGACY_TRASH_RAW):
         total += _empty_dir_tree(p)
+    flash(f"Permanently removed {total} file(s) from trash.", "success")
     return redirect(url_for("uploads_trash_page"))
 
 # --- Buttons referenced by template ---
 @app.post("/uploads/clean_raw")
 @login_required
 def uploads_clean_raw():
-    _sweep_all_raw_to_trash()
+    count = _sweep_all_raw_to_trash()
+    flash(f"Moved {count} raw artifact file(s) to trash.", "success")
     return redirect(url_for("uploads_trash_page"))
 
 @app.post("/uploads/clean_drafts")
 @login_required
 def uploads_clean_drafts():
-    _sweep_all_drafts_to_trash()
+    count = _sweep_all_drafts_to_trash()
+    flash(f"Moved {count} draft file(s) to trash.", "success")
     return redirect(url_for("uploads_trash_page"))
 
 # --- Artifact Sweep button on bin page ---
@@ -889,6 +948,7 @@ def publish_draft(job_id):
     except Exception:
         pass
 
+    flash(f"Published draft #{job_id} to menu #{menu_id}.", "success")
     return redirect(url_for("items_page", menu_id=menu_id))
 
 # ------------------------
@@ -908,12 +968,54 @@ def view_raw(job_id):
     abort(404, description="Raw OCR not found for that job")
 
 # ------------------------
-# Simple Import landing page (optional)
+# Import landing page + HTML POST handler
 # ------------------------
 @app.get("/import")
 @login_required
 def import_page():
     return render_template("import.html")
+
+@app.post("/import")
+@login_required
+def import_upload():
+    """HTML handler: save upload, start OCR job, then refresh with a flash."""
+    try:
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose a file to upload.", "error")
+            return redirect(url_for("import_page"))
+        if not allowed_file(file.filename):
+            flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
+            return redirect(url_for("import_page"))
+
+        base_name = secure_filename(file.filename) or "upload"
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
+        threading.Thread(
+            target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
+        ).start()
+
+        flash(f"Import started for {base_name} (job #{job_id}).", "success")
+    except RequestEntityTooLarge:
+        flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+    except Exception as e:
+        flash(f"Server error while saving upload: {e}", "error")
+    return redirect(url_for("import_page"))
+
+# ------------------------
+# Error handlers (Day 10)
+# ------------------------
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("errors/404.html"), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    # Do not leak error details; rely on logs for specifics in dev.
+    return render_template("errors/500.html"), 500
 
 # ------------------------
 # Run

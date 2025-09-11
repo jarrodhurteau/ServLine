@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base.html" %} 
 {% block title %}ServLine Portal{% endblock %}
 {% block content %}
   <div class="card">
@@ -9,4 +9,16 @@
       <a href="/db/health" class="underline">/db/health</a>.
     </p>
   </div>
+
+  <section class="card mt-4">
+    <h2 class="text-lg font-semibold mb-2">Admin &amp; Maintenance</h2>
+    <div class="flex flex-wrap gap-2">
+      <a class="btn btn-primary" href="/import">Import</a>
+      <a class="btn btn-primary" href="/imports">Imports</a>
+      <a class="btn btn-primary" href="/uploads">Uploads</a>
+      <a class="btn btn-primary" href="/uploads/trash">Recycle Bin</a>
+      <a class="btn btn-primary" href="/ocr/health">OCR Health</a>
+      <a class="btn btn-primary" href="/db/health">/db/health</a>
+    </div>
+  </section>
 {% endblock %}

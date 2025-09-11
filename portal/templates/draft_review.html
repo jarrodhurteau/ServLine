@@ -1,83 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Review Draft{% endblock %}
+{% block title %}Draft Review · Job #{{ draft.job_id }} · ServLine{% endblock %}
 
 {% block content %}
-<div class="container" style="max-width: 1100px;">
-  <h1 class="mt-4 mb-3">Review Draft</h1>
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-4">Draft Review · Job #{{ draft.job_id }}</h1>
 
-  <div class="row g-4">
-    <div class="col-md-5">
-      <div class="card">
-        <div class="card-header">Source Preview</div>
-        <div class="card-body">
-          {% if preview_url %}
-            <img src="{{ preview_url }}" alt="uploaded" style="width:100%; height:auto; border-radius:6px; border:1px solid #ddd;">
-          {% else %}
-            <p class="text-muted">No image preview available.</p>
-          {% endif %}
-          <div class="mt-2 small text-muted">
-            <div><strong>Job ID:</strong> {{ draft.get('job_id') }}</div>
-            <div><strong>Source file:</strong> {{ (draft.get('source') or {}).get('file') }}</div>
-          </div>
-        </div>
-      </div>
+    <div class="mb-4 flex flex-wrap gap-2">
+      <a class="btn btn-primary" href="{{ url_for('imports') }}">Back to Imports</a>
+      <a class="btn btn-primary" href="{{ url_for('uploads_page') }}">Uploads</a>
+      <a class="btn btn-primary" href="{{ url_for('uploads_trash_page') }}">Recycle Bin</a>
+      {% if preview_url %}
+        <a class="btn btn-primary" href="{{ preview_url }}" target="_blank">View Source Image</a>
+      {% endif %}
     </div>
 
-    <div class="col-md-7">
-      <div class="card mb-3">
-        <div class="card-header">Detected Categories & Items (MVP)</div>
-        <div class="card-body">
-          {% if draft.get('categories') %}
-            {% for cat in draft.get('categories') %}
-              <h6 class="mb-1">{{ cat.get('name') }}</h6>
-              <ul class="mb-3">
-                {% for it in (cat.get('items') or []) %}
-                  <li>
-                    <strong>{{ it.get('name') }}</strong>
-                    {% if it.get('sizes') %}
-                      <div class="small text-muted">
-                        Sizes:
-                        {% for s in it.get('sizes') %}
-                          {{ s.get('name') }} (${{ "%.2f"|format(s.get('price', 0)) }}){% if not loop.last %}, {% endif %}
-                        {% endfor %}
-                      </div>
-                    {% endif %}
-                    {% if it.get('description') %}
-                      <div class="small text-muted">{{ it.get('description') }}</div>
-                    {% endif %}
-                  </li>
-                {% endfor %}
-              </ul>
-            {% endfor %}
-          {% else %}
-            <p class="text-muted">No items detected in this draft.</p>
-          {% endif %}
-        </div>
+    <form method="post" action="{{ url_for('publish_draft', job_id=draft.job_id) }}" class="space-y-4">
+      <div>
+        <label class="block mb-1 font-medium">Restaurant</label>
+        <select name="restaurant_id" class="form-control w-full" required>
+          {% for r in restaurants %}
+            <option value="{{ r.id }}">{{ r.name }}</option>
+          {% endfor %}
+        </select>
       </div>
-
-      <div class="card">
-        <div class="card-header">Publish</div>
-        <div class="card-body">
-          <form method="post" action="/drafts/{{ draft.get('job_id') }}/publish">
-            <div class="mb-3">
-              <label class="form-label">Restaurant</label>
-              <select name="restaurant_id" class="form-select" required>
-                <option value="" selected disabled>Choose restaurant…</option>
-                {% for r in restaurants %}
-                  <option value="{{ r['id'] }}">{{ r['id'] }} — {{ r['name'] }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="mb-3">
-              <label class="form-label">Menu Name</label>
-              <input type="text" class="form-control" name="menu_name" placeholder="e.g., Main Menu (Imported)">
-            </div>
-            <button class="btn btn-primary" type="submit">Publish Menu</button>
-          </form>
-        </div>
+      <div>
+        <label class="block mb-1 font-medium">Menu Name</label>
+        <input type="text" name="menu_name" class="form-control w-full" placeholder="Imported Menu" />
       </div>
+      <button type="submit" class="btn btn-primary">Publish Draft → Menu</button>
+    </form>
 
-    </div>
-  </div>
-</div>
+    <h2 class="text-lg font-semibold mt-6 mb-2">Draft JSON Preview</h2>
+    <pre class="rounded-xl border border-line bg-[#0b1220] text-ink p-3 overflow-x-auto" style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
+  </section>
 {% endblock %}

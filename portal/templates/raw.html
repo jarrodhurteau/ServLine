@@ -4,21 +4,37 @@
   <meta charset="utf-8">
   <title>Raw OCR — {{ job_id }}</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #0b1220; color: #e8eefc; }
     .bar { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
-    .btn { padding:6px 12px; border:1px solid #ccc; border-radius:4px; background:#f7f7f7; cursor:pointer; }
+    .btn {
+      padding:6px 12px;
+      border:1px solid #7aa2ff;
+      border-radius:6px;
+      background:#7aa2ff;
+      color:#000;
+      cursor:pointer;
+      font-weight:500;
+    }
+    .btn:hover {
+      background:#5a86f7;
+      border-color:#5a86f7;
+    }
     pre.raw {
       white-space: pre-wrap;
       font-family: ui-monospace, Menlo, Consolas, monospace;
       font-size: 13px; line-height: 1.4;
-      border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #fafafa;
+      border: 1px solid #1f2a44;
+      border-radius: 8px;
+      padding: 12px;
+      background: #111a2f;
+      color: #e8eefc;
     }
   </style>
 </head>
 <body>
   <div class="bar">
     <button class="btn" id="copyAll">Copy All</button>
-    <div style="color:#666">Job: <strong>{{ job_id }}</strong></div>
+    <div style="color:#9fb0d1">Job: <strong>{{ job_id }}</strong></div>
   </div>
 
   <pre class="raw" id="rawBlock">{{ raw_text }}</pre>

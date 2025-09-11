@@ -1,16 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Menus · {{ restaurant.name }} · ServLine{% endblock %}
+
 {% block content %}
-  <p class="crumbs"><a href="/restaurants">Restaurants</a> › {{ restaurant.name }}</p>
-  <div class="card">
-    <h1>Menus — {{ restaurant.name }}</h1>
-    <ul class="list">
-      {% for m in menus %}
-        <li class="row">
-          <div><a href="/menus/{{ m.id }}/items">{{ m.name }}</a></div>
-          <div class="muted">#{{ m.id }}</div>
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a> › {{ restaurant.name }}
+  </p>
+
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-4">Menus — {{ restaurant.name }}</h1>
+
+    {% if menus %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="text-right">ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in menus %}
+            <tr>
+              <td>
+                <a href="/menus/{{ m.id }}/items" class="underline hover:text-brand-500">{{ m.name }}</a>
+              </td>
+              <td class="text-right text-muted">#{{ m.id }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No menus found for this restaurant.</p>
+    {% endif %}
+
+    <div class="mt-4 flex gap-2">
+      <a href="/restaurants" class="btn btn-primary">Back to Restaurants</a>
+      {# Uncomment if/when a create route exists:
+      <a href="/restaurants/{{ restaurant.id }}/menus/new" class="btn btn-primary">Add Menu</a>
+      #}
+    </div>
+  </section>
 {% endblock %}

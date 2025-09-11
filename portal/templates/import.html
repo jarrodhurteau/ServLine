@@ -1,51 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Import Menu{% endblock %}
+{% block title %}Import a Menu · ServLine{% endblock %}
 
 {% block content %}
-<div class="container" style="max-width: 820px;">
-  <h1 class="mt-4 mb-2">Import a Menu</h1>
-  <p class="muted mb-4">
-    Upload a photo or PDF. We’ll create a draft you can review and publish into your menus.
-  </p>
+  <section class="card max-w-3xl mx-auto">
+    <h1 class="text-xl font-semibold mb-2">Import a Menu</h1>
+    <p class="muted mb-4">
+      Upload a photo or PDF. We’ll create a draft you can review and publish into your menus.
+    </p>
 
-  <div class="mb-3" style="display:flex; gap:.5rem; flex-wrap:wrap;">
-    <a class="btn" href="{{ url_for('imports') }}">View Import Jobs</a>
-    <a class="btn" href="{{ url_for('uploads_page') }}">Uploads</a>
-    <a class="btn" href="{{ url_for('uploads_trash_page') }}">Recycle Bin</a>
-    <a class="btn" href="{{ url_for('ocr_health') }}">OCR Health</a>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <!-- Upload Image -->
-    <div class="card p-4 border border-line rounded-2xl">
-      <h2 class="text-lg mb-2">Upload Image</h2>
-      <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control mb-3" />
-        <button class="btn">Upload Image</button>
-      </form>
-      <p class="small muted mt-2">PNG or JPG. Great for phone photos of printed menus.</p>
+    <div class="mb-4 flex flex-wrap gap-2">
+      {# Removed duplicates to top nav: Imports, Uploads, Recycle Bin #}
+      <a class="btn btn-primary" href="{{ url_for('ocr_health') }}">OCR Health</a>
     </div>
 
-    <!-- Upload PDF -->
-    <div class="card p-4 border border-line rounded-2xl">
-      <h2 class="text-lg mb-2">Upload PDF</h2>
-      <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="application/pdf" required class="form-control mb-3" />
-        <button class="btn">Upload PDF</button>
-      </form>
-      <p class="small muted mt-2">For digital menus. We’ll extract text and structure a draft.</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Upload Image -->
+      <div class="card">
+        <h2 class="text-lg font-semibold mb-2">Upload Image</h2>
+        <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+          <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
+          <button class="btn btn-primary w-full">Upload Image</button>
+        </form>
+        <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
+      </div>
+
+      <!-- Upload PDF -->
+      <div class="card">
+        <h2 class="text-lg font-semibold mb-2">Upload PDF</h2>
+        <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+          <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
+          <button class="btn btn-primary w-full">Upload PDF</button>
+        </form>
+        <p class="muted mt-2 text-sm">For digital menus. We’ll extract text and structure a draft.</p>
+      </div>
     </div>
-  </div>
 
-  <div class="mt-4 text-xs muted">
-    Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.
-  </div>
-</div>
-
-<style>
-  .btn { display:inline-block; padding:8px 12px; border:1px solid #ddd; background:#fafafa; border-radius:6px; cursor:pointer; text-decoration:none; color:inherit; }
-  .muted { color:#777; }
-  .card { background:#fff; }
-  .border-line { border-color:#eee; }
-</style>
+    <div class="mt-4 text-xs muted">
+      Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.
+    </div>
+  </section>
 {% endblock %}

@@ -1,15 +1,34 @@
 {% extends "base.html" %}
+{% block title %}Import #{{ job.id }} · ServLine{% endblock %}
+
 {% block content %}
-<h1>Import #{{ job.id }}</h1>
-<p><strong>File:</strong> {{ job.filename }}</p>
-<p><strong>Status:</strong> {{ job.status }}</p>
-<p><strong>Created:</strong> {{ job.created_at }} &nbsp; <strong>Updated:</strong> {{ job.updated_at }}</p>
-{% if job.error %}<p style="color:red"><strong>Error:</strong> {{ job.error }}</p>{% endif %}
-<hr/>
-<h3>Draft Preview</h3>
-{% if draft %}
-  <pre style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
-{% else %}
-  <em>No draft available yet.</em>
-{% endif %}
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-4">Import #{{ job.id }}</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="md:col-span-2">
+        <div class="rounded-xl border border-line p-3">
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div><span class="muted">File:</span> <code>{{ job.filename }}</code></div>
+            <div><span class="muted">Status:</span> {{ job.status or "—" }}</div>
+            <div><span class="muted">Created:</span> {{ job.created_at }}</div>
+            <div><span class="muted">Updated:</span> {{ job.updated_at }}</div>
+          </div>
+        </div>
+
+        <h2 class="text-lg font-semibold mt-4 mb-2">Draft Preview</h2>
+        {% if draft %}
+          <pre class="rounded-xl border border-line bg-[#0a1222] p-3 overflow-auto"
+               style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
+        {% else %}
+          <em class="muted">No draft available yet.</em>
+        {% endif %}
+      </div>
+
+      <aside class="space-y-2">
+        <a href="{{ url_for('view_raw', job_id=job.id) }}" class="btn btn-secondary">View Raw OCR</a>
+        {# Removed duplicate "Back to Imports" since top nav already has Imports #}
+      </aside>
+    </div>
+  </section>
 {% endblock %}

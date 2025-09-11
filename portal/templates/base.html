@@ -1,4 +1,4 @@
-<!doctype html> 
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -32,19 +32,72 @@
       html,body { height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
       a { color:#b7cdfb; text-decoration:none; }
       a:hover { text-decoration:underline; }
-      .nav { display:flex; gap:16px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; }
+
+      .nav { display:flex; gap:16px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; z-index:50; }
       .brand { font-weight:700; letter-spacing:.3px; }
       .wrap { max-width:960px; margin:24px auto; padding:0 16px; }
       .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
-      .list { margin:0; padding:0; list-style:none; }
-      .row { display:flex; align-items:center; justify-content:space-between; padding:12px 10px; border-bottom:1px dashed var(--line); }
-      .row:last-child { border-bottom:none; }
       .crumbs { color:var(--muted); margin:0 0 10px; font-size:14px; }
       h1,h2 { margin:0 0 10px; }
       .muted { color:var(--muted); }
       .ml-auto { margin-left: auto; }
 
-      /* Forms readability */
+      /* Buttons: all forced black text */
+      .btn,
+      button,
+      input[type="submit"] {
+        display: inline-block;
+        font-weight: 500;
+        padding: 0.45rem 1rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: #000; /* force black */
+        transition: background 0.2s, color 0.2s, border-color 0.2s;
+      }
+      .btn:hover,
+      button:hover,
+      input[type="submit"]:hover {
+        background: #1a2338;
+        border-color: #7aa2ff;
+        color: #000;
+      }
+      .btn-primary {
+        background: #7aa2ff;
+        border-color: #7aa2ff;
+        color: #000;
+      }
+      .btn-primary:hover {
+        background: #5a86f7;
+        border-color: #5a86f7;
+        color: #000;
+      }
+      .btn-secondary {
+        background: transparent;
+        border-color: var(--line);
+        color: #000;
+      }
+      .btn-secondary:hover {
+        background: #1a2338;
+        color: #000;
+      }
+      .btn-danger {
+        background: #b91c1c;
+        border-color: #b91c1c;
+        color: #000;
+      }
+      .btn-danger:hover {
+        background: #991b1b;
+        border-color: #991b1b;
+        color: #000;
+      }
+
+      /* Tables */
+      table.table { width:100%; border-collapse: collapse; }
+      .table th, .table td { padding: 10px 12px; border-bottom: 1px dashed var(--line); }
+      .table th { text-align: left; color: var(--muted); font-weight: 600; }
+
+      /* Forms: ensure readability on dark theme */
       select.form-select,
       input.form-control,
       textarea.form-control,
@@ -55,45 +108,76 @@
       input[type="password"],
       textarea {
         color: #000 !important;
-        background-color: #fff;
+        background-color: #fff !important;
       }
       select.form-select option,
       select option {
         color: #000 !important;
-        background-color: #fff;
+        background-color: #fff !important;
       }
-      input::placeholder, textarea::placeholder {
-        color: #666;
-        opacity: 1;
-      }
+      input::placeholder, textarea::placeholder { color: #666; opacity: 1; }
+
+      /* Flash (optional subtle transition hook) */
+      .flash-enter { opacity: 0; transform: translateY(-4px); }
+      .flash-enter-active { opacity: 1; transform: translateY(0); transition: all .25s ease; }
     </style>
+
     {% block head %}{% endblock %}
   </head>
   <body class="bg-bg text-ink">
+    <!-- Top Nav -->
     <div class="nav">
       <div class="brand"><a href="/">ServLine Portal</a></div>
+
       <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
-      <div><a href="/import" class="hover:underline">Import</a></div>
-      <div><a href="/imports" class="hover:underline">Imports</a></div>
-      <div><a href="/uploads" class="hover:underline">Uploads</a></div>
-      <div><a href="/uploads/trash" class="hover:underline">Recycle Bin</a></div>
+
+      {% if show_admin %}
+        <div><a href="/import" class="hover:underline">Import</a></div>
+        <div><a href="/imports" class="hover:underline">Imports</a></div>
+        <div><a href="/uploads" class="hover:underline">Uploads</a></div>
+        <div><a href="/uploads/trash" class="hover:underline">Recycle Bin</a></div>
+      {% endif %}
 
       <!-- Right-aligned auth controls -->
       <div class="ml-auto">
         {% if session.get('user') %}
           <form method="post" action="/logout" style="display:inline">
-            <button class="bg-panel border border-line px-3 py-1 rounded-xl hover:underline">
-              Logout
-            </button>
+            <button class="btn btn-secondary">Logout</button>
           </form>
         {% else %}
-          <a href="/login" class="hover:underline">Login</a>
+          <a href="/login" class="btn btn-primary">Login</a>
         {% endif %}
       </div>
     </div>
 
-    <div class="wrap">
-      {% block content %}{% endblock %}
+    <!-- Flash messages -->
+    <div class="wrap" aria-live="polite" aria-atomic="true">
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% if msgs %}
+          <div class="space-y-2">
+            {% for cat, msg in msgs %}
+              <div class="rounded-xl border border-line bg-panel px-4 py-3 shadow-card
+                          {% if cat == 'success' %} ring-1 ring-green-500/40 {% elif cat == 'error' %} ring-1 ring-red-500/40 {% else %} ring-1 ring-brand-500/30 {% endif %}">
+                {{ msg }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
     </div>
+
+    <!-- Main content -->
+    <main class="wrap">
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="wrap mt-10 mb-6 text-sm text-muted">
+      <div class="border-t border-line pt-4">
+        ServLine Portal · {{ now|default('') }}
+      </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
   </body>
 </html>

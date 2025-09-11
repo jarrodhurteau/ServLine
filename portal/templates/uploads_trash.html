@@ -4,16 +4,13 @@
 
 <h1 class="mb-3">Recycle Bin</h1>
 
-<div class="mb-3" style="display:flex; gap:.5rem; flex-wrap:wrap;">
-  <a class="btn" href="{{ url_for('uploads_page') }}">Back to Uploads</a>
-  <a class="btn" href="{{ url_for('imports') }}">Imports</a>
-
-  <!-- Optional: trigger the Day 8 artifact sweep right from here -->
+<div class="mb-3 flex flex-wrap gap-2">
+  {# Removed duplicates to top nav: Back to Uploads, Imports #}
   <form method="post" action="{{ url_for('artifacts_sweep') }}" style="display:inline;">
-    <button type="submit" class="btn">Artifact Sweep</button>
+    <button type="submit" class="btn btn-primary">Artifact Sweep</button>
   </form>
 
-  <span class="muted" style="margin-left:auto;">
+  <span class="muted ml-auto">
     {{ trashed|length }} item{{ '' if trashed|length == 1 else 's' }} in bin
   </span>
 </div>
@@ -22,35 +19,32 @@
   <p>Recycle Bin is empty.</p>
 {% else %}
   <!-- Restore selected -->
-  <form method="post" action="{{ url_for('uploads_restore') }}" style="margin-bottom:1rem;">
+  <form method="post" action="{{ url_for('uploads_restore') }}" class="mb-4">
     <button type="submit" class="btn btn-primary">Restore Selected</button>
-    <table border="0" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin-top:.5rem;">
+    <table class="table mt-2">
       <thead>
-        <tr style="border-bottom:1px solid #eee;">
-          <th style="padding:8px 10px;"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
-          <th style="padding:8px 10px; text-align:left;">Filename</th>
-          <th style="padding:8px 10px; text-align:left;">Trash Path</th>
-          <th style="padding:8px 10px; text-align:left;">Size</th>
-          <th style="padding:8px 10px; text-align:left;">Trashed At</th>
+        <tr>
+          <th style="width:44px;"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+          <th>Filename</th>
+          <th>Trash Path</th>
+          <th>Size</th>
+          <th>Trashed At</th>
         </tr>
       </thead>
       <tbody>
         {% for t in trashed %}
-        <tr style="border-bottom:1px solid #f3f3f3;">
-          <td style="padding:8px 10px;">
-            <input type="checkbox" name="trash_paths" value="{{ t.trash_path }}">
-          </td>
-          <td style="padding:8px 10px;"><code>{{ t.name or '—' }}</code></td>
-          <td style="padding:8px 10px;"><code>{{ t.trash_path or '—' }}</code></td>
-          <td style="padding:8px 10px;">
+        <tr>
+          <td><input type="checkbox" name="trash_paths" value="{{ t.trash_path }}"></td>
+          <td><code>{{ t.name or '—' }}</code></td>
+          <td><code>{{ t.trash_path or '—' }}</code></td>
+          <td>
             {% if t.size is defined %}
               {{ ((t.size or 0) / 1024)|round(1) }} KB
             {% else %}
               —
             {% endif %}
           </td>
-          <!-- Use precomputed string to avoid strftime issues -->
-          <td style="padding:8px 10px;">{{ t.modified_iso or t.modified or '—' }}</td>
+          <td>{{ t.modified_iso or t.modified or '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -58,15 +52,15 @@
   </form>
 
   <!-- Batch maintenance actions -->
-  <div class="mb-2" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+  <div class="mb-2 flex flex-wrap gap-2">
     <form method="post" action="{{ url_for('uploads_clean_raw') }}" style="display:inline"
           onsubmit="return confirm('Move ALL raw artifacts (storage/drafts/raw and storage/raw) into the Recycle Bin?');">
-      <button type="submit" class="btn">Clean Raw Artifacts → Bin</button>
+      <button type="submit" class="btn btn-secondary">Clean Raw Artifacts → Bin</button>
     </form>
 
     <form method="post" action="{{ url_for('uploads_clean_drafts') }}" style="display:inline;"
           onsubmit="return confirm('Move ALL draft JSONs (storage/drafts) into the Recycle Bin?');">
-      <button type="submit" class="btn">Clean Draft JSONs → Bin</button>
+      <button type="submit" class="btn btn-secondary">Clean Draft JSONs → Bin</button>
     </form>
 
     <form method="post" action="{{ url_for('uploads_empty_trash') }}" style="display:inline; margin-left:auto;"
@@ -82,12 +76,4 @@ function toggleAll(box){
   checks.forEach(c => c.checked = box.checked);
 }
 </script>
-
-<style>
-  .btn { display:inline-block; padding:8px 12px; border:1px solid #ddd; background:#fafafa; border-radius:6px; cursor:pointer; text-decoration:none; color:inherit; }
-  .btn-danger { border-color:#e0b; color:#b00; }
-  .btn-primary { background:#f5f5ff; border-color:#ccd; }
-  .muted { color:#777; }
-</style>
-
 {% endblock %}

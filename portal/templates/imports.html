@@ -1,89 +1,51 @@
-<!-- portal/templates/imports.html -->
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Imports</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-    h1 { margin: 0 0 16px; }
-    .bar { display: flex; gap: 8px; align-items: center; margin: 12px 0 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; }
-    code { background:#f6f8fa; padding:2px 4px; border-radius:4px; }
-    .btn { display:inline-block; padding:8px 12px; border:1px solid #ddd; background:#fafafa; border-radius:6px; cursor:pointer; }
-    .btn-danger { border-color:#f0c; color:#b00; }
-    .btn-primary { background:#f5f5ff; border-color:#ccd; }
-    .muted { color:#777; }
-    form { display:inline; margin:0; }
-  </style>
-</head>
-<body>
-  <h1>Imports</h1>
+{% extends "base.html" %}
+{% block title %}Imports · ServLine{% endblock %}
 
-  <div class="bar">
-    <!-- Cleanup: permanently remove unreferenced files lingering in uploads/.trash -->
-    <form action="{{ url_for('imports_cleanup') }}" method="post">
-      <button class="btn btn-danger" title="Permanently remove trash files not referenced by any job">Cleanup .trash (unreferenced)</button>
+{% block content %}
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-4">Import Jobs</h1>
+
+    {% if jobs %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Filename</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th class="text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in jobs %}
+            <tr>
+              <td class="text-muted">#{{ j.id }}</td>
+              <td>{{ j.filename }}</td>
+              <td>{{ j.status or "—" }}</td>
+              <td>{{ j.created_at }}</td>
+              <td>{{ j.updated_at }}</td>
+              <td class="text-right">
+                <div class="flex justify-end gap-2">
+                  <a href="/imports/view/{{ j.id }}" class="btn btn-primary">View</a>
+                  <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline">
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No import jobs found.</p>
+    {% endif %}
+  </section>
+
+  <div class="mt-4 flex gap-2">
+    <form method="post" action="/imports/cleanup">
+      <button class="btn btn-primary">Cleanup</button>
     </form>
-
-    <!-- Artifact sweep: move scratch/raw files into storage/drafts/ (JSON reply) -->
-    <form action="{{ url_for('artifacts_sweep') }}" method="post">
-      <button class="btn btn-primary" title="Move scratch/raw artifacts into storage/drafts/">Artifact Sweep</button>
-    </form>
-
-    <a class="btn" href="{{ url_for('uploads_page') }}">Uploads</a>
-    <a class="btn" href="{{ url_for('uploads_trash_page') }}">Trash</a>
+    <a href="/uploads/trash" class="btn btn-secondary">Recycle Bin</a>
   </div>
-
-  {% if jobs and jobs|length > 0 %}
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>File</th>
-          <th>Status</th>
-          <th>Lifecycle</th>
-          <th>Draft</th>
-          <th>Created</th>
-          <th>Updated</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for j in jobs %}
-        <tr>
-          <td>{{ j.id }}</td>
-          <td>
-            <div>{{ j.filename }}</div>
-            {% if j.source_path %}
-              <div class="muted"><small><code>{{ j.source_path }}</code></small></div>
-            {% endif %}
-          </td>
-          <td>{{ j.status }}</td>
-          <td>{{ j.lifecycle }}</td>
-          <td>
-            {% if j.draft_path %}
-              <a href="{{ url_for('imports_view', job_id=j.id) }}">view</a> ·
-              <a href="{{ url_for('imports_raw', job_id=j.id) }}">raw</a>
-            {% else %}
-              <span class="muted">—</span>
-            {% endif %}
-          </td>
-          <td><small>{{ j.created_at }}</small></td>
-          <td><small>{{ j.updated_at }}</small></td>
-          <td>
-            <!-- Per-job delete (DB row + underlying file) -->
-            <form action="{{ url_for('imports_delete_job', job_id=j.id) }}" method="post" onsubmit="return confirm('Delete this job and its file? This cannot be undone.');">
-              <button class="btn btn-danger">Delete</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="muted">No active import jobs yet.</p>
-  {% endif %}
-</body>
-</html>
+{% endblock %}
