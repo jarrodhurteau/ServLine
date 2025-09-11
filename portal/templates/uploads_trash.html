@@ -55,12 +55,12 @@
   <div class="mb-2 flex flex-wrap gap-2">
     <form method="post" action="{{ url_for('uploads_clean_raw') }}" style="display:inline"
           onsubmit="return confirm('Move ALL raw artifacts (storage/drafts/raw and storage/raw) into the Recycle Bin?');">
-      <button type="submit" class="btn btn-secondary">Clean Raw Artifacts → Bin</button>
+      <button type="submit" class="btn btn-primary">Clean Raw Artifacts → Bin</button>
     </form>
 
     <form method="post" action="{{ url_for('uploads_clean_drafts') }}" style="display:inline;"
           onsubmit="return confirm('Move ALL draft JSONs (storage/drafts) into the Recycle Bin?');">
-      <button type="submit" class="btn btn-secondary">Clean Draft JSONs → Bin</button>
+      <button type="submit" class="btn btn-primary">Clean Draft JSONs → Bin</button>
     </form>
 
     <form method="post" action="{{ url_for('uploads_empty_trash') }}" style="display:inline; margin-left:auto;"
