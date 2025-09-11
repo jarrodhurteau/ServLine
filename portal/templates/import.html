@@ -17,7 +17,7 @@
       <!-- Upload Image -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Upload Image</h2>
-        <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+        <form action="{{ url_for('import_upload') }}" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
           <button class="btn btn-primary w-full">Upload Image</button>
         </form>
@@ -27,7 +27,7 @@
       <!-- Upload PDF -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Upload PDF</h2>
-        <form action="{{ url_for('import_menu') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+        <form action="{{ url_for('import_upload') }}" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
           <button class="btn btn-primary w-full">Upload PDF</button>
         </form>
