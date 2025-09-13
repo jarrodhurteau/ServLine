@@ -91,6 +91,12 @@
         border-color: #991b1b;
         color: #000;
       }
+      /***** Small button size *****/
+      .btn-sm {
+        padding: 0.3rem 0.75rem;
+        font-size: 0.875rem; /* ~text-sm */
+        line-height: 1.2;
+      }
 
       /* Tables */
       table.table { width:100%; border-collapse: collapse; }
@@ -142,7 +148,7 @@
       <div class="ml-auto">
         {% if session.get('user') %}
           <form method="post" action="/logout" style="display:inline">
-            <button class="btn btn-secondary">Logout</button>
+            <button class="btn btn-primary btn-sm">Logout</button>
           </form>
         {% else %}
           <a href="/login" class="btn btn-primary">Login</a>

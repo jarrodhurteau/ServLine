@@ -2,9 +2,17 @@
 {% block title %}Imports · ServLine{% endblock %}
 
 {% block content %}
-  <section class="card">
-    <h1 class="text-xl font-semibold mb-4">Import Jobs</h1>
+  <h1 class="text-xl font-semibold mb-4">Import Jobs</h1>
 
+  <!-- Toolbar -->
+  <div class="mb-3 flex flex-wrap gap-2">
+    <form method="post" action="/imports/cleanup">
+      <button class="btn btn-primary">Cleanup</button>
+    </form>
+    <a href="/uploads/trash" class="btn btn-primary">Recycle Bin</a>
+  </div>
+
+  <section class="card">
     {% if jobs %}
       <table class="table">
         <thead>
@@ -41,11 +49,4 @@
       <p class="muted">No import jobs found.</p>
     {% endif %}
   </section>
-
-  <div class="mt-4 flex gap-2">
-    <form method="post" action="/imports/cleanup">
-      <button class="btn btn-primary">Cleanup</button>
-    </form>
-    <a href="/uploads/trash" class="btn btn-primary">Recycle Bin</a>
-  </div>
 {% endblock %}

@@ -4,19 +4,17 @@
 
 <h1 class="mb-3">Recycle Bin</h1>
 
-<div class="mb-3 flex flex-wrap gap-2">
-  {# Removed duplicates to top nav: Back to Uploads, Imports #}
+<div class="mb-3 flex flex-wrap items-center gap-2">
   <form method="post" action="{{ url_for('artifacts_sweep') }}" style="display:inline;">
     <button type="submit" class="btn btn-primary">Artifact Sweep</button>
   </form>
-
   <span class="muted ml-auto">
     {{ trashed|length }} item{{ '' if trashed|length == 1 else 's' }} in bin
   </span>
 </div>
 
 {% if trashed|length == 0 %}
-  <p>Recycle Bin is empty.</p>
+  <p class="muted">Recycle Bin is empty.</p>
 {% else %}
   <!-- Restore selected -->
   <form method="post" action="{{ url_for('uploads_restore') }}" class="mb-4">

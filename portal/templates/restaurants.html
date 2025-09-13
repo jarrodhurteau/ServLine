@@ -1,41 +1,223 @@
-{% extends "base.html" %}
-{% block title %}Restaurants · ServLine{% endblock %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Restaurants{% endblock %}</title>
 
-{% block content %}
-  <section class="card">
-    <h1 class="text-xl font-semibold mb-4">Restaurants</h1>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b1220',
+              panel: '#111a2f',
+              ink: '#e8eefc',
+              muted: '#9fb0d1',
+              line: '#1f2a44',
+              brand: { 50: '#eaf2ff', 500: '#7aa2ff', 600: '#5a86f7' }
+            },
+            boxShadow: { card: '0 8px 24px rgba(0,0,0,.25)' },
+            borderRadius: { xl: '14px' }
+          }
+        }
+      }
+    </script>
 
-    {% if restaurants %}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone</th>
-            <th>Address</th>
-            <th class="text-right">ID</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in restaurants %}
-            <tr>
-              <td>
-                <a href="/restaurants/{{ r.id }}/menus" class="underline hover:text-brand-500">
-                  {{ r.name }}
-                </a>
-              </td>
-              <td>{{ r.phone }}</td>
-              <td>{{ r.address }}</td>
-              <td class="text-right text-muted">#{{ r.id }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="muted">No restaurants have been added yet.</p>
-    {% endif %}
+    <style>
+      :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; }
+      * { box-sizing: border-box; }
+      html,body { height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+      a { color:#b7cdfb; text-decoration:none; }
+      a:hover { text-decoration:underline; }
 
-    <div class="mt-4">
-      <a href="/restaurants/new" class="btn btn-primary">Add Restaurant</a>
+      .nav { display:flex; gap:16px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; z-index:50; }
+      .brand { font-weight:700; letter-spacing:.3px; }
+      .wrap { max-width:960px; margin:24px auto; padding:0 16px; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+      .crumbs { color:var(--muted); margin:0 0 10px; font-size:14px; }
+      h1,h2 { margin:0 0 10px; }
+      .muted { color:var(--muted); }
+      .ml-auto { margin-left: auto; }
+
+      /* Buttons: all forced black text */
+      .btn,
+      button,
+      input[type="submit"] {
+        display: inline-block;
+        font-weight: 500;
+        padding: 0.45rem 1rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: #000; /* force black */
+        transition: background 0.2s, color 0.2s, border-color 0.2s;
+      }
+      .btn:hover,
+      button:hover,
+      input[type="submit"]:hover {
+        background: #1a2338;
+        border-color: #7aa2ff;
+        color: #000;
+      }
+      .btn-primary {
+        background: #7aa2ff;
+        border-color: #7aa2ff;
+        color: #000;
+      }
+      .btn-primary:hover {
+        background: #5a86f7;
+        border-color: #5a86f7;
+        color: #000;
+      }
+      .btn-secondary {
+        background: transparent;
+        border-color: var(--line);
+        color: #000;
+      }
+      .btn-secondary:hover {
+        background: #1a2338;
+        color: #000;
+      }
+      .btn-danger {
+        background: #b91c1c;
+        border-color: #b91c1c;
+        color: #000;
+      }
+      .btn-danger:hover {
+        background: #991b1b;
+        border-color: #991b1b;
+        color: #000;
+      }
+      /***** Small button size *****/
+      .btn-sm {
+        padding: 0.3rem 0.75rem;
+        font-size: 0.875rem; /* ~text-sm */
+        line-height: 1.2;
+      }
+
+      /* Tables */
+      table.table { width:100%; border-collapse: collapse; }
+      .table th, .table td { padding: 10px 12px; border-bottom: 1px dashed var(--line); }
+      .table th { text-align: left; color: var(--muted); font-weight: 600; }
+
+      /* Forms: ensure readability on dark theme */
+      select.form-select,
+      input.form-control,
+      textarea.form-control,
+      select,
+      input[type="text"],
+      input[type="number"],
+      input[type="email"],
+      input[type="password"],
+      textarea {
+        color: #000 !important;
+        background-color: #fff !important;
+      }
+      select.form-select option,
+      select option {
+        color: #000 !important;
+        background-color: #fff !important;
+      }
+      input::placeholder, textarea::placeholder { color: #666; opacity: 1; }
+
+      /* Flash (optional subtle transition hook) */
+      .flash-enter { opacity: 0; transform: translateY(-4px); }
+      .flash-enter-active { opacity: 1; transform: translateY(0); transition: all .25s ease; }
+    </style>
+
+    {% block head %}{% endblock %}
+  </head>
+  <body class="bg-bg text-ink">
+    <!-- Top Nav -->
+    <div class="nav">
+      <div class="brand"><a href="/">ServLine Portal</a></div>
+
+      <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
+
+      {% if show_admin %}
+        <div><a href="/import" class="hover:underline">Import</a></div>
+        <div><a href="/imports" class="hover:underline">Imports</a></div>
+        <div><a href="/uploads" class="hover:underline">Uploads</a></div>
+        <div><a href="/uploads/trash" class="hover:underline">Recycle Bin</a></div>
+      {% endif %}
+
+      <!-- Right-aligned auth controls -->
+      <div class="ml-auto">
+        {% if session.get('user') %}
+          <form method="post" action="/logout" style="display:inline">
+            <button class="btn btn-primary btn-sm">Logout</button>
+          </form>
+        {% else %}
+          <a href="/login" class="btn btn-primary">Login</a>
+        {% endif %}
+      </div>
     </div>
-  </section>
-{% endblock %}
+
+    <!-- Flash messages -->
+    <div class="wrap" aria-live="polite" aria-atomic="true">
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% if msgs %}
+          <div class="space-y-2">
+            {% for cat, msg in msgs %}
+              <div class="rounded-xl border border-line bg-panel px-4 py-3 shadow-card
+                          {% if cat == 'success' %} ring-1 ring-green-500/40 {% elif cat == 'error' %} ring-1 ring-red-500/40 {% else %} ring-1 ring-brand-500/30 {% endif %}">
+                {{ msg }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    <!-- Main content -->
+    <main class="wrap">
+      <h1 class="mb-4">Restaurants</h1>
+
+      <!-- Toolbar (placeholder link so it can't 500) -->
+      <div class="flex mb-3">
+        <div class="ml-auto">
+          <a href="/restaurants" class="btn btn-primary">Add Restaurant</a>
+        </div>
+      </div>
+
+      {% if restaurants|length == 0 %}
+        <p class="muted">No restaurants found.</p>
+      {% else %}
+        <div class="card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Address</th>
+                <th>ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in restaurants %}
+              <tr>
+                <td>{{ r.name }}</td>
+                <td>{{ r.phone }}</td>
+                <td>{{ r.address }}</td>
+                <td>#{{ r.id }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="wrap mt-10 mb-6 text-sm text-muted">
+      <div class="border-t border-line pt-4">
+        ServLine Portal · {{ now|default('') }}
+      </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>
