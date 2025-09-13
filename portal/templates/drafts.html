@@ -1,67 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Draft Menus{% endblock %}
+{% block title %}Drafts · ServLine{% endblock %}
 
 {% block content %}
-<div class="container" style="max-width: 1000px;">
-  <h1 class="mt-4 mb-3">Draft Menus</h1>
+  <h1 class="text-xl font-semibold mb-4">Drafts</h1>
 
-  {% if drafts|length == 0 %}
-    <div class="alert alert-info">No drafts yet. Upload a menu to get started.</div>
-  {% else %}
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th style="width: 120px;">Preview</th>
-          <th>Job ID</th>
-          <th>Source File</th>
-          <th>Categories</th>
-          <th>Status</th>
-          <th>Updated</th>
-          <th style="width: 110px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in drafts %}
+  <div class="mb-3">
+    <a href="{{ url_for('drafts_list') }}" class="btn">Refresh</a>
+  </div>
+
+  <section class="card">
+    {% if drafts %}
+      <table class="table">
+        <thead>
           <tr>
-            <td>
-              {% if d.source_file and (d.source_file.lower().endswith(".png") or d.source_file.lower().endswith(".jpg") or d.source_file.lower().endswith(".jpeg")) %}
-                <img src="{{ url_for('serve_upload', filename=d.source_file) }}" alt="preview" style="height: 64px; width: auto; border-radius: 6px; border:1px solid #ddd;">
-              {% else %}
-                <span class="text-muted">n/a</span>
-              {% endif %}
-            </td>
-            <td style="font-family: monospace; font-size: 0.9rem;">
-              {{ d.job_id }}
-            </td>
-            <td style="word-break: break-all;">
-              {{ d.source_file or "—" }}
-            </td>
-            <td>
-              {% if d.categories %}
-                {{ d.categories|join(", ") }}
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-            <td>
-              {% set badge = "secondary" %}
-              {% if d.status == "draft_created" %}{% set badge = "success" %}
-              {% elif d.status.startswith("processing") %}{% set badge = "warning" %}
-              {% elif d.status == "error" %}{% set badge = "danger" %}
-              {% endif %}
-              <span class="badge bg-{{ badge }}">{{ d.status }}</span>
-            </td>
-            <td>
-              <span class="text-muted">{{ d.updated_at }}</span>
-            </td>
-            <td class="text-end">
-              <!-- This link will work after we add the review page next -->
-              <a class="btn btn-sm btn-primary" href="/drafts/{{ d.job_id }}">Review</a>
-            </td>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Updated</th>
+            <th class="text-right">Actions</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
-</div>
+        </thead>
+        <tbody>
+          {% for d in drafts %}
+            <tr>
+              <td class="text-muted">#{{ d.id }}</td>
+              <td>{{ d.title }}</td>
+              <td>{{ d.status }}</td>
+              <td>{{ d.updated_at }}</td>
+              <td class="text-right">
+                <a href="{{ url_for('draft_editor', draft_id=d.id) }}" class="btn">Open</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No drafts yet.</p>
+    {% endif %}
+  </section>
 {% endblock %}

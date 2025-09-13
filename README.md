@@ -25,6 +25,8 @@ portal/ # Flask portal website
     uploads_trash.html  
     import.html  
     draft_review.html  
+    draft_editor.html  
+    drafts.html  
     raw.html  
     errors/404.html  
     errors/500.html  
@@ -35,6 +37,7 @@ storage/ # SQLite database + seed + schema + artifacts
   servline.db  
   schema.sql  
   seed_dev.sql  
+  drafts.py  
 uploads/ # User-uploaded menu files (+ .trash for recycle bin)  
 .gitignore  
 .vscode/ # VS Code tasks (auto-run infra, stop infra)  
@@ -173,3 +176,33 @@ README.md # This file
   - Admin & Maintenance block spaced neatly; all buttons now blue primary.
 
 ✅ **Day 11 complete — ServLine Portal is now fully consistent, polished, and debugged (Uploads delete fixed).**
+
+---
+
+## 🚀 Day 12: Drafts (DB-backed Editor)
+
+- **Database**
+  - Added `drafts` + `draft_items` tables in schema.sql.
+  - Migration ensured `import_jobs.draft_id` and `drafts.source_job_id`.
+
+- **Storage Layer**
+  - New `storage/drafts.py` for managing drafts and draft items:
+    - `list_drafts`, `get_draft`, `get_draft_items`
+    - `create_draft`, `save_draft_metadata`, `upsert_draft_items`
+    - `delete_draft_items`, `submit_draft`
+
+- **App Integration**
+  - `/drafts` → list drafts with filter options.
+  - `/drafts/<id>/edit` → full-featured Draft Editor.
+  - `/drafts/<id>/save` → JSON API for saving title + items.
+  - `/drafts/<id>/submit` → mark draft as submitted.
+  - Import jobs now bridge into drafts via **Edit** button.
+
+- **UI**
+  - New `draft_editor.html` page:
+    - Search, add, duplicate, delete rows.
+    - Auto price formatting + validation.
+    - Unsaved change indicator + save/submit keyboard shortcuts.
+  - Darker background + black text inputs for readability.
+
+✅ **Day 12 complete — ServLine now supports full DB-backed draft editing (menus editable in portal).**

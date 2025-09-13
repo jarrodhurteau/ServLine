@@ -1,5 +1,10 @@
 PRAGMA foreign_keys = ON;
 
+-----------------------------------------------------------------------
+-- Core: Restaurants / Menus / Items
+-----------------------------------------------------------------------
+
+-- Restaurants
 CREATE TABLE IF NOT EXISTS restaurants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -9,6 +14,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Menus
 CREATE TABLE IF NOT EXISTS menus (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   restaurant_id INTEGER NOT NULL,
@@ -18,6 +24,7 @@ CREATE TABLE IF NOT EXISTS menus (
   FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
 );
 
+-- Menu Items
 CREATE TABLE IF NOT EXISTS menu_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   menu_id INTEGER NOT NULL,
@@ -29,17 +36,20 @@ CREATE TABLE IF NOT EXISTS menu_items (
   FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE
 );
 
--- Day 8: Import Jobs (track uploaded menu files + OCR results)
+-----------------------------------------------------------------------
+-- Day 8: Import Jobs (uploads + OCR pipeline)
+-----------------------------------------------------------------------
+
 CREATE TABLE IF NOT EXISTS import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  restaurant_id INTEGER,                      -- optional link to restaurant
-  filename TEXT NOT NULL,                     -- original uploaded file name
-  source_path TEXT,                           -- full relative path (uploads/... or uploads/.trash/...)
-  status TEXT NOT NULL DEFAULT 'pending',     -- processing state: pending | processing | done | failed
-  lifecycle TEXT NOT NULL DEFAULT 'active',   -- visibility state: active | deleted (trash)
-  trashed_at TEXT,                            -- ISO time when moved to .trash
-  draft_path TEXT,                            -- relative path to storage/drafts/*.json
-  error TEXT,                                 -- error notes if OCR fails
+  restaurant_id INTEGER,                        -- optional association
+  filename TEXT NOT NULL,                       -- sanitized uploaded filename
+  source_path TEXT,                             -- original relative path if needed
+  status TEXT NOT NULL DEFAULT 'pending',       -- pending|processing|done|failed|deleted|restored|published
+  lifecycle TEXT NOT NULL DEFAULT 'active',     -- future use
+  trashed_at TEXT,                              -- when moved into uploads/.trash
+  draft_path TEXT,                              -- storage/drafts/*.json (legacy OCR output)
+  error TEXT,                                   -- failure notes
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
@@ -48,3 +58,69 @@ CREATE TABLE IF NOT EXISTS import_jobs (
 CREATE INDEX IF NOT EXISTS idx_import_jobs_status    ON import_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_import_jobs_lifecycle ON import_jobs(lifecycle);
 CREATE INDEX IF NOT EXISTS idx_import_jobs_created   ON import_jobs(created_at);
+
+-----------------------------------------------------------------------
+-- Day 12: Drafts (DB-backed editor)
+-- NOTE: This version introduces `source_job_id` to link a draft
+--       back to an import_jobs row. This matches storage/drafts.py.
+-----------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  restaurant_id INTEGER,
+  title TEXT NOT NULL DEFAULT 'Untitled Draft',
+  status TEXT NOT NULL DEFAULT 'editing',       -- editing|submitted|approved|rejected|archived
+  source_job_id INTEGER,                        -- <- NEW: provenance link to import_jobs.id
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+  FOREIGN KEY (source_job_id) REFERENCES import_jobs(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_status      ON drafts(status);
+CREATE INDEX IF NOT EXISTS idx_drafts_restaurant  ON drafts(restaurant_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated     ON drafts(updated_at);
+-- Ensure at most one draft per import job (but allow NULLs)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_drafts_source_job
+  ON drafts(source_job_id)
+  WHERE source_job_id IS NOT NULL;
+
+-- Draft Items
+CREATE TABLE IF NOT EXISTS draft_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  draft_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  price_cents INTEGER NOT NULL DEFAULT 0,
+  category TEXT,
+  position INTEGER,                              -- display sort (NULLs last)
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_draft_items_draft ON draft_items(draft_id);
+CREATE INDEX IF NOT EXISTS idx_draft_items_cat   ON draft_items(draft_id, category);
+CREATE INDEX IF NOT EXISTS idx_draft_items_pos   ON draft_items(draft_id, position);
+
+-----------------------------------------------------------------------
+-- (Optional) helpers: simple updated_at bumpers
+-- You already update timestamps in app/storage code; these are optional.
+-----------------------------------------------------------------------
+/* Example triggers if you want SQLite to auto-bump updated_at:
+-- DRAFTS
+CREATE TRIGGER IF NOT EXISTS trg_drafts_updated
+AFTER UPDATE ON drafts
+FOR EACH ROW
+BEGIN
+  UPDATE drafts SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- DRAFT ITEMS
+CREATE TRIGGER IF NOT EXISTS trg_draft_items_updated
+AFTER UPDATE ON draft_items
+FOR EACH ROW
+BEGIN
+  UPDATE draft_items SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+*/

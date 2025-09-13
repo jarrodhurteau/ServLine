@@ -23,6 +23,9 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from importlib.util import find_spec
 import pytesseract
 
+# ------------------------
+# App & Config
+# ------------------------
 app = Flask(__name__)
 
 # --- Config (dev) ---
@@ -34,6 +37,17 @@ DEV_PASSWORD = "letmein"
 # --- Paths ---
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "storage" / "servline.db"
+
+# Make project root importable so we can import storage.*
+import sys
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+# storage layer for drafts (Day 12)
+try:
+    from storage import drafts as drafts_store
+except Exception:
+    drafts_store = None  # guarded below
 
 # uploads (kept out of git via .gitignore)
 UPLOAD_FOLDER = ROOT / "uploads"
@@ -381,7 +395,6 @@ def login_post():
         flash("Welcome back!", "success")
         return redirect(nxt)  # PRG
     flash("Invalid credentials", "error")
-    # Redirect back to login to avoid re-POST on refresh (PRG)
     return redirect(url_for("login", next=request.form.get("next") or ""))
 
 @app.post("/logout")
@@ -482,6 +495,42 @@ def imports_view(job_id):
             with open(abs_path, "r", encoding="utf-8") as f:
                 draft = json.load(f)
     return render_template("import_view.html", job=row, draft=draft)
+
+# NEW: bridge route that turns the "Edit" button into something that always works
+@app.get("/imports/<int:job_id>/edit")
+@login_required
+def imports_edit(job_id: int):
+    """
+    If a DB draft exists linked to this import (drafts.source_job_id), go to the Draft Editor.
+    Otherwise, if a legacy JSON draft exists, promote it to the new drafts system and then open the editor.
+    If nothing is ready, fall back to the legacy view.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    # 1) If there's already a DB-backed draft for this import job, open it.
+    if drafts_store and hasattr(drafts_store, "find_draft_by_source_job"):
+        existing = drafts_store.find_draft_by_source_job(job_id)
+        if existing and (existing.get("id") or existing.get("draft_id")):
+            did = int(existing.get("id") or existing.get("draft_id"))
+            return redirect(url_for("draft_editor", draft_id=did))
+
+    # 2) Otherwise, try to build one from the legacy JSON file (if present).
+    abs_path = _abs_from_rel(row["draft_path"]) if row["draft_path"] else None
+    if drafts_store and hasattr(drafts_store, "create_draft_from_import") and abs_path and abs_path.exists():
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                draft_json = json.load(f)
+            created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
+            new_id = int(created.get("id") or created.get("draft_id"))
+            return redirect(url_for("draft_editor", draft_id=new_id))
+        except Exception as e:
+            flash(f"Could not open editor yet: {e}", "error")
+
+    # 3) Last resort: show the legacy import view so the button still does something.
+    flash("Draft not ready for editor yet. Showing legacy import view.", "info")
+    return redirect(url_for("imports_view", job_id=job_id))
 
 # --- Cleanup & per-job delete (soft delete via status) ---
 @app.route("/imports/cleanup", methods=["GET", "POST"])
@@ -866,7 +915,7 @@ def artifacts_sweep():
     return jsonify({"status": "ok", **report})
 
 # ------------------------
-# Draft Review & Publish
+# Draft Review (legacy JSON-file flow) & Publish to live menu
 # ------------------------
 def _load_draft_json_by_job(job_id: int):
     row = get_import_job(job_id)
@@ -1004,6 +1053,93 @@ def import_upload():
     except Exception as e:
         flash(f"Server error while saving upload: {e}", "error")
     return redirect(url_for("import_page"))
+
+# ======================================================================
+# Day 12 — DRAFTS (DB-first): List + Editor + Save + Submit
+# ======================================================================
+
+def _require_drafts_storage():
+    if drafts_store is None:
+        abort(500, description="Drafts storage layer not available. Ensure storage/drafts.py exists and is importable.")
+
+@app.get("/drafts")
+@login_required
+def drafts_list():
+    """List drafts (optionally filter by status or restaurant)."""
+    _require_drafts_storage()
+    status = request.args.get("status") or None
+    try:
+        restaurant_id = int(request.args.get("restaurant_id")) if request.args.get("restaurant_id") else None
+    except Exception:
+        restaurant_id = None
+
+    drafts = drafts_store.list_drafts(status=status, restaurant_id=restaurant_id, limit=200, offset=0)
+    return render_template("drafts.html", drafts=drafts, status=status, restaurant_id=restaurant_id)
+
+@app.get("/drafts/<int:draft_id>/edit")
+@login_required
+def draft_editor(draft_id: int):
+    """Render the Draft Editor UI."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404, description=f"Draft {draft_id} not found")
+    items = drafts_store.get_draft_items(draft_id)
+    # Optional: load category suggestions from existing items
+    categories = sorted({(it.get("category") or "").strip() for it in items if (it.get("category") or "").strip()})
+    categories = [c for c in categories if c]
+    return render_template("draft_editor.html", draft=draft, items=items, categories=categories)
+
+@app.post("/drafts/<int:draft_id>/save")
+@login_required
+def draft_save(draft_id: int):
+    """Save title and bulk upsert/delete items. Expects JSON payload."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
+    payload = request.get_json(silent=True) or {}
+
+    title = (payload.get("title") or "").strip() or None
+    items = payload.get("items") or []
+    deleted_ids = payload.get("deleted_item_ids") or []
+
+    try:
+        if title is not None:
+            drafts_store.save_draft_metadata(draft_id, title=title)
+        upsert_result = drafts_store.upsert_draft_items(draft_id, items)
+        deleted_count = 0
+        if deleted_ids:
+            del_ints = []
+            for x in deleted_ids:
+                try:
+                    del_ints.append(int(x))
+                except Exception:
+                    continue
+            if del_ints:
+                deleted_count = drafts_store.delete_draft_items(draft_id, del_ints)
+        saved = {
+            "ok": True,
+            "saved_at": _now_iso(),
+            "inserted_ids": upsert_result.get("inserted_ids", []),
+            "updated_ids": upsert_result.get("updated_ids", []),
+            "deleted_count": deleted_count,
+        }
+        return jsonify(saved), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.post("/drafts/<int:draft_id>/submit")
+@login_required
+def draft_submit(draft_id: int):
+    """Mark draft as submitted."""
+    _require_drafts_storage()
+    try:
+        drafts_store.submit_draft(draft_id)
+        flash(f"Draft #{draft_id} submitted for review.", "success")
+        return redirect(url_for("drafts_list"))
+    except Exception as e:
+        flash(f"Submit failed: {e}", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
 
 # ------------------------
 # Error handlers (Day 10)
