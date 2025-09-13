@@ -1,26 +1,34 @@
-# --- Root-level .gitignore ---
-# Global ignores for the ServLine project
-
-# Python
-.venv/
+# --- Python ---
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.pycache
+*.egg-info/
+*.egg
+*.log
 
-# Infra scratch files
-infra/.pids
-infra/current_url.txt
+# --- Virtual environments ---
+.venv/
+env/
+venv/
 
-# Env secrets
-.env
+# --- SQLite databases (don’t track live DBs) ---
+*.db
 
-# VS Code settings
+# --- VS Code ---
 .vscode/
 
-# Uploaded menu files (binary user content)
-uploads/
+# --- System files ---
+.DS_Store
+Thumbs.db
 
-# Day 8: Draft JSONs + DB file
-storage/drafts/
-storage/servline.db
-storage/*.db
-storage/*.db
+# --- Uploads ---
+uploads/*
+!uploads/.gitkeep
+
+# --- Drafts & Raw artifacts ---
+storage/drafts/*
+!storage/drafts/.gitkeep
+storage/raw/*
+!storage/raw/.gitkeep
