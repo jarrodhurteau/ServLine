@@ -136,6 +136,40 @@ README.md # This file
 - 404 and 500 error pages styled to match site
 - Import landing page (`/import`) aligned with portal polish
 
+✅ **Day 10 complete — ServLine Portal is now visually consistent, navigable, and polished.**
+
 ---
 
-✅ **Day 10 complete — ServLine Portal is now visually consistent, navigable, and polished.**
+## 🚀 Day 11: Portal Polish Round 2
+
+- **Global**
+  - All buttons unified: blue `btn-primary` for all actions, red `btn-danger` for destructive actions only.
+  - Logout styled as compact blue pill (`btn-primary btn-sm`).
+
+- **Restaurants**
+  - Added right-aligned “Add Restaurant” button.
+  - Clean empty state message.
+
+- **Uploads**
+  - Toolbar row with Artifact Sweep, Delete Selected, and file count aligned.
+  - Fixed delete bug (no nested forms; button disabled until a file is checked).
+  - Empty state muted: “No files in Uploads.”
+
+- **Recycle Bin**
+  - Toolbar row with Artifact Sweep + item count aligned.
+  - Empty state muted: “Recycle Bin is empty.”
+
+- **Imports**
+  - Toolbar row with Cleanup + Recycle Bin buttons.
+  - Recycle Bin now primary button.
+  - Empty state muted.
+
+- **Import a Menu**
+  - Added spacing under OCR Health button.
+  - Upload cards balanced and styled consistently.
+
+- **Index (Home)**
+  - Headline cleaned up: bold “ServLine Portal” with muted “System is online.” subtitle.
+  - Admin & Maintenance block spaced neatly; all buttons now blue primary.
+
+✅ **Day 11 complete — ServLine Portal is now fully consistent, polished, and debugged (Uploads delete fixed).**
