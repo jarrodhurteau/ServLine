@@ -42,68 +42,44 @@
       .muted { color:var(--muted); }
       .ml-auto { margin-left: auto; }
 
-      /* Buttons: all forced black text */
-      .btn,
-      button,
-      input[type="submit"] {
-        display: inline-block;
-        font-weight: 500;
-        padding: 0.45rem 1rem;
-        border-radius: 0.75rem;
-        border: 1px solid var(--line);
-        background: var(--panel);
-        color: #000; /* force black */
-        transition: background 0.2s, color 0.2s, border-color 0.2s;
+      /* ------------------------------------------------------------------
+         Buttons: PRIMARY BLUE IS THE DEFAULT. Black text per design.
+         Use .btn-danger for red, .btn-ghost for neutral.
+         ------------------------------------------------------------------ */
+      .btn {
+        display:inline-block;
+        font-weight:600;
+        padding:0.45rem 1rem;
+        border-radius:0.75rem;
+        border:1px solid #7aa2ff;
+        background:#7aa2ff;      /* default = primary blue */
+        color:#000;               /* black lettering */
+        transition:background .2s, color .2s, border-color .2s, opacity .2s;
+        text-decoration:none;
+        cursor:pointer;
       }
-      .btn:hover,
-      button:hover,
-      input[type="submit"]:hover {
-        background: #1a2338;
-        border-color: #7aa2ff;
-        color: #000;
-      }
-      .btn-primary {
-        background: #7aa2ff;
-        border-color: #7aa2ff;
-        color: #000;
-      }
-      .btn-primary:hover {
-        background: #5a86f7;
-        border-color: #5a86f7;
-        color: #000;
-      }
-      .btn-secondary {
-        background: transparent;
-        border-color: var(--line);
-        color: #000;
-      }
-      .btn-secondary:hover {
-        background: #1a2338;
-        color: #000;
-      }
-      .btn-danger {
-        background: #b91c1c;
-        border-color: #b91c1c;
-        color: #000;
-      }
-      .btn-danger:hover {
-        background: #991b1b;
-        border-color: #991b1b;
-        color: #000;
-      }
-      /***** Small button size *****/
-      .btn-sm {
-        padding: 0.3rem 0.75rem;
-        font-size: 0.875rem; /* ~text-sm */
-        line-height: 1.2;
-      }
+      .btn:hover { background:#5a86f7; border-color:#5a86f7; color:#000; }
+      .btn:disabled { opacity:.6; cursor:not-allowed; }
+
+      /* Optional explicit variants (still primary by default) */
+      .btn-primary { background:#7aa2ff; border-color:#7aa2ff; color:#000; }
+      .btn-primary:hover { background:#5a86f7; border-color:#5a86f7; color:#000; }
+
+      .btn-ghost  { background:#fff; border-color:var(--line); color:#111827; }
+      .btn-ghost:hover { background:#f9fafb; color:#111827; }
+
+      .btn-danger { background:#b91c1c; border-color:#b91c1c; color:#000; }
+      .btn-danger:hover { background:#991b1b; border-color:#991b1b; color:#000; }
+
+      /* Small button */
+      .btn-sm { padding:0.3rem 0.75rem; font-size:0.875rem; line-height:1.2; }
 
       /* Tables */
       table.table { width:100%; border-collapse: collapse; }
       .table th, .table td { padding: 10px 12px; border-bottom: 1px dashed var(--line); }
       .table th { text-align: left; color: var(--muted); font-weight: 600; }
 
-      /* Forms: ensure readability on dark theme */
+      /* Inputs: force light controls with black text for readability */
       select.form-select,
       input.form-control,
       textarea.form-control,
@@ -113,19 +89,19 @@
       input[type="email"],
       input[type="password"],
       textarea {
-        color: #000 !important;
-        background-color: #fff !important;
+        color:#000 !important;
+        background:#fff !important;
       }
       select.form-select option,
       select option {
-        color: #000 !important;
-        background-color: #fff !important;
+        color:#000 !important;
+        background:#fff !important;
       }
-      input::placeholder, textarea::placeholder { color: #666; opacity: 1; }
+      input::placeholder, textarea::placeholder { color:#666; opacity:1; }
 
       /* Flash (optional subtle transition hook) */
-      .flash-enter { opacity: 0; transform: translateY(-4px); }
-      .flash-enter-active { opacity: 1; transform: translateY(0); transition: all .25s ease; }
+      .flash-enter { opacity:0; transform:translateY(-4px); }
+      .flash-enter-active { opacity:1; transform:translateY(0); transition:all .25s ease; }
     </style>
 
     {% block head %}{% endblock %}
@@ -148,10 +124,10 @@
       <div class="ml-auto">
         {% if session.get('user') %}
           <form method="post" action="/logout" style="display:inline">
-            <button class="btn btn-primary btn-sm">Logout</button>
+            <button class="btn btn-sm">Logout</button>
           </form>
         {% else %}
-          <a href="/login" class="btn btn-primary">Login</a>
+          <a href="/login" class="btn">Login</a>
         {% endif %}
       </div>
     </div>

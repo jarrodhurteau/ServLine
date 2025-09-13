@@ -2,6 +2,20 @@
 {% block title %}Imports · ServLine{% endblock %}
 
 {% block content %}
+  <style>
+    /* Status pills */
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
+    .pill-gray  { background:#e5e7eb; color:#374151; }
+    .pill-blue  { background:#dbeafe; color:#1e40af; }
+    .pill-yellow{ background:#fef3c7; color:#92400e; }
+    .pill-green { background:#dcfce7; color:#065f46; }
+    .pill-red   { background:#fee2e2; color:#991b1b; }
+    .pill-purple{ background:#ede9fe; color:#5b21b6; }
+
+    /* Actions alignment */
+    .actions { display:flex; justify-content:flex-end; gap:.5rem; flex-wrap:wrap; }
+  </style>
+
   <h1 class="text-xl font-semibold mb-4">Import Jobs</h1>
 
   <!-- Toolbar -->
@@ -27,15 +41,37 @@
         </thead>
         <tbody>
           {% for j in jobs %}
+            {% set st = (j.status or '').lower() %}
+            {% set pill_class =
+              'pill-gray'   if st in ['', 'pending', 'deleted'] else
+              'pill-blue'   if st in ['processing', 'restored'] else
+              'pill-green'  if st in ['done', 'published'] else
+              'pill-yellow' if st in ['submitted', 'review'] else
+              'pill-purple' if st in ['editing'] else
+              'pill-red'
+            %}
+            {% set status_label =
+              'Pending'     if st == 'pending' else
+              'Processing'  if st == 'processing' else
+              'Ready'       if st == 'done' else
+              'Submitted'   if st == 'submitted' else
+              'Editing'     if st == 'editing' else
+              'Published'   if st == 'published' else
+              'Restored'    if st == 'restored' else
+              'Deleted'     if st == 'deleted' else
+              (st|capitalize if st else '—')
+            %}
             <tr>
               <td class="text-muted">#{{ j.id }}</td>
               <td>{{ j.filename }}</td>
-              <td>{{ j.status or "—" }}</td>
-              <td>{{ j.created_at }}</td>
-              <td>{{ j.updated_at }}</td>
+              <td><span class="pill {{ pill_class }}">{{ status_label }}</span></td>
+              <td><time class="ts" datetime="{{ j.created_at }}">{{ j.created_at }}</time></td>
+              <td><time class="ts" datetime="{{ j.updated_at }}">{{ j.updated_at }}</time></td>
               <td class="text-right">
-                <div class="flex justify-end gap-2">
+                <div class="actions">
                   <a href="/imports/view/{{ j.id }}" class="btn btn-primary">View</a>
+                  <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary">Raw OCR</a>
+                  <a href="{{ url_for('imports_edit', job_id=j.id) }}" class="btn btn-primary">Edit</a>
                   <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline">
                     <button type="submit" class="btn btn-danger">Delete</button>
                   </form>
@@ -49,4 +85,23 @@
       <p class="muted">No import jobs found.</p>
     {% endif %}
   </section>
+
+  <script>
+    // Format timestamps to a friendlier display while preserving raw value as fallback
+    (function() {
+      function fmt(d) {
+        try {
+          // SQLite typically returns "YYYY-MM-DD HH:MM:SS"
+          const dt = new Date((d || '').replace(' ', 'T') + 'Z');
+          if (isNaN(dt)) return d;
+          const opts = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+          return dt.toLocaleString(undefined, opts).replace(',', ' ·');
+        } catch { return d; }
+      }
+      document.querySelectorAll('time.ts').forEach(t => {
+        const raw = t.getAttribute('datetime') || t.textContent || '';
+        t.textContent = fmt(raw);
+      });
+    })();
+  </script>
 {% endblock %}
