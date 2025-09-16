@@ -1,7 +1,7 @@
 # portal/app.py
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
-    session, send_from_directory, flash
+    session, send_from_directory, flash, make_response
 )
 import sqlite3
 from pathlib import Path
@@ -14,6 +14,17 @@ import json
 import shutil
 from datetime import datetime
 from typing import Optional, Iterable, Tuple
+
+# stdlib for exports
+import io
+import csv
+import re  # <-- added for OCR parsing
+
+# NEW: optional Excel export dependency
+try:
+    from openpyxl import Workbook
+except Exception:
+    Workbook = None
 
 # safer filename + big-file error handling
 from werkzeug.utils import secure_filename
@@ -43,7 +54,7 @@ import sys
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-# storage layer for drafts (Day 12)
+# storage layer for drafts (DB-first, Day 12+)
 try:
     from storage import drafts as drafts_store
 except Exception:
@@ -167,6 +178,157 @@ def login_required(view_func):
     return wrapper
 
 # ------------------------
+# Small helpers for Day 13 flow
+# ------------------------
+def _require_drafts_storage():
+    if drafts_store is None:
+        abort(500, description="Drafts storage layer not available. Ensure storage/drafts.py exists and is importable.")
+
+def _abs_from_rel(rel_path: Optional[str]) -> Optional[Path]:
+    if not rel_path:
+        return None
+    return (ROOT / rel_path).resolve()
+
+def _price_to_cents(v) -> int:
+    """Accept floats/strings like 12.5, '12.50', '$12.5', '12 50' and return cents."""
+    if v is None:
+        return 0
+    try:
+        if isinstance(v, (int, float)):
+            return int(round(float(v) * 100))
+        s = str(v)
+        s = s.replace("$", "").replace(",", " ").strip()
+        # handle '12 50' -> '12.50'
+        parts = [p for p in s.split() if p]
+        if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) in (1, 2):
+            s = parts[0] + "." + parts[1].rjust(2, "0")
+        return int(round(float(s) * 100))
+    except Exception:
+        return 0
+
+def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row) -> int:
+    """Pick an existing active menu for the job's restaurant, else create one."""
+    rest_id = job_row["restaurant_id"]
+    cur = conn.cursor()
+    if rest_id:
+        m = cur.execute(
+            "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
+            (rest_id,),
+        ).fetchone()
+        if m:
+            return int(m["id"])
+    # create a new menu
+    name = f"Imported {datetime.utcnow().date()}"
+    cur.execute(
+        "INSERT INTO menus (restaurant_id, name, active) VALUES (?, ?, 1)",
+        (rest_id, name),
+    )
+    return int(cur.lastrowid)
+
+def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
+    """Return a draft_id for this import job, creating from legacy JSON if needed."""
+    _require_drafts_storage()
+    row = get_import_job(job_id)
+    if not row:
+        return None
+
+    # Existing DB-backed draft?
+    if hasattr(drafts_store, "find_draft_by_source_job"):
+        existing = drafts_store.find_draft_by_source_job(job_id)
+        if existing and (existing.get("id") or existing.get("draft_id")):
+            return int(existing.get("id") or existing.get("draft_id"))
+
+    # Legacy JSON → new draft
+    abs_path = _abs_from_rel(row["draft_path"]) if row["draft_path"] else None
+    if abs_path and abs_path.exists() and hasattr(drafts_store, "create_draft_from_import"):
+        with open(abs_path, "r", encoding="utf-8") as f:
+            draft_json = json.load(f)
+        created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
+        return int(created.get("id") or created.get("draft_id"))
+
+    return None
+
+def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cents: int) -> bool:
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT 1 FROM menu_items
+        WHERE menu_id=? AND lower(trim(name))=lower(trim(?)) AND price_cents=?
+        LIMIT 1
+        """,
+        (menu_id, name, price_cents),
+    ).fetchone()
+    return bool(row)
+
+def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
+    """
+    Commit draft rows for job -> menu_items with simple dedupe.
+    Returns (menu_id, inserted_count).
+    """
+    _require_drafts_storage()
+    job = get_import_job(job_id)
+    if not job:
+        abort(404, description="Job not found")
+
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        abort(400, description="No draft available to approve")
+
+    items = drafts_store.get_draft_items(draft_id) or []
+
+    with db_connect() as conn:
+        menu_id = _find_or_create_menu_for_job(conn, job)
+        cur = conn.cursor()
+
+        inserted = 0
+        for it in items:
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            price_cents = it.get("price_cents")
+            if price_cents is None:
+                price_cents = _price_to_cents(it.get("price") or it.get("price_text"))
+            desc = (it.get("description") or "").strip()
+
+            if not _dedupe_exists(conn, menu_id, name, int(price_cents)):
+                cur.execute(
+                    "INSERT INTO menu_items (menu_id, name, description, price_cents, is_available) VALUES (?, ?, ?, ?, 1)",
+                    (menu_id, name, desc, int(price_cents)),
+                )
+                inserted += 1
+
+        conn.commit()
+
+    # Mark job approved + note linkage
+    try:
+        update_import_job(job_id, status="approved")
+    except Exception:
+        pass
+
+    return menu_id, inserted
+
+def discard_draft_for_job(job_id: int) -> int:
+    """Delete all draft items (keep the draft shell so editor can be used later). Returns deleted count."""
+    _require_drafts_storage()
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        return 0
+
+    # fetch items, delete them
+    items = drafts_store.get_draft_items(draft_id) or []
+    ids = [it.get("id") for it in items if it.get("id") is not None]
+    deleted = 0
+    if ids:
+        deleted = drafts_store.delete_draft_items(draft_id, ids)
+
+    try:
+        update_import_job(job_id, status="discarded")
+    except Exception:
+        pass
+
+    return int(deleted)
+
+# ------------------------
 # Health / DB / OCR Health
 # ------------------------
 @app.get("/health")
@@ -240,13 +402,8 @@ def get_menu_items(menu_id):
         return jsonify([dict(r) for r in rows])
 
 # ------------------------
-# Import flow: Upload -> Job -> Worker -> Draft JSON
+# Import flow: Upload -> Job -> Worker -> Draft JSON (OCR)
 # ------------------------
-def _abs_from_rel(rel_path: Optional[str]) -> Optional[Path]:
-    if not rel_path:
-        return None
-    return (ROOT / rel_path).resolve()
-
 def _save_draft_json(job_id: int, draft: dict) -> str:
     draft_name = f"draft_{job_id}_{uuid.uuid4().hex[:8]}.json"
     abs_path = DRAFTS_FOLDER / draft_name
@@ -254,45 +411,154 @@ def _save_draft_json(job_id: int, draft: dict) -> str:
         json.dump(draft, f, indent=2)
     return str(abs_path.relative_to(ROOT)).replace("\\", "/")
 
+# --- OCR helpers: image/PDF → text, then text → draft -----------------
+def _ocr_image_to_text(img_path: Path) -> str:
+    try:
+        return pytesseract.image_to_string(str(img_path)) or ""
+    except Exception:
+        return ""
+
+def _pdf_to_text(pdf_path: Path) -> str:
+    """
+    Try to rasterize each PDF page with pdf2image (+poppler) and OCR it.
+    Falls back gracefully if pdf2image/poppler are not available.
+    """
+    try:
+        from pdf2image import convert_from_path
+    except Exception:
+        return ""
+
+    poppler_path = os.environ.get("POPPLER_PATH") or None
+    try:
+        pages = convert_from_path(str(pdf_path), dpi=200, poppler_path=poppler_path)
+    except Exception:
+        return ""
+
+    buf = []
+    for pg in pages:
+        try:
+            tmp = RAW_FOLDER / f"_{uuid.uuid4().hex[:8]}_pg.png"
+            pg.save(str(tmp), "PNG")
+            txt = _ocr_image_to_text(tmp)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            if txt:
+                buf.append(txt)
+        except Exception:
+            continue
+    return "\n".join(buf).strip()
+
+_price_rx = re.compile(r"""
+    (?P<name>.+?)                # item name
+    [\s\-·]*                     # optional separators
+    (?P<price>\$?\d+(?:\.\d{1,2})?)\s*$   # price at end
+""", re.X)
+
+def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> dict:
+    """
+    Heuristic parser:
+      - Default category until a new one detected
+      - New category when 'Category: Foo' or an ALL-CAPS line
+      - Item line if it ends in a price; otherwise, append to previous item's description
+    """
+    categories = []
+    current_cat = {"name": "Uncategorized", "items": []}
+    categories.append(current_cat)
+
+    def new_cat(name: str):
+        nonlocal current_cat
+        name = (name or "Misc").strip()
+        current_cat = {"name": name, "items": []}
+        categories.append(current_cat)
+
+    prev_item = None
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        # Category cues
+        if line.lower().startswith("category:"):
+            new_cat(line.split(":", 1)[1].strip() or "Misc")
+            prev_item = None
+            continue
+        if len(line) <= 40 and line.isupper() and any(c.isalpha() for c in line):
+            new_cat(line.title())
+            prev_item = None
+            continue
+
+        # Item with trailing price
+        m = _price_rx.match(line)
+        if m:
+            name = m.group("name").strip(" -·")
+            price = m.group("price")
+            try:
+                p = float(price.replace("$", ""))
+            except Exception:
+                p = 0.0
+            current_cat["items"].append({
+                "name": name,
+                "description": "",
+                "sizes": [{"name": "One Size", "price": round(p, 2)}],
+            })
+            prev_item = current_cat["items"][-1]
+            continue
+
+        # Otherwise, treat as description line for the last item
+        if prev_item:
+            desc = (prev_item.get("description") or "").strip()
+            prev_item["description"] = (desc + " " + line).strip()
+        else:
+            # no item yet; treat as a freestanding name (no price)
+            current_cat["items"].append({"name": line, "description": "", "sizes": []})
+            prev_item = current_cat["items"][-1]
+
+    # Drop empty leading category if it has no items
+    categories = [c for c in categories if c.get("items")]
+
+    return {
+        "job_id": job_id,
+        "source": {"type": "upload", "file": src_file, "ocr_engine": engine_label},
+        "extracted_at": _now_iso(),
+        "categories": categories or [{"name": "Uncategorized", "items": []}],
+    }
+
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
 
-        # (Stubbed OCR for dev)
-        time.sleep(0.8)
-        if saved_file_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+        suffix = saved_file_path.suffix.lower()
+        text = ""
+        engine = ""
+        if suffix in (".png", ".jpg", ".jpeg"):
+            engine = "tesseract"
+            text = _ocr_image_to_text(saved_file_path)
+        elif suffix == ".pdf":
+            engine = "tesseract+pdf2image"
+            text = _pdf_to_text(saved_file_path)
+
+        # If OCR yielded nothing (missing deps, etc.), leave a gentle note
+        if not text:
             draft = {
                 "job_id": job_id,
-                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "tesseract_stub"},
+                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
                 "extracted_at": _now_iso(),
                 "categories": [
-                    {"name": "Pizzas", "items": [
-                        {"name": "Cheese Pizza", "description": "", "sizes": [{"name": "Small", "price": 9.99}, {"name": "Large", "price": 14.99}]},
-                        {"name": "Pepperoni Pizza", "description": "", "sizes": [{"name": "Small", "price": 10.99}, {"name": "Large", "price": 16.49}]}
+                    {"name": "Uncategorized", "items": [
+                        {"name": "OCR not configured", "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.", "sizes": []}
                     ]}
                 ]
             }
         else:
-            draft = {
-                "job_id": job_id,
-                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "pdf_stub"},
-                "extracted_at": _now_iso(),
-                "categories": [
-                    {"name": "Pizzas", "items": [
-                        {"name": "Cheese Pizza", "sizes": [{"name": "Large", "price": 14.99}]},
-                        {"name": "Pepperoni Pizza", "sizes": [{"name": "Large", "price": 16.49}]}
-                    ]},
-                    {"name": "Drinks", "items": [
-                        {"name": "Soda", "description": "20oz bottle", "sizes": [{"name": "One Size", "price": 2.49}]}
-                    ]}
-                ]
-            }
+            draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
 
         rel_draft_path = _save_draft_json(job_id, draft)
 
         # OPTIONAL raw dump for debugging
         try:
-            (RAW_FOLDER / f"{job_id}.txt").write_text("stub raw OCR\n", encoding="utf-8")
+            (RAW_FOLDER / f"{job_id}.txt").write_text(text or "(no text extracted)\n", encoding="utf-8")
         except Exception:
             pass
 
@@ -458,13 +724,28 @@ def dev_upload_form():
     """
 
 # ------------------------
-# Imports pages (Day 8 behaviors)
+# Imports pages (Day 8 behaviors + Day 13 actions)
 # ------------------------
 @app.get("/imports")
 @login_required
 def imports():
     jobs = list_import_jobs()  # hide status='deleted'
     return render_template("imports.html", jobs=jobs)
+
+@app.get("/imports/<int:job_id>")
+@login_required
+def imports_detail(job_id):
+    """Day 13: job detail page with actions."""
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+    draft = None
+    if row["draft_path"]:
+        abs_path = _abs_from_rel(row["draft_path"])
+        if abs_path and abs_path.exists():
+            with open(abs_path, "r", encoding="utf-8") as f:
+                draft = json.load(f)
+    return render_template("import_view.html", job=row, draft=draft)
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
@@ -482,57 +763,68 @@ def imports_raw(job_id):
         data = json.load(f)
     return jsonify(data)
 
+# NEW: bridge to Draft Editor (always try DB-first, create from legacy if needed)
+@app.get("/imports/<int:job_id>/draft")
+@login_required
+def imports_draft(job_id: int):
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if draft_id:
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+    flash("Draft not ready for editor yet. Showing legacy import view.", "info")
+    return redirect(url_for("imports_detail", job_id=job_id))
+
+# NEW: approve draft → commit to menu_items (dedupe), set job approved
+@app.post("/imports/<int:job_id>/approve")
+@login_required
+def imports_approve(job_id: int):
+    try:
+        menu_id, inserted = approve_draft_to_menu(job_id)
+        flash(f"Approved: inserted {inserted} item(s) into menu #{menu_id}.", "success")
+        return redirect(url_for("items_page", menu_id=menu_id))
+    except Exception as e:
+        flash(f"Approve failed: {e}", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+# NEW: discard draft items for job, mark job discarded
+@app.post("/imports/<int:job_id>/discard")
+@login_required
+def imports_discard(job_id: int):
+    try:
+        deleted = discard_draft_for_job(job_id)
+        flash(f"Discarded draft items ({deleted} removed).", "success")
+    except Exception as e:
+        flash(f"Discard failed: {e}", "error")
+    return redirect(url_for("imports_detail", job_id=job_id))
+
+# NEW: clone draft tied to an import job
+@app.post("/imports/<int:job_id>/clone")
+@login_required
+def imports_clone(job_id: int):
+    try:
+        _require_drafts_storage()
+        draft_id = _get_or_create_draft_for_job(job_id)
+        if not draft_id:
+            flash("No draft available to clone for this import.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
+        if hasattr(drafts_store, "clone_draft"):
+            clone = drafts_store.clone_draft(draft_id)
+            new_id = int(clone.get("id") or clone.get("draft_id"))
+            flash(f"Cloned draft #{draft_id} → #{new_id}.", "success")
+            return redirect(url_for("draft_editor", draft_id=new_id))
+        else:
+            flash("Clone operation is not supported by the drafts storage layer.", "error")
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+    except Exception as e:
+        flash(f"Clone failed: {e}", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+# Legacy “view” kept (alias to detail)
 @app.get("/imports/view/<int:job_id>")
 @login_required
 def imports_view(job_id):
-    row = get_import_job(job_id)
-    if not row:
-        abort(404)
-    draft = None
-    if row["draft_path"]:
-        abs_path = _abs_from_rel(row["draft_path"])
-        if abs_path and abs_path.exists():
-            with open(abs_path, "r", encoding="utf-8") as f:
-                draft = json.load(f)
-    return render_template("import_view.html", job=row, draft=draft)
+    return imports_detail(job_id)
 
-# NEW: bridge route that turns the "Edit" button into something that always works
-@app.get("/imports/<int:job_id>/edit")
-@login_required
-def imports_edit(job_id: int):
-    """
-    If a DB draft exists linked to this import (drafts.source_job_id), go to the Draft Editor.
-    Otherwise, if a legacy JSON draft exists, promote it to the new drafts system and then open the editor.
-    If nothing is ready, fall back to the legacy view.
-    """
-    row = get_import_job(job_id)
-    if not row:
-        abort(404)
-
-    # 1) If there's already a DB-backed draft for this import job, open it.
-    if drafts_store and hasattr(drafts_store, "find_draft_by_source_job"):
-        existing = drafts_store.find_draft_by_source_job(job_id)
-        if existing and (existing.get("id") or existing.get("draft_id")):
-            did = int(existing.get("id") or existing.get("draft_id"))
-            return redirect(url_for("draft_editor", draft_id=did))
-
-    # 2) Otherwise, try to build one from the legacy JSON file (if present).
-    abs_path = _abs_from_rel(row["draft_path"]) if row["draft_path"] else None
-    if drafts_store and hasattr(drafts_store, "create_draft_from_import") and abs_path and abs_path.exists():
-        try:
-            with open(abs_path, "r", encoding="utf-8") as f:
-                draft_json = json.load(f)
-            created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
-            new_id = int(created.get("id") or created.get("draft_id"))
-            return redirect(url_for("draft_editor", draft_id=new_id))
-        except Exception as e:
-            flash(f"Could not open editor yet: {e}", "error")
-
-    # 3) Last resort: show the legacy import view so the button still does something.
-    flash("Draft not ready for editor yet. Showing legacy import view.", "info")
-    return redirect(url_for("imports_view", job_id=job_id))
-
-# --- Cleanup & per-job delete (soft delete via status) ---
+# Cleanup & per-job delete (soft delete via status)
 @app.route("/imports/cleanup", methods=["GET", "POST"])
 @login_required
 def imports_cleanup():
@@ -915,7 +1207,7 @@ def artifacts_sweep():
     return jsonify({"status": "ok", **report})
 
 # ------------------------
-# Draft Review (legacy JSON-file flow) & Publish to live menu
+# Draft Review (legacy JSON-file flow) & Publish to live menu (kept)
 # ------------------------
 def _load_draft_json_by_job(job_id: int):
     row = get_import_job(job_id)
@@ -1000,68 +1292,9 @@ def publish_draft(job_id):
     flash(f"Published draft #{job_id} to menu #{menu_id}.", "success")
     return redirect(url_for("items_page", menu_id=menu_id))
 
-# ------------------------
-# Raw OCR viewer
-# ------------------------
-@app.get("/drafts/<int:job_id>/raw")
-@login_required
-def view_raw(job_id):
-    candidates = [
-        RAW_FOLDER / f"{job_id}.txt",
-        LEGACY_RAW_FOLDER / f"{job_id}.txt",
-    ]
-    for raw_file in candidates:
-        if raw_file.exists():
-            raw_text = raw_file.read_text(encoding="utf-8", errors="ignore")
-            return render_template("raw.html", raw_text=raw_text, job_id=job_id)
-    abort(404, description="Raw OCR not found for that job")
-
-# ------------------------
-# Import landing page + HTML POST handler
-# ------------------------
-@app.get("/import")
-@login_required
-def import_page():
-    return render_template("import.html")
-
-@app.post("/import")
-@login_required
-def import_upload():
-    """HTML handler: save upload, start OCR job, then refresh with a flash."""
-    try:
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            flash("Please choose a file to upload.", "error")
-            return redirect(url_for("import_page"))
-        if not allowed_file(file.filename):
-            flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
-            return redirect(url_for("import_page"))
-
-        base_name = secure_filename(file.filename) or "upload"
-        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
-        save_path = UPLOAD_FOLDER / tmp_name
-        file.save(str(save_path))
-
-        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
-        threading.Thread(
-            target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
-        ).start()
-
-        flash(f"Import started for {base_name} (job #{job_id}).", "success")
-    except RequestEntityTooLarge:
-        flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
-    except Exception as e:
-        flash(f"Server error while saving upload: {e}", "error")
-    return redirect(url_for("import_page"))
-
 # ======================================================================
-# Day 12 — DRAFTS (DB-first): List + Editor + Save + Submit
+# Day 12 — DRAFTS (DB-first): List + Editor + Save + Submit (kept)
 # ======================================================================
-
-def _require_drafts_storage():
-    if drafts_store is None:
-        abort(500, description="Drafts storage layer not available. Ensure storage/drafts.py exists and is importable.")
-
 @app.get("/drafts")
 @login_required
 def drafts_list():
@@ -1084,10 +1317,16 @@ def draft_editor(draft_id: int):
     draft = drafts_store.get_draft(draft_id)
     if not draft:
         abort(404, description=f"Draft {draft_id} not found")
-    items = drafts_store.get_draft_items(draft_id)
+
+    # Robust: treat None as []
+    items = drafts_store.get_draft_items(draft_id) or []
+
     # Optional: load category suggestions from existing items
-    categories = sorted({(it.get("category") or "").strip() for it in items if (it.get("category") or "").strip()})
-    categories = [c for c in categories if c]
+    categories = sorted({
+        (it.get("category") or "").strip()
+        for it in items
+        if (it.get("category") or "").strip()
+    })
     return render_template("draft_editor.html", draft=draft, items=items, categories=categories)
 
 @app.post("/drafts/<int:draft_id>/save")
@@ -1098,6 +1337,10 @@ def draft_save(draft_id: int):
     if not request.is_json:
         return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
     payload = request.get_json(silent=True) or {}
+
+    # Lightweight ping for autosave heartbeat
+    if payload.get("autosave_ping"):
+        return jsonify({"ok": True, "saved_at": _now_iso(), "ping": True}), 200
 
     title = (payload.get("title") or "").strip() or None
     items = payload.get("items") or []
@@ -1141,6 +1384,105 @@ def draft_submit(draft_id: int):
         flash(f"Submit failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
+# NEW: clone a draft from the editor
+@app.post("/drafts/<int:draft_id>/clone")
+@login_required
+def draft_clone(draft_id: int):
+    try:
+        _require_drafts_storage()
+        if hasattr(drafts_store, "clone_draft"):
+            clone = drafts_store.clone_draft(draft_id)
+            new_id = int(clone.get("id") or clone.get("draft_id"))
+            flash(f"Cloned draft #{draft_id} → #{new_id}.", "success")
+            return redirect(url_for("draft_editor", draft_id=new_id))
+        else:
+            flash("Clone operation is not supported by the drafts storage layer.", "error")
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+    except Exception as e:
+        flash(f"Clone failed: {e}", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+# NEW: export CSV
+@app.get("/drafts/<int:draft_id>/export.csv")
+@login_required
+def draft_export_csv(draft_id: int):
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id) or {}
+    items = drafts_store.get_draft_items(draft_id) or []
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["id", "name", "description", "price_cents", "category", "position"])
+    writer.writeheader()
+    for it in items:
+        writer.writerow({
+            "id": it.get("id"),
+            "name": it.get("name", ""),
+            "description": it.get("description", ""),
+            "price_cents": it.get("price_cents", 0),
+            "category": it.get("category") or "",
+            "position": it.get("position") if it.get("position") is not None else ""
+        })
+    csv_data = buf.getvalue().encode("utf-8-sig")  # BOM to help Excel
+    resp = make_response(csv_data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.csv"'
+    return resp
+
+# NEW: export JSON
+@app.get("/drafts/<int:draft_id>/export.json")
+@login_required
+def draft_export_json(draft_id: int):
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id) or {}
+    items = drafts_store.get_draft_items(draft_id) or []
+    payload = {
+        "draft_id": draft_id,
+        "title": draft.get("title"),
+        "restaurant_id": draft.get("restaurant_id"),
+        "status": draft.get("status"),
+        "items": items,
+        "exported_at": _now_iso(),
+    }
+    resp = make_response(json.dumps(payload, indent=2))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.json"'
+    return resp
+
+# NEW: export XLSX
+@app.get("/drafts/<int:draft_id>/export.xlsx")
+@login_required
+def draft_export_xlsx(draft_id: int):
+    _require_drafts_storage()
+    if Workbook is None:
+        return make_response("openpyxl not installed. pip install openpyxl", 500)
+
+    draft = drafts_store.get_draft(draft_id) or {}
+    items = drafts_store.get_draft_items(draft_id) or []
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]  # Excel sheet name limit
+
+    headers = ["id", "name", "description", "price_cents", "category", "position"]
+    ws.append(headers)
+    for it in items:
+        ws.append([
+            it.get("id"),
+            it.get("name", ""),
+            it.get("description", ""),
+            it.get("price_cents", 0),
+            it.get("category") or "",
+            "" if it.get("position") is None else it.get("position"),
+        ])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    resp = make_response(out.read())
+    resp.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.xlsx"'
+    return resp
+
 # ------------------------
 # Error handlers (Day 10)
 # ------------------------
@@ -1152,6 +1494,44 @@ def not_found(e):
 def server_error(e):
     # Do not leak error details; rely on logs for specifics in dev.
     return render_template("errors/500.html"), 500
+
+# ------------------------
+# Import landing page + HTML POST handler (kept)
+# ------------------------
+@app.get("/import")
+@login_required
+def import_page():
+    return render_template("import.html")
+
+@app.post("/import")
+@login_required
+def import_upload():
+    """HTML handler: save upload, start OCR job, then refresh with a flash."""
+    try:
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose a file to upload.", "error")
+            return redirect(url_for("import_page"))
+        if not allowed_file(file.filename):
+            flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
+            return redirect(url_for("import_page"))
+
+        base_name = secure_filename(file.filename) or "upload"
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
+        threading.Thread(
+            target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
+        ).start()
+
+        flash(f"Import started for {base_name} (job #{job_id}).", "success")
+    except RequestEntityTooLarge:
+        flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+    except Exception as e:
+        flash(f"Server error while saving upload: {e}", "error")
+    return redirect(url_for("import_page"))
 
 # ------------------------
 # Run

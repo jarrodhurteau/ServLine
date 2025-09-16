@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base.html" %} 
 {% block title %}Draft Editor · Draft #{{ draft.id }}{% endblock %}
 
 {% block content %}
@@ -59,12 +59,13 @@
   .cell-pos { width:90px; }
   .row-actions { display:flex; gap:6px; }
 
-  /* Buttons – keep your scheme (primary blue, danger red) */
+  /* Buttons */
   .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:10px; border:1px solid #e5e7eb; background:#fff; color:#111827; text-decoration:none; cursor:pointer; }
   .btn:hover { background:#f3f4f6; }
   .btn-primary { background:#2563eb; color:#fff; border-color:#2563eb; }
   .btn-primary:hover { background:#1d4ed8; }
   .btn-secondary { background:#111827; color:#fff; border-color:#111827; }
+  .btn-success { background:#10b981; color:#fff; border-color:#10b981; }
   .btn-danger { background:#ef4444; color:#fff; border-color:#ef4444; }
   .btn-ghost { background:#fff; color:#111827; }
   .btn:disabled { opacity:.6; cursor:not-allowed; }
@@ -81,6 +82,29 @@
   .title-input { font-size:1.15rem; font-weight:700; border:none; outline:none; background:#fff; border-bottom:2px solid transparent; padding:4px 6px; border-radius:6px; }
   .title-input:focus { border-color:#d1d5db; }
   .search { min-width:240px; }
+
+  /* small helper text under actions */
+  .helper { font-size:.85rem; color:#9fb0d1; }
+
+  /* Export dropdown (native) */
+  details.export { position:relative; }
+  details.export[open] summary::after { transform: rotate(180deg); }
+  details.export summary {
+    list-style:none; cursor:pointer; user-select:none;
+  }
+  details.export summary::marker { display:none; }
+  details.export summary .caret { display:inline-block; transition:.15s transform; }
+  details.export[open] summary .caret { transform: rotate(180deg); }
+  details.export .menu {
+    position:absolute; right:0; top:110%;
+    background:#fff; color:#111827; border:1px solid #e5e7eb; border-radius:10px;
+    box-shadow:0 10px 20px rgba(0,0,0,.15); min-width:220px; padding:6px;
+    z-index:10;
+  }
+  details.export .menu a, details.export .menu button {
+    width:100%; text-align:left; background:none; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; color:#111827; text-decoration:none; display:block;
+  }
+  details.export .menu a:hover, details.export .menu button:hover { background:#f3f4f6; }
 </style>
 
 <div class="draft-editor">
@@ -96,16 +120,46 @@
         <div>Draft #{{ draft.id }}</div>
         <div>Restaurant ID #{{ draft.restaurant_id }}</div>
         {% if draft.source %}<div>Source: <span class="badge">{{ draft.source }}</span></div>{% endif %}
+        {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
         <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
       </div>
     </div>
-    <div style="display:flex; gap:8px;">
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <a class="btn btn-ghost" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
+      {% if draft.source_job_id %}
+        <a class="btn btn-ghost" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Import Detail</a>
+      {% endif %}
+
+      <!-- Export menu (server CSV/JSON/XLSX + client-side "Export Visible CSV") -->
+      <details class="export">
+        <summary class="btn">
+          Export <span class="caret">▾</span>
+        </summary>
+        <div class="menu">
+          <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
+          <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
+          <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
+          <button type="button" id="export-visible-btn">Export Visible as CSV</button>
+        </div>
+      </details>
+
+      <!-- Existing controls -->
       <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save Draft</button>
       <form id="submit-form" action="{{ url_for('draft_submit', draft_id=draft.id) }}" method="post" style="display:inline;">
         <button id="submit-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Submit for Review</button>
       </form>
+
+      {% if draft.source_job_id %}
+        <form action="{{ url_for('imports_approve', job_id=draft.source_job_id) }}" method="post" style="display:inline;">
+          <button class="btn btn-success">Approve</button>
+        </form>
+        <form action="{{ url_for('imports_discard', job_id=draft.source_job_id) }}" method="post" style="display:inline;">
+          <button class="btn btn-danger">Discard</button>
+        </form>
+      {% endif %}
     </div>
+    <div class="helper">Tip: “Export Visible as CSV” respects your table filter. CSV opens cleanly in Excel; JSON is great for debugging or re-imports.</div>
   </div>
 
   <div id="error-banner" class="error-banner"></div>
@@ -191,6 +245,8 @@
   const toast = $("#toast");
   const selectAll = $("#select-all");
   const search = $("#search");
+  const lastSaved = $("#last-saved");
+  const exportVisibleBtn = $("#export-visible-btn");
 
   let dirty = false;
 
@@ -304,10 +360,9 @@
         body: JSON.stringify({ title, items, deleted_item_ids: deletedIds })
       });
       const data = await res.json();
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || "Save failed");
-      }
+      if (!res.ok || data.ok === false) throw new Error(data.error || "Save failed");
 
+      // map server-assigned IDs back into rows that were temp
       let insIdx = 0;
       $$("#items-body tr").forEach(tr => {
         const idAttr = tr.getAttribute("data-id");
@@ -317,7 +372,7 @@
         }
       });
 
-      $("#last-saved").textContent = data.saved_at || new Date().toISOString();
+      if (lastSaved) lastSaved.textContent = data.saved_at || new Date().toISOString();
       setDirty(false);
       showSuccess("Saved");
     } catch (e) {
@@ -467,6 +522,94 @@
       e.returnValue = "";
     }
   });
+
+  // --- Autosave heartbeat ping (non-destructive) ---
+  let pingTimer = null;
+  function startHeartbeat() {
+    if (!isEditable) return;
+    stopHeartbeat();
+    pingTimer = setInterval(async () => {
+      if (document.hidden) return; // don't ping in background tabs
+      try {
+        const res = await fetch(`/drafts/${draftId}/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ autosave_ping: true })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.saved_at && lastSaved) {
+            lastSaved.textContent = data.saved_at;
+          }
+        }
+      } catch (_) { /* silent */ }
+    }, 30000); // every 30s
+  }
+  function stopHeartbeat() { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopHeartbeat(); else startHeartbeat();
+  });
+  startHeartbeat();
+
+  // --- Export Visible as CSV (client-side, respects current filter) ---
+  function toCsvCell(v) {
+    const s = (v ?? "").toString();
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function visibleRowsToCsv() {
+    const rows = $$("#items-body tr").filter(tr => tr.style.display !== "none");
+    const headers = ["id","name","description","price_cents","category","position"];
+    const out = [headers.join(",")];
+    for (const tr of rows) {
+      const idAttr = tr.getAttribute("data-id") || "";
+      const name = $(".name", tr)?.value ?? "";
+      const desc = $(".description", tr)?.value ?? "";
+      const priceStr = $(".price", tr)?.value ?? "";
+      const category = $(".category", tr)?.value ?? "";
+      const positionStr = $(".position", tr)?.value ?? "";
+      const cents = (function dollarsToCentsLoc(val){
+        if (val === null || val === undefined) return 0;
+        let s = String(val).trim().replace(/[$,]/g, "");
+        if (s === "") return 0;
+        const n = Number(s);
+        if (Number.isNaN(n)) return 0;
+        return Math.round(n * 100);
+      })(priceStr);
+      const row = [
+        toCsvCell(idAttr),
+        toCsvCell(name),
+        toCsvCell(desc),
+        toCsvCell(String(cents)),
+        toCsvCell(category),
+        toCsvCell(positionStr)
+      ];
+      out.push(row.join(","));
+    }
+    return out.join("\n");
+  }
+
+  // Avoid default-parameter syntax (some linters misread it in HTML contexts)
+  function downloadFile(filename, content, mime) {
+    var m = mime || 'text/csv;charset=utf-8';
+    var blob = new Blob(["\uFEFF", content], { type: m }); // BOM for Excel
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  if (exportVisibleBtn) {
+    exportVisibleBtn.addEventListener("click", function() {
+      const csv = visibleRowsToCsv();
+      downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8');
+      showToast("Exported visible rows");
+    });
+  }
 
 })();
 </script>

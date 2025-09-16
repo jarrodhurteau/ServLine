@@ -5,15 +5,18 @@
   <section class="card">
     <h1 class="text-xl font-semibold mb-4">Draft Review · Job #{{ draft.job_id }}</h1>
 
+    <!-- Toolbar -->
     <div class="mb-4 flex flex-wrap gap-2">
       <a class="btn btn-primary" href="{{ url_for('imports') }}">Back to Imports</a>
-      <a class="btn btn-primary" href="{{ url_for('uploads_page') }}">Uploads</a>
-      <a class="btn btn-primary" href="{{ url_for('uploads_trash_page') }}">Recycle Bin</a>
+      <a class="btn btn-primary" href="{{ url_for('imports_detail', job_id=draft.job_id) }}">Import Detail</a>
+      <a class="btn btn-primary" href="{{ url_for('imports_draft', job_id=draft.job_id) }}">Open Draft Editor</a>
+      <a class="btn btn-secondary" href="{{ url_for('view_raw', job_id=draft.job_id) }}">View Raw OCR</a>
       {% if preview_url %}
         <a class="btn btn-primary" href="{{ preview_url }}" target="_blank">View Source Image</a>
       {% endif %}
     </div>
 
+    <!-- Legacy publish flow (still supported) -->
     <form method="post" action="{{ url_for('publish_draft', job_id=draft.job_id) }}" class="space-y-4">
       <div>
         <label class="block mb-1 font-medium">Restaurant</label>
@@ -27,10 +30,21 @@
         <label class="block mb-1 font-medium">Menu Name</label>
         <input type="text" name="menu_name" class="form-control w-full" placeholder="Imported Menu" />
       </div>
-      <button type="submit" class="btn btn-primary">Publish Draft → Menu</button>
+      <div class="flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">Publish Draft → Menu</button>
+        <!-- Convenience: modern Day 13 actions against this job -->
+        <form action="{{ url_for('imports_approve', job_id=draft.job_id) }}" method="post" style="display:inline">
+          <button type="submit" class="btn btn-success">Approve (Day 13)</button>
+        </form>
+        <form action="{{ url_for('imports_discard', job_id=draft.job_id) }}" method="post" style="display:inline">
+          <button type="submit" class="btn btn-danger">Discard (Day 13)</button>
+        </form>
+      </div>
     </form>
 
     <h2 class="text-lg font-semibold mt-6 mb-2">Draft JSON Preview</h2>
-    <pre class="rounded-xl border border-line bg-[#0b1220] text-ink p-3 overflow-x-auto" style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
+    <pre class="rounded-xl border border-line bg-[#0b1220] text-ink p-3 overflow-x-auto" style="white-space: pre-wrap;">
+{{ draft | tojson(indent=2) }}
+    </pre>
   </section>
 {% endblock %}

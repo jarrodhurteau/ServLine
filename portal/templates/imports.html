@@ -43,12 +43,13 @@
           {% for j in jobs %}
             {% set st = (j.status or '').lower() %}
             {% set pill_class =
-              'pill-gray'   if st in ['', 'pending', 'deleted'] else
+              'pill-gray'   if st in ['', 'pending'] else
               'pill-blue'   if st in ['processing', 'restored'] else
-              'pill-green'  if st in ['done', 'published'] else
+              'pill-green'  if st in ['done', 'published', 'approved'] else
               'pill-yellow' if st in ['submitted', 'review'] else
               'pill-purple' if st in ['editing'] else
-              'pill-red'
+              'pill-red'    if st in ['deleted', 'discarded', 'failed'] else
+              'pill-gray'
             %}
             {% set status_label =
               'Pending'     if st == 'pending' else
@@ -57,8 +58,10 @@
               'Submitted'   if st == 'submitted' else
               'Editing'     if st == 'editing' else
               'Published'   if st == 'published' else
+              'Approved'    if st == 'approved' else
               'Restored'    if st == 'restored' else
               'Deleted'     if st == 'deleted' else
+              'Discarded'   if st == 'discarded' else
               (st|capitalize if st else '—')
             %}
             <tr>
@@ -69,9 +72,9 @@
               <td><time class="ts" datetime="{{ j.updated_at }}">{{ j.updated_at }}</time></td>
               <td class="text-right">
                 <div class="actions">
-                  <a href="/imports/view/{{ j.id }}" class="btn btn-primary">View</a>
+                  <a href="{{ url_for('imports_detail', job_id=j.id) }}" class="btn btn-primary">View</a>
                   <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary">Raw OCR</a>
-                  <a href="{{ url_for('imports_edit', job_id=j.id) }}" class="btn btn-primary">Edit</a>
+                  <a href="{{ url_for('imports_draft', job_id=j.id) }}" class="btn btn-primary">Edit</a>
                   <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline">
                     <button type="submit" class="btn btn-danger">Delete</button>
                   </form>
