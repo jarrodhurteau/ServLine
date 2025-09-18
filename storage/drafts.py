@@ -110,7 +110,8 @@ def get_draft(draft_id: int) -> Optional[Dict[str, Any]]:
 def get_draft_items(draft_id: int) -> List[Dict[str, Any]]:
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM draft_items WHERE draft_id=? ORDER BY COALESCE(position, 1e9), id",
+            # FIX: use a plain large integer instead of 1e9 to avoid SQLite parsing issues
+            "SELECT * FROM draft_items WHERE draft_id=? ORDER BY COALESCE(position, 1000000000), id",
             (int(draft_id),)
         ).fetchall()
         return [_row_to_dict(r) for r in rows]

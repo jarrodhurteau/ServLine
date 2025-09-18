@@ -65,6 +65,22 @@
       </div>
 
       <aside class="space-y-2">
+        <!-- Assign to a restaurant (admin side). Hidden if no restaurants list passed -->
+        {% if restaurants %}
+          <form action="{{ url_for('imports_set_restaurant', job_id=job.id) }}" method="post" class="space-y-2">
+            <label class="block text-sm">
+              <span class="muted">Restaurant</span>
+              <select name="restaurant_id" class="input w-full">
+                <option value="">— Select —</option>
+                {% for r in restaurants %}
+                  <option value="{{ r.id }}" {% if job.restaurant_id==r.id %}selected{% endif %}>#{{ r.id }} · {{ r.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit" class="btn w-full">Link Restaurant</button>
+          </form>
+        {% endif %}
+
         <!-- Always available -->
         <a href="{{ url_for('imports_draft', job_id=job.id) }}" class="btn btn-primary w-full">Open Draft Editor</a>
         <a href="{{ url_for('imports_raw', job_id=job.id) }}" class="btn btn-secondary w-full">View Raw OCR</a>

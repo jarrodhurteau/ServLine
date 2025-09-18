@@ -32,3 +32,23 @@ storage/drafts/*
 !storage/drafts/.gitkeep
 storage/raw/*
 !storage/raw/.gitkeep
+# runtime & secrets
+.env
+uploads/
+storage/drafts/
+storage/raw/
+storage/*.txt
+storage/*.json
+storage/*.ocr.txt
+storage/*.raw.json
+storage/servline.db
+*.sqlite
+__pycache__/
+*.pyc
+
+# backups & scratch
+*.bak
+*.bak*
+*.old
+dev_tools/
+_bak_archive/

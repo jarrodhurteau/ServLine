@@ -118,7 +118,9 @@
       </div>
       <div class="meta">
         <div>Draft #{{ draft.id }}</div>
-        <div>Restaurant ID #{{ draft.restaurant_id }}</div>
+        {% if draft.restaurant_id is not none %}
+          <div>Restaurant ID #{{ draft.restaurant_id }}</div>
+        {% endif %}
         {% if draft.source %}<div>Source: <span class="badge">{{ draft.source }}</span></div>{% endif %}
         {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
         <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
@@ -191,7 +193,14 @@
           <td><input type="checkbox" class="row-select" /></td>
           <td><input class="cell-input name" value="{{ it.name|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
           <td><textarea class="cell-textarea description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
-          <td><input class="cell-input cell-price price" value="{{ '%.2f' % ((it.price_cents or 0)/100) }}" inputmode="decimal" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+          <td>
+            <input
+              class="cell-input cell-price price"
+              value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}"
+              inputmode="decimal"
+              {% if draft.status != 'editing' %}disabled{% endif %}
+            />
+          </td>
           <td>
             <input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
           </td>
@@ -432,7 +441,7 @@
       <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position : ''}" inputmode="numeric" /></td>
       <td class="row-actions">
         <button class="btn duplicate-btn">Duplicate</button>
-        <button class="btn btn-danger delete-btn">Delete</button>
+        <button class="btn btn-danger">Delete</button>
       </td>
     `;
     itemsBody.prepend(tr);
@@ -462,7 +471,7 @@
       itemsBody.insertBefore(clone, tr.nextSibling);
       setDirty(true);
       showToast("Duplicated");
-    } else if (btn.classList.contains("delete-btn")) {
+    } else if (btn.classList.contains("btn-danger")) {
       queueDelete(tr);
       tr.remove();
       setDirty(true);

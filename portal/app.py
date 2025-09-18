@@ -54,6 +54,21 @@ import sys
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+# --- Load .env if available (so TESSERACT_CMD / POPPLER_PATH work even without PATH) ---
+try:
+    from dotenv import load_dotenv  # optional; ok if not installed
+    load_dotenv(ROOT / ".env")
+except Exception:
+    pass
+
+# --- OCR paths from env ---
+TESSERACT_CMD = os.getenv("TESSERACT_CMD")
+POPPLER_PATH = os.getenv("POPPLER_PATH") or None
+
+# If explicit tesseract path is set and exists, tell pytesseract to use it
+if TESSERACT_CMD and Path(TESSERACT_CMD).exists():
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+
 # storage layer for drafts (DB-first, Day 12+)
 try:
     from storage import drafts as drafts_store
@@ -178,6 +193,64 @@ def login_required(view_func):
     return wrapper
 
 # ------------------------
+# Role/restaurant helpers (ADMIN vs CUSTOMER scoping)
+# ------------------------
+def _resolve_restaurant_id_for_action(job_row: sqlite3.Row) -> Optional[int]:
+    """
+    Determine the restaurant context for an action:
+      - customer side: session['user']['restaurant_id']
+      - admin side: use job_row.restaurant_id (must be chosen)
+    """
+    u = (session.get("user") or {})
+    if u.get("role") == "customer" and u.get("restaurant_id"):
+        try:
+            return int(u["restaurant_id"])
+        except Exception:
+            return None
+    rid = job_row["restaurant_id"]
+    try:
+        return int(rid) if rid is not None else None
+    except Exception:
+        return None
+
+def _resolve_restaurant_id_from_request() -> Optional[int]:
+    """
+    Used at upload time:
+      - If customer: force their own restaurant_id.
+      - Else (admin): try form['restaurant_id'] if provided.
+    """
+    u = (session.get("user") or {})
+    if u.get("role") == "customer" and u.get("restaurant_id"):
+        try:
+            return int(u["restaurant_id"])
+        except Exception:
+            return None
+    rid = request.form.get("restaurant_id")
+    if rid is None or str(rid).strip() == "":
+        return None
+    try:
+        return int(rid)
+    except Exception:
+        return None
+
+def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id: int) -> int:
+    """Return an existing active menu for the restaurant, or create a new one."""
+    cur = conn.cursor
+    cur = conn.cursor()
+    row = cur.execute(
+        "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
+        (int(restaurant_id),)
+    ).fetchone()
+    if row:
+        return int(row["id"] if isinstance(row, sqlite3.Row) else row[0])
+    name = f"Imported {datetime.utcnow().date()}"
+    cur.execute(
+        "INSERT INTO menus (restaurant_id, name, active) VALUES (?, ?, 1)",
+        (int(restaurant_id), name)
+    )
+    return int(cur.lastrowid)
+
+# ------------------------
 # Small helpers for Day 13 flow
 # ------------------------
 def _require_drafts_storage():
@@ -207,7 +280,7 @@ def _price_to_cents(v) -> int:
         return 0
 
 def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row) -> int:
-    """Pick an existing active menu for the job's restaurant, else create one."""
+    """(Legacy) Pick an existing active menu for the job's restaurant, else create one."""
     rest_id = job_row["restaurant_id"]
     cur = conn.cursor()
     if rest_id:
@@ -236,7 +309,14 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
     if hasattr(drafts_store, "find_draft_by_source_job"):
         existing = drafts_store.find_draft_by_source_job(job_id)
         if existing and (existing.get("id") or existing.get("draft_id")):
-            return int(existing.get("id") or existing.get("draft_id"))
+            draft_id = int(existing.get("id") or existing.get("draft_id"))
+            # NEW: sync restaurant_id if the job has one and draft is missing it
+            try:
+                if row["restaurant_id"] and not (existing.get("restaurant_id")):
+                    drafts_store.save_draft_metadata(draft_id, restaurant_id=int(row["restaurant_id"]))
+            except Exception:
+                pass
+            return draft_id
 
     # Legacy JSON → new draft
     abs_path = _abs_from_rel(row["draft_path"]) if row["draft_path"] else None
@@ -244,7 +324,14 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
         with open(abs_path, "r", encoding="utf-8") as f:
             draft_json = json.load(f)
         created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
-        return int(created.get("id") or created.get("draft_id"))
+        draft_id = int(created.get("id") or created.get("draft_id"))
+        # NEW: set draft.restaurant_id from the job if available
+        try:
+            if row["restaurant_id"]:
+                drafts_store.save_draft_metadata(draft_id, restaurant_id=int(row["restaurant_id"]))
+        except Exception:
+            pass
+        return draft_id
 
     return None
 
@@ -263,12 +350,20 @@ def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cent
 def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
     """
     Commit draft rows for job -> menu_items with simple dedupe.
+    Requires a restaurant context:
+      - customer side: session['user']['restaurant_id']
+      - admin side: job_row.restaurant_id (must be chosen)
     Returns (menu_id, inserted_count).
     """
     _require_drafts_storage()
     job = get_import_job(job_id)
     if not job:
         abort(404, description="Job not found")
+
+    # Determine restaurant context
+    restaurant_id = _resolve_restaurant_id_for_action(job)
+    if not restaurant_id:
+        abort(400, description="No restaurant selected. Choose a restaurant for this import before approving.")
 
     draft_id = _get_or_create_draft_for_job(job_id)
     if not draft_id:
@@ -277,7 +372,7 @@ def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
     items = drafts_store.get_draft_items(draft_id) or []
 
     with db_connect() as conn:
-        menu_id = _find_or_create_menu_for_job(conn, job)
+        menu_id = _find_or_create_menu_for_restaurant(conn, int(restaurant_id))
         cur = conn.cursor()
 
         inserted = 0
@@ -299,9 +394,13 @@ def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
 
         conn.commit()
 
-    # Mark job approved + note linkage
+    # Mark job approved and sync restaurant linkage
     try:
-        update_import_job(job_id, status="approved")
+        update_import_job(job_id, status="approved", restaurant_id=int(restaurant_id))
+    except Exception:
+        pass
+    try:
+        drafts_store.save_draft_metadata(draft_id, restaurant_id=int(restaurant_id))
     except Exception:
         pass
 
@@ -337,8 +436,15 @@ def health():
 
 @app.get("/ocr/health")
 def ocr_health():
-    tess_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "")
-    tess_path_exists = bool(tess_cmd) and Path(tess_cmd).exists()
+    # Prefer explicit cmd if set; otherwise look up via PATH
+    explicit_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
+    which_cmd = shutil.which("tesseract") or ""
+    # Choose a display cmd (explicit beats PATH)
+    display_cmd = explicit_cmd or which_cmd
+
+    # Found = explicit path exists OR which found something
+    tess_path_exists = (bool(explicit_cmd) and Path(explicit_cmd).exists()) or bool(which_cmd)
+
     try:
         tess_version = str(pytesseract.get_tesseract_version())
     except Exception:
@@ -349,7 +455,15 @@ def ocr_health():
     column_mode = "enabled" if (have_pandas and have_sklearn) else "fallback"
 
     return jsonify({
-        "tesseract": {"cmd": tess_cmd, "found_on_disk": tess_path_exists, "version": tess_version},
+        "tesseract": {
+            "cmd": display_cmd,
+            "found_on_disk": bool(tess_path_exists),
+            "version": tess_version
+        },
+        "poppler": {
+            "poppler_path_env": POPPLER_PATH or "",
+            "poppler_bin_present": bool(POPPLER_PATH and Path(POPPLER_PATH).exists())
+        },
         "columns": {"pandas": have_pandas, "scikit_learn": have_sklearn, "mode": column_mode}
     })
 
@@ -428,7 +542,8 @@ def _pdf_to_text(pdf_path: Path) -> str:
     except Exception:
         return ""
 
-    poppler_path = os.environ.get("POPPLER_PATH") or None
+    # Use POPPLER_PATH from env if provided
+    poppler_path = POPPLER_PATH
     try:
         pages = convert_from_path(str(pdf_path), dpi=200, poppler_path=poppler_path)
     except Exception:
@@ -584,12 +699,14 @@ def import_menu():
         save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
+        # NEW: capture restaurant scope
+        restaurant_id = _resolve_restaurant_id_from_request()
+        job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
 
         t = threading.Thread(target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True)
         t.start()
 
-        return jsonify({"job_id": job_id, "status": "pending", "file": tmp_name}), 200
+        return jsonify({"job_id": job_id, "status": "pending", "file": tmp_name, "restaurant_id": restaurant_id}), 200
 
     except RequestEntityTooLarge:
         return jsonify({"error": "File too large. Try a smaller image or raise MAX_CONTENT_LENGTH."}), 413
@@ -657,7 +774,8 @@ def login_post():
     password = (request.form.get("password") or "").strip()
     nxt = request.form.get("next") or url_for("index")
     if username == DEV_USERNAME and password == DEV_PASSWORD:
-        session["user"] = {"username": username}
+        # Dev defaults to admin
+        session["user"] = {"username": username, "role": "admin"}
         flash("Welcome back!", "success")
         return redirect(nxt)  # PRG
     flash("Invalid credentials", "error")
@@ -745,7 +863,12 @@ def imports_detail(job_id):
         if abs_path and abs_path.exists():
             with open(abs_path, "r", encoding="utf-8") as f:
                 draft = json.load(f)
-    return render_template("import_view.html", job=row, draft=draft)
+    # Provide restaurants list for admin assignment UX
+    with db_connect() as conn:
+        restaurants = conn.execute(
+            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
+        ).fetchall()
+    return render_template("import_view.html", job=row, draft=draft, restaurants=restaurants)
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
@@ -771,6 +894,35 @@ def imports_draft(job_id: int):
     if draft_id:
         return redirect(url_for("draft_editor", draft_id=draft_id))
     flash("Draft not ready for editor yet. Showing legacy import view.", "info")
+    return redirect(url_for("imports_detail", job_id=job_id))
+
+# NEW: set/assign restaurant to import (and sync to linked draft)
+@app.post("/imports/<int:job_id>/set_restaurant")
+@login_required
+def imports_set_restaurant(job_id: int):
+    rid = request.form.get("restaurant_id")
+    if not rid:
+        flash("Please choose a restaurant.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+    try:
+        restaurant_id = int(rid)
+    except Exception:
+        flash("Invalid restaurant id.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    try:
+        update_import_job(job_id, restaurant_id=restaurant_id)
+        # sync a linked draft if present
+        try:
+            _require_drafts_storage()
+            draft_id = _get_or_create_draft_for_job(job_id)
+            if draft_id:
+                drafts_store.save_draft_metadata(draft_id, restaurant_id=restaurant_id)
+        except Exception:
+            pass
+        flash("Linked import to restaurant.", "success")
+    except Exception as e:
+        flash(f"Failed to link restaurant: {e}", "error")
     return redirect(url_for("imports_detail", job_id=job_id))
 
 # NEW: approve draft → commit to menu_items (dedupe), set job approved
@@ -1490,18 +1642,25 @@ def draft_export_xlsx(draft_id: int):
 def not_found(e):
     return render_template("errors/404.html"), 404
 
-@app.errorhandler(500)
-def server_error(e):
-    # Do not leak error details; rely on logs for specifics in dev.
-    return render_template("errors/500.html"), 500
+# DEBUG GUARD ADDED
+if os.environ.get("FLASK_DEBUG") != "1":
+    @app.errorhandler(500)
+    def server_error(e):
+        # Do not leak error details; rely on logs for specifics in dev.
+        return render_template("errors/500.html"), 500
 
 # ------------------------
-# Import landing page + HTML POST handler (kept)
+# Import landing page + HTML POST handler (kept; now passes restaurants)
 # ------------------------
 @app.get("/import")
 @login_required
 def import_page():
-    return render_template("import.html")
+    # Provide restaurants to allow admin to pick a target at upload time
+    with db_connect() as conn:
+        restaurants = conn.execute(
+            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
+        ).fetchall()
+    return render_template("import.html", restaurants=restaurants)
 
 @app.post("/import")
 @login_required
@@ -1521,12 +1680,18 @@ def import_upload():
         save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        job_id = create_import_job(filename=tmp_name, restaurant_id=None)
+        # NEW: capture restaurant scope (customer forced, admin optional)
+        restaurant_id = _resolve_restaurant_id_from_request()
+
+        job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
         threading.Thread(
             target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
         ).start()
 
-        flash(f"Import started for {base_name} (job #{job_id}).", "success")
+        if restaurant_id:
+            flash(f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.", "success")
+        else:
+            flash(f"Import started for {base_name} (job #{job_id}). Tip: assign a restaurant on the import page before approving.", "success")
     except RequestEntityTooLarge:
         flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
     except Exception as e:
@@ -1538,3 +1703,28 @@ def import_upload():
 # ------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+# === DEBUG APPEND (auto-added) ===
+import os as _os
+if _os.environ.get("FLASK_DEBUG") == "1":
+    @app.errorhandler(500)
+    def _dev_rethrow(e):
+        import traceback
+        traceback.print_exc()   # print to terminal
+        raise e                 # bubble to debugger
+
+    # Direct debug route to surface real errors for Draft Editor
+    @app.get("/__debug/imports/<int:job_id>/draft")
+    @login_required
+    def imports_draft_debug(job_id: int):
+        try:
+            draft_id = _get_or_create_draft_for_job(job_id)
+            if draft_id:
+                return redirect(url_for("draft_editor", draft_id=draft_id))
+            flash("Draft not ready for editor yet. Showing legacy import view.", "info")
+            return redirect(url_for("imports_detail", job_id=job_id))
+        except Exception:
+            import traceback, html
+            tb = traceback.format_exc()
+            return f"<pre>{html.escape(tb)}</pre>", 500
+# === /DEBUG APPEND ===

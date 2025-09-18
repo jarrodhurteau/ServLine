@@ -206,3 +206,42 @@ README.md # This file
   - Darker background + black text inputs for readability.
 
 ✅ **Day 12 complete — ServLine now supports full DB-backed draft editing (menus editable in portal).**
+
+---
+
+## 🚀 Day 13: OCR Online + Imports → Drafts → Approve
+
+- **OCR fully wired**
+  - Images (PNG/JPG): Tesseract.
+  - PDFs: `pdf2image` + Poppler → Tesseract per page.
+  - Health endpoint: `GET /ocr/health` shows detected paths/versions.
+  - Raw OCR dumps saved under `storage/drafts/raw/` for debugging.
+
+- **Import Detail page upgrades (`/imports/<job_id>`)**
+  - **Open Draft Editor**: first open migrates legacy JSON → DB draft and links it to the import.
+  - **Assign Restaurant** (admin): dropdown + `POST /imports/<job_id>/set_restaurant`.
+  - **Approve Draft**: `POST /imports/<job_id>/approve` inserts items into the restaurant’s **active menu** (or creates one). Simple dedupe on `(name, price_cents)`.
+  - **Discard Draft**: `POST /imports/<job_id>/discard` removes current draft items (keeps the draft shell).
+  - **Exports**: CSV / JSON / XLSX links auto-resolve to the DB-backed draft.
+
+- **Admin vs Customer scoping**
+  - **Customer** users are automatically scoped to their own `restaurant_id` for imports/approval.
+  - **Admin** users can select the restaurant at upload time or on the import page.  
+    If missing during approval, user gets: _“No restaurant selected. Choose a restaurant for this import before approving.”_
+
+- **Endpoints recap**
+  - Open Editor: `GET /imports/<job_id>/draft` → redirects to `/drafts/<draft_id>/edit`
+  - Set Restaurant: `POST /imports/<job_id>/set_restaurant`
+  - Approve: `POST /imports/<job_id>/approve`
+  - Discard: `POST /imports/<job_id>/discard`
+  - Raw OCR JSON: `GET /imports/raw/<job_id>`
+
+- **Troubleshooting**
+  - If you see `sqlite3.OperationalError: no such column: source_job_id`, run:
+    ```bash
+    python migrate_drafts.py
+    ```
+  - If PDF OCR returns empty: ensure `POPPLER_PATH` points to the Poppler **bin** folder.
+  - If Tesseract isn’t detected on Windows: set `TESSERACT_CMD` in `.env` to the full `tesseract.exe` path.
+
+✅ **Day 13 complete — End-to-end intake is live: upload → OCR → DB-backed draft → approve to live menu with restaurant scoping and exports.**
