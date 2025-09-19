@@ -133,7 +133,7 @@ README.md # This file
 - Unified **button styling** (consistent blue/secondary/danger buttons sitewide)
 - Cleaned redundant navigation buttons (kept top banner links authoritative)
 - Imports table polished:  
-  - “View” button now styled blue (`btn-primary`)
+  - “View” button now styled blue (`btn-primary`)  
   - Actions area aligned consistently
 - Forms cleaned: dark theme inputs standardized (black text on white background for readability)
 - 404 and 500 error pages styled to match site
@@ -245,3 +245,25 @@ README.md # This file
   - If Tesseract isn’t detected on Windows: set `TESSERACT_CMD` in `.env` to the full `tesseract.exe` path.
 
 ✅ **Day 13 complete — End-to-end intake is live: upload → OCR → DB-backed draft → approve to live menu with restaurant scoping and exports.**
+
+---
+
+## 🚀 Day 14: Draft Editor Revamp + Smarter OCR
+
+- **Draft Editor functional**
+  - Fixed broken routes (`draft_publish_now` vs `draft_publish`).
+  - Safe rendering wrapper prevents infinite 500 loops when a template is missing or broken.
+  - Added debug utilities (`/__ping`, `/__routes`, `/__boom`, `/__debug/...`).
+
+- **OCR pipeline upgraded**
+  - Uses `storage/ocr_helper.extract_items_from_path` if available.
+  - Fallback regex parser handles categories, names, descriptions, trailing prices.
+  - Normalizes parsed results into JSON drafts: categories → items → sizes.
+  - Stray text lines are attached as descriptions to previous items.
+  - Output is much cleaner than raw Tesseract dumps.
+
+- **Exports**
+  - CSV, JSON, XLSX (via `openpyxl`) working from Draft Editor and Import Detail.
+  - “Export Visible as CSV” (client-side) for filtered tables.
+
+✅ **Day 14 complete — OCR now produces structured menu data, and the Draft Editor is stable and ready for polish.**

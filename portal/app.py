@@ -9,16 +9,15 @@ from functools import wraps
 import uuid
 import os
 import threading
-import time
 import json
 import shutil
 from datetime import datetime
-from typing import Optional, Iterable, Tuple
+from typing import Optional, Iterable, Tuple, List
 
 # stdlib for exports
 import io
 import csv
-import re  # <-- added for OCR parsing
+import re  # <-- for OCR parsing
 
 # NEW: optional Excel export dependency
 try:
@@ -75,6 +74,12 @@ try:
 except Exception:
     drafts_store = None  # guarded below
 
+# OCR helper (Day 14)
+try:
+    from storage.ocr_helper import extract_items_from_path
+except Exception:
+    extract_items_from_path = None  # fallback to legacy OCR if helper not available
+
 # uploads (kept out of git via .gitignore)
 UPLOAD_FOLDER = ROOT / "uploads"
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -106,6 +111,19 @@ def allowed_file(filename: str) -> bool:
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+# ------------------------
+# Safe render helper (prevents template-caused 500 loops)
+# ------------------------
+def _safe_render(template_name: str, **ctx):
+    try:
+        return render_template(template_name, **ctx)
+    except Exception:
+        # Minimal inline fallback to expose the real traceback
+        import html, traceback
+        tb = html.escape(traceback.format_exc())
+        body = f"<h1>{html.escape(template_name)} missing or failed</h1><pre>{tb}</pre>"
+        return body, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 # ------------------------
 # Template globals
@@ -235,7 +253,6 @@ def _resolve_restaurant_id_from_request() -> Optional[int]:
 
 def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id: int) -> int:
     """Return an existing active menu for the restaurant, or create a new one."""
-    cur = conn.cursor
     cur = conn.cursor()
     row = cur.execute(
         "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
@@ -640,40 +657,111 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
         "categories": categories or [{"name": "Uncategorized", "items": []}],
     }
 
+# ----- Day 14: helper-backed draft builder -----
+def _build_draft_from_helper(job_id: int, saved_file_path: Path) -> dict:
+    """
+    Use storage/ocr_helper.extract_items_from_path to build a draft JSON compatible
+    with our legacy schema.
+    """
+    if extract_items_from_path is None:
+        raise RuntimeError("ocr_helper not available")
+
+    cats = extract_items_from_path(str(saved_file_path)) or {}
+    categories = []
+    for cat_name, items in cats.items():
+        out_items = []
+        for it in items or []:
+            name = (it.get("name") or "").strip()
+            desc = (it.get("description") or "").strip()
+            price = it.get("price")
+            # price could be cents or dollars depending on helper; normalize to dollars float for JSON
+            if isinstance(price, str):
+                try:
+                    price_val = float(price.replace("$", "").strip())
+                except Exception:
+                    price_val = 0.0
+            elif isinstance(price, (int, float)):
+                price_val = float(price) / 100.0 if isinstance(price, int) and price >= 100 else float(price)
+            else:
+                price_val = 0.0
+            sizes = [{"name": "One Size", "price": round(float(price_val), 2)}] if price_val else []
+
+            out_items.append({
+                "name": name or "Untitled",
+                "description": desc,
+                "sizes": sizes,
+                "category": cat_name,
+                "confidence": it.get("confidence"),
+                "raw": it.get("raw"),
+            })
+        if out_items:
+            categories.append({"name": cat_name, "items": out_items})
+
+    if not categories:
+        categories = [{"name": "Uncategorized", "items": [
+            {"name": "No items recognized", "description": "OCR returned no items.", "sizes": []}
+        ]}]
+
+    engine = "ocr_helper+tesseract"
+    return {
+        "job_id": job_id,
+        "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine},
+        "extracted_at": _now_iso(),
+        "categories": categories,
+    }
+
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
 
-        suffix = saved_file_path.suffix.lower()
-        text = ""
+        draft = None
         engine = ""
-        if suffix in (".png", ".jpg", ".jpeg"):
-            engine = "tesseract"
-            text = _ocr_image_to_text(saved_file_path)
-        elif suffix == ".pdf":
-            engine = "tesseract+pdf2image"
-            text = _pdf_to_text(saved_file_path)
+        helper_error = None
 
-        # If OCR yielded nothing (missing deps, etc.), leave a gentle note
-        if not text:
-            draft = {
-                "job_id": job_id,
-                "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
-                "extracted_at": _now_iso(),
-                "categories": [
-                    {"name": "Uncategorized", "items": [
-                        {"name": "OCR not configured", "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.", "sizes": []}
-                    ]}
-                ]
-            }
-        else:
-            draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
+        # 1) Preferred path: our Day-14 OCR helper (category-aware, normalized)
+        if extract_items_from_path is not None:
+            try:
+                draft = _build_draft_from_helper(job_id, saved_file_path)
+                engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
+            except Exception as e:
+                helper_error = str(e)
+                draft = None
 
+        # 2) Fallback to legacy text OCR if helper unavailable or failed
+        if draft is None:
+            suffix = saved_file_path.suffix.lower()
+            text = ""
+            if suffix in (".png", ".jpg", ".jpeg"):
+                engine = "tesseract"
+                text = _ocr_image_to_text(saved_file_path)
+            elif suffix == ".pdf":
+                engine = "tesseract+pdf2image"
+                text = _pdf_to_text(saved_file_path)
+
+            if text:
+                draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
+            else:
+                # gentle placeholder
+                draft = {
+                    "job_id": job_id,
+                    "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
+                    "extracted_at": _now_iso(),
+                    "categories": [
+                        {"name": "Uncategorized", "items": [
+                            {"name": "OCR not configured", "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.", "sizes": []}
+                        ]}
+                    ],
+                }
+
+        # Save legacy-compatible JSON for continuity with existing flows
         rel_draft_path = _save_draft_json(job_id, draft)
 
-        # OPTIONAL raw dump for debugging
+        # Optional raw dump (legacy)
         try:
-            (RAW_FOLDER / f"{job_id}.txt").write_text(text or "(no text extracted)\n", encoding="utf-8")
+            raw_dump = f"(engine={engine})\n"
+            if helper_error:
+                raw_dump += f"[helper_error] {helper_error}\n"
+            (RAW_FOLDER / f"{job_id}.txt").write_text(raw_dump, encoding="utf-8")
         except Exception:
             pass
 
@@ -726,17 +814,17 @@ def import_status(job_id):
     return jsonify(data)
 
 # ------------------------
-# HTML Pages (Portal UI)
+# HTML Pages (Portal UI) — use _safe_render
 # ------------------------
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return _safe_render("index.html")
 
 @app.get("/restaurants")
 def restaurants_page():
     with db_connect() as conn:
         rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
-    return render_template("restaurants.html", restaurants=rows)
+    return _safe_render("restaurants.html", restaurants=rows)
 
 @app.get("/restaurants/<int:rest_id>/menus")
 def menus_page(rest_id):
@@ -747,7 +835,7 @@ def menus_page(rest_id):
         ).fetchall()
     if not rest:
         abort(404)
-    return render_template("menus.html", restaurant=rest, menus=menus)
+    return _safe_render("menus.html", restaurant=rest, menus=menus)
 
 @app.get("/menus/<int:menu_id>/items")
 def items_page(menu_id):
@@ -759,14 +847,14 @@ def items_page(menu_id):
         items = conn.execute(
             "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,),
         ).fetchall()
-        return render_template("items.html", restaurant=rest, menu=menu, items=items)
+        return _safe_render("items.html", restaurant=rest, menu=menu, items=items)
 
 # ------------------------
 # Day 6: Auth (Login / Logout) — PRG + flashes
 # ------------------------
 @app.get("/login")
 def login():
-    return render_template("login.html", error=None, next=request.args.get("next"))
+    return _safe_render("login.html", error=None, next=request.args.get("next"))
 
 @app.post("/login")
 def login_post():
@@ -825,7 +913,6 @@ def dev_upload_form():
           <div class="card">
             <h2>Dev Upload Test</h2>
             <p>Pick an image or PDF and submit to <code>/api/menus/import</code>.</p>
-
             <form class="mt-3" action="/api/menus/import" method="post" enctype="multipart/form-data">
               <input type="file" name="file" accept="image/*,.pdf" required />
               <div class="mt-3 row">
@@ -833,7 +920,6 @@ def dev_upload_form():
                 <a href="/import" class="btn">Back to Import</a>
               </div>
             </form>
-
             <p class="mt-4">Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.</p>
           </div>
         </div>
@@ -848,7 +934,7 @@ def dev_upload_form():
 @login_required
 def imports():
     jobs = list_import_jobs()  # hide status='deleted'
-    return render_template("imports.html", jobs=jobs)
+    return _safe_render("imports.html", jobs=jobs)
 
 @app.get("/imports/<int:job_id>")
 @login_required
@@ -868,7 +954,7 @@ def imports_detail(job_id):
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
-    return render_template("import_view.html", job=row, draft=draft, restaurants=restaurants)
+    return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants)
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
@@ -1186,7 +1272,7 @@ def _move_to_trash(names: Iterable[str]) -> Iterable[str]:
     batch_dir = _batch_trash_dir()
     batch_dir.mkdir(parents=True, exist_ok=True)
 
-    moved: list[str] = []
+    moved: List[str] = []
     for raw in names:
         name = secure_filename(Path(raw).name)
         if not name:
@@ -1206,7 +1292,7 @@ def _move_to_trash(names: Iterable[str]) -> Iterable[str]:
 
 def _restore_from_trash(trash_paths: Iterable[str]) -> Iterable[Tuple[str, str]]:
     """Restore files from /uploads/.trash by relative trash paths and mark jobs restored."""
-    restored: list[Tuple[str, str]] = []
+    restored: List[Tuple[str, str]] = []
     for rel in trash_paths:
         rel_path = (TRASH_FOLDER / rel).resolve()
         if not str(rel_path).startswith(str(TRASH_FOLDER.resolve())):
@@ -1291,7 +1377,7 @@ def _sweep_artifacts() -> dict:
 @login_required
 def uploads_page():
     files = _list_uploads_files()
-    return render_template("uploads.html", files=files)
+    return _safe_render("uploads.html", files=files)
 
 @app.post("/uploads/delete")
 @login_required
@@ -1315,7 +1401,7 @@ def uploads_trash_page():
     except Exception as e:
         err_note = f"Note: failed to enumerate recycle bin ({e.__class__.__name__}). Showing empty list."
         trashed = []
-    return render_template("uploads_trash.html", trashed=trashed, err_note=err_note)
+    return _safe_render("uploads_trash.html", trashed=trashed, err_note=err_note)
 
 @app.post("/uploads/restore")
 @login_required
@@ -1385,8 +1471,9 @@ def draft_review_page(job_id):
         ).fetchall()
     src_file = (draft.get("source", {}) or {}).get("file")
     preview_url = url_for("serve_upload", filename=src_file) if src_file and _is_image(src_file) else None
-    return render_template("draft_review.html", draft=draft, restaurants=restaurants, preview_url=preview_url)
+    return _safe_render("draft_review.html", draft=draft, restaurants=restaurants, preview_url=preview_url)
 
+# NOTE: This legacy route keeps its historical path.
 @app.post("/drafts/<int:job_id>/publish")
 @login_required
 def publish_draft(job_id):
@@ -1459,7 +1546,7 @@ def drafts_list():
         restaurant_id = None
 
     drafts = drafts_store.list_drafts(status=status, restaurant_id=restaurant_id, limit=200, offset=0)
-    return render_template("drafts.html", drafts=drafts, status=status, restaurant_id=restaurant_id)
+    return _safe_render("drafts.html", drafts=drafts, status=status, restaurant_id=restaurant_id)
 
 @app.get("/drafts/<int:draft_id>/edit")
 @login_required
@@ -1470,16 +1557,28 @@ def draft_editor(draft_id: int):
     if not draft:
         abort(404, description=f"Draft {draft_id} not found")
 
-    # Robust: treat None as []
     items = drafts_store.get_draft_items(draft_id) or []
 
-    # Optional: load category suggestions from existing items
+    # Category list for sidebar filter
     categories = sorted({
         (it.get("category") or "").strip()
         for it in items
         if (it.get("category") or "").strip()
     })
-    return render_template("draft_editor.html", draft=draft, items=items, categories=categories)
+
+    # Provide restaurants for assignment dropdown
+    with db_connect() as conn:
+        restaurants = conn.execute(
+            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
+        ).fetchall()
+
+    return _safe_render(
+        "draft_editor.html",
+        draft=draft,
+        items=items,
+        categories=categories,
+        restaurants=restaurants,
+    )
 
 @app.post("/drafts/<int:draft_id>/save")
 @login_required
@@ -1536,6 +1635,98 @@ def draft_submit(draft_id: int):
         flash(f"Submit failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
+# NEW (Day 14): Approve & Publish from Draft Editor (requires assigned restaurant)
+# NOTE: Route path changed to avoid colliding with the legacy publish route above.
+@app.post("/drafts/<int:draft_id>/publish_now")
+@login_required
+def draft_publish_now(draft_id: int):
+    """
+    Approve & publish from the Draft Editor.
+    Requires restaurant_id to be assigned (in metadata) or provided in form/json.
+    """
+    _require_drafts_storage()
+    try:
+        draft = drafts_store.get_draft(draft_id)
+        if not draft:
+            flash("Draft not found.", "error")
+            return redirect(url_for("drafts_list"))
+
+        # Source of restaurant_id: prefer draft metadata; allow override via form/json
+        rid = draft.get("restaurant_id")
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+            rid = payload.get("restaurant_id", rid)
+        else:
+            rid = request.form.get("restaurant_id", rid)
+
+        try:
+            restaurant_id = int(rid) if rid is not None else None
+        except Exception:
+            restaurant_id = None
+
+        if not restaurant_id:
+            flash("Assign a restaurant before publishing.", "error")
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+
+        # Commit items to menu
+        items = drafts_store.get_draft_items(draft_id) or []
+        with db_connect() as conn:
+            menu_id = _find_or_create_menu_for_restaurant(conn, int(restaurant_id))
+            cur = conn.cursor()
+            inserted = 0
+            for it in items:
+                name = (it.get("name") or "").strip()
+                if not name:
+                    continue
+                desc = (it.get("description") or "").strip()
+                price_cents = it.get("price_cents")
+                if price_cents is None:
+                    # allow plain price text as fallback
+                    price_cents = _price_to_cents(it.get("price") or it.get("price_text"))
+                if not _dedupe_exists(conn, menu_id, name, int(price_cents)):
+                    cur.execute(
+                        "INSERT INTO menu_items (menu_id, name, description, price_cents, is_available) VALUES (?, ?, ?, ?, 1)",
+                        (menu_id, name, desc, int(price_cents)),
+                    )
+                    inserted += 1
+            conn.commit()
+
+        # Mark draft approved/published in storage if supported
+        try:
+            if hasattr(drafts_store, "approve_publish"):
+                drafts_store.approve_publish(draft_id)
+            else:
+                drafts_store.save_draft_metadata(draft_id, status="published")
+        except Exception:
+            pass
+
+        flash(f"Published draft #{draft_id} to menu #{menu_id} ({inserted} items).", "success")
+        return redirect(url_for("items_page", menu_id=menu_id))
+    except Exception as e:
+        flash(f"Publish failed: {e}", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+# NEW (Day 14): Assign restaurant for a draft (editor-side)
+@app.post("/drafts/<int:draft_id>/assign_restaurant")
+@login_required
+def draft_assign_restaurant(draft_id: int):
+    _require_drafts_storage()
+    rid = request.form.get("restaurant_id")
+    if not rid:
+        flash("Please choose a restaurant.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+    try:
+        restaurant_id = int(rid)
+    except Exception:
+        flash("Invalid restaurant id.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+    try:
+        drafts_store.save_draft_metadata(draft_id, restaurant_id=restaurant_id)
+        flash("Restaurant assigned to draft.", "success")
+    except Exception as e:
+        flash(f"Failed to assign restaurant: {e}", "error")
+    return redirect(url_for("draft_editor", draft_id=draft_id))
+
 # NEW: clone a draft from the editor
 @app.post("/drafts/<int:draft_id>/clone")
 @login_required
@@ -1560,7 +1751,7 @@ def draft_clone(draft_id: int):
 def draft_export_csv(draft_id: int):
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id) or []
+    items = drafts_store.get_draft_items(draft_id) or []   # <-- fixed to list
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=["id", "name", "description", "price_cents", "category", "position"])
     writer.writeheader()
@@ -1636,18 +1827,23 @@ def draft_export_xlsx(draft_id: int):
     return resp
 
 # ------------------------
-# Error handlers (Day 10)
+# Error handlers (bulletproof; avoid template recursion)
 # ------------------------
 @app.errorhandler(404)
 def not_found(e):
-    return render_template("errors/404.html"), 404
+    try:
+        return render_template("errors/404.html"), 404
+    except Exception:
+        return "404 Not Found", 404
 
-# DEBUG GUARD ADDED
+# If not in debug, still avoid template recursion
 if os.environ.get("FLASK_DEBUG") != "1":
     @app.errorhandler(500)
     def server_error(e):
-        # Do not leak error details; rely on logs for specifics in dev.
-        return render_template("errors/500.html"), 500
+        try:
+            return render_template("errors/500.html"), 500
+        except Exception:
+            return "500 Internal Server Error", 500
 
 # ------------------------
 # Import landing page + HTML POST handler (kept; now passes restaurants)
@@ -1660,7 +1856,7 @@ def import_page():
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
-    return render_template("import.html", restaurants=restaurants)
+    return _safe_render("import.html", restaurants=restaurants)
 
 @app.post("/import")
 @login_required
@@ -1697,6 +1893,21 @@ def import_upload():
     except Exception as e:
         flash(f"Server error while saving upload: {e}", "error")
     return redirect(url_for("import_page"))
+
+# ------------------------
+# Diagnostics: ping/routes/boom
+# ------------------------
+@app.get("/__ping")
+def __ping():
+    return jsonify({"ok": True, "time": _now_iso()})
+
+@app.get("/__routes")
+def __routes():
+    return jsonify(sorted([r.rule for r in app.url_map.iter_rules()]))
+
+@app.get("/__boom")
+def __boom():
+    raise RuntimeError("Intentional test error")
 
 # ------------------------
 # Run

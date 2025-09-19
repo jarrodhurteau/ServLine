@@ -1,252 +1,227 @@
-{% extends "base.html" %} 
+{% extends "base.html" %}
 {% block title %}Draft Editor · Draft #{{ draft.id }}{% endblock %}
 
 {% block content %}
 <style>
-  /* --- Darker editor container (scoped to this page only) --- */
-  .draft-editor {
-    background:#0e1729;              /* darker navy */
-    color:#e8eefc;                   /* light ink for labels/meta */
-    border:1px solid #1f2a44;
-    border-radius:14px;
-    padding:18px;
-    box-shadow:0 10px 28px rgba(0,0,0,.35);
+  :root {
+    --bg:#0b1220; --panel:#0e1729; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44;
+    --brand:#2563eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
   }
-
-  /* Keep inputs HIGH-contrast: white bg + black lettering */
-  .draft-editor .cell-input,
-  .draft-editor .cell-textarea,
-  .draft-editor .cell-select,
-  .draft-editor .cell-number,
-  .draft-editor .title-input,
-  .draft-editor input[type="text"],
-  .draft-editor textarea {
-    background:#fff !important;
-    color:#000 !important;
-    border:1px solid #d1d5db;
-    border-radius:8px;
-  }
-
-  /* Page header + meta */
-  .page-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
-  .meta { display:flex; gap:18px; color:#9fb0d1; font-size:0.95rem; margin-bottom:10px; flex-wrap:wrap; }
-  .status-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
-  .status-editing  { background:#e0f2fe; color:#075985; }
-  .status-submitted{ background:#fef3c7; color:#92400e; }
-  .status-approved { background:#dcfce7; color:#065f46; }
-  .status-rejected { background:#fee2e2; color:#991b1b; }
-  .status-archived { background:#e5e7eb; color:#374151; }
-
-  .toolbar { display:flex; align-items:center; gap:8px; margin:12px 0; flex-wrap:wrap; }
-  .toolbar .spacer { flex:1; }
-
-  /* Table on dark background */
-  .table-wrap { overflow:auto; border:1px solid #1f2a44; border-radius:10px; }
-  table.editor { width:100%; border-collapse:separate; border-spacing:0; }
-  table.editor thead th {
-    position:sticky; top:0;
-    background:#0b1220;
-    color:#e8eefc;
-    font-weight:700; padding:10px;
-    border-bottom:1px solid #24304d; text-align:left;
-  }
-  table.editor tbody td { padding:8px; border-bottom:1px solid #18233c; vertical-align:top; }
-  table.editor tbody tr:nth-child(odd)  { background:#0f1a2e; }
-  table.editor tbody tr:nth-child(even) { background:#0b1527; }
-
-  .cell-textarea { min-height:36px; resize:vertical; }
-  .cell-price { width:120px; }
-  .cell-pos { width:90px; }
-  .row-actions { display:flex; gap:6px; }
-
-  /* Buttons */
-  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:10px; border:1px solid #e5e7eb; background:#fff; color:#111827; text-decoration:none; cursor:pointer; }
-  .btn:hover { background:#f3f4f6; }
-  .btn-primary { background:#2563eb; color:#fff; border-color:#2563eb; }
-  .btn-primary:hover { background:#1d4ed8; }
-  .btn-secondary { background:#111827; color:#fff; border-color:#111827; }
-  .btn-success { background:#10b981; color:#fff; border-color:#10b981; }
-  .btn-danger { background:#ef4444; color:#fff; border-color:#ef4444; }
-  .btn-ghost { background:#fff; color:#111827; }
-  .btn:disabled { opacity:.6; cursor:not-allowed; }
-
-  .badge { padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:.8rem; }
-  .muted { color:#9fb0d1; }
-  .dirty-dot { width:8px; height:8px; border-radius:50%; background:#f59e0b; display:inline-block; margin-left:6px; vertical-align:middle; }
-
-  .note { margin-top:8px; font-size:0.9rem; color:#9fb0d1; }
-  .toast { position:fixed; right:16px; bottom:16px; background:#111827; color:#fff; padding:12px 14px; border-radius:10px; box-shadow:0 10px 26px rgba(0,0,0,.25); display:none; z-index:1000; }
-  .error-banner { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:10px 12px; border-radius:10px; margin:10px 0; display:none; }
-  .success-banner { background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; padding:10px 12px; border-radius:10px; margin:10px 0; display:none; }
-
-  .title-input { font-size:1.15rem; font-weight:700; border:none; outline:none; background:#fff; border-bottom:2px solid transparent; padding:4px 6px; border-radius:6px; }
-  .title-input:focus { border-color:#d1d5db; }
-  .search { min-width:240px; }
-
-  /* small helper text under actions */
-  .helper { font-size:.85rem; color:#9fb0d1; }
-
-  /* Export dropdown (native) */
-  details.export { position:relative; }
-  details.export[open] summary::after { transform: rotate(180deg); }
-  details.export summary {
-    list-style:none; cursor:pointer; user-select:none;
-  }
-  details.export summary::marker { display:none; }
-  details.export summary .caret { display:inline-block; transition:.15s transform; }
-  details.export[open] summary .caret { transform: rotate(180deg); }
-  details.export .menu {
-    position:absolute; right:0; top:110%;
-    background:#fff; color:#111827; border:1px solid #e5e7eb; border-radius:10px;
-    box-shadow:0 10px 20px rgba(0,0,0,.15); min-width:220px; padding:6px;
-    z-index:10;
-  }
-  details.export .menu a, details.export .menu button {
-    width:100%; text-align:left; background:none; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; color:#111827; text-decoration:none; display:block;
-  }
-  details.export .menu a:hover, details.export .menu button:hover { background:#f3f4f6; }
+  .layout{display:grid;grid-template-columns:320px 1fr;gap:14px}
+  .sidebar{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 10px 28px rgba(0,0,0,.25);color:var(--ink);position:sticky;top:16px;height:fit-content}
+  .sidebar h3{margin:0 0 10px;font-size:1rem;color:#cfe0ff}
+  .tree{list-style:none;padding-left:0;margin:0}
+  .tree .cat{margin:6px 0}
+  .tree .cat > .row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;background:#0b1527;border:1px solid #1b2540;border-radius:10px;padding:8px 10px}
+  .tree .cat.active > .row{border-color:#3b82f6;background:#112147}
+  .tree .items{margin:6px 0 6px 14px;border-left:2px dashed #24304d;padding-left:10px}
+  .tree .item{margin:4px 0}
+  .tree .item > .row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;padding:6px 8px;border-radius:8px}
+  .tree .item.active > .row{background:#0b1527}
+  .tree .sizes{margin:4px 0 4px 16px}
+  .size-pill{display:inline-flex;gap:8px;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid #334155;background:#0b1527;color:#e8eefc;font-size:.82rem;margin:2px 4px 2px 0;cursor:pointer}
+  .size-pill:hover{background:#112147}
+  .count{opacity:.9;font-weight:700}
+  .helper{font-size:.85rem;color:var(--muted)}
+  .draft-editor{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+  .page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+  .meta{display:flex;gap:18px;color:var(--muted);font-size:.95rem;margin-top:6px;flex-wrap:wrap}
+  .status-pill{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:600;font-size:.85rem}
+  .status-editing{background:#e0f2fe;color:#075985}
+  .status-submitted{background:#fef3c7;color:#92400e}
+  .status-approved{background:#dcfce7;color:#065f46}
+  .status-rejected{background:#fee2e2;color:#991b1b}
+  .status-archived{background:#e5e7eb;color:#374151}
+  .title-input{font-size:1.15rem;font-weight:700;background:#fff;color:#000;border:1px solid #d1d5db;border-radius:8px;padding:4px 6px;outline:none}
+  .toolbar{display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap}
+  .toolbar .spacer{flex:1}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#111827;text-decoration:none;cursor:pointer}
+  .btn:hover{background:#f3f4f6}
+  .btn-primary{background:#2563eb;color:#fff;border-color:#2563eb}
+  .btn-primary:hover{background:#1d4ed8}
+  .btn-secondary{background:#111827;color:#fff;border-color:#111827}
+  .btn-success{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .btn-danger{background:var(--err);color:#fff;border-color:var(--err)}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .badge{padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:.8rem}
+  .dirty{display:none;margin-left:8px}
+  .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
+  table.editor{width:100%;border-collapse:separate;border-spacing:0}
+  table.editor thead th{position:sticky;top:0;background:#0b1220;color:#e8eefc;font-weight:700;padding:10px;border-bottom:1px solid #24304d;text-align:left}
+  table.editor tbody td{padding:8px;border-bottom:1px solid #18233c;vertical-align:top}
+  table.editor tbody tr:nth-child(odd){background:#0f1a2e}
+  table.editor tbody tr:nth-child(even){background:#0b1527}
+  .cell-input,.cell-textarea,.title-input,input[type="text"],textarea{background:#fff!important;color:#000!important;border:1px solid #d1d5db;border-radius:8px}
+  .name-input{width:100%;min-width:220px}
+  .desc-text{width:100%;min-height:42px;resize:vertical;line-height:1.35}
+  .cell-price{width:120px}.cell-number{width:90px}
+  .row-actions{display:flex;gap:6px}
+  .conf-badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:.72rem;font-weight:700;margin-left:6px}
+  .conf-high{background:rgba(16,185,129,.18);color:#16a34a;border:1px solid rgba(16,185,129,.35)}
+  .conf-med{background:rgba(245,158,11,.18);color:#d97706;border:1px solid rgba(245,158,11,.35)}
+  .conf-low{background:rgba(239,68,68,.18);color:#dc2626;border:1px solid rgba(239,68,68,.35)}
+  .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
+  .error-banner{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
+  .success-banner{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
+  .search{min-width:240px}
+  details.export{position:relative} details.export summary{list-style:none;cursor:pointer;user-select:none}
+  details.export .menu{position:absolute;right:0;top:110%;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 20px rgba(0,0,0,.15);min-width:220px;padding:6px;z-index:10}
+  details.export .menu a, details.export .menu button{width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;color:#111827;text-decoration:none;display:block}
+  details.export .menu a:hover, details.export .menu button:hover{background:#f3f4f6}
+  .row-focus{outline:2px solid #60a5fa; outline-offset:-2px}
+  @media (max-width: 1060px){.layout{grid-template-columns:1fr}.sidebar{position:static}}
 </style>
 
-<div class="draft-editor">
-  <div class="page-header">
-    <div>
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
-        {% set s = draft.status %}
-        <span class="status-pill status-{{ s }}">{{ s }}</span>
-        <span id="dirty-indicator" class="badge" style="display:none;">Unsaved changes</span>
-      </div>
-      <div class="meta">
-        <div>Draft #{{ draft.id }}</div>
-        {% if draft.restaurant_id is not none %}
-          <div>Restaurant ID #{{ draft.restaurant_id }}</div>
-        {% endif %}
-        {% if draft.source %}<div>Source: <span class="badge">{{ draft.source }}</span></div>{% endif %}
-        {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
-        <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
-      </div>
-    </div>
+<div class="layout">
+  <!-- SIDEBAR (Outline) -->
+  <aside class="sidebar">
+    <h3>Menu Outline</h3>
+    <ul id="outline" class="tree"></ul>
 
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-      <a class="btn btn-ghost" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
-      {% if draft.source_job_id %}
-        <a class="btn btn-ghost" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Import Detail</a>
-      {% endif %}
+    <hr style="border-color:#1f2a44; margin:12px 0;">
+    <h3>Actions</h3>
 
-      <!-- Export menu (server CSV/JSON/XLSX + client-side "Export Visible CSV") -->
-      <details class="export">
-        <summary class="btn">
-          Export <span class="caret">▾</span>
-        </summary>
-        <div class="menu">
-          <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
-          <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
-          <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
-          <button type="button" id="export-visible-btn">Export Visible as CSV</button>
-        </div>
-      </details>
-
-      <!-- Existing controls -->
-      <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save Draft</button>
-      <form id="submit-form" action="{{ url_for('draft_submit', draft_id=draft.id) }}" method="post" style="display:inline;">
-        <button id="submit-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Submit for Review</button>
-      </form>
-
-      {% if draft.source_job_id %}
-        <form action="{{ url_for('imports_approve', job_id=draft.source_job_id) }}" method="post" style="display:inline;">
-          <button class="btn btn-success">Approve</button>
-        </form>
-        <form action="{{ url_for('imports_discard', job_id=draft.source_job_id) }}" method="post" style="display:inline;">
-          <button class="btn btn-danger">Discard</button>
-        </form>
-      {% endif %}
-    </div>
-    <div class="helper">Tip: “Export Visible as CSV” respects your table filter. CSV opens cleanly in Excel; JSON is great for debugging or re-imports.</div>
-  </div>
-
-  <div id="error-banner" class="error-banner"></div>
-  <div id="success-banner" class="success-banner"></div>
-
-  <div class="toolbar">
-    <input id="search" class="cell-input search" placeholder="Search items…" />
-    <div class="spacer"></div>
-    <button id="add-row-btn" class="btn">Add Item</button>
-    <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
-  </div>
-
-  <div class="table-wrap">
-    <table class="editor" id="items-table">
-      <thead>
-        <tr>
-          <th style="width:38px;"><input type="checkbox" id="select-all" /></th>
-          <th style="min-width:200px;">Name <span class="muted">(required)</span></th>
-          <th style="min-width:260px;">Description</th>
-          <th style="min-width:120px;">Price</th>
-          <th style="min-width:160px;">Category</th>
-          <th style="min-width:90px;">Position</th>
-          <th style="width:120px;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="items-body">
-        {% for it in items %}
-        <tr data-id="{{ it.id }}">
-          <td><input type="checkbox" class="row-select" /></td>
-          <td><input class="cell-input name" value="{{ it.name|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
-          <td><textarea class="cell-textarea description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
-          <td>
-            <input
-              class="cell-input cell-price price"
-              value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}"
-              inputmode="decimal"
-              {% if draft.status != 'editing' %}disabled{% endif %}
-            />
-          </td>
-          <td>
-            <input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
-          </td>
-          <td><input class="cell-input cell-number position" value="{{ it.position if it.position is not none else '' }}" inputmode="numeric" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
-          <td class="row-actions">
-            <button class="btn duplicate-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Duplicate</button>
-            <button class="btn btn-danger delete-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
-          </td>
-        </tr>
+    <!-- Assign Restaurant -->
+    <form action="{{ url_for('draft_assign_restaurant', draft_id=draft.id) }}" method="post" style="display:grid; gap:8px;">
+      <label for="restaurant_id" style="color:var(--muted); font-size:.9rem;">Assign Restaurant</label>
+      <select id="restaurant_id" name="restaurant_id" class="cell-input" {% if draft.status != 'editing' %}disabled{% endif %}>
+        {% for r in restaurants %}
+          <option value="{{ r.id }}" {% if draft.restaurant_id == r.id %}selected{% endif %}>{{ r.name }} ({{ r.id }})</option>
         {% endfor %}
-      </tbody>
-    </table>
+      </select>
+      <button class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Save Assignment</button>
+    </form>
+
+    <!-- Publish -->
+    <form action="{{ url_for('draft_publish_now', draft_id=draft.id) }}" method="post" style="margin-top:10px;">
+      <button class="btn btn-success">Publish to Menu</button>
+    </form>
+
+    {% if draft.source_job_id %}
+      <hr style="border-color:#1f2a44; margin:12px 0;">
+      <a class="btn" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Back to Import Detail</a>
+    {% endif %}
+  </aside>
+
+  <!-- MAIN -->
+  <div class="draft-editor">
+    <div class="page-header">
+      <div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
+          {% set s = draft.status %}
+          <span class="status-pill status-{{ s }}">{{ s }}</span>
+          <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
+        </div>
+        <div class="meta">
+          <div>Draft #{{ draft.id }}</div>
+          {% if draft.restaurant_id is not none %}<div>Restaurant ID #{{ draft.restaurant_id }}</div>{% endif %}
+          {% if draft.source %}<div>Source: <span class="badge">{{ draft.source }}</span></div>{% endif %}
+          {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
+          <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
+        <details class="export">
+          <summary class="btn">Export ▾</summary>
+          <div class="menu">
+            <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
+            <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
+            <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
+            <button type="button" id="export-visible-btn">Export Visible as CSV</button>
+          </div>
+        </details>
+        <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
+      </div>
+      <div class="helper">Use the left outline to filter: click a category, item, or a specific size to jump and edit.</div>
+    </div>
+
+    <div id="error-banner" class="error-banner"></div>
+    <div id="success-banner" class="success-banner"></div>
+
+    <div class="toolbar">
+      <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
+      <div class="spacer"></div>
+      <button id="add-row-btn" class="btn">Add Item</button>
+      <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="editor" id="items-table">
+        <thead>
+          <tr>
+            <th style="width:38px;"><input type="checkbox" id="select-all" /></th>
+            <th style="min-width:220px;">Name</th>
+            <th style="min-width:320px;">Description</th>
+            <th style="min-width:120px;">Price</th>
+            <th style="min-width:160px;">Category</th>
+            <th style="min-width:90px;">Position</th>
+            <th style="width:120px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="items-body">
+          {% for it in items %}
+          <tr data-id="{{ it.id }}" data-cat="{{ (it.category or '')|e }}" data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
+            <td><input type="checkbox" class="row-select" /></td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <input class="cell-input name-input name" value="{{ it.name|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
+                {% if it.confidence is not none %}
+                  {% set conf = it.confidence|int %}
+                  {% if conf >= 80 %}
+                    <span class="conf-badge conf-high">{{ conf }}%</span>
+                  {% elif conf >= 60 %}
+                    <span class="conf-badge conf-med">{{ conf }}%</span>
+                  {% else %}
+                    <span class="conf-badge conf-low">{{ conf }}%</span>
+                  {% endif %}
+                {% endif %}
+              </div>
+            </td>
+            <td><textarea class="cell-textarea desc-text description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
+            <td><input class="cell-input cell-price price" value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}" inputmode="decimal" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+            <td><input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+            <td><input class="cell-input cell-number position" value="{{ it.position if it.position is not none else '' }}" inputmode="numeric" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+            <td class="row-actions">
+              <button class="btn duplicate-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Duplicate</button>
+              <button class="btn btn-danger delete-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <datalist id="category-datalist">
+      {% for c in categories %}
+      <option value="{{ c|e }}"></option>
+      {% endfor %}
+      <option value="(Uncategorized)"></option>
+    </datalist>
+
+    <p class="helper" style="margin-top:10px;">Shortcuts: <strong>Ctrl/Cmd+S</strong> Save · <strong>Delete</strong> Delete selected.</p>
+    <div id="toast" class="toast"></div>
   </div>
-
-  <datalist id="category-datalist">
-    {% for c in categories %}
-    <option value="{{ c|e }}"></option>
-    {% endfor %}
-  </datalist>
-
-  <p class="note">Shortcuts: <strong>Ctrl/Cmd+S</strong> Save · <strong>Ctrl/Cmd+Enter</strong> Submit · <strong>Delete</strong> Delete selected.</p>
-
-  <div id="toast" class="toast"></div>
 </div>
 
-<!-- Single source of truth for server data (pure JSON, no JS parsing confusion) -->
 <script id="draft-meta" type="application/json">
 {{ {"id": draft.id, "status": draft.status}|tojson }}
 </script>
 
 <script>
-(function() {
-  // Read and parse the JSON emitted above
-  const metaEl = document.getElementById('draft-meta');
-  const meta = metaEl ? JSON.parse(metaEl.textContent || '{}') : {};
+(function(){
+  const meta = JSON.parse(document.getElementById('draft-meta').textContent || '{}');
   const draftId = Number(meta.id);
-  const draftStatus = String(meta.status || '');
-  const isEditable = draftStatus === 'editing';
+  const isEditable = String(meta.status||'') === 'editing';
 
-  const $ = (sel, el=document) => el.querySelector(sel);
-  const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+  const $ = (s, el=document)=>el.querySelector(s);
+  const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
 
   const itemsBody = $("#items-body");
+  const outline = $("#outline");
   const saveBtn = $("#save-btn");
-  const submitBtn = $("#submit-btn");
-  const submitForm = $("#submit-form");
   const titleInput = $("#draft-title");
   const dirtyIndicator = $("#dirty-indicator");
   const errorBanner = $("#error-banner");
@@ -258,368 +233,342 @@
   const exportVisibleBtn = $("#export-visible-btn");
 
   let dirty = false;
+  let deletedIds = [];
 
-  function setDirty(v) {
-    dirty = !!v;
-    dirtyIndicator.style.display = dirty ? "inline-block" : "none";
-  }
+  function setDirty(v){ dirty=!!v; dirtyIndicator.style.display = dirty? "inline-block":"none"; }
+  function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
+  function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
+  function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
 
-  function showToast(msg) {
-    toast.textContent = msg;
-    toast.style.display = "block";
-    setTimeout(() => { toast.style.display = "none"; }, 1800);
-  }
+  function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
 
-  function showError(msg) {
-    errorBanner.textContent = msg;
-    errorBanner.style.display = "block";
-    successBanner.style.display = "none";
-  }
-  function showSuccess(msg) {
-    successBanner.textContent = msg;
-    successBanner.style.display = "block";
-    errorBanner.style.display = "none";
-    setTimeout(() => { successBanner.style.display = "none"; }, 2200);
-  }
+  // autosize descriptions
+  function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
+  $$(".desc-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
-  function dollarsToCents(val) {
-    if (val === null || val === undefined) return 0;
-    let s = String(val).trim().replace(/[$,]/g, "");
-    if (s === "") return 0;
-    const n = Number(s);
-    if (Number.isNaN(n)) return 0;
-    return Math.round(n * 100);
-  }
-
-  function collectRowsFiltered() {
+  function collectRowsFiltered(){
     const q = search.value.trim().toLowerCase();
-    const rows = $$("#items-body tr");
-    rows.forEach(tr => {
-      const name = $(".name", tr)?.value?.toLowerCase() || "";
-      const desc = $(".description", tr)?.value?.toLowerCase() || "";
-      const cat  = $(".category", tr)?.value?.toLowerCase() || "";
-      const match = !q || name.includes(q) || desc.includes(q) || cat.includes(q);
-      tr.style.display = match ? "" : "none";
+    // filter is applied via dataset flags set by outline clicks
+    $$("#items-body tr").forEach(tr=>{
+      const name=$(".name", tr)?.value?.toLowerCase()||"";
+      const desc=$(".description", tr)?.value?.toLowerCase()||"";
+      const cat =(tr.getAttribute("data-cat")||"").toLowerCase();
+
+      const passCat = tr.dataset.filterCat ? (cat === tr.dataset.filterCat) : true;
+      const passItem = tr.dataset.filterItem ? (normalizeBaseName($(".name", tr)?.value||"") === tr.dataset.filterItem) : true;
+
+      const hit = (!q || name.includes(q) || desc.includes(q) || cat.includes(q));
+      tr.style.display = (passCat && passItem && hit) ? "" : "none";
     });
   }
 
-  function collectPayload() {
+  // ---------------- Outline builder ----------------
+  // We infer "(Size)" from end of name:  "Cheese Pizza (Small)"
+  const sizeRx = /(.*)\s*\(([^)]+)\)\s*$/;
+
+  function normalizeBaseName(name){
+    const m = name.match(sizeRx);
+    const base = (m ? m[1] : name).trim();
+    return base.toLowerCase();
+  }
+
+  function gatherData(){
+    const data = {}; // category -> baseName -> { rows:[], sizes:[{label, rowId, price}] }
+    $$("#items-body tr").forEach(tr=>{
+      const rowId = tr.getAttribute("data-id");
+      const cat = ($(".category", tr)?.value || tr.getAttribute("data-cat") || "").trim() || "(Uncategorized)";
+      const fullName = $(".name", tr)?.value || "";
+      const priceStr = $(".price", tr)?.value || "";
+      const price = dollarsToCents(priceStr)/100;
+      const m = fullName.match(sizeRx);
+      const base = (m ? m[1] : fullName).trim();
+      const sizeLabel = m ? m[2].trim() : null;
+
+      data[cat] ||= {};
+      data[cat][base] ||= { rows: [], sizes: [] };
+      data[cat][base].rows.push(rowId);
+      if (sizeLabel){
+        data[cat][base].sizes.push({ label: sizeLabel, rowId, price });
+      }
+    });
+    return data;
+  }
+
+  function clearAllFilters(){
+    $$("#items-body tr").forEach(tr=>{
+      delete tr.dataset.filterCat;
+      delete tr.dataset.filterItem;
+    });
+  }
+
+  function setFilterByCategory(cat){
+    clearAllFilters();
+    if (cat === "__ALL__"){ collectRowsFiltered(); return; }
+    $$("#items-body tr").forEach(tr=>{
+      tr.dataset.filterCat = cat.toLowerCase();
+    });
+    collectRowsFiltered();
+  }
+
+  function setFilterByItem(cat, baseNorm){
+    clearAllFilters();
+    $$("#items-body tr").forEach(tr=>{
+      tr.dataset.filterCat = cat.toLowerCase();
+      tr.dataset.filterItem = baseNorm;
+    });
+    collectRowsFiltered();
+  }
+
+  function focusRow(rowId){
+    const tr = $(`#items-body tr[data-id="${CSS.escape(rowId)}"]`);
+    if (!tr) return;
+    tr.scrollIntoView({behavior:"smooth", block:"center"});
+    tr.classList.add("row-focus");
+    setTimeout(()=>tr.classList.remove("row-focus"), 1200);
+  }
+
+  function rebuildOutline(){
+    const data = gatherData();
+
+    // Build sorted category list
+    const cats = Object.keys(data).sort((a,b)=>{
+      const au = a === "(Uncategorized)", bu = b === "(Uncategorized)";
+      if (au && !bu) return 1; if (!au && bu) return -1;
+      return a.localeCompare(b);
+    });
+
+    outline.innerHTML = "";
+    // "All" row
+    const liAll = document.createElement("li");
+    liAll.className = "cat";
+    liAll.innerHTML = `<div class="row" data-cat="__ALL__"><strong>All</strong><span class="count">${$$("#items-body tr").length}</span></div>`;
+    outline.appendChild(liAll);
+
+    liAll.querySelector(".row").addEventListener("click", ()=>{
+      // activate visual state
+      $$("#outline .cat").forEach(e=>e.classList.remove("active"));
+      liAll.classList.add("active");
+      setFilterByCategory("__ALL__");
+    });
+
+    cats.forEach(cat=>{
+      const items = data[cat];
+      const itemNames = Object.keys(items).sort((a,b)=>a.localeCompare(b));
+
+      const li = document.createElement("li");
+      li.className = "cat";
+      const totalCount = itemNames.reduce((acc, n)=>acc + items[n].rows.length, 0);
+      li.innerHTML = `<div class="row"><strong>${cat}</strong><span class="count">${totalCount}</span></div>`;
+      const ulItems = document.createElement("ul");
+      ulItems.className = "items";
+
+      // Category click filters by category
+      li.querySelector(".row").addEventListener("click", ()=>{
+        $$("#outline .cat").forEach(e=>e.classList.remove("active"));
+        li.classList.add("active");
+        setFilterByCategory(cat);
+      });
+
+      itemNames.forEach(base=>{
+        const entry = items[base];
+        const liItem = document.createElement("li");
+        liItem.className = "item";
+        liItem.innerHTML = `<div class="row"><span>${base}</span><span class="count">${entry.rows.length}</span></div>`;
+
+        // click on item → filter by item (across sizes)
+        liItem.querySelector(".row").addEventListener("click", (e)=>{
+          e.stopPropagation();
+          $$("#outline .item").forEach(x=>x.classList.remove("active"));
+          liItem.classList.add("active");
+          setFilterByItem(cat, base.toLowerCase());
+        });
+
+        // sizes as pills
+        if (entry.sizes.length){
+          const sizesDiv = document.createElement("div");
+          sizesDiv.className = "sizes";
+          entry.sizes.forEach(s=>{
+            const pill = document.createElement("span");
+            pill.className = "size-pill";
+            pill.textContent = `${s.label}: ${s.price.toFixed(2)}`;
+            pill.title = "Jump to row";
+            pill.addEventListener("click", (ev)=>{ ev.stopPropagation(); focusRow(s.rowId); });
+            sizesDiv.appendChild(pill);
+          });
+          liItem.appendChild(sizesDiv);
+        }
+
+        ulItems.appendChild(liItem);
+      });
+
+      li.appendChild(ulItems);
+      outline.appendChild(li);
+    });
+  }
+
+  // ---------------- Save / Edit / Ops ----------------
+  function collectPayload(){
     const items = [];
     let errors = [];
-
-    $$("#items-body tr").forEach(tr => {
+    $$("#items-body tr").forEach(tr=>{
       if (tr.style.display === "none") return;
-      const idAttr = tr.getAttribute("data-id");
-      const id = idAttr && /^\d+$/.test(idAttr) ? Number(idAttr) : (idAttr || null);
-
-      const name = $(".name", tr).value.trim();
-      const description = $(".description", tr).value.trim();
-      const priceStr = $(".price", tr).value.trim();
-      const category = $(".category", tr).value.trim();
-      const positionStr = $(".position", tr).value.trim();
-
-      if (!name) {
-        errors.push("Name is required for all items.");
-        tr.classList.add("row-error");
-      } else {
-        tr.classList.remove("row-error");
-      }
-
-      const price_cents = dollarsToCents(priceStr);
-      if (price_cents < 0) {
-        errors.push("Price cannot be negative.");
-      }
-
-      let position = null;
-      if (positionStr !== "") {
-        const p = Number(positionStr);
-        if (Number.isNaN(p) || !Number.isInteger(p)) {
-          errors.push("Position must be an integer.");
-        } else {
-          position = p;
-        }
-      }
-
-      items.push({
-        id,
-        name,
-        description,
-        price_cents,
-        category: category || null,
-        position
-      });
+      const idAttr=tr.getAttribute("data-id");
+      const id = idAttr && /^\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
+      const name=$(".name", tr).value.trim();
+      const description=$(".description", tr).value.trim();
+      const priceStr=$(".price", tr).value.trim();
+      const category=$(".category", tr).value.trim();
+      const posStr=$(".position", tr).value.trim();
+      const confStr=tr.getAttribute("data-confidence");
+      if (!name){ errors.push("Name is required for all items."); tr.classList.add("row-error"); } else { tr.classList.remove("row-error"); }
+      const price_cents=dollarsToCents(priceStr);
+      let position=null; if (posStr!==""){ const p=Number(posStr); if (Number.isNaN(p) || !Number.isInteger(p)){ errors.push("Position must be an integer."); } else { position=p; } }
+      const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
+      items.push({ id, name, description, price_cents, category: category||null, position, confidence });
     });
-
-    const title = titleInput.value.trim();
-
+    const title = $("#draft-title").value.trim();
     return { title, items, errors };
   }
 
-  async function saveNow() {
+  async function saveNow(){
     if (!isEditable) return;
     const { title, items, errors } = collectPayload();
-    if (errors.length) {
-      showError(errors[0]);
-      return;
-    }
-    try {
+    if (errors.length){ showError(errors[0]); return; }
+    try{
       const res = await fetch(`/drafts/${draftId}/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ title, items, deleted_item_ids: deletedIds })
       });
       const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.error || "Save failed");
-
-      // map server-assigned IDs back into rows that were temp
-      let insIdx = 0;
-      $$("#items-body tr").forEach(tr => {
-        const idAttr = tr.getAttribute("data-id");
-        if (!idAttr || !/^\d+$/.test(idAttr)) {
-          const newId = data.inserted_ids?.[insIdx++];
-          if (newId) tr.setAttribute("data-id", String(newId));
+      if (!res.ok || data.ok===false) throw new Error(data.error || "Save failed");
+      // map server ids
+      let insIdx=0;
+      $$("#items-body tr").forEach(tr=>{
+        const idAttr=tr.getAttribute("data-id");
+        if (!idAttr || !/^\d+$/.test(idAttr)){
+          const newId = data.inserted_ids?.[insIdx++]; if (newId) tr.setAttribute("data-id", String(newId));
         }
       });
-
-      if (lastSaved) lastSaved.textContent = data.saved_at || new Date().toISOString();
-      setDirty(false);
+      lastSaved.textContent = data.saved_at || new Date().toISOString();
+      setDirty(false); deletedIds=[];
       showSuccess("Saved");
-    } catch (e) {
-      showError(String(e));
-    } finally {
-      deletedIds = [];
-    }
+      rebuildOutline(); // update counts and groupings
+    } catch(e){ showError(String(e)); }
   }
 
-  function submitIfValid(e) {
-    const { errors } = collectPayload();
-    if (errors.length) {
-      e?.preventDefault?.();
-      showError("Fix validation issues before submitting.");
-      return false;
-    }
-    return true;
-  }
-
-  // Event wiring
-  if (isEditable) {
-    itemsBody.addEventListener("input", () => setDirty(true));
-    titleInput.addEventListener("input", () => setDirty(true));
-    saveBtn.addEventListener("click", (e) => { e.preventDefault(); saveNow(); });
-
-    document.addEventListener("keydown", (e) => {
+  if (isEditable){
+    itemsBody.addEventListener("input", ()=>{ setDirty(true); });
+    titleInput.addEventListener("input", ()=>setDirty(true));
+    saveBtn.addEventListener("click", (e)=>{ e.preventDefault(); saveNow(); });
+    document.addEventListener("keydown", (e)=>{
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key === "s") {
-        e.preventDefault();
-        saveNow();
-      } else if (mod && e.key === "Enter") {
-        e.preventDefault();
-        if (submitIfValid(e)) submitForm.submit();
-      } else if (e.key === "Delete") {
-        e.preventDefault();
-        deleteSelected();
-      }
+      if (mod && e.key === "s"){ e.preventDefault(); saveNow(); }
+      else if (e.key === "Delete"){ e.preventDefault(); deleteSelected(); }
     });
   }
 
-  // Search filter
-  search.addEventListener("input", collectRowsFiltered);
+  // search filter + UI sync
+  $("#search").addEventListener("input", collectRowsFiltered);
 
-  // Row ops
-  let rowSeq = 1;
-  function newTempId() { return "tmp-" + (rowSeq++); }
-
-  function addRow(prefill={}) {
-    const tr = document.createElement("tr");
+  // row ops
+  let rowSeq=1; function newTempId(){ return "tmp-"+(rowSeq++); }
+  function addRow(prefill={}){
+    const tr=document.createElement("tr");
     tr.setAttribute("data-id", newTempId());
+    tr.setAttribute("data-cat", (prefill.category||""));
+    tr.setAttribute("data-confidence", prefill.confidence!=null? String(prefill.confidence):"");
     tr.innerHTML = `
       <td><input type="checkbox" class="row-select" /></td>
-      <td><input class="cell-input name" value="${(prefill.name||"").replace(/"/g, '&quot;')}" /></td>
-      <td><textarea class="cell-textarea description">${(prefill.description||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input class="cell-input name-input name" value="${(prefill.name||"").replace(/"/g,'&quot;')}" />
+          ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
+        </div>
+      </td>
+      <td><textarea class="cell-textarea desc-text description">${(prefill.description||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
       <td><input class="cell-input cell-price price" value="${prefill.price_cents!=null? (prefill.price_cents/100).toFixed(2): ''}" inputmode="decimal" /></td>
-      <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g, '&quot;')}" /></td>
-      <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position : ''}" inputmode="numeric" /></td>
+      <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g,'&quot;')}" /></td>
+      <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>
       <td class="row-actions">
         <button class="btn duplicate-btn">Duplicate</button>
         <button class="btn btn-danger">Delete</button>
-      </td>
-    `;
+      </td>`;
     itemsBody.prepend(tr);
-    setDirty(true);
+    const ta=$(".desc-text", tr); if (ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
+    setDirty(true); rebuildOutline();
     return tr;
   }
 
-  $("#add-row-btn").addEventListener("click", (e) => {
-    e.preventDefault();
-    const tr = addRow({ position: 0 });
-    const nameInput = $(".name", tr);
-    if (nameInput) nameInput.focus();
-  });
+  $("#add-row-btn").addEventListener("click",(e)=>{ e.preventDefault(); const tr=addRow({position:0}); $(".name", tr)?.focus(); });
 
-  // duplicate / delete buttons
-  itemsBody.addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    const tr = e.target.closest("tr");
-    if (!tr) return;
-
-    if (btn.classList.contains("duplicate-btn")) {
-      const clone = tr.cloneNode(true);
-      clone.setAttribute("data-id", newTempId());
-      const nameEl = $(".name", clone);
-      if (nameEl) nameEl.value = (nameEl.value || "") + " (copy)";
+  itemsBody.addEventListener("click",(e)=>{
+    const btn=e.target.closest("button"); if(!btn) return;
+    const tr=e.target.closest("tr"); if(!tr) return;
+    if (btn.classList.contains("duplicate-btn")){
+      const clone=tr.cloneNode(true); clone.setAttribute("data-id", newTempId());
+      const nameEl=$(".name", clone); if(nameEl) nameEl.value=(nameEl.value||"")+" (copy)";
       itemsBody.insertBefore(clone, tr.nextSibling);
-      setDirty(true);
-      showToast("Duplicated");
-    } else if (btn.classList.contains("btn-danger")) {
-      queueDelete(tr);
-      tr.remove();
-      setDirty(true);
-      showToast("Deleted");
+      const ta=$(".desc-text", clone); if(ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
+      setDirty(true); showToast("Duplicated"); rebuildOutline();
+    } else if (btn.classList.contains("btn-danger")){
+      queueDelete(tr); tr.remove(); setDirty(true); showToast("Deleted"); rebuildOutline();
     }
   });
 
   // select all + bulk delete
-  const selectAllEl = selectAll;
-  if (selectAllEl) {
-    selectAllEl.addEventListener("change", () => {
-      const checked = selectAllEl.checked;
-      $$(".row-select").forEach(cb => cb.checked = checked);
-    });
-  }
-
-  $("#delete-selected-btn").addEventListener("click", (e) => {
+  selectAll?.addEventListener("change", ()=>{ const checked=selectAll.checked; $$(".row-select").forEach(cb=>cb.checked=checked); });
+  $("#delete-selected-btn").addEventListener("click", (e)=>{
     e.preventDefault();
-    const selected = $$(".row-select").filter(cb => cb.checked).map(cb => cb.closest("tr"));
+    const selected=$$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr"));
     if (!selected.length) return;
-    selected.forEach(tr => { queueDelete(tr); tr.remove(); });
-    setDirty(true);
-    showToast(`Deleted ${selected.length} item(s)`);
+    selected.forEach(tr=>{ queueDelete(tr); tr.remove(); });
+    setDirty(true); showToast(`Deleted ${selected.length} item(s)`); rebuildOutline();
   });
+  function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
-  // Delete tracking (server-side queue)
-  let deletedIds = [];
-  function queueDelete(tr) {
-    const idAttr = tr.getAttribute("data-id");
-    if (idAttr && /^\d+$/.test(idAttr)) {
-      deletedIds.push(Number(idAttr));
-    }
-  }
-
-  // Validate before submit
-  submitForm.addEventListener("submit", (e) => {
-    if (!submitIfValid(e)) return;
-    if (dirty) {
-      e.preventDefault();
-      saveNow().then(() => submitForm.submit()).catch(() => {});
-    }
-  });
-
-  // Price auto-format on blur
-  itemsBody.addEventListener("blur", (e) => {
-    const el = e.target;
-    if (el && el.classList.contains("price")) {
-      const cents = dollarsToCents(el.value);
-      el.value = (cents/100).toFixed(2);
-    }
+  // keep category attr in sync for outline grouping
+  itemsBody.addEventListener("blur",(e)=>{
+    const el=e.target;
+    if (el && el.classList.contains("price")){ const cents=dollarsToCents(el.value); el.value=(cents/100).toFixed(2); }
+    if (el && el.classList.contains("category")){ const tr=el.closest("tr"); if (tr) tr.setAttribute("data-cat", el.value || ""); rebuildOutline(); }
+    if (el && el.classList.contains("name")){ rebuildOutline(); }
   }, true);
 
-  // Warn on navigation with unsaved changes
-  window.addEventListener("beforeunload", (e) => {
-    if (dirty && isEditable) {
-      e.preventDefault();
-      e.returnValue = "";
-    }
-  });
+  // unsaved nav guard
+  window.addEventListener("beforeunload",(e)=>{ if (dirty && isEditable){ e.preventDefault(); e.returnValue=""; } });
 
-  // --- Autosave heartbeat ping (non-destructive) ---
-  let pingTimer = null;
-  function startHeartbeat() {
-    if (!isEditable) return;
-    stopHeartbeat();
-    pingTimer = setInterval(async () => {
-      if (document.hidden) return; // don't ping in background tabs
-      try {
-        const res = await fetch(`/drafts/${draftId}/save`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ autosave_ping: true })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.saved_at && lastSaved) {
-            lastSaved.textContent = data.saved_at;
-          }
-        }
-      } catch (_) { /* silent */ }
-    }, 30000); // every 30s
-  }
-  function stopHeartbeat() { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } }
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopHeartbeat(); else startHeartbeat();
-  });
+  // autosave heartbeat
+  let pingTimer=null;
+  function startHeartbeat(){ if (!isEditable) return; stopHeartbeat(); pingTimer=setInterval(async ()=>{ if (document.hidden) return; try{ const res=await fetch(`/drafts/${draftId}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({autosave_ping:true})}); if (res.ok){ const data=await res.json(); if (data && data.saved_at && lastSaved) lastSaved.textContent=data.saved_at; } }catch(_){ } },30000); }
+  function stopHeartbeat(){ if(pingTimer){ clearInterval(pingTimer); pingTimer=null; } }
+  document.addEventListener("visibilitychange", ()=>{ if (document.hidden) stopHeartbeat(); else startHeartbeat(); });
   startHeartbeat();
 
-  // --- Export Visible as CSV (client-side, respects current filter) ---
-  function toCsvCell(v) {
-    const s = (v ?? "").toString();
-    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-    return s;
-  }
-  function visibleRowsToCsv() {
-    const rows = $$("#items-body tr").filter(tr => tr.style.display !== "none");
-    const headers = ["id","name","description","price_cents","category","position"];
-    const out = [headers.join(",")];
-    for (const tr of rows) {
-      const idAttr = tr.getAttribute("data-id") || "";
-      const name = $(".name", tr)?.value ?? "";
-      const desc = $(".description", tr)?.value ?? "";
-      const priceStr = $(".price", tr)?.value ?? "";
-      const category = $(".category", tr)?.value ?? "";
-      const positionStr = $(".position", tr)?.value ?? "";
-      const cents = (function dollarsToCentsLoc(val){
-        if (val === null || val === undefined) return 0;
-        let s = String(val).trim().replace(/[$,]/g, "");
-        if (s === "") return 0;
-        const n = Number(s);
-        if (Number.isNaN(n)) return 0;
-        return Math.round(n * 100);
-      })(priceStr);
-      const row = [
-        toCsvCell(idAttr),
-        toCsvCell(name),
-        toCsvCell(desc),
-        toCsvCell(String(cents)),
-        toCsvCell(category),
-        toCsvCell(positionStr)
-      ];
-      out.push(row.join(","));
+  // export visible CSV
+  function toCsvCell(v){ const s=(v??"").toString(); return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s; }
+  function visibleRowsToCsv(){
+    const rows=$$("#items-body tr").filter(tr=>tr.style.display!=="none");
+    const headers=["id","name","description","price_cents","category","position","confidence"];
+    const out=[headers.join(",")];
+    for(const tr of rows){
+      const idAttr=tr.getAttribute("data-id")||"";
+      const name=$(".name", tr)?.value??"";
+      const desc=$(".description", tr)?.value??"";
+      const priceStr=$(".price", tr)?.value??"";
+      const cents=dollarsToCents(priceStr);
+      const category=$(".category", tr)?.value??"";
+      const position=$(".position", tr)?.value??"";
+      const conf=tr.getAttribute("data-confidence")||"";
+      out.push([toCsvCell(idAttr),toCsvCell(name),toCsvCell(desc),toCsvCell(String(cents)),toCsvCell(category),toCsvCell(position),toCsvCell(conf)].join(","));
     }
     return out.join("\n");
   }
+  function downloadFile(filename, content, mime){ var m=mime||'text/csv;charset=utf-8'; var blob=new Blob(["\uFEFF",content],{type:m}); var url=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+  exportVisibleBtn?.addEventListener("click", ()=>{ const csv=visibleRowsToCsv(); downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8'); showToast("Exported visible rows"); });
 
-  // Avoid default-parameter syntax (some linters misread it in HTML contexts)
-  function downloadFile(filename, content, mime) {
-    var m = mime || 'text/csv;charset=utf-8';
-    var blob = new Blob(["\uFEFF", content], { type: m }); // BOM for Excel
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  if (exportVisibleBtn) {
-    exportVisibleBtn.addEventListener("click", function() {
-      const csv = visibleRowsToCsv();
-      downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8');
-      showToast("Exported visible rows");
-    });
-  }
-
+  // initial render
+  rebuildOutline();
+  collectRowsFiltered();
 })();
 </script>
 {% endblock %}
