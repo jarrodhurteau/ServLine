@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS menu_items (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE
 );
+-- helpful index for faster menu loads
+CREATE INDEX IF NOT EXISTS idx_menu_items_menu ON menu_items(menu_id);
 
 -----------------------------------------------------------------------
 -- Day 8: Import Jobs (uploads + OCR pipeline)
@@ -60,9 +62,9 @@ CREATE INDEX IF NOT EXISTS idx_import_jobs_lifecycle ON import_jobs(lifecycle);
 CREATE INDEX IF NOT EXISTS idx_import_jobs_created   ON import_jobs(created_at);
 
 -----------------------------------------------------------------------
--- Day 12: Drafts (DB-backed editor)
--- NOTE: This version introduces `source_job_id` to link a draft
---       back to an import_jobs row. This matches storage/drafts.py.
+-- Day 12+: Drafts (DB-backed editor)
+-- Day 14 adds `source` (JSON string with provenance) and keeps a
+-- unique link to import_jobs via source_job_id.
 -----------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS drafts (
@@ -70,7 +72,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   restaurant_id INTEGER,
   title TEXT NOT NULL DEFAULT 'Untitled Draft',
   status TEXT NOT NULL DEFAULT 'editing',       -- editing|submitted|approved|rejected|archived
-  source_job_id INTEGER,                        -- <- NEW: provenance link to import_jobs.id
+  source_job_id INTEGER,                        -- provenance link to import_jobs.id
+  source TEXT,                                  -- NEW (Day 14): JSON blob (e.g., {"file":..., "ocr_engine":...})
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
@@ -94,6 +97,7 @@ CREATE TABLE IF NOT EXISTS draft_items (
   price_cents INTEGER NOT NULL DEFAULT 0,
   category TEXT,
   position INTEGER,                              -- display sort (NULLs last)
+  confidence INTEGER,                            -- NEW (Day 14): OCR confidence (nullable)
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE

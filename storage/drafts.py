@@ -1,9 +1,10 @@
 # storage/drafts.py
 from __future__ import annotations
+import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional
 
 # ------------------------------------------------------------
 # Paths / DB
@@ -21,13 +22,13 @@ def _now() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 # ------------------------------------------------------------
-# Schema (idempotent)
+# Schema (idempotent; safe with external schema.sql + migrate)
 # ------------------------------------------------------------
 def _ensure_schema() -> None:
     with db_connect() as conn:
         cur = conn.cursor()
 
-        # base drafts table
+        # drafts (includes source JSON + source_job_id link)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS drafts (
@@ -35,16 +36,16 @@ def _ensure_schema() -> None:
               title         TEXT,
               restaurant_id INTEGER,
               status        TEXT NOT NULL DEFAULT 'editing',
-              source        TEXT,               -- freeform (filename, type, etc)
-              source_job_id INTEGER,           -- import_jobs.id if applicable
+              source        TEXT,               -- JSON string (file, ocr_engine, etc)
+              source_job_id INTEGER,            -- import_jobs.id if applicable
               created_at    TEXT NOT NULL,
               updated_at    TEXT NOT NULL,
-              FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+              FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
             )
             """
         )
 
-        # items table
+        # draft_items (includes confidence)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS draft_items (
@@ -55,6 +56,7 @@ def _ensure_schema() -> None:
               price_cents INTEGER NOT NULL DEFAULT 0,
               category    TEXT,
               position    INTEGER,
+              confidence  INTEGER,              -- OCR confidence (nullable)
               created_at  TEXT NOT NULL,
               updated_at  TEXT NOT NULL,
               FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
@@ -66,6 +68,17 @@ def _ensure_schema() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_drafts_source_job ON drafts(source_job_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_items_draft ON draft_items(draft_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_items_cat ON draft_items(draft_id, category)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_items_pos ON draft_items(draft_id, position)")
+
+        # in case existing DBs predate Day-14 columns, patch them
+        def _col_exists(table: str, col: str) -> bool:
+            return any(r[1].lower() == col for r in conn.execute(f"PRAGMA table_info({table});").fetchall())
+
+        if not _col_exists("drafts", "source"):
+            cur.execute("ALTER TABLE drafts ADD COLUMN source TEXT;")
+        if not _col_exists("draft_items", "confidence"):
+            cur.execute("ALTER TABLE draft_items ADD COLUMN confidence INTEGER;")
 
         conn.commit()
 
@@ -83,6 +96,14 @@ def _coerce_int(v: Any, default: int = 0) -> int:
     except Exception:
         return default
 
+def _coerce_opt_int(v: Any) -> Optional[int]:
+    try:
+        if v is None or str(v).strip() == "":
+            return None
+        return int(v)
+    except Exception:
+        return None
+
 # ------------------------------------------------------------
 # Public API consumed by portal/app.py
 # ------------------------------------------------------------
@@ -96,7 +117,7 @@ def list_drafts(*, status: Optional[str] = None, restaurant_id: Optional[int] = 
     if restaurant_id is not None:
         qs += " AND restaurant_id=?"
         args.append(int(restaurant_id))
-    qs += " ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?"
+    qs += " ORDER BY datetime(updated_at) DESC, id DESC LIMIT ? OFFSET ?"
     args += [int(limit), int(offset)]
     with db_connect() as conn:
         rows = conn.execute(qs, args).fetchall()
@@ -110,7 +131,7 @@ def get_draft(draft_id: int) -> Optional[Dict[str, Any]]:
 def get_draft_items(draft_id: int) -> List[Dict[str, Any]]:
     with db_connect() as conn:
         rows = conn.execute(
-            # FIX: use a plain large integer instead of 1e9 to avoid SQLite parsing issues
+            # NULL positions go last (use a big integer sentinel)
             "SELECT * FROM draft_items WHERE draft_id=? ORDER BY COALESCE(position, 1000000000), id",
             (int(draft_id),)
         ).fetchall()
@@ -131,6 +152,7 @@ def save_draft_metadata(draft_id: int, *, title: Optional[str] = None,
     if status is not None:
         sets.append("status=?"); args.append(status)
     if source is not None:
+        # store as-is (caller may pass JSON string)
         sets.append("source=?"); args.append(source)
     if source_job_id is not None:
         sets.append("source_job_id=?"); args.append(int(source_job_id))
@@ -173,18 +195,15 @@ def _insert_items_bulk(draft_id: int, items: Iterable[Dict[str, Any]]) -> List[i
             desc = (it.get("description") or "").strip()
             price_cents = _coerce_int(it.get("price_cents"), 0)
             category = (it.get("category") or None)
-            position = it.get("position")
-            if position is not None:
-                try:
-                    position = int(position)
-                except Exception:
-                    position = None
+            position = _coerce_opt_int(it.get("position"))
+            confidence = _coerce_opt_int(it.get("confidence"))
+
             cur.execute(
                 """
-                INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, confidence, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (int(draft_id), name, desc, price_cents, category, position, _now(), _now())
+                (int(draft_id), name, desc, price_cents, category, position, confidence, _now(), _now())
             )
             ids.append(int(cur.lastrowid))
         conn.commit()
@@ -220,21 +239,17 @@ def upsert_draft_items(draft_id: int, items: Iterable[Dict[str, Any]]) -> Dict[s
             desc = (it.get("description") or "").strip()
             price_cents = _coerce_int(it.get("price_cents"), 0)
             category = (it.get("category") or None)
-            position = it.get("position")
-            if position is not None:
-                try:
-                    position = int(position)
-                except Exception:
-                    position = None
+            position = _coerce_opt_int(it.get("position"))
+            confidence = _coerce_opt_int(it.get("confidence"))
 
             if has_int_id:
                 cur.execute(
                     """
                     UPDATE draft_items
-                    SET name=?, description=?, price_cents=?, category=?, position=?, updated_at=?
+                    SET name=?, description=?, price_cents=?, category=?, position=?, confidence=?, updated_at=?
                     WHERE id=? AND draft_id=?
                     """,
-                    (name, desc, price_cents, category, position, _now(), item_id, int(draft_id))
+                    (name, desc, price_cents, category, position, confidence, _now(), item_id, int(draft_id))
                 )
                 if cur.rowcount > 0:
                     updated.append(item_id)
@@ -242,19 +257,19 @@ def upsert_draft_items(draft_id: int, items: Iterable[Dict[str, Any]]) -> Dict[s
                     # if the id doesn't belong to this draft, insert instead (safety)
                     cur.execute(
                         """
-                        INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, confidence, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (int(draft_id), name, desc, price_cents, category, position, _now(), _now())
+                        (int(draft_id), name, desc, price_cents, category, position, confidence, _now(), _now())
                     )
                     inserted.append(int(cur.lastrowid))
             else:
                 cur.execute(
                     """
-                    INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO draft_items (draft_id, name, description, price_cents, category, position, confidence, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (int(draft_id), name, desc, price_cents, category, position, _now(), _now())
+                    (int(draft_id), name, desc, price_cents, category, position, confidence, _now(), _now())
                 )
                 inserted.append(int(cur.lastrowid))
 
@@ -263,7 +278,7 @@ def upsert_draft_items(draft_id: int, items: Iterable[Dict[str, Any]]) -> Dict[s
     return {"inserted_ids": inserted, "updated_ids": updated}
 
 def delete_draft_items(draft_id: int, item_ids: Iterable[int]) -> int:
-    ids = [int(i) for i in item_ids]
+    ids = [int(i) for i in item_ids if str(i).isdigit()]
     if not ids:
         return 0
     with db_connect() as conn:
@@ -289,33 +304,28 @@ def find_draft_by_source_job(job_id: int) -> Optional[Dict[str, Any]]:
 
 def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) -> Dict[str, Any]:
     """
-    Accepts a legacy JSON structure like:
+    Accepts JSON like:
     {
       "job_id": ...,
       "source": {"type":"upload","file":"...","ocr_engine":"..."},
       "categories": [
         {"name":"Pizzas","items":[
-           {"name":"Cheese Pizza","description":"", "sizes":[{"name":"Small","price":9.99}, ...]}
+           {"name":"Cheese Pizza", "description":"", "sizes":[{"name":"Small","price":9.99}], "confidence": 68}
         ]}
       ]
     }
     Explodes sizes into individual rows; if no sizes, uses item.price or 0.
     """
     title = f"Imported {datetime.utcnow().date()}"
-    source = None
-    try:
-        src = (draft_json.get("source") or {})
-        f = (src.get("file") or "").strip()
-        eng = (src.get("ocr_engine") or "").strip()
-        source = f"{f} ({eng})" if f or eng else None
-    except Exception:
-        source = None
+
+    # Persist full source JSON (stringified) so editor can display provenance
+    source_blob = json.dumps(draft_json.get("source") or {}, ensure_ascii=False)
 
     draft_id = _insert_draft(
         title=title,
         restaurant_id=None,
         status="editing",
-        source=source,
+        source=source_blob,
         source_job_id=int(import_job_id)
     )
 
@@ -327,6 +337,8 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
             if not base:
                 continue
             desc = (item.get("description") or "").strip()
+            confidence = _coerce_opt_int(item.get("confidence"))
+
             sizes = item.get("sizes") or []
             if sizes:
                 for s in sizes:
@@ -342,7 +354,8 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                         "description": desc,
                         "price_cents": cents,
                         "category": cat_name,
-                        "position": None
+                        "position": None,
+                        "confidence": confidence
                     })
             else:
                 price = item.get("price", 0)
@@ -355,7 +368,8 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                     "description": desc,
                     "price_cents": cents,
                     "category": cat_name,
-                    "position": None
+                    "position": None,
+                    "confidence": confidence
                 })
 
     _insert_items_bulk(draft_id, flat_items)
@@ -369,7 +383,7 @@ def clone_draft(draft_id: int) -> Dict[str, Any]:
     if not src:
         raise ValueError(f"Draft {draft_id} not found")
 
-    # create new shell with "(copy)" in title, keep linkage to source_job_id but not status
+    # create new shell with "(copy)" in title, keep linkage to source_job_id but reset status
     new_title = ((src.get("title") or "").strip() or f"Draft {draft_id}") + " (copy)"
     new_id = _insert_draft(
         title=new_title,
@@ -380,14 +394,13 @@ def clone_draft(draft_id: int) -> Dict[str, Any]:
     )
 
     items = get_draft_items(int(draft_id))
-    for it in items:
-        it_copy = {
-            "name": it.get("name"),
-            "description": it.get("description"),
-            "price_cents": _coerce_int(it.get("price_cents"), 0),
-            "category": it.get("category"),
-            "position": it.get("position"),
-        }
-        _insert_items_bulk(new_id, [it_copy])
+    _insert_items_bulk(new_id, [{
+        "name": it.get("name"),
+        "description": it.get("description"),
+        "price_cents": _coerce_int(it.get("price_cents"), 0),
+        "category": it.get("category"),
+        "position": it.get("position"),
+        "confidence": _coerce_opt_int(it.get("confidence")),
+    } for it in items])
 
     return {"id": new_id, "draft_id": new_id}
