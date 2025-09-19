@@ -1,4 +1,19 @@
+# --- Core web framework ---
 Flask==3.0.3
+
+# --- OCR stack ---
 pytesseract==0.3.13
 opencv-python==4.10.0.84
 Pillow==10.4.0
+pdf2image==1.17.0   # rasterize PDFs (requires Poppler installed separately)
+
+# --- Spell/parse helper (Day 14) ---
+symspellpy==6.7.8
+
+# --- Data & export support ---
+openpyxl==3.1.5     # Excel (XLSX) export
+pandas==2.2.2       # used for column-aware OCR helper
+scikit-learn==1.5.1 # ditto (optional but supported)
+
+# --- Utils ---
+python-dotenv==1.0.1  # load .env for TESSERACT_CMD, POPPLER_PATH, secrets
