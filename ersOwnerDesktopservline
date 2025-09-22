@@ -1,0 +1,34 @@
+[33mf512e59[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m Day 14: add migration scripts and lock requirements
+[33mead6577[m chore: add .gitkeep for uploads and storage artifacts
+[33m65063d9[m Day 14: add portal requirements and SQLite migration helper
+[33m17d594a[m Day 14: Draft Editor revamp + smarter OCR (regex parser, structured drafts, safe render, export polish)
+[33me2a2e5d[m Day 14: Draft Editor revamp + smarter OCR pipeline (structured parsing, safer rendering, export fixes)
+[33m1c60943[m[33m ([m[1;33mtag: [m[1;33mday-13[m[33m)[m Day 13: OCR→Draft bridge; imports→Draft Editor link; restaurant assignment + approval guard; approval writes to menu_items with dedupe; export buttons (CSV/JSON/XLSX); drafts storage migration; debug helpers; README updated for Day 13.
+[33m26cb5e9[m Day 13 WIP: Import detail updates (clone, export CSV/JSON/XLSX), draft editor bridge, OCR pipeline scaffolding; pending OCR install + drafts fix
+[33m6c81ee2[m Cleanup: ignore DB, uploads, drafts/raw; add .gitkeep placeholders
+[33me86a36a[m Day 12: DB-backed drafts system + Draft Editor integration
+[33m4729122[m Day 12: Added DB-backed drafts system with editor, schema, storage layer, and portal integration
+[33md7b4c0f[m Day 11: Update README with portal polish round 2 milestone
+[33md506e5e[m Day 11: Portal polish round 2 — unified button styles, fixed Uploads delete form bug, toolbar alignment, consistent empty states, and headline/admin block cleanup
+[33mdf46d5c[m chore: stop tracking SQLite db
+[33m15fb2a2[m chore: ignore local SQLite db
+[33mcb5f9ee[m Day 10 polish: blue button styling + duplicate-nav cleanup + import HTML POST flash flow
+[33m814ab43[m chore: ignore local SQLite db
+[33m8d01e30[m Day 10 polish: unify button styles on Recycle Bin page (Clean Raw Artifacts + Clean Draft JSONs now blue)
+[33md4624bb[m Add polished error pages (404 & 500)
+[33m276c925[m Day 10: Portal polish — unified button styles, removed redundant links, styled errors, imports cleanup
+[33m62fc917[m[33m ([m[1;33mtag: [m[1;33mday-9-complete[m[33m)[m Day 9: Draft Review & Publish flow complete
+[33mf8044e1[m[33m ([m[1;33mtag: [m[1;33mday-8-complete[m[33m)[m Day 8: Uploads Recycle Bin + Imports Cleanup complete
+[33mbdd3f37[m Day 8: uploads recycle bin + artifact sweep; imports cleanup (/imports/cleanup, per-job delete); status sync; secure serving
+[33mba09df8[m Day 7: draft flow + uploads recycle bin; imports cleanup (/imports/cleanup, per-job delete); artifact sweep; status sync; secure serving
+[33m6c10529[m Day 8: add import_jobs table, upload/import pipeline, draft JSON storage, portal pages
+[33m93a221f[m[33m ([m[1;33mtag: [m[1;33mv0.0.7-day7[m[33m)[m Day 7: OCR import + raw viewer with Sam's Pizza test
+[33m6f51a9a[m Day 6: Basic auth (login/logout) + protected admin routes
+[33m459acf6[m Day 5: Admin forms (add menu items)
+[33m24ad0db[m Day 4.5: Tailwind CDN + base tokens (no layout changes)
+[33m878ad0b[m Day 4: Portal UI (restaurants → menus → items) read-only
+[33md4b04c3[m Day 4: Portal UI (restaurants → menus → items) read-only
+[33m3d0eb0c[m Day 3: API endpoints for restaurants, menus, and menu_items
+[33m1b81cda[m Day 2: SQLite schema + seed + /db/health wired
+[33m04c6e12[m Day 2: SQLite schema + seed + /db/health wired
+[33m0c1ba7c[m Day 1: Portal skeleton + health check online
