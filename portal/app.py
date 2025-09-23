@@ -1,4 +1,4 @@
-# portal/app.py
+# portal/app.py 
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
     session, send_from_directory, flash, make_response
@@ -63,10 +63,29 @@ except Exception:
 # --- OCR paths from env ---
 TESSERACT_CMD = os.getenv("TESSERACT_CMD")
 POPPLER_PATH = os.getenv("POPPLER_PATH") or None
+# Allow tuning Tesseract without code changes
+TESSERACT_LANG = os.getenv("TESSERACT_LANG") or "eng"
+TESSERACT_CONFIG = os.getenv("TESSERACT_CONFIG") or "--oem 1 --psm 6"
 
-# If explicit tesseract path is set and exists, tell pytesseract to use it
+# Windows-friendly Tesseract discovery:
+# 1) Respect explicit env var if it exists
+# 2) Else use PATH
+# 3) Else try common install locations
 if TESSERACT_CMD and Path(TESSERACT_CMD).exists():
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+else:
+    _which = shutil.which("tesseract") or shutil.which("tesseract.exe")
+    if _which:
+        pytesseract.pytesseract.tesseract_cmd = _which
+    else:
+        _common = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ]
+        for p in _common:
+            if Path(p).exists():
+                pytesseract.pytesseract.tesseract_cmd = p
+                break
 
 # storage layer for drafts (DB-first, Day 12+)
 try:
@@ -447,15 +466,13 @@ def discard_draft_for_job(job_id: int) -> int:
 # ------------------------
 # Health / DB / OCR Health
 # ------------------------
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok"})
+# (index and /health moved into core blueprint)
 
 @app.get("/ocr/health")
 def ocr_health():
     # Prefer explicit cmd if set; otherwise look up via PATH
     explicit_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
-    which_cmd = shutil.which("tesseract") or ""
+    which_cmd = shutil.which("tesseract") or shutil.which("tesseract.exe") or ""
     # Choose a display cmd (explicit beats PATH)
     display_cmd = explicit_cmd or which_cmd
 
@@ -545,7 +562,12 @@ def _save_draft_json(job_id: int, draft: dict) -> str:
 # --- OCR helpers: image/PDF → text, then text → draft -----------------
 def _ocr_image_to_text(img_path: Path) -> str:
     try:
-        return pytesseract.image_to_string(str(img_path)) or ""
+        # Use tuned defaults; overridable via env
+        return pytesseract.image_to_string(
+            str(img_path),
+            lang=TESSERACT_LANG,
+            config=TESSERACT_CONFIG
+        ) or ""
     except Exception:
         return ""
 
@@ -556,26 +578,31 @@ def _pdf_to_text(pdf_path: Path) -> str:
     """
     try:
         from pdf2image import convert_from_path
+        from PIL import ImageOps, ImageFilter
     except Exception:
         return ""
 
     # Use POPPLER_PATH from env if provided
     poppler_path = POPPLER_PATH
     try:
-        pages = convert_from_path(str(pdf_path), dpi=200, poppler_path=poppler_path)
+        # Higher DPI tends to help OCR quality on menus
+        pages = convert_from_path(str(pdf_path), dpi=300, poppler_path=poppler_path)
     except Exception:
         return ""
 
     buf = []
     for pg in pages:
         try:
-            tmp = RAW_FOLDER / f"_{uuid.uuid4().hex[:8]}_pg.png"
-            pg.save(str(tmp), "PNG")
-            txt = _ocr_image_to_text(tmp)
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
+            # Light cleanup: grayscale -> autocontrast -> sharpen
+            img = pg.convert("L")
+            img = ImageOps.autocontrast(img)
+            img = img.filter(ImageFilter.SHARPEN)
+
+            txt = pytesseract.image_to_string(
+                img,
+                lang=TESSERACT_LANG,
+                config=TESSERACT_CONFIG
+            )
             if txt:
                 buf.append(txt)
         except Exception:
@@ -583,9 +610,14 @@ def _pdf_to_text(pdf_path: Path) -> str:
     return "\n".join(buf).strip()
 
 _price_rx = re.compile(r"""
-    (?P<name>.+?)                # item name
-    [\s\-·]*                     # optional separators
-    (?P<price>\$?\d+(?:\.\d{1,2})?)\s*$   # price at end
+    (?P<name>.+?)                         # item name
+    [\s\-\–\—·:]*                         # optional separators (dashes, middots, colon)
+    (?P<price>                            # price at end
+        [\$€£]?\s*
+        \d{1,3}(?:[.,]\d{3})*             # thousands with . or ,
+        (?:[.,]\d{1,2})?                  # optional decimals
+        |\$?\d+(?:[.,]\d{1,2})?           # or simple number with decimals
+    )\s*$
 """, re.X)
 
 def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> dict:
@@ -624,16 +656,20 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
         # Item with trailing price
         m = _price_rx.match(line)
         if m:
-            name = m.group("name").strip(" -·")
-            price = m.group("price")
+            name = m.group("name").strip(" -·:—–")
+            price = (m.group("price") or "").strip()
+            # Normalize currency and decimal comma → dot
+            price_norm = price.replace("$", "").replace("€", "").replace("£", "").replace(" ", "")
+            if ("," in price_norm) and ("." not in price_norm):
+                price_norm = price_norm.replace(",", ".")
             try:
-                p = float(price.replace("$", ""))
+                p = float(re.sub(r"[^\d.]", "", price_norm))
             except Exception:
                 p = 0.0
             current_cat["items"].append({
                 "name": name,
                 "description": "",
-                "sizes": [{"name": "One Size", "price": round(p, 2)}],
+                "sizes": [{"name": "One Size", "price": round(p, 2)}] if p else [],
             })
             prev_item = current_cat["items"][-1]
             continue
@@ -816,9 +852,7 @@ def import_status(job_id):
 # ------------------------
 # HTML Pages (Portal UI) — use _safe_render
 # ------------------------
-@app.get("/")
-def index():
-    return _safe_render("index.html")
+# (index moved into core blueprint)
 
 @app.get("/restaurants")
 def restaurants_page():
@@ -1897,6 +1931,7 @@ def import_upload():
 # ------------------------
 # Diagnostics: ping/routes/boom
 # ------------------------
+# (index/health are in core blueprint; keep others here)
 @app.get("/__ping")
 def __ping():
     return jsonify({"ok": True, "time": _now_iso()})
@@ -1908,6 +1943,17 @@ def __routes():
 @app.get("/__boom")
 def __boom():
     raise RuntimeError("Intentional test error")
+
+# ------------------------
+# Blueprint registration (Day 16 micro-refactor)
+# ------------------------
+try:
+    # local import to avoid circulars if running in unusual contexts
+    from .routes.core import core_bp  # type: ignore
+except Exception:
+    from routes.core import core_bp  # fallback if relative import fails
+
+app.register_blueprint(core_bp)
 
 # ------------------------
 # Run

@@ -54,6 +54,8 @@ README.md # This file
   - VS Code tasks run `infra/run_infra.ps1` on folder open
   - Ngrok + Flask auto-start, Twilio webhook update
 
+✅ **Day 1 complete — project skeleton live.**
+
 ---
 
 ## 🚀 Day 2: Restaurants & Menus
@@ -61,6 +63,8 @@ README.md # This file
 - Added tables: `restaurants`, `menus`, `menu_items`
 - Portal pages to list restaurants, menus, items
 - API endpoints under `/api/...`
+
+✅ **Day 2 complete — restaurants/menus data model + UI in place.**
 
 ---
 
@@ -70,6 +74,8 @@ README.md # This file
 - Added new item form
 - Price stored as cents for accuracy
 
+✅ **Day 3 complete — menu items editable via portal.**
+
 ---
 
 ## 🚀 Day 4: Git + POS Handshake
@@ -77,6 +83,8 @@ README.md # This file
 - Git version control set up
 - Fallback Git saves
 - POS order send/handshake scaffolding in place
+
+✅ **Day 4 complete — Git + POS scaffolding done.**
 
 ---
 
@@ -87,6 +95,8 @@ README.md # This file
 - Added `store_id` and POS secret overrides
 - Emits upsell accept events (`size_upsell_yes`, `cheese_upsell_yes`)
 
+✅ **Day 5 complete — call flow router and ordering logic working.**
+
 ---
 
 ## 🚀 Day 6: Auth System
@@ -95,6 +105,8 @@ README.md # This file
 - Session-based admin mode
 - `/login`, `/logout`
 - Navbar shows imports/uploads when logged in
+
+✅ **Day 6 complete — authentication + admin scoping live.**
 
 ---
 
@@ -106,6 +118,8 @@ README.md # This file
 - Draft JSON scaffolding
 - Git fallback saves in place
 
+✅ **Day 7 complete — raw OCR capture pipeline exists.**
+
 ---
 
 ## 🚀 Day 8: Uploads & Recycle Bin
@@ -115,6 +129,8 @@ README.md # This file
 - Move-to-bin + restore from bin
 - Artifact sweep endpoints
 - Secure serving of uploads (blocks `.trash`)
+
+✅ **Day 8 complete — uploads + recycle bin fully functional.**
 
 ---
 
@@ -126,41 +142,43 @@ README.md # This file
 - JSON preview & draft editor scaffolding
 - Error pages added (404, 500)
 
+✅ **Day 9 complete — draft review + cleanup live.**
+
 ---
 
 ## 🚀 Day 10: Portal Polish
 
 - Unified **button styling** (consistent blue/secondary/danger buttons sitewide)
 - Cleaned redundant navigation buttons (kept top banner links authoritative)
-- Imports table polished:  
-  - “View” button now styled blue (`btn-primary`)  
+- Imports table polished:
+  - “View” button styled blue (`btn-primary`)
   - Actions area aligned consistently
-- Forms cleaned: dark theme inputs standardized (black text on white background for readability)
-- 404 and 500 error pages styled to match site
+- Forms cleaned: dark theme inputs standardized (black text on white background)
+- 404 and 500 error pages styled to match
 - Import landing page (`/import`) aligned with portal polish
 
-✅ **Day 10 complete — ServLine Portal is now visually consistent, navigable, and polished.**
+✅ **Day 10 complete — portal polished and consistent.**
 
 ---
 
 ## 🚀 Day 11: Portal Polish Round 2
 
 - **Global**
-  - All buttons unified: blue `btn-primary` for all actions, red `btn-danger` for destructive actions only.
-  - Logout styled as compact blue pill (`btn-primary btn-sm`).
+  - All buttons unified: blue `btn-primary` for actions, red `btn-danger` for destructive.
+  - Logout styled compact (`btn-primary btn-sm`).
 
 - **Restaurants**
-  - Added right-aligned “Add Restaurant” button.
+  - Right-aligned “Add Restaurant” button.
   - Clean empty state message.
 
 - **Uploads**
   - Toolbar row with Artifact Sweep, Delete Selected, and file count aligned.
   - Fixed delete bug (no nested forms; button disabled until a file is checked).
-  - Empty state muted: “No files in Uploads.”
+  - Empty state: “No files in Uploads.”
 
 - **Recycle Bin**
-  - Toolbar row with Artifact Sweep + item count aligned.
-  - Empty state muted: “Recycle Bin is empty.”
+  - Toolbar row with Artifact Sweep + item count.
+  - Empty state: “Recycle Bin is empty.”
 
 - **Imports**
   - Toolbar row with Cleanup + Recycle Bin buttons.
@@ -169,101 +187,104 @@ README.md # This file
 
 - **Import a Menu**
   - Added spacing under OCR Health button.
-  - Upload cards balanced and styled consistently.
+  - Upload cards balanced.
 
 - **Index (Home)**
-  - Headline cleaned up: bold “ServLine Portal” with muted “System is online.” subtitle.
-  - Admin & Maintenance block spaced neatly; all buttons now blue primary.
+  - Headline cleaned up.
+  - Admin & Maintenance block spaced neatly.
 
-✅ **Day 11 complete — ServLine Portal is now fully consistent, polished, and debugged (Uploads delete fixed).**
+✅ **Day 11 complete — portal fully consistent, polished, and bug-fixed.**
 
 ---
 
 ## 🚀 Day 12: Drafts (DB-backed Editor)
 
-- **Database**
-  - Added `drafts` + `draft_items` tables in schema.sql.
-  - Migration ensured `import_jobs.draft_id` and `drafts.source_job_id`.
+- Added `drafts` + `draft_items` tables
+- New `storage/drafts.py` with helpers
+- `/drafts` → list drafts
+- `/drafts/<id>/edit` → full Draft Editor
+- `/drafts/<id>/save` → save title/items
+- `/drafts/<id>/submit` → submit draft
+- Import jobs bridge into drafts
 
-- **Storage Layer**
-  - New `storage/drafts.py` for managing drafts and draft items:
-    - `list_drafts`, `get_draft`, `get_draft_items`
-    - `create_draft`, `save_draft_metadata`, `upsert_draft_items`
-    - `delete_draft_items`, `submit_draft`
+- Draft Editor UI:
+  - Search, add, duplicate, delete rows
+  - Auto price formatting
+  - Unsaved change indicator
+  - Darker background + readable text
 
-- **App Integration**
-  - `/drafts` → list drafts with filter options.
-  - `/drafts/<id>/edit` → full-featured Draft Editor.
-  - `/drafts/<id>/save` → JSON API for saving title + items.
-  - `/drafts/<id>/submit` → mark draft as submitted.
-  - Import jobs now bridge into drafts via **Edit** button.
-
-- **UI**
-  - New `draft_editor.html` page:
-    - Search, add, duplicate, delete rows.
-    - Auto price formatting + validation.
-    - Unsaved change indicator + save/submit keyboard shortcuts.
-  - Darker background + black text inputs for readability.
-
-✅ **Day 12 complete — ServLine now supports full DB-backed draft editing (menus editable in portal).**
+✅ **Day 12 complete — DB-backed draft editing live.**
 
 ---
 
 ## 🚀 Day 13: OCR Online + Imports → Drafts → Approve
 
-- **OCR fully wired**
-  - Images (PNG/JPG): Tesseract.
-  - PDFs: `pdf2image` + Poppler → Tesseract per page.
-  - Health endpoint: `GET /ocr/health` shows detected paths/versions.
-  - Raw OCR dumps saved under `storage/drafts/raw/` for debugging.
+- OCR fully wired:
+  - Images: Tesseract
+  - PDFs: pdf2image + Poppler → Tesseract
+- Health endpoint (`/ocr/health`) shows paths/versions
+- Raw OCR dumps saved
 
-- **Import Detail page upgrades (`/imports/<job_id>`)**
-  - **Open Draft Editor**: first open migrates legacy JSON → DB draft and links it to the import.
-  - **Assign Restaurant** (admin): dropdown + `POST /imports/<job_id>/set_restaurant`.
-  - **Approve Draft**: `POST /imports/<job_id>/approve` inserts items into the restaurant’s **active menu** (or creates one). Simple dedupe on `(name, price_cents)`.
-  - **Discard Draft**: `POST /imports/<job_id>/discard` removes current draft items (keeps the draft shell).
-  - **Exports**: CSV / JSON / XLSX links auto-resolve to the DB-backed draft.
+- Import Detail upgrades:
+  - Open Draft Editor migrates JSON → DB draft
+  - Assign Restaurant dropdown
+  - Approve Draft → inserts items into active menu
+  - Discard Draft → removes draft items
+  - Exports (CSV/JSON/XLSX) from DB draft
 
-- **Admin vs Customer scoping**
-  - **Customer** users are automatically scoped to their own `restaurant_id` for imports/approval.
-  - **Admin** users can select the restaurant at upload time or on the import page.  
-    If missing during approval, user gets: _“No restaurant selected. Choose a restaurant for this import before approving.”_
+- Scoping:
+  - Customers limited to their restaurant
+  - Admins can assign restaurant
 
-- **Endpoints recap**
-  - Open Editor: `GET /imports/<job_id>/draft` → redirects to `/drafts/<draft_id>/edit`
-  - Set Restaurant: `POST /imports/<job_id>/set_restaurant`
-  - Approve: `POST /imports/<job_id>/approve`
-  - Discard: `POST /imports/<job_id>/discard`
-  - Raw OCR JSON: `GET /imports/raw/<job_id>`
-
-- **Troubleshooting**
-  - If you see `sqlite3.OperationalError: no such column: source_job_id`, run:
-    ```bash
-    python migrate_drafts.py
-    ```
-  - If PDF OCR returns empty: ensure `POPPLER_PATH` points to the Poppler **bin** folder.
-  - If Tesseract isn’t detected on Windows: set `TESSERACT_CMD` in `.env` to the full `tesseract.exe` path.
-
-✅ **Day 13 complete — End-to-end intake is live: upload → OCR → DB-backed draft → approve to live menu with restaurant scoping and exports.**
+✅ **Day 13 complete — end-to-end intake live: upload → OCR → draft → approve.**
 
 ---
 
 ## 🚀 Day 14: Draft Editor Revamp + Smarter OCR
 
-- **Draft Editor functional**
-  - Fixed broken routes (`draft_publish_now` vs `draft_publish`).
-  - Safe rendering wrapper prevents infinite 500 loops when a template is missing or broken.
-  - Added debug utilities (`/__ping`, `/__routes`, `/__boom`, `/__debug/...`).
+- Fixed broken routes
+- Safe rendering wrapper for missing templates
+- Added debug utilities (`/__ping`, `/__routes`, etc.)
 
-- **OCR pipeline upgraded**
-  - Uses `storage/ocr_helper.extract_items_from_path` if available.
-  - Fallback regex parser handles categories, names, descriptions, trailing prices.
-  - Normalizes parsed results into JSON drafts: categories → items → sizes.
-  - Stray text lines are attached as descriptions to previous items.
-  - Output is much cleaner than raw Tesseract dumps.
+- OCR pipeline upgraded:
+  - Uses `storage/ocr_helper` if available
+  - Regex fallback parser for categories/items
+  - Stray lines → description attachment
+  - Cleaner normalized JSON output
 
-- **Exports**
-  - CSV, JSON, XLSX (via `openpyxl`) working from Draft Editor and Import Detail.
-  - “Export Visible as CSV” (client-side) for filtered tables.
+- Exports (CSV, JSON, XLSX) working
+- “Export Visible as CSV” in Draft Editor
 
-✅ **Day 14 complete — OCR now produces structured menu data, and the Draft Editor is stable and ready for polish.**
+✅ **Day 14 complete — smarter OCR + stable Draft Editor.**
+
+---
+
+## 🚀 Day 15: Failed App Split Attempt
+
+- Attempted to modularize `portal/app.py` into multiple files
+- Caused routing/template import errors
+- Repeated fixes failed → full rollback to Day 14 baseline
+- Lesson: split must be done with more care/tests later
+
+❌ **Day 15 failed — reset to Day 14.**
+
+---
+
+## 🚀 Day 16: Infra & PDF OCR Success
+
+- **Infra scripts**
+  - `run_infra.ps1` launches Flask + ngrok in separate windows
+  - `stop_infra.ps1` reliably kills Flask/ngrok
+  - PIDs stored in `.pids`
+
+- **OCR stack**
+  - Tesseract v5.5.0 detected
+  - Poppler installed, `.env` configured
+  - `/ocr/health` shows both present
+  - PDF OCR pipeline (pdf2image + Poppler → Tesseract) functional
+
+- **Draft Editor integration**
+  - Importing PDF now generates draft with parsed items
+  - Messy but functional → baseline success
+
+✅ **Day 16 complete — infra stable and OCR processes PDFs end-to-end.**

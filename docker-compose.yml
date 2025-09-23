@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  servline:
+    build: .
+    image: servline:latest
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY: "${SECRET_KEY:-change-me}"
+      # If you still want to force a path (not needed on this image):
+      # POPPLER_PATH: "/usr/bin"
+    volumes:
+      - servline_uploads:/app/uploads
+      - servline_storage:/app/storage
+volumes:
+  servline_uploads:
+  servline_storage:

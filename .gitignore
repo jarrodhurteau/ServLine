@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pycache
 *.egg-info/
 *.egg
 *.log
@@ -13,8 +12,9 @@ __pycache__/
 env/
 venv/
 
-# --- SQLite databases (don’t track live DBs) ---
+# --- Databases (don’t track live DBs) ---
 *.db
+*.sqlite
 
 # --- VS Code ---
 .vscode/
@@ -23,30 +23,28 @@ venv/
 .DS_Store
 Thumbs.db
 
-# --- Uploads ---
+# --- Uploads (keep .gitkeep only) ---
 uploads/*
 !uploads/.gitkeep
 
-# --- Drafts & Raw artifacts ---
+# --- Drafts & Raw artifacts (keep .gitkeep only) ---
 storage/drafts/*
 !storage/drafts/.gitkeep
 storage/raw/*
 !storage/raw/.gitkeep
-# runtime & secrets
+
+# --- Runtime & secrets ---
 .env
-uploads/
-storage/drafts/
-storage/raw/
 storage/*.txt
 storage/*.json
 storage/*.ocr.txt
 storage/*.raw.json
-storage/servline.db
-*.sqlite
-__pycache__/
-*.pyc
 
-# backups & scratch
+# --- Infra artifacts ---
+infra/.pids/
+infra/current_url.txt
+
+# --- Backups & scratch ---
 *.bak
 *.bak*
 *.old
