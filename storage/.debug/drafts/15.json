@@ -1,0 +1,3378 @@
+{
+  "version": 9,
+  "lines": [
+    {
+      "text": "Menu",
+      "conf": 95.9,
+      "page": 1,
+      "col": 0,
+      "y": 318,
+      "tokens": [
+        {
+          "text": "Menu",
+          "conf": 95.87439,
+          "left": 869,
+          "top": 318,
+          "width": 109,
+          "height": 32,
+          "cx": 923.5,
+          "cy": 334.0,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "- lced Tea - 2.00",
+      "conf": 85.2,
+      "page": 1,
+      "col": 0,
+      "y": 344,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 87.709976,
+          "left": 305,
+          "top": 364,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 365.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "lced",
+          "conf": 57.73851,
+          "left": 335,
+          "top": 344,
+          "width": 81,
+          "height": 34,
+          "cx": 375.5,
+          "cy": 361.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "Tea",
+          "conf": 93.24617,
+          "left": 433,
+          "top": 346,
+          "width": 79,
+          "height": 32,
+          "cx": 472.5,
+          "cy": 362.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 91.472267,
+          "left": 527,
+          "top": 364,
+          "width": 11,
+          "height": 3,
+          "cx": 532.5,
+          "cy": 365.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "2.00",
+          "conf": 95.963722,
+          "left": 556,
+          "top": 345,
+          "width": 87,
+          "height": 33,
+          "cx": 599.5,
+          "cy": 361.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "tomato, basil - 12.99",
+      "conf": 94.5,
+      "page": 1,
+      "col": 0,
+      "y": 552,
+      "tokens": [
+        {
+          "text": "tomato,",
+          "conf": 96.523506,
+          "left": 980,
+          "top": 556,
+          "width": 150,
+          "height": 36,
+          "cx": 1055.0,
+          "cy": 574.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "basil",
+          "conf": 92.437759,
+          "left": 1150,
+          "top": 552,
+          "width": 90,
+          "height": 34,
+          "cx": 1195.0,
+          "cy": 569.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.302628,
+          "left": 1258,
+          "top": 572,
+          "width": 11,
+          "height": 3,
+          "cx": 1263.5,
+          "cy": 573.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "12.99",
+          "conf": 96.564667,
+          "left": 1288,
+          "top": 553,
+          "width": 111,
+          "height": 33,
+          "cx": 1343.5,
+          "cy": 569.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "with pepperoni - 13.49",
+      "conf": 94.5,
+      "page": 1,
+      "col": 0,
+      "y": 642,
+      "tokens": [
+        {
+          "text": "with",
+          "conf": 96.33699,
+          "left": 883,
+          "top": 642,
+          "width": 80,
+          "height": 34,
+          "cx": 923.0,
+          "cy": 659.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "pepperoni",
+          "conf": 93.300545,
+          "left": 982,
+          "top": 642,
+          "width": 201,
+          "height": 44,
+          "cx": 1082.5,
+          "cy": 664.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 91.576805,
+          "left": 1201,
+          "top": 662,
+          "width": 11,
+          "height": 3,
+          "cx": 1206.5,
+          "cy": 663.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "13.49",
+          "conf": 96.864273,
+          "left": 1231,
+          "top": 643,
+          "width": 111,
+          "height": 33,
+          "cx": 1286.5,
+          "cy": 659.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "BBQ sauce, red onion - 14.25",
+      "conf": 95.2,
+      "page": 1,
+      "col": 0,
+      "y": 732,
+      "tokens": [
+        {
+          "text": "BBQ",
+          "conf": 96.624153,
+          "left": 851,
+          "top": 733,
+          "width": 92,
+          "height": 42,
+          "cx": 897.0,
+          "cy": 754.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "sauce,",
+          "conf": 96.077522,
+          "left": 959,
+          "top": 741,
+          "width": 132,
+          "height": 31,
+          "cx": 1025.0,
+          "cy": 756.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "red",
+          "conf": 96.89151,
+          "left": 1111,
+          "top": 732,
+          "width": 62,
+          "height": 34,
+          "cx": 1142.0,
+          "cy": 749.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "onion",
+          "conf": 93.259529,
+          "left": 1190,
+          "top": 732,
+          "width": 110,
+          "height": 34,
+          "cx": 1245.0,
+          "cy": 749.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.000488,
+          "left": 1318,
+          "top": 752,
+          "width": 11,
+          "height": 3,
+          "cx": 1323.5,
+          "cy": 753.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "14.25",
+          "conf": 95.204315,
+          "left": 1348,
+          "top": 733,
+          "width": 111,
+          "height": 33,
+          "cx": 1403.5,
+          "cy": 749.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "peppers, onions, olives - 12.75",
+      "conf": 94.8,
+      "page": 1,
+      "col": 0,
+      "y": 823,
+      "tokens": [
+        {
+          "text": "peppers,",
+          "conf": 96.695457,
+          "left": 948,
+          "top": 832,
+          "width": 174,
+          "height": 35,
+          "cx": 1035.0,
+          "cy": 849.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "onions,",
+          "conf": 95.978592,
+          "left": 1141,
+          "top": 823,
+          "width": 145,
+          "height": 40,
+          "cx": 1213.5,
+          "cy": 843.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "olives",
+          "conf": 93.167969,
+          "left": 1305,
+          "top": 823,
+          "width": 115,
+          "height": 34,
+          "cx": 1362.5,
+          "cy": 840.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.335518,
+          "left": 1436,
+          "top": 843,
+          "width": 11,
+          "height": 3,
+          "cx": 1441.5,
+          "cy": 844.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "12.75",
+          "conf": 95.996719,
+          "left": 1468,
+          "top": 824,
+          "width": 110,
+          "height": 33,
+          "cx": 1523.0,
+          "cy": 840.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "Beef patty, cheese, lettuce, tomato - 9.99",
+      "conf": 95.4,
+      "page": 1,
+      "col": 0,
+      "y": 1059,
+      "tokens": [
+        {
+          "text": "Beef",
+          "conf": 96.501808,
+          "left": 835,
+          "top": 1059,
+          "width": 92,
+          "height": 34,
+          "cx": 881.0,
+          "cy": 1076.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "patty,",
+          "conf": 96.47023,
+          "left": 943,
+          "top": 1063,
+          "width": 106,
+          "height": 40,
+          "cx": 996.0,
+          "cy": 1083.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "cheese,",
+          "conf": 96.537865,
+          "left": 1068,
+          "top": 1059,
+          "width": 158,
+          "height": 40,
+          "cx": 1147.0,
+          "cy": 1079.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "lettuce,",
+          "conf": 96.229561,
+          "left": 1246,
+          "top": 1059,
+          "width": 143,
+          "height": 40,
+          "cx": 1317.5,
+          "cy": 1079.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "tomato",
+          "conf": 92.580437,
+          "left": 1407,
+          "top": 1063,
+          "width": 139,
+          "height": 30,
+          "cx": 1476.5,
+          "cy": 1078.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.270027,
+          "left": 1563,
+          "top": 1079,
+          "width": 11,
+          "height": 3,
+          "cx": 1568.5,
+          "cy": 1080.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "9.99",
+          "conf": 96.414772,
+          "left": 1592,
+          "top": 1060,
+          "width": 87,
+          "height": 33,
+          "cx": 1635.5,
+          "cy": 1076.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "Two patties, bacon, cheese - 11.50",
+      "conf": 94.5,
+      "page": 1,
+      "col": 0,
+      "y": 1149,
+      "tokens": [
+        {
+          "text": "Two",
+          "conf": 95.464005,
+          "left": 819,
+          "top": 1151,
+          "width": 85,
+          "height": 32,
+          "cx": 861.5,
+          "cy": 1167.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "patties,",
+          "conf": 96.040092,
+          "left": 922,
+          "top": 1149,
+          "width": 144,
+          "height": 44,
+          "cx": 994.0,
+          "cy": 1171.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "bacon,",
+          "conf": 96.787819,
+          "left": 1085,
+          "top": 1149,
+          "width": 133,
+          "height": 40,
+          "cx": 1151.5,
+          "cy": 1169.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "cheese",
+          "conf": 91.249344,
+          "left": 1237,
+          "top": 1149,
+          "width": 146,
+          "height": 34,
+          "cx": 1310.0,
+          "cy": 1166.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 91.249344,
+          "left": 1400,
+          "top": 1169,
+          "width": 11,
+          "height": 3,
+          "cx": 1405.5,
+          "cy": 1170.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "11.50",
+          "conf": 96.484871,
+          "left": 1431,
+          "top": 1150,
+          "width": 111,
+          "height": 33,
+          "cx": 1486.5,
+          "cy": 1166.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "- Lettuce, tomato, mayo - 8.75",
+      "conf": 94.3,
+      "page": 1,
+      "col": 0,
+      "y": 1240,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 91.455154,
+          "left": 877,
+          "top": 1259,
+          "width": 11,
+          "height": 3,
+          "cx": 882.5,
+          "cy": 1260.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "Lettuce,",
+          "conf": 96.319832,
+          "left": 908,
+          "top": 1241,
+          "width": 157,
+          "height": 38,
+          "cx": 986.5,
+          "cy": 1260.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "tomato,",
+          "conf": 96.24514,
+          "left": 1083,
+          "top": 1243,
+          "width": 151,
+          "height": 36,
+          "cx": 1158.5,
+          "cy": 1261.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "mayo",
+          "conf": 93.287674,
+          "left": 1254,
+          "top": 1248,
+          "width": 109,
+          "height": 35,
+          "cx": 1308.5,
+          "cy": 1265.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.100647,
+          "left": 1380,
+          "top": 1259,
+          "width": 11,
+          "height": 3,
+          "cx": 1385.5,
+          "cy": 1260.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "8.75",
+          "conf": 96.628525,
+          "left": 1408,
+          "top": 1240,
+          "width": 87,
+          "height": 33,
+          "cx": 1451.5,
+          "cy": 1256.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "Spicy buffalo sauce - 7.99",
+      "conf": 94.7,
+      "page": 1,
+      "col": 0,
+      "y": 1476,
+      "tokens": [
+        {
+          "text": "Spicy",
+          "conf": 96.809952,
+          "left": 818,
+          "top": 1476,
+          "width": 111,
+          "height": 44,
+          "cx": 873.5,
+          "cy": 1498.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "buffalo",
+          "conf": 96.28788,
+          "left": 945,
+          "top": 1476,
+          "width": 135,
+          "height": 34,
+          "cx": 1012.5,
+          "cy": 1493.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "sauce",
+          "conf": 93.291809,
+          "left": 1096,
+          "top": 1485,
+          "width": 121,
+          "height": 25,
+          "cx": 1156.5,
+          "cy": 1497.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 91.310379,
+          "left": 1234,
+          "top": 1496,
+          "width": 11,
+          "height": 3,
+          "cx": 1239.5,
+          "cy": 1497.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "7.99",
+          "conf": 95.802032,
+          "left": 1263,
+          "top": 1477,
+          "width": 86,
+          "height": 33,
+          "cx": 1306.0,
+          "cy": 1493.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "- Sweet & smoky - 7.99",
+      "conf": 93.3,
+      "page": 1,
+      "col": 0,
+      "y": 1566,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 92.131638,
+          "left": 890,
+          "top": 1586,
+          "width": 11,
+          "height": 3,
+          "cx": 895.5,
+          "cy": 1587.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "Sweet",
+          "conf": 92.940483,
+          "left": 918,
+          "top": 1567,
+          "width": 128,
+          "height": 33,
+          "cx": 982.0,
+          "cy": 1583.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "&",
+          "conf": 92.940483,
+          "left": 1060,
+          "top": 1568,
+          "width": 28,
+          "height": 32,
+          "cx": 1074.0,
+          "cy": 1584.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "smoky",
+          "conf": 93.304054,
+          "left": 1104,
+          "top": 1566,
+          "width": 133,
+          "height": 44,
+          "cx": 1170.5,
+          "cy": 1588.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.080215,
+          "left": 1252,
+          "top": 1586,
+          "width": 11,
+          "height": 3,
+          "cx": 1257.5,
+          "cy": 1587.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "7.99",
+          "conf": 96.383438,
+          "left": 1281,
+          "top": 1567,
+          "width": 87,
+          "height": 33,
+          "cx": 1324.5,
+          "cy": 1583.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "(6 pcs) - Savory garlic butter - 8.25",
+      "conf": 94.9,
+      "page": 1,
+      "col": 0,
+      "y": 1656,
+      "tokens": [
+        {
+          "text": "(6",
+          "conf": 96.905724,
+          "left": 837,
+          "top": 1656,
+          "width": 36,
+          "height": 44,
+          "cx": 855.0,
+          "cy": 1678.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "pcs)",
+          "conf": 93.295097,
+          "left": 891,
+          "top": 1656,
+          "width": 83,
+          "height": 44,
+          "cx": 932.5,
+          "cy": 1678.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.751778,
+          "left": 991,
+          "top": 1676,
+          "width": 11,
+          "height": 3,
+          "cx": 996.5,
+          "cy": 1677.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "Savory",
+          "conf": 96.721794,
+          "left": 1020,
+          "top": 1657,
+          "width": 142,
+          "height": 43,
+          "cx": 1091.0,
+          "cy": 1678.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "garlic",
+          "conf": 96.470543,
+          "left": 1178,
+          "top": 1656,
+          "width": 108,
+          "height": 44,
+          "cx": 1232.0,
+          "cy": 1678.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "butter",
+          "conf": 93.210388,
+          "left": 1303,
+          "top": 1656,
+          "width": 115,
+          "height": 34,
+          "cx": 1360.5,
+          "cy": 1673.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.210388,
+          "left": 1434,
+          "top": 1676,
+          "width": 11,
+          "height": 3,
+          "cx": 1439.5,
+          "cy": 1677.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "8.25",
+          "conf": 96.74173,
+          "left": 1463,
+          "top": 1657,
+          "width": 86,
+          "height": 33,
+          "cx": 1506.0,
+          "cy": 1673.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "with marinara - 4.99",
+      "conf": 93.9,
+      "page": 1,
+      "col": 0,
+      "y": 1893,
+      "tokens": [
+        {
+          "text": "with",
+          "conf": 96.091805,
+          "left": 909,
+          "top": 1893,
+          "width": 80,
+          "height": 34,
+          "cx": 949.0,
+          "cy": 1910.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "marinara",
+          "conf": 93.275093,
+          "left": 1008,
+          "top": 1893,
+          "width": 181,
+          "height": 34,
+          "cx": 1098.5,
+          "cy": 1910.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 91.031067,
+          "left": 1204,
+          "top": 1913,
+          "width": 11,
+          "height": 3,
+          "cx": 1209.5,
+          "cy": 1914.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "4.99",
+          "conf": 95.369186,
+          "left": 1231,
+          "top": 1894,
+          "width": 88,
+          "height": 33,
+          "cx": 1275.0,
+          "cy": 1910.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "cheese with dip - 5.50",
+      "conf": 95.2,
+      "page": 1,
+      "col": 0,
+      "y": 1983,
+      "tokens": [
+        {
+          "text": "cheese",
+          "conf": 96.598877,
+          "left": 856,
+          "top": 1983,
+          "width": 147,
+          "height": 34,
+          "cx": 929.5,
+          "cy": 2000.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "with",
+          "conf": 96.181,
+          "left": 1017,
+          "top": 1983,
+          "width": 80,
+          "height": 34,
+          "cx": 1057.0,
+          "cy": 2000.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "dip",
+          "conf": 93.122101,
+          "left": 1115,
+          "top": 1983,
+          "width": 59,
+          "height": 44,
+          "cx": 1144.5,
+          "cy": 2005.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.122101,
+          "left": 1190,
+          "top": 2003,
+          "width": 11,
+          "height": 3,
+          "cx": 1195.5,
+          "cy": 2004.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "5.50",
+          "conf": 96.915192,
+          "left": 1219,
+          "top": 1984,
+          "width": 87,
+          "height": 33,
+          "cx": 1262.5,
+          "cy": 2000.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "crispy - 3.99",
+      "conf": 94.3,
+      "page": 1,
+      "col": 0,
+      "y": 2073,
+      "tokens": [
+        {
+          "text": "crispy",
+          "conf": 93.29995,
+          "left": 890,
+          "top": 2073,
+          "width": 120,
+          "height": 44,
+          "cx": 950.0,
+          "cy": 2095.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.807312,
+          "left": 1024,
+          "top": 2093,
+          "width": 11,
+          "height": 3,
+          "cx": 1029.5,
+          "cy": 2094.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "3.99",
+          "conf": 96.942574,
+          "left": 1053,
+          "top": 2074,
+          "width": 87,
+          "height": 33,
+          "cx": 1096.5,
+          "cy": 2090.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "croutons, parmesan - 6.99",
+      "conf": 95.4,
+      "page": 1,
+      "col": 0,
+      "y": 2311,
+      "tokens": [
+        {
+          "text": "croutons,",
+          "conf": 96.431145,
+          "left": 870,
+          "top": 2314,
+          "width": 185,
+          "height": 36,
+          "cx": 962.5,
+          "cy": 2332.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "parmesan",
+          "conf": 92.97673,
+          "left": 1075,
+          "top": 2319,
+          "width": 201,
+          "height": 35,
+          "cx": 1175.5,
+          "cy": 2336.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 92.97673,
+          "left": 1295,
+          "top": 2330,
+          "width": 11,
+          "height": 3,
+          "cx": 1300.5,
+          "cy": 2331.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "cucumber 6.50",
+      "conf": 94.7,
+      "page": 1,
+      "col": 0,
+      "y": 2400,
+      "tokens": [
+        {
+          "text": "cucumber",
+          "conf": 93.285965,
+          "left": 1137,
+          "top": 2400,
+          "width": 201,
+          "height": 34,
+          "cx": 1237.5,
+          "cy": 2417.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "6.50",
+          "conf": 96.087326,
+          "left": 1382,
+          "top": 2401,
+          "width": 87,
+          "height": 33,
+          "cx": 1425.5,
+          "cy": 2417.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "greens, tomato, -",
+      "conf": 95.4,
+      "page": 1,
+      "col": 0,
+      "y": 2404,
+      "tokens": [
+        {
+          "text": "greens,",
+          "conf": 96.73024,
+          "left": 799,
+          "top": 2409,
+          "width": 150,
+          "height": 35,
+          "cx": 874.0,
+          "cy": 2426.5,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "tomato,",
+          "conf": 96.333817,
+          "left": 967,
+          "top": 2404,
+          "width": 150,
+          "height": 36,
+          "cx": 1042.0,
+          "cy": 2422.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.111595,
+          "left": 1354,
+          "top": 2420,
+          "width": 11,
+          "height": 3,
+          "cx": 1359.5,
+          "cy": 2421.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "Coke, Sprite - 1.50",
+      "conf": 95.7,
+      "page": 1,
+      "col": 0,
+      "y": 2636,
+      "tokens": [
+        {
+          "text": "Coke,",
+          "conf": 96.566399,
+          "left": 812,
+          "top": 2636,
+          "width": 116,
+          "height": 40,
+          "cx": 870.0,
+          "cy": 2656.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "Sprite",
+          "conf": 93.26107,
+          "left": 947,
+          "top": 2636,
+          "width": 118,
+          "height": 44,
+          "cx": 1006.0,
+          "cy": 2658.0,
+          "page_num": 1,
+          "col": 0
+        },
+        {
+          "text": "-",
+          "conf": 93.258591,
+          "left": 1082,
+          "top": 2656,
+          "width": 11,
+          "height": 3,
+          "cx": 1087.5,
+          "cy": 2657.5,
+          "page_num": 1,
+          "col": 0
+        }
+      ]
+    },
+    {
+      "text": "Pizza",
+      "conf": 90.8,
+      "page": 1,
+      "col": 1,
+      "y": 316,
+      "tokens": [
+        {
+          "text": "Pizza",
+          "conf": 90.762741,
+          "left": 542,
+          "top": 316,
+          "width": 111,
+          "height": 34,
+          "cx": 597.5,
+          "cy": 333.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Hometown - Sample",
+      "conf": 94.5,
+      "page": 1,
+      "col": 1,
+      "y": 316,
+      "tokens": [
+        {
+          "text": "Hometown",
+          "conf": 96.253151,
+          "left": 307,
+          "top": 318,
+          "width": 216,
+          "height": 32,
+          "cx": 415.0,
+          "cy": 334.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 90.762741,
+          "left": 667,
+          "top": 336,
+          "width": 11,
+          "height": 3,
+          "cx": 672.5,
+          "cy": 337.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Sample",
+          "conf": 96.38398,
+          "left": 696,
+          "top": 316,
+          "width": 154,
+          "height": 44,
+          "cx": 773.0,
+          "cy": 338.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Specialty Pizzas",
+      "conf": 96.2,
+      "page": 1,
+      "col": 1,
+      "y": 462,
+      "tokens": [
+        {
+          "text": "Specialty",
+          "conf": 96.487381,
+          "left": 305,
+          "top": 462,
+          "width": 186,
+          "height": 44,
+          "cx": 398.0,
+          "cy": 484.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Pizzas",
+          "conf": 95.872826,
+          "left": 509,
+          "top": 462,
+          "width": 132,
+          "height": 34,
+          "cx": 575.0,
+          "cy": 479.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Margherita - Fresh mozzarella,",
+      "conf": 93.7,
+      "page": 1,
+      "col": 1,
+      "y": 552,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.251099,
+          "left": 305,
+          "top": 572,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 573.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Margherita",
+          "conf": 91.235077,
+          "left": 335,
+          "top": 552,
+          "width": 219,
+          "height": 44,
+          "cx": 444.5,
+          "cy": 574.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 91.235077,
+          "left": 569,
+          "top": 572,
+          "width": 11,
+          "height": 3,
+          "cx": 574.5,
+          "cy": 573.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Fresh",
+          "conf": 96.403122,
+          "left": 599,
+          "top": 552,
+          "width": 112,
+          "height": 34,
+          "cx": 655.0,
+          "cy": 569.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "mozzarella,",
+          "conf": 96.554253,
+          "left": 731,
+          "top": 552,
+          "width": 231,
+          "height": 40,
+          "cx": 846.5,
+          "cy": 572.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Pepperoni Feast - Loaded",
+      "conf": 94.2,
+      "page": 1,
+      "col": 1,
+      "y": 642,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.238762,
+          "left": 305,
+          "top": 662,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 663.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Pepperoni",
+          "conf": 95.85611,
+          "left": 335,
+          "top": 642,
+          "width": 205,
+          "height": 44,
+          "cx": 437.5,
+          "cy": 664.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Feast",
+          "conf": 93.246628,
+          "left": 560,
+          "top": 644,
+          "width": 113,
+          "height": 32,
+          "cx": 616.5,
+          "cy": 660.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 91.98024,
+          "left": 688,
+          "top": 662,
+          "width": 11,
+          "height": 3,
+          "cx": 693.5,
+          "cy": 663.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Loaded",
+          "conf": 96.602844,
+          "left": 718,
+          "top": 642,
+          "width": 149,
+          "height": 34,
+          "cx": 792.5,
+          "cy": 659.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- BBQ Chicken - Chicken,",
+      "conf": 93.2,
+      "page": 1,
+      "col": 1,
+      "y": 732,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.24614,
+          "left": 305,
+          "top": 752,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 753.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "BBQ",
+          "conf": 95.948677,
+          "left": 335,
+          "top": 733,
+          "width": 92,
+          "height": 42,
+          "cx": 381.0,
+          "cy": 754.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Chicken",
+          "conf": 90.429329,
+          "left": 445,
+          "top": 732,
+          "width": 163,
+          "height": 34,
+          "cx": 526.5,
+          "cy": 749.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 90.429329,
+          "left": 626,
+          "top": 752,
+          "width": 11,
+          "height": 3,
+          "cx": 631.5,
+          "cy": 753.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Chicken,",
+          "conf": 95.854912,
+          "left": 654,
+          "top": 732,
+          "width": 175,
+          "height": 40,
+          "cx": 741.5,
+          "cy": 752.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Veggie Delight - Mushrooms,",
+      "conf": 94.3,
+      "page": 1,
+      "col": 1,
+      "y": 823,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.249313,
+          "left": 305,
+          "top": 843,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 844.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Veggie",
+          "conf": 96.641479,
+          "left": 331,
+          "top": 823,
+          "width": 143,
+          "height": 44,
+          "cx": 402.5,
+          "cy": 845.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Delight",
+          "conf": 92.434807,
+          "left": 493,
+          "top": 823,
+          "width": 141,
+          "height": 44,
+          "cx": 563.5,
+          "cy": 845.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.434807,
+          "left": 649,
+          "top": 843,
+          "width": 11,
+          "height": 3,
+          "cx": 654.5,
+          "cy": 844.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Mushrooms,",
+          "conf": 96.504517,
+          "left": 680,
+          "top": 823,
+          "width": 248,
+          "height": 40,
+          "cx": 804.0,
+          "cy": 843.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Burgers & Sandwiches",
+      "conf": 92.8,
+      "page": 1,
+      "col": 1,
+      "y": 969,
+      "tokens": [
+        {
+          "text": "Burgers",
+          "conf": 90.917961,
+          "left": 307,
+          "top": 971,
+          "width": 158,
+          "height": 42,
+          "cx": 386.0,
+          "cy": 992.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "&",
+          "conf": 90.917961,
+          "left": 481,
+          "top": 971,
+          "width": 28,
+          "height": 32,
+          "cx": 495.0,
+          "cy": 987.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Sandwiches",
+          "conf": 96.434776,
+          "left": 525,
+          "top": 969,
+          "width": 248,
+          "height": 34,
+          "cx": 649.0,
+          "cy": 986.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Classic Cheeseburger -",
+      "conf": 93.4,
+      "page": 1,
+      "col": 1,
+      "y": 1059,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.250816,
+          "left": 305,
+          "top": 1079,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1080.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Classic",
+          "conf": 95.539307,
+          "left": 333,
+          "top": 1059,
+          "width": 147,
+          "height": 34,
+          "cx": 406.5,
+          "cy": 1076.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Cheeseburger",
+          "conf": 93.296654,
+          "left": 496,
+          "top": 1059,
+          "width": 293,
+          "height": 44,
+          "cx": 642.5,
+          "cy": 1081.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 91.688484,
+          "left": 804,
+          "top": 1079,
+          "width": 11,
+          "height": 3,
+          "cx": 809.5,
+          "cy": 1080.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Bacon Double Burger -",
+      "conf": 94.5,
+      "page": 1,
+      "col": 1,
+      "y": 1149,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.246307,
+          "left": 305,
+          "top": 1169,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1170.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Bacon",
+          "conf": 96.436424,
+          "left": 335,
+          "top": 1151,
+          "width": 125,
+          "height": 32,
+          "cx": 397.5,
+          "cy": 1167.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Double",
+          "conf": 96.594032,
+          "left": 480,
+          "top": 1149,
+          "width": 142,
+          "height": 34,
+          "cx": 551.0,
+          "cy": 1166.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Burger",
+          "conf": 93.257683,
+          "left": 641,
+          "top": 1151,
+          "width": 135,
+          "height": 42,
+          "cx": 708.5,
+          "cy": 1172.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.813698,
+          "left": 791,
+          "top": 1169,
+          "width": 11,
+          "height": 3,
+          "cx": 796.5,
+          "cy": 1170.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Grilled Chicken Sandwich",
+      "conf": 94.6,
+      "page": 1,
+      "col": 1,
+      "y": 1239,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 92.870918,
+          "left": 305,
+          "top": 1259,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1260.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Grilled",
+          "conf": 96.162865,
+          "left": 333,
+          "top": 1239,
+          "width": 130,
+          "height": 34,
+          "cx": 398.0,
+          "cy": 1256.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Chicken",
+          "conf": 96.162865,
+          "left": 480,
+          "top": 1239,
+          "width": 164,
+          "height": 34,
+          "cx": 562.0,
+          "cy": 1256.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Sandwich",
+          "conf": 93.29232,
+          "left": 662,
+          "top": 1239,
+          "width": 197,
+          "height": 34,
+          "cx": 760.5,
+          "cy": 1256.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Wings",
+      "conf": 96.8,
+      "page": 1,
+      "col": 1,
+      "y": 1386,
+      "tokens": [
+        {
+          "text": "Wings",
+          "conf": 96.777443,
+          "left": 303,
+          "top": 1386,
+          "width": 127,
+          "height": 44,
+          "cx": 366.5,
+          "cy": 1408.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Buffalo Wings (6 pcs) -",
+      "conf": 94.4,
+      "page": 1,
+      "col": 1,
+      "y": 1476,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.113525,
+          "left": 305,
+          "top": 1496,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1497.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Buffalo",
+          "conf": 96.096649,
+          "left": 335,
+          "top": 1476,
+          "width": 139,
+          "height": 34,
+          "cx": 404.5,
+          "cy": 1493.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Wings",
+          "conf": 96.106575,
+          "left": 489,
+          "top": 1476,
+          "width": 128,
+          "height": 44,
+          "cx": 553.0,
+          "cy": 1498.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "(6",
+          "conf": 96.430573,
+          "left": 634,
+          "top": 1476,
+          "width": 37,
+          "height": 44,
+          "cx": 652.5,
+          "cy": 1498.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "pcs)",
+          "conf": 93.288193,
+          "left": 689,
+          "top": 1476,
+          "width": 83,
+          "height": 44,
+          "cx": 730.5,
+          "cy": 1498.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 91.370384,
+          "left": 789,
+          "top": 1496,
+          "width": 11,
+          "height": 3,
+          "cx": 794.5,
+          "cy": 1497.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Honey BBQ Wings (6 pcs)",
+      "conf": 95.0,
+      "page": 1,
+      "col": 1,
+      "y": 1566,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 91.953072,
+          "left": 305,
+          "top": 1586,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1587.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Honey",
+          "conf": 96.629395,
+          "left": 335,
+          "top": 1568,
+          "width": 130,
+          "height": 42,
+          "cx": 400.0,
+          "cy": 1589.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "BBQ",
+          "conf": 96.595337,
+          "left": 483,
+          "top": 1567,
+          "width": 92,
+          "height": 42,
+          "cx": 529.0,
+          "cy": 1588.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Wings",
+          "conf": 96.584038,
+          "left": 590,
+          "top": 1566,
+          "width": 128,
+          "height": 44,
+          "cx": 654.0,
+          "cy": 1588.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "(6",
+          "conf": 95.558701,
+          "left": 736,
+          "top": 1566,
+          "width": 36,
+          "height": 44,
+          "cx": 754.0,
+          "cy": 1588.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "pcs)",
+          "conf": 92.955719,
+          "left": 790,
+          "top": 1566,
+          "width": 82,
+          "height": 44,
+          "cx": 831.0,
+          "cy": 1588.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Garlic Parmesan Wings",
+      "conf": 95.6,
+      "page": 1,
+      "col": 1,
+      "y": 1656,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.245041,
+          "left": 305,
+          "top": 1676,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1677.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Garlic",
+          "conf": 95.988274,
+          "left": 333,
+          "top": 1656,
+          "width": 119,
+          "height": 34,
+          "cx": 392.5,
+          "cy": 1673.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Parmesan",
+          "conf": 96.733932,
+          "left": 469,
+          "top": 1658,
+          "width": 207,
+          "height": 32,
+          "cx": 572.5,
+          "cy": 1674.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Wings",
+          "conf": 96.449875,
+          "left": 691,
+          "top": 1656,
+          "width": 129,
+          "height": 44,
+          "cx": 755.5,
+          "cy": 1678.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Sides & Apps",
+      "conf": 94.0,
+      "page": 1,
+      "col": 1,
+      "y": 1803,
+      "tokens": [
+        {
+          "text": "Sides",
+          "conf": 93.289825,
+          "left": 305,
+          "top": 1803,
+          "width": 113,
+          "height": 34,
+          "cx": 361.5,
+          "cy": 1820.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "&",
+          "conf": 93.125717,
+          "left": 434,
+          "top": 1805,
+          "width": 28,
+          "height": 32,
+          "cx": 448.0,
+          "cy": 1821.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Apps",
+          "conf": 95.604218,
+          "left": 476,
+          "top": 1805,
+          "width": 105,
+          "height": 42,
+          "cx": 528.5,
+          "cy": 1826.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Garlic Breadsticks - Served",
+      "conf": 94.3,
+      "page": 1,
+      "col": 1,
+      "y": 1893,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.244377,
+          "left": 305,
+          "top": 1913,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 1914.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Garlic",
+          "conf": 96.049171,
+          "left": 333,
+          "top": 1893,
+          "width": 119,
+          "height": 34,
+          "cx": 392.5,
+          "cy": 1910.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Breadsticks",
+          "conf": 93.294975,
+          "left": 469,
+          "top": 1893,
+          "width": 237,
+          "height": 34,
+          "cx": 587.5,
+          "cy": 1910.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.248413,
+          "left": 722,
+          "top": 1913,
+          "width": 11,
+          "height": 3,
+          "cx": 727.5,
+          "cy": 1914.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Served",
+          "conf": 96.575272,
+          "left": 750,
+          "top": 1893,
+          "width": 143,
+          "height": 34,
+          "cx": 821.5,
+          "cy": 1910.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- Mozzarella Sticks - Fried",
+      "conf": 94.4,
+      "page": 1,
+      "col": 1,
+      "y": 1983,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.255402,
+          "left": 305,
+          "top": 2003,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2004.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Mozzarella",
+          "conf": 96.512085,
+          "left": 335,
+          "top": 1983,
+          "width": 221,
+          "height": 34,
+          "cx": 445.5,
+          "cy": 2000.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Sticks",
+          "conf": 93.248901,
+          "left": 571,
+          "top": 1983,
+          "width": 122,
+          "height": 34,
+          "cx": 632.0,
+          "cy": 2000.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.544571,
+          "left": 708,
+          "top": 2003,
+          "width": 11,
+          "height": 3,
+          "cx": 713.5,
+          "cy": 2004.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Fried",
+          "conf": 96.547859,
+          "left": 739,
+          "top": 1983,
+          "width": 99,
+          "height": 34,
+          "cx": 788.5,
+          "cy": 2000.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- French Fries - Golden and",
+      "conf": 94.1,
+      "page": 1,
+      "col": 1,
+      "y": 2073,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.218002,
+          "left": 305,
+          "top": 2093,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2094.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "French",
+          "conf": 96.785446,
+          "left": 335,
+          "top": 2073,
+          "width": 138,
+          "height": 34,
+          "cx": 404.0,
+          "cy": 2090.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Fries",
+          "conf": 90.791153,
+          "left": 493,
+          "top": 2073,
+          "width": 99,
+          "height": 34,
+          "cx": 542.5,
+          "cy": 2090.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 90.791153,
+          "left": 608,
+          "top": 2093,
+          "width": 11,
+          "height": 3,
+          "cx": 613.5,
+          "cy": 2094.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Golden",
+          "conf": 96.36689,
+          "left": 636,
+          "top": 2073,
+          "width": 146,
+          "height": 34,
+          "cx": 709.0,
+          "cy": 2090.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "and",
+          "conf": 96.36689,
+          "left": 799,
+          "top": 2073,
+          "width": 73,
+          "height": 34,
+          "cx": 835.5,
+          "cy": 2090.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Salads",
+      "conf": 95.9,
+      "page": 1,
+      "col": 1,
+      "y": 2219,
+      "tokens": [
+        {
+          "text": "Salads",
+          "conf": 95.876556,
+          "left": 305,
+          "top": 2219,
+          "width": 139,
+          "height": 34,
+          "cx": 374.5,
+          "cy": 2236.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Caesar Salad Romaine, - -",
+      "conf": 94.4,
+      "page": 1,
+      "col": 1,
+      "y": 2310,
+      "tokens": [
+        {
+          "text": "Caesar",
+          "conf": 96.472466,
+          "left": 333,
+          "top": 2311,
+          "width": 148,
+          "height": 33,
+          "cx": 407.0,
+          "cy": 2327.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Salad",
+          "conf": 93.273964,
+          "left": 496,
+          "top": 2310,
+          "width": 114,
+          "height": 34,
+          "cx": 553.0,
+          "cy": 2327.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Romaine,",
+          "conf": 96.411766,
+          "left": 659,
+          "top": 2310,
+          "width": 191,
+          "height": 40,
+          "cx": 754.5,
+          "cy": 2330.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 93.254662,
+          "left": 305,
+          "top": 2330,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2331.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.334435,
+          "left": 628,
+          "top": 2330,
+          "width": 11,
+          "height": 3,
+          "cx": 633.5,
+          "cy": 2331.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Garden Salad Mixed",
+      "conf": 95.4,
+      "page": 1,
+      "col": 1,
+      "y": 2400,
+      "tokens": [
+        {
+          "text": "Garden",
+          "conf": 96.404343,
+          "left": 333,
+          "top": 2400,
+          "width": 151,
+          "height": 34,
+          "cx": 408.5,
+          "cy": 2417.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Salad",
+          "conf": 93.289879,
+          "left": 501,
+          "top": 2400,
+          "width": 115,
+          "height": 34,
+          "cx": 558.5,
+          "cy": 2417.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Mixed",
+          "conf": 96.375679,
+          "left": 665,
+          "top": 2400,
+          "width": 116,
+          "height": 34,
+          "cx": 723.0,
+          "cy": 2417.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- -",
+      "conf": 92.9,
+      "page": 1,
+      "col": 1,
+      "y": 2420,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.250656,
+          "left": 305,
+          "top": 2420,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2421.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.50264,
+          "left": 633,
+          "top": 2420,
+          "width": 11,
+          "height": 3,
+          "cx": 638.5,
+          "cy": 2421.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Beverages",
+      "conf": 96.6,
+      "page": 1,
+      "col": 1,
+      "y": 2548,
+      "tokens": [
+        {
+          "text": "Beverages",
+          "conf": 96.62915,
+          "left": 307,
+          "top": 2548,
+          "width": 217,
+          "height": 42,
+          "cx": 415.5,
+          "cy": 2569.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Soda Can Diet",
+      "conf": 95.1,
+      "page": 1,
+      "col": 1,
+      "y": 2636,
+      "tokens": [
+        {
+          "text": "Soda",
+          "conf": 96.283997,
+          "left": 333,
+          "top": 2636,
+          "width": 107,
+          "height": 34,
+          "cx": 386.5,
+          "cy": 2653.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Can",
+          "conf": 92.429245,
+          "left": 455,
+          "top": 2637,
+          "width": 81,
+          "height": 33,
+          "cx": 495.5,
+          "cy": 2653.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Diet",
+          "conf": 96.631317,
+          "left": 718,
+          "top": 2636,
+          "width": 80,
+          "height": 34,
+          "cx": 758.0,
+          "cy": 2653.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- - Coke,",
+      "conf": 93.9,
+      "page": 1,
+      "col": 1,
+      "y": 2636,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.242691,
+          "left": 305,
+          "top": 2656,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2657.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.420799,
+          "left": 553,
+          "top": 2656,
+          "width": 11,
+          "height": 3,
+          "cx": 558.5,
+          "cy": 2657.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Coke,",
+          "conf": 95.999573,
+          "left": 582,
+          "top": 2636,
+          "width": 116,
+          "height": 40,
+          "cx": 640.0,
+          "cy": 2656.0,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "Bottled Water 1.25",
+      "conf": 95.1,
+      "page": 1,
+      "col": 1,
+      "y": 2727,
+      "tokens": [
+        {
+          "text": "Bottled",
+          "conf": 95.367523,
+          "left": 335,
+          "top": 2727,
+          "width": 138,
+          "height": 34,
+          "cx": 404.0,
+          "cy": 2744.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "Water",
+          "conf": 93.191734,
+          "left": 489,
+          "top": 2729,
+          "width": 124,
+          "height": 32,
+          "cx": 551.0,
+          "cy": 2745.0,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "1.25",
+          "conf": 96.883316,
+          "left": 659,
+          "top": 2728,
+          "width": 84,
+          "height": 33,
+          "cx": 701.0,
+          "cy": 2744.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    },
+    {
+      "text": "- -",
+      "conf": 93.1,
+      "page": 1,
+      "col": 1,
+      "y": 2747,
+      "tokens": [
+        {
+          "text": "-",
+          "conf": 93.275009,
+          "left": 305,
+          "top": 2747,
+          "width": 11,
+          "height": 3,
+          "cx": 310.5,
+          "cy": 2748.5,
+          "page_num": 1,
+          "col": 1
+        },
+        {
+          "text": "-",
+          "conf": 92.907997,
+          "left": 628,
+          "top": 2747,
+          "width": 11,
+          "height": 3,
+          "cx": 633.5,
+          "cy": 2748.5,
+          "page_num": 1,
+          "col": 1
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "lced Tea",
+      "desc": "",
+      "price": 2.0,
+      "category": "Uncategorized",
+      "confidence": 85.2,
+      "source": {
+        "page": 1,
+        "line_idx": 1,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "tomato, basil",
+      "desc": "",
+      "price": 12.99,
+      "category": "Uncategorized",
+      "confidence": 94.5,
+      "source": {
+        "page": 1,
+        "line_idx": 2,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "with pepperoni",
+      "desc": "",
+      "price": 13.49,
+      "category": "Uncategorized",
+      "confidence": 94.5,
+      "source": {
+        "page": 1,
+        "line_idx": 3,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "BBQ sauce, red onion",
+      "desc": "",
+      "price": 14.25,
+      "category": "Uncategorized",
+      "confidence": 95.2,
+      "source": {
+        "page": 1,
+        "line_idx": 4,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "peppers, onions, olives",
+      "desc": "",
+      "price": 12.75,
+      "category": "Uncategorized",
+      "confidence": 94.8,
+      "source": {
+        "page": 1,
+        "line_idx": 5,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Beef patty, cheese, lettuce, tomato",
+      "desc": "",
+      "price": 9.99,
+      "category": "Uncategorized",
+      "confidence": 95.4,
+      "source": {
+        "page": 1,
+        "line_idx": 6,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Two patties, bacon, cheese",
+      "desc": "",
+      "price": 11.5,
+      "category": "Uncategorized",
+      "confidence": 94.5,
+      "source": {
+        "page": 1,
+        "line_idx": 7,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Lettuce, tomato, mayo",
+      "desc": "",
+      "price": 8.75,
+      "category": "Uncategorized",
+      "confidence": 94.3,
+      "source": {
+        "page": 1,
+        "line_idx": 8,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Spicy buffalo sauce",
+      "desc": "",
+      "price": 7.99,
+      "category": "Uncategorized",
+      "confidence": 94.7,
+      "source": {
+        "page": 1,
+        "line_idx": 9,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Sweet & smoky",
+      "desc": "",
+      "price": 7.99,
+      "category": "Uncategorized",
+      "confidence": 93.3,
+      "source": {
+        "page": 1,
+        "line_idx": 10,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "(6 pcs)",
+      "desc": "Savory garlic butter",
+      "price": 8.25,
+      "category": "Uncategorized",
+      "confidence": 94.9,
+      "source": {
+        "page": 1,
+        "line_idx": 11,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "with marinara",
+      "desc": "",
+      "price": 4.99,
+      "category": "Uncategorized",
+      "confidence": 93.9,
+      "source": {
+        "page": 1,
+        "line_idx": 12,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "cheese with dip",
+      "desc": "",
+      "price": 5.5,
+      "category": "Uncategorized",
+      "confidence": 95.2,
+      "source": {
+        "page": 1,
+        "line_idx": 13,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "crispy",
+      "desc": "",
+      "price": 3.99,
+      "category": "Uncategorized",
+      "confidence": 94.3,
+      "source": {
+        "page": 1,
+        "line_idx": 14,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "croutons, parmesan",
+      "desc": "",
+      "price": 6.99,
+      "category": "Uncategorized",
+      "confidence": 95.4,
+      "source": {
+        "page": 1,
+        "line_idx": 15,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "cucumber",
+      "desc": "",
+      "price": 6.5,
+      "category": "Uncategorized",
+      "confidence": 94.7,
+      "source": {
+        "page": 1,
+        "line_idx": 16,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Coke, Sprite",
+      "desc": "",
+      "price": 1.5,
+      "category": "Uncategorized",
+      "confidence": 95.7,
+      "source": {
+        "page": 1,
+        "line_idx": 18,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Hometown - Sample",
+      "desc": "",
+      "price": 0.0,
+      "category": "Pizza",
+      "confidence": 94.5,
+      "source": {
+        "page": 1,
+        "line_idx": 20,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Margherita - Fresh mozzarella,",
+      "desc": "",
+      "price": 0.0,
+      "category": "Specialty Pizzas",
+      "confidence": 93.7,
+      "source": {
+        "page": 1,
+        "line_idx": 22,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Pepperoni Feast - Loaded",
+      "desc": "",
+      "price": 0.0,
+      "category": "Specialty Pizzas",
+      "confidence": 94.2,
+      "source": {
+        "page": 1,
+        "line_idx": 23,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- BBQ Chicken - Chicken,",
+      "desc": "",
+      "price": 0.0,
+      "category": "Specialty Pizzas",
+      "confidence": 93.2,
+      "source": {
+        "page": 1,
+        "line_idx": 24,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Veggie Delight - Mushrooms,",
+      "desc": "",
+      "price": 0.0,
+      "category": "Specialty Pizzas",
+      "confidence": 94.3,
+      "source": {
+        "page": 1,
+        "line_idx": 25,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Classic Cheeseburger -",
+      "desc": "",
+      "price": 0.0,
+      "category": "Burgers & Sandwiches",
+      "confidence": 93.4,
+      "source": {
+        "page": 1,
+        "line_idx": 27,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Bacon Double Burger -",
+      "desc": "",
+      "price": 0.0,
+      "category": "Burgers & Sandwiches",
+      "confidence": 94.5,
+      "source": {
+        "page": 1,
+        "line_idx": 28,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Grilled Chicken Sandwich",
+      "desc": "",
+      "price": 0.0,
+      "category": "Burgers & Sandwiches",
+      "confidence": 94.6,
+      "source": {
+        "page": 1,
+        "line_idx": 29,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "Buffalo Wings (",
+      "desc": "",
+      "price": 6.0,
+      "category": "Wings",
+      "confidence": 94.4,
+      "source": {
+        "page": 1,
+        "line_idx": 31,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "Honey BBQ Wings (",
+      "desc": "",
+      "price": 6.0,
+      "category": "Wings",
+      "confidence": 95.0,
+      "source": {
+        "page": 1,
+        "line_idx": 32,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    },
+    {
+      "name": "- Garlic Parmesan Wings",
+      "desc": "",
+      "price": 0.0,
+      "category": "Wings",
+      "confidence": 95.6,
+      "source": {
+        "page": 1,
+        "line_idx": 33,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Garlic Breadsticks - Served",
+      "desc": "",
+      "price": 0.0,
+      "category": "Sides & Apps",
+      "confidence": 94.3,
+      "source": {
+        "page": 1,
+        "line_idx": 35,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "- Mozzarella Sticks - Fried",
+      "desc": "",
+      "price": 0.0,
+      "category": "Sides & Apps",
+      "confidence": 94.4,
+      "source": {
+        "page": 1,
+        "line_idx": 36,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "Caesar Salad Romaine, - -",
+      "desc": "",
+      "price": 0.0,
+      "category": "Salads",
+      "confidence": 94.4,
+      "source": {
+        "page": 1,
+        "line_idx": 39,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "Garden Salad Mixed",
+      "desc": "",
+      "price": 0.0,
+      "category": "Salads",
+      "confidence": 95.4,
+      "source": {
+        "page": 1,
+        "line_idx": 40,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "Soda Can Diet",
+      "desc": "",
+      "price": 0.0,
+      "category": "Beverages",
+      "confidence": 95.1,
+      "source": {
+        "page": 1,
+        "line_idx": 43,
+        "bbox": null,
+        "matched_rule": "FREESTANDING_LINE"
+      }
+    },
+    {
+      "name": "Bottled Water",
+      "desc": "",
+      "price": 1.25,
+      "category": "Beverages",
+      "confidence": 95.1,
+      "source": {
+        "page": 1,
+        "line_idx": 45,
+        "bbox": null,
+        "matched_rule": "PRICE_RX_TRAIL+SPLIT"
+      }
+    }
+  ],
+  "assignments": [
+    {
+      "type": "description_attach",
+      "to_item": "cucumber",
+      "category": "Uncategorized",
+      "page": 1,
+      "line": "greens, tomato, -",
+      "score": 95.4,
+      "reason": "continuation heuristic (same column)"
+    },
+    {
+      "type": "category_header",
+      "category": "Pizza",
+      "page": 1,
+      "y": 316,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Pizza",
+      "score": 90.8
+    },
+    {
+      "type": "category_header",
+      "category": "Specialty Pizzas",
+      "page": 1,
+      "y": 462,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Specialty Pizzas",
+      "score": 96.2
+    },
+    {
+      "type": "category_header",
+      "category": "Burgers & Sandwiches",
+      "page": 1,
+      "y": 969,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Burgers & Sandwiches",
+      "score": 92.8
+    },
+    {
+      "type": "category_header",
+      "category": "Wings",
+      "page": 1,
+      "y": 1386,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Wings",
+      "score": 96.8
+    },
+    {
+      "type": "category_header",
+      "category": "Sides & Apps",
+      "page": 1,
+      "y": 1803,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Sides & Apps",
+      "score": 94.0
+    },
+    {
+      "type": "description_attach",
+      "to_item": "- Mozzarella Sticks - Fried",
+      "category": "Sides & Apps",
+      "page": 1,
+      "line": "- French Fries - Golden and",
+      "score": 94.1,
+      "reason": "continuation heuristic (same column)"
+    },
+    {
+      "type": "category_header",
+      "category": "Salads",
+      "page": 1,
+      "y": 2219,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Salads",
+      "score": 95.9
+    },
+    {
+      "type": "description_attach",
+      "to_item": "Garden Salad Mixed",
+      "category": "Salads",
+      "page": 1,
+      "line": "- -",
+      "score": 92.9,
+      "reason": "continuation heuristic (same column)"
+    },
+    {
+      "type": "category_header",
+      "category": "Beverages",
+      "page": 1,
+      "y": 2548,
+      "col": 1,
+      "reason": "heading heuristic (caps/title-case + keywords)",
+      "line": "Beverages",
+      "score": 96.6
+    },
+    {
+      "type": "description_attach",
+      "to_item": "Soda Can Diet",
+      "category": "Beverages",
+      "page": 1,
+      "line": "- - Coke,",
+      "score": 93.9,
+      "reason": "continuation heuristic (same column)"
+    },
+    {
+      "type": "description_attach",
+      "to_item": "Bottled Water",
+      "category": "Beverages",
+      "page": 1,
+      "line": "- -",
+      "score": 93.1,
+      "reason": "continuation heuristic (same column)"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Beverages",
+      "item": "Iced Tea",
+      "price": 2.0,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Specialty Pizzas",
+      "item": "tomato, basil",
+      "price": 12.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Specialty Pizzas",
+      "item": "with pepperoni",
+      "price": 13.49,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Wings",
+      "item": "BBQ sauce, red onion",
+      "price": 14.25,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Specialty Pizzas",
+      "item": "peppers, onions, olives",
+      "price": 12.75,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Burgers & Sandwiches",
+      "item": "Beef patty, cheese, lettuce, tomato",
+      "price": 9.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Burgers & Sandwiches",
+      "item": "Two patties, bacon, cheese",
+      "price": 11.5,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Burgers & Sandwiches",
+      "item": "Lettuce, tomato, mayo",
+      "price": 8.75,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Wings",
+      "item": "Spicy buffalo sauce",
+      "price": 7.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Wings",
+      "item": "Sweet & smoky",
+      "price": 7.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Wings",
+      "item": "Savory garlic butter (6 pcs)",
+      "price": 8.25,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Sides & Apps",
+      "item": "with marinara",
+      "price": 4.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Sides & Apps",
+      "item": "cheese with dip",
+      "price": 5.5,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Sides & Apps",
+      "item": "crispy",
+      "price": 3.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Salads",
+      "item": "croutons, parmesan",
+      "price": 6.99,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Salads",
+      "item": "cucumber",
+      "price": 6.5,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "category_reassign",
+      "from": "Uncategorized",
+      "to": "Beverages",
+      "item": "Coke, Sprite",
+      "price": 1.5,
+      "reason": "semantic guess"
+    },
+    {
+      "type": "merge_beverage_flavors",
+      "from_item": "Coke, Sprite",
+      "into": "Soda Can - Coke, Diet, Sprite",
+      "price_used": 1.5,
+      "reason": "consolidate soda flavors into Soda Can item"
+    }
+  ],
+  "pre_merged_line_count": 50,
+  "post_merged_line_count": 47
+}

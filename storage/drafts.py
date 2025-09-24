@@ -12,6 +12,10 @@ from typing import Any, Dict, Iterable, List, Optional
 ROOT = Path(__file__).resolve().parents[1]   # project root
 DB_PATH = ROOT / "storage" / "servline.db"
 
+# Sidecar debug storage for OCR Inspector
+_DEBUG_BASE = ROOT / "storage" / ".debug" / "drafts"
+_DEBUG_BASE.mkdir(parents=True, exist_ok=True)
+
 def db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -20,6 +24,9 @@ def db_connect() -> sqlite3.Connection:
 
 def _now() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+def _debug_path(draft_id: int) -> Path:
+    return _DEBUG_BASE / f"{int(draft_id)}.json"
 
 # ------------------------------------------------------------
 # Schema (idempotent; safe with external schema.sql + migrate)
@@ -101,6 +108,33 @@ def _coerce_opt_int(v: Any) -> Optional[int]:
         if v is None or str(v).strip() == "":
             return None
         return int(v)
+    except Exception:
+        return None
+
+# ------------------------------------------------------------
+# OCR Inspector debug sidecars
+# ------------------------------------------------------------
+def save_ocr_debug(draft_id: int, payload: Dict[str, Any]) -> None:
+    """
+    Persist a rich OCR debug payload to a sidecar JSON file:
+      storage/.debug/drafts/<draft_id>.json
+    This avoids DB migrations and keeps large blobs off the main table.
+    """
+    p = _debug_path(int(draft_id))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(payload or {}, f, ensure_ascii=False, indent=2)
+
+def load_ocr_debug(draft_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Load the OCR debug payload if present. Returns None if missing or unreadable.
+    """
+    p = _debug_path(int(draft_id))
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
         return None
 

@@ -694,17 +694,30 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
     }
 
 # ----- Day 14: helper-backed draft builder -----
-def _build_draft_from_helper(job_id: int, saved_file_path: Path) -> dict:
+def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     """
     Use storage/ocr_helper.extract_items_from_path to build a draft JSON compatible
     with our legacy schema.
+
+    NOTE (Day 17): extract_items_from_path may return either:
+      • dict[str, list[items]]  -> just categories
+      • (dict[str, list[items]], debug: dict) -> categories + debug payload
+    We handle both. This function now returns a tuple: (draft_dict, debug_dict_or_None).
     """
     if extract_items_from_path is None:
         raise RuntimeError("ocr_helper not available")
 
-    cats = extract_items_from_path(str(saved_file_path)) or {}
+    debug_payload = None
+    cats_raw = extract_items_from_path(str(saved_file_path)) or {}
+
+    # Support tuple return for (cats, debug)
+    if isinstance(cats_raw, tuple) and len(cats_raw) == 2:
+        cats, debug_payload = cats_raw
+    else:
+        cats, debug_payload = cats_raw, None
+
     categories = []
-    for cat_name, items in cats.items():
+    for cat_name, items in (cats or {}).items():
         out_items = []
         for it in items or []:
             name = (it.get("name") or "").strip()
@@ -739,29 +752,32 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path) -> dict:
         ]}]
 
     engine = "ocr_helper+tesseract"
-    return {
+    draft_dict = {
         "job_id": job_id,
         "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine},
         "extracted_at": _now_iso(),
         "categories": categories,
     }
+    return draft_dict, debug_payload
 
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
 
         draft = None
+        debug_payload = None   # NEW: capture optional debug for OCR Inspector
         engine = ""
         helper_error = None
 
         # 1) Preferred path: our Day-14 OCR helper (category-aware, normalized)
         if extract_items_from_path is not None:
             try:
-                draft = _build_draft_from_helper(job_id, saved_file_path)
+                draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
                 engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
             except Exception as e:
                 helper_error = str(e)
                 draft = None
+                debug_payload = None
 
         # 2) Fallback to legacy text OCR if helper unavailable or failed
         if draft is None:
@@ -776,6 +792,12 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
             if text:
                 draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
+                # Minimal debug if helper not used
+                debug_payload = {
+                    "notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
+                    "items": [],
+                    "lines": text.splitlines()[:500]  # cap to keep small
+                }
             else:
                 # gentle placeholder
                 draft = {
@@ -788,6 +810,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                         ]}
                     ],
                 }
+                debug_payload = {"notes": ["no_text_extracted"]}
 
         # Save legacy-compatible JSON for continuity with existing flows
         rel_draft_path = _save_draft_json(job_id, draft)
@@ -801,7 +824,22 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         except Exception:
             pass
 
+        # Mark job done first
         update_import_job(job_id, status="done", draft_path=rel_draft_path)
+
+        # NEW (Day 17): Immediately ensure a DB draft exists and persist OCR debug if supported
+        try:
+            if drafts_store is not None:
+                draft_id = _get_or_create_draft_for_job(job_id)
+                if draft_id and debug_payload and hasattr(drafts_store, "save_ocr_debug"):
+                    try:
+                        drafts_store.save_ocr_debug(draft_id, debug_payload)
+                    except Exception:
+                        # Non-fatal; continue
+                        pass
+        except Exception:
+            pass
+
     except Exception as e:
         update_import_job(job_id, status="failed", error=str(e))
 
@@ -1477,7 +1515,6 @@ def uploads_clean_drafts():
 def artifacts_sweep():
     report = _sweep_artifacts()
     return jsonify({"status": "ok", **report})
-
 # ------------------------
 # Draft Review (legacy JSON-file flow) & Publish to live menu (kept)
 # ------------------------
@@ -1761,23 +1798,75 @@ def draft_assign_restaurant(draft_id: int):
         flash(f"Failed to assign restaurant: {e}", "error")
     return redirect(url_for("draft_editor", draft_id=draft_id))
 
-# NEW: clone a draft from the editor
-@app.post("/drafts/<int:draft_id>/clone")
+# NEW (Day 17): OCR Inspector debug endpoints
+@app.get("/drafts/<int:draft_id>/ocr-debug.json")
 @login_required
-def draft_clone(draft_id: int):
-    try:
-        _require_drafts_storage()
-        if hasattr(drafts_store, "clone_draft"):
-            clone = drafts_store.clone_draft(draft_id)
-            new_id = int(clone.get("id") or clone.get("draft_id"))
-            flash(f"Cloned draft #{draft_id} → #{new_id}.", "success")
-            return redirect(url_for("draft_editor", draft_id=new_id))
-        else:
-            flash("Clone operation is not supported by the drafts storage layer.", "error")
-            return redirect(url_for("draft_editor", draft_id=draft_id))
-    except Exception as e:
-        flash(f"Clone failed: {e}", "error")
-        return redirect(url_for("draft_editor", draft_id=draft_id))
+def draft_ocr_debug_json(draft_id: int):
+    _require_drafts_storage()
+    if not hasattr(drafts_store, "load_ocr_debug"):
+        return jsonify({"error": "OCR debug storage not available"}), 404
+    dbg = drafts_store.load_ocr_debug(draft_id)
+    if not dbg:
+        return jsonify({"error": "No OCR debug payload found for this draft"}), 404
+    return jsonify(dbg)
+
+@app.get("/drafts/<int:draft_id>/ocr-debug.csv")
+@login_required
+def draft_ocr_debug_csv(draft_id: int):
+    _require_drafts_storage()
+    # Tolerate missing function gracefully
+    load_fn = getattr(drafts_store, "load_ocr_debug", None)
+    if load_fn is None:
+        return make_response("OCR debug storage not available", 404)
+    dbg = load_fn(draft_id)
+    if not dbg:
+        return make_response("No OCR debug payload found for this draft", 404)
+
+    # Flatten a reasonable subset to CSV: primarily parsed items; fall back to assignments/tokens summary
+    rows = []
+    items = dbg.get("items") or []
+    if items:
+        for it in items:
+            src = it.get("source") or {}
+            rows.append({
+                "id": it.get("id"),
+                "name": it.get("name"),
+                "description": it.get("desc") or it.get("description"),
+                "price": it.get("price"),
+                "category": it.get("category"),
+                "confidence": it.get("confidence"),
+                "page": src.get("page"),
+                "line_idx": src.get("line_idx"),
+                "bbox": json.dumps(src.get("bbox")) if src.get("bbox") is not None else "",
+                "matched_rule": src.get("matched_rule"),
+            })
+    else:
+        # minimal fallback: summarize assignments or first 100 tokens/lines
+        for a in (dbg.get("assignments") or [])[:200]:
+            rows.append({
+                "id": "",
+                "name": a.get("name"),
+                "description": "",
+                "price": "",
+                "category": a.get("category"),
+                "confidence": a.get("score"),
+                "page": "",
+                "line_idx": "",
+                "bbox": "",
+                "matched_rule": a.get("reason"),
+            })
+
+    buf = io.StringIO()
+    fieldnames = ["id", "name", "description", "price", "category", "confidence", "page", "line_idx", "bbox", "matched_rule"]
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in fieldnames})
+    data = buf.getvalue().encode("utf-8-sig")
+    resp = make_response(data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_ocr_debug.csv"'
+    return resp
 
 # NEW: export CSV
 @app.get("/drafts/<int:draft_id>/export.csv")

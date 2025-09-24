@@ -31,38 +31,109 @@ except Exception:
     KMeans = None
 
 import re
-import math
+import unicodedata
 
-# robust price + sizes regexes
+# -----------------------------
+# Regex & heuristics
+# -----------------------------
 DOT_LEADER_RX = re.compile(r"\.{2,}")  # dot leaders "....."
-# $12 | 12 | 12.5 | 12.50 | $ 12 . 50 | 12 50
-PRICE_RX = re.compile(r"""
-    (?<!\w)                # not preceded by word-char
+
+def _normalize_text(s: str) -> str:
+    """Normalize bullets/dashes and compress whitespace."""
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFC", s)
+    s = s.replace("•", "-").replace("·", "-").replace("‧", "-")
+    s = s.replace("–", "-").replace("—", "-")
+    s = DOT_LEADER_RX.sub(" ", s)
+    s = " ".join(s.split())
+    return s
+
+PRICE_RX = re.compile(
+    r"""
+    (?<!\w)
     \$?\s*
     (?P<int>\d{1,3}(?:[,\s]\d{3})*|\d+)
     (?:\s*[\.\s]\s*(?P<dec>\d{1,2}))?
-    (?!\w)                 # not followed by word-char
-""", re.X)
+    (?!\w)
+    """,
+    re.X,
+)
 
-# formats like "Small 9.99  Medium 12.99  Large 15.49"
+PRICE_ONLY_RX = re.compile(r"^\s*\$?\s*\d{1,3}(?:[,\s]\d{3})?(?:\s*[\.\s]\s*\d{1,2})?\s*$")
+
 SIZE_PAIR_RX = re.compile(
-    r"""(?P<label>[A-Za-z]{2,}|\b(Regular|Small|Medium|Large|XL|Half|Full)\b)\s*[:\-]?\s*(?P<price>\$?\s*\d+(?:[\.\s]\d{1,2})?)""",
+    r"""(?P<label>[A-Za-z]{2,}|\b(Regular|Small|Medium|Large|XL|Half|Full)\b)\s*[:\-]?\s*(?P<price>\$?\s*\d+(?:[\.\s]\s*\d{1,2})?)""",
     re.I,
 )
 
 ALL_CAPS_HDR = re.compile(r"^[A-Z][A-Z0-9&\s'\-]{2,}$")
+TITLE_CASE_HDR = re.compile(r"^[A-Z][A-Za-z0-9'&\-\s]{3,}$")
 
+SECTION_HINTS = (
+    "pizza", "pizzas", "burgers", "sandwiches", "wings", "sides", "apps", "appetizers",
+    "salads", "beverages", "drinks", "desserts", "specialty"
+)
+
+CONTINUATION_PREFIXES = (
+    "with", "served", "fresh", "spicy", "sweet", "savory", "romaine", "mixed",
+    "golden", "crispy", "lettuce", "tomato", "cucumber", "onion", "onions",
+    "bbq", "garlic", "parmesan", "basil", "marinara", "mozzarella", "mushrooms",
+    "pepperoni", "olives", "peppers", "honey", "red", "green"
+)
+
+PAREN_PCS_RX = re.compile(r"\(\s*\d+\s*pcs?\s*\)", re.I)
+
+# Canon headers and semantic hints
+HEADER_CANON = {
+    "pizza": "Pizza",
+    "specialty pizzas": "Specialty Pizzas",
+    "burgers & sandwiches": "Burgers & Sandwiches",
+    "wings": "Wings",
+    "sides & apps": "Sides & Apps",
+    "salads": "Salads",
+    "beverages": "Beverages",
+}
+FLAVOR_HINTS = {"coke", "diet", "sprite", "pepsi", "root beer", "orange", "lemonade", "dr pepper", "mountain dew"}
+
+SEMANTIC_KEYWORDS = {
+    "Beverages": [
+        "tea", "iced", "soda", "cola", "coke", "sprite", "pepsi", "water", "lemonade", "juice",
+        "coffee", "latte", "dr pepper", "mountain dew", "root beer"
+    ],
+    "Wings": [
+        "wings", "buffalo", "bbq", "garlic parmesan", "honey bbq", "parmesan", "sweet & smoky"
+    ],
+    "Burgers & Sandwiches": [
+        "burger", "cheeseburger", "patty", "sandwich", "bacon", "grilled chicken", "mayo"
+    ],
+    "Salads": [
+        "salad", "romaine", "croutons", "cucumber", "greens", "parmesan", "mixed"
+    ],
+    "Sides & Apps": [
+        "fries", "breadsticks", "mozzarella sticks", "marinara", "dip", "appetizer", "crispy"
+    ],
+    "Specialty Pizzas": [
+        "margherita", "pepperoni", "mozzarella", "basil", "veggie", "bbq chicken",
+        "peppers", "olives", "onions"
+    ],
+    "Pizza": [
+        "pizza"
+    ],
+}
+
+# -----------------------------
+# Helpers
+# -----------------------------
 def _to_float_price(txt: str) -> float:
     if not txt:
         return 0.0
     s = txt.replace("$", " ").replace(",", " ").strip()
     parts = [p for p in re.split(r"\s+", s) if p]
     if len(parts) >= 2 and parts[-1].isdigit() and len(parts[-1]) <= 2:
-        # e.g. "12 5" -> 12.05 or 12.5 ? Use cents.
         return float(f"{parts[0]}.{parts[-1].rjust(2,'0')}")
     s = s.replace(" ", "")
     if s.count(".") > 1:
-        # e.g. "12. . 50" after stripping could become "12..50": keep last dot
         left, _, right = s.rpartition(".")
         s = left.replace(".", "") + "." + right
     try:
@@ -71,17 +142,14 @@ def _to_float_price(txt: str) -> float:
         return 0.0
 
 def _preprocess_image(img_bgr):
-    """Light cleanup to aid OCR if OpenCV available."""
     if cv2 is None:
         return img_bgr
     try:
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        # slight blur reduces salt-and-pepper noise
         gray = cv2.medianBlur(gray, 3)
-        # adaptive threshold keeps contrast across lighting
-        th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                   cv2.THRESH_BINARY, 31, 9)
-        # optional deskew via moments
+        th = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 9
+        )
         coords = cv2.findNonZero(255 - th)
         if coords is not None:
             rect = cv2.minAreaRect(coords)
@@ -89,20 +157,21 @@ def _preprocess_image(img_bgr):
             if angle < -45:
                 angle = 90 + angle
             M = cv2.getRotationMatrix2D((th.shape[1] / 2, th.shape[0] / 2), angle, 1.0)
-            th = cv2.warpAffine(th, M, (th.shape[1], th.shape[0]), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            th = cv2.warpAffine(
+                th, M, (th.shape[1], th.shape[0]),
+                flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+            )
         return cv2.cvtColor(th, cv2.COLOR_GRAY2BGR)
     except Exception:
         return img_bgr
 
 def _image_to_words(image_bgr) -> List[dict]:
-    """
-    Use pytesseract TSV to get word boxes + confidences.
-    """
-    config = "--psm 6 -l eng"  # assume uniform blocks, adjust if needed
-    data = pytesseract.image_to_data(image_bgr, output_type=Output.DATAFRAME, config=config)  # type: ignore
+    config = "--psm 6 -l eng"
+    data = pytesseract.image_to_data(
+        image_bgr, output_type=Output.DATAFRAME, config=config  # type: ignore
+    )
     if data is None or len(data) == 0:
         return []
-    # Clean rows
     data = data[(data.conf != -1) & data.text.notna()]
     out = []
     for _, r in data.iterrows():
@@ -110,8 +179,8 @@ def _image_to_words(image_bgr) -> List[dict]:
             out.append({
                 "text": str(r["text"]),
                 "conf": float(r["conf"]),
-                "x": int(r["left"]), "y": int(r["top"]),
-                "w": int(r["width"]), "h": int(r["height"]),
+                "left": int(r["left"]), "top": int(r["top"]),
+                "width": int(r["width"]), "height": int(r["height"]),
                 "cx": int(r["left"]) + int(r["width"]) / 2.0,
                 "cy": int(r["top"]) + int(r["height"]) / 2.0,
                 "line_num": int(r.get("line_num", 0)),
@@ -128,21 +197,38 @@ def _cluster_columns(words: List[dict], k: int = 2) -> Optional[List[int]]:
         return None
     try:
         df = pd.DataFrame(words)
-        X = df[["cx"]].values  # 1D clustering by horizontal position
-        k = min(k, max(1, len(words)//30)) or 1
-        k = max(k, 1)
-        if k == 1:
-            return [0]*len(words)
+        if "cx" not in df.columns or len(df) < 8:
+            return None
+        X = df[["cx"]].values
+        k = min(k, max(1, len(df) // 40)) or 1
+        if k <= 1:
+            return [0] * len(df)
         model = KMeans(n_clusters=k, n_init="auto", random_state=0)
         labels = model.fit_predict(X)
         return list(labels)
     except Exception:
         return None
 
-def _group_lines(words: List[dict], labels: Optional[List[int]]) -> List[str]:
-    """
-    Group words into lines per column label, then sort by (page, y, x).
-    """
+def _line_left(d: dict) -> int:
+    toks = d.get("tokens") or []
+    if not toks:
+        return 0
+    return min(int(t.get("left", 0)) for t in toks)
+
+def _line_height(d: dict) -> int:
+    toks = d.get("tokens") or []
+    if not toks:
+        return 22
+    hs = [int(t.get("height", 14)) for t in toks if t.get("height") is not None]
+    return max(14, int(sum(hs) / max(1, len(hs))))
+
+def _has_price(s: str) -> bool:
+    return bool(PRICE_RX.search(s))
+
+# -----------------------------
+# Line grouping & merging
+# -----------------------------
+def _group_lines(words: List[dict], labels: Optional[List[int]]) -> List[dict]:
     if not words:
         return []
     items = list(words)
@@ -153,101 +239,705 @@ def _group_lines(words: List[dict], labels: Optional[List[int]]) -> List[str]:
         for w in items:
             w["col"] = 0
 
-    # group by (page, col, approx line y)
-    # use line_num when available; fall back to y binning
-    grouped: Dict[Tuple[int,int,int], List[dict]] = {}
+    grouped: Dict[Tuple[int, int, int], List[dict]] = {}
     for w in items:
         page = int(w.get("page_num", 0))
         col = int(w["col"])
-        line_key = int(w.get("line_num") or round(w["cy"] / 12))  # coarse bin
+        line_key = int(w.get("line_num") or max(0, round(w["cy"] / 18)))
         key = (page, col, line_key)
         grouped.setdefault(key, []).append(w)
 
-    lines = []
+    lines: List[dict] = []
     for (page, col, line_key), ws in sorted(grouped.items(), key=lambda t: (t[0][0], t[0][1], t[0][2])):
-        ws_sorted = sorted(ws, key=lambda x: x["x"])
-        txt = " ".join(x["text"] for x in ws_sorted if x["text"].strip())
-        avg_conf = sum(x["conf"] for x in ws_sorted) / max(1, len(ws_sorted))
-        lines.append({"text": txt.strip(), "conf": avg_conf, "page": page, "col": col, "y": min(x["y"] for x in ws_sorted)})
-    # finally, return readable strings but keep conf for parsing
+        ws_sorted = sorted(ws, key=lambda x: x.get("left", 0))
+        raw_txt = " ".join(x["text"] for x in ws_sorted if str(x["text"]).strip())
+        txt = _normalize_text(raw_txt)
+        if not txt:
+            continue
+        avg_conf = sum(float(x["conf"]) for x in ws_sorted) / max(1, len(ws_sorted))
+        lines.append({
+            "text": txt,
+            "conf": round(avg_conf, 1),
+            "page": int(page),
+            "col": int(col),
+            "y": min(int(x.get("top", 0)) for x in ws_sorted),
+            "tokens": ws_sorted,
+        })
     return lines
 
-def _parse_lines_to_categories(lines: List[dict]) -> Dict[str, List[dict]]:
-    """
-    Build categories and items from OCR lines.
-    """
+def _is_stub(s: str) -> bool:
+    s = s.strip()
+    if not s:
+        return False
+    return s.endswith("-") or s.endswith(",")
+
+def _stitch_stub_price(lines: List[dict]) -> List[dict]:
+    if not lines:
+        return []
+    out: List[dict] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        cur = lines[i]
+        cur_text = _normalize_text(cur["text"])
+        if _is_stub(cur_text) and i + 1 < n:
+            nxt = lines[i + 1]
+            if (nxt["page"] == cur["page"] and nxt["col"] == cur["col"] and
+                PRICE_ONLY_RX.match(_normalize_text(nxt["text"]))):
+                dy = abs(int(nxt["y"]) - int(cur["y"]))
+                h = max(_line_height(cur), _line_height(nxt))
+                if dy <= int(h * 1.35) + 6:
+                    merged = _normalize_text(f"{cur_text} {nxt['text']}")
+                    out.append({**cur, "text": merged, "conf": round((cur["conf"] + nxt["conf"]) / 2.0, 1)})
+                    i += 2
+                    continue
+        if PRICE_ONLY_RX.match(cur_text) and i + 1 < n:
+            nxt = lines[i + 1]
+            nxt_text = _normalize_text(nxt["text"])
+            if (nxt["page"] == cur["page"] and nxt["col"] == cur["col"] and _is_stub(nxt_text)):
+                dy = abs(int(nxt["y"]) - int(cur["y"]))
+                h = max(_line_height(cur), _line_height(nxt))
+                if dy <= int(h * 1.35) + 6:
+                    merged = _normalize_text(f"{nxt_text} {cur_text}")
+                    out.append({**nxt, "text": merged, "conf": round((cur["conf"] + nxt["conf"]) / 2.0, 1), "y": min(cur["y"], nxt["y"])})
+                    i += 2
+                    continue
+        out.append(cur)
+        i += 1
+    return out
+
+def _merge_broken_lines(lines: List[dict]) -> List[dict]:
+    if not lines:
+        return []
+    lines = _stitch_stub_price(lines)
+
+    merged: List[dict] = []
+    seq = sorted(lines, key=lambda r: (r.get("page", 0), r.get("col", 0), r.get("y", 0)))
+
+    def _looks_like_new_item_title(s: str) -> bool:
+        s = s.strip()
+        if not s.startswith("- "):
+            return False
+        core = s[2:].strip()
+        if " - " in core:  # bullet with internal " - " → clearly a new item
+            return True
+        if PRICE_ONLY_RX.match(core) or _has_price(core):
+            return False
+        words = core.split()
+        if 1 <= len(words) <= 4 and core[:1].isupper():
+            return True
+        return False
+
+    def can_merge(prev: dict, curr: dict) -> bool:
+        if prev.get("page") != curr.get("page") or prev.get("col") != curr.get("col"):
+            return False
+
+        prev_text = _normalize_text(prev.get("text", ""))
+        curr_text = _normalize_text(curr.get("text", ""))
+        if not prev_text or not curr_text:
+            return False
+
+        dy = abs(int(curr.get("y", 0)) - int(prev.get("y", 0)))
+        h = max(_line_height(prev), _line_height(curr))
+        if dy > int(h * 1.25) + 6:
+            return False
+
+        # Don't attach if the next line looks like a fresh bullet/item
+        if _looks_like_new_item_title(curr_text):
+            return False
+
+        prev_price = _has_price(prev_text)
+        curr_price = _has_price(curr_text)
+
+        if (_is_stub(prev_text) and (curr_price or len(curr_text) <= 24)) or \
+           ((len(prev_text) <= 24) and curr_price):
+            if abs(_line_left(prev) - _line_left(curr)) > 260:
+                return False
+            return True
+
+        return False
+
+    def order_merge(a: str, b: str) -> str:
+        a = _normalize_text(a); b = _normalize_text(b)
+        if _has_price(a) and not _has_price(b):
+            return _normalize_text(f"{b} {a}")
+        return _normalize_text(f"{a} {b}")
+
+    for row in seq:
+        if not merged:
+            merged.append(row)
+            continue
+        prev = merged[-1]
+        if can_merge(prev, row):
+            new_text = order_merge(prev["text"], row["text"])
+            prev_tok = len(prev.get("tokens") or [])
+            row_tok = len(row.get("tokens") or [])
+            tot = max(1, prev_tok + row_tok)
+            conf = (prev.get("conf", 80) * prev_tok + row.get("conf", 80) * row_tok) / tot
+            merged[-1] = {
+                "text": new_text,
+                "conf": round(conf, 1),
+                "page": prev.get("page"),
+                "col": prev.get("col"),
+                "y": min(int(prev.get("y", 0)), int(row.get("y", 0))),
+                "tokens": (prev.get("tokens") or []) + (row.get("tokens") or []),
+            }
+        else:
+            merged.append(row)
+    return merged
+
+# -----------------------------
+# Parsing heuristics
+# -----------------------------
+def _looks_like_section_heading(line: str) -> bool:
+    s = line.strip()
+    if not s or len(s) > 48:
+        return False
+    if ALL_CAPS_HDR.match(s):
+        return True
+    if TITLE_CASE_HDR.match(s):
+        low = s.lower()
+        for w in SECTION_HINTS:
+            if w in low:
+                return True
+    return False
+
+def _split_name_desc_price(line: str) -> Tuple[str, str, float]:
+    s = _normalize_text(line)
+    last = None
+    for m in PRICE_RX.finditer(s):
+        last = m
+    if not last:
+        return s.strip(), "", 0.0
+    price_val = _to_float_price(last.group(0))
+    head = s[: last.start()].strip().strip("-:").strip()
+
+    if " - " in head:
+        parts = [p.strip() for p in head.split(" - ", 1)]
+    else:
+        parts = [p.strip() for p in head.rsplit("-", 1)]
+    if len(parts) == 2 and parts[0] and parts[1]:
+        return parts[0], parts[1], price_val
+    return head, "", price_val
+
+# Bullet "- Name - Desc" even when there is NO price
+BULLET_NAME_DESC_RX = re.compile(r"^\s*-\s*(?P<name>[^-].*?)\s*-\s*(?P<desc>.+?)\s*$")
+
+_PUNCT_ONLY_RX = re.compile(r"^[\s\-,.&()]+$")
+
+def _split_name_desc_no_price(line: str) -> Optional[Tuple[str, str]]:
+    s = _normalize_text(line)
+    # Drop junk bullets like "- -" outright
+    if s in {"- -", "-"}:
+        return None
+    m = BULLET_NAME_DESC_RX.match(s)
+    if not m:
+        return None
+    name = (m.group("name") or "").strip()
+    desc = (m.group("desc") or "").strip()
+    # Guard: require at least one letter in the name; ignore "- - Coke,"
+    if not name or _PUNCT_ONLY_RX.fullmatch(name) or not re.search(r"[A-Za-z]", name):
+        return None
+    # tidy trailing punctuation
+    name = name.rstrip(",- ").strip()
+    desc = desc.rstrip(",- ").strip()
+    return name, desc
+
+def _should_attach_as_description(line: str) -> bool:
+    if not line:
+        return False
+    s = line.strip()
+    # reject pure punctuation / hyphen filler like "- -" or "--"
+    if _PUNCT_ONLY_RX.fullmatch(s):
+        return False
+    if PRICE_ONLY_RX.match(s):
+        return False
+    # If it's a bullet that itself looks like a new item (e.g., "- French Fries - Golden and"), don't attach
+    if s.startswith("- "):
+        if " - " in s[2:]:
+            return False
+        words = s[2:].strip().split()
+        if 1 <= len(words) <= 4 and s[2:3].isupper():
+            return False
+    if len(s) <= 100 and (s[0] in "(-&"):
+        return True
+    low = s.lower()
+    if low.startswith(tuple(CONTINUATION_PREFIXES)):
+        return True
+    if s.endswith(",") or s.endswith("-"):
+        return True
+    if len(s) <= 24 and s == s.lower():
+        return True
+    return False
+
+# -----------------------------
+# Lines → Categories & Items
+# -----------------------------
+def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]], Dict[str, Any]]:
     cats: Dict[str, List[dict]] = {}
     current = "Uncategorized"
     cats[current] = []
 
-    def new_cat(name: str):
-        nonlocal current
+    debug: Dict[str, Any] = {
+        "version": 12,
+        "lines": lines,
+        "items": [],
+        "assignments": [],
+    }
+
+    def new_cat(name: str, src_line: Optional[dict] = None, reason: str = ""):
+        nonlocal current, prev_item_ref, prev_item_col
         current = (name or "Misc").strip()
         cats.setdefault(current, [])
+        prev_item_ref = None
+        prev_item_col = None
+        if src_line:
+            debug["assignments"].append({
+                "type": "category_header",
+                "category": current,
+                "page": src_line.get("page"),
+                "y": src_line.get("y"),
+                "col": src_line.get("col"),
+                "reason": reason or "header detection",
+                "line": src_line.get("text"),
+                "score": src_line.get("conf"),
+            })
 
-    for row in lines:
+    SKIP_TITLES = {"menu", "menu:", "our menu"}
+    prev_item_ref: Optional[dict] = None
+    prev_item_col: Optional[int] = None
+
+    for idx, row in enumerate(lines):
         raw = row["text"]
         if not raw:
             continue
-        line = DOT_LEADER_RX.sub(" ", raw).strip()  # remove dot leaders
-        # Category markers
-        if line.lower().startswith("category:"):
-            new_cat(line.split(":", 1)[1].strip() or "Misc")
-            continue
-        if len(line) <= 40 and ALL_CAPS_HDR.match(line):
-            new_cat(line.title())
+        line = _normalize_text(raw)
+        if not line:
             continue
 
-        # Multiple size/price pairs on one line
+        if idx < 6 and line.lower() in SKIP_TITLES:
+            continue
+
+        if line.lower().startswith("category:"):
+            new_cat(line.split(":", 1)[1].strip() or "Misc", row, reason="explicit 'Category:'")
+            continue
+        if _looks_like_section_heading(line):
+            new_cat(line.title(), row, reason="heading heuristic (caps/title-case + keywords)")
+            continue
+
+        # Multi-size
         pairs = list(SIZE_PAIR_RX.finditer(line))
         if pairs and len(pairs) >= 2:
-            base = SIZE_PAIR_RX.split(line)[0].strip()  # crude base (before first size)
-            base = base.rstrip(":-").strip() or "Untitled"
+            base = SIZE_PAIR_RX.split(line)[0].strip().rstrip(":-").strip() or "Untitled"
             for m in pairs:
                 label = (m.group("label") or "").strip().title()
                 price = _to_float_price(m.group("price") or "")
                 if price <= 0:
                     continue
-                cats[current].append({
+                item = {
                     "name": f"{base} ({label})",
                     "description": "",
                     "price": price,
                     "confidence": round(float(row.get("conf", 80)), 1),
                     "raw": raw,
+                    "_src_idx": idx, "_page": row.get("page"), "_col": row.get("col"),
+                }
+                cats[current].append(item)
+                debug["items"].append({
+                    "name": item["name"], "desc": item["description"], "price": item["price"],
+                    "category": current, "confidence": item["confidence"],
+                    "source": {"page": row.get("page"), "line_idx": idx, "bbox": None, "matched_rule": "SIZE_PAIR_RX"},
                 })
+            prev_item_ref = None
+            prev_item_col = None
             continue
 
-        # Single trailing price
-        m = None
-        last = None
-        for m2 in PRICE_RX.finditer(line):
-            last = m2
-        if last:
-            name = line[: last.start()].rstrip(" -·:").strip()
-            price = _to_float_price(last.group(0))
-            if name and price > 0:
-                cats[current].append({
-                    "name": name,
-                    "description": "",
-                    "price": price,
-                    "confidence": round(float(row.get("conf", 80)), 1),
-                    "raw": raw,
-                })
-                continue
+        # Price-terminated
+        name, desc, price = _split_name_desc_price(line)
+        if price > 0 and name:
+            item = {
+                "name": name, "description": desc, "price": price,
+                "confidence": round(float(row.get("conf", 80)), 1),
+                "raw": raw, "_src_idx": idx, "_page": row.get("page"), "_col": row.get("col"),
+            }
+            cats[current].append(item)
+            debug["items"].append({
+                "name": item["name"], "desc": item["description"], "price": item["price"],
+                "category": current, "confidence": item["confidence"],
+                "source": {"page": row.get("page"), "line_idx": idx, "bbox": None, "matched_rule": "PRICE_RX_TRAIL+SPLIT"},
+            })
+            prev_item_ref = item
+            prev_item_col = row.get("col")
+            continue
 
-        # Otherwise, treat as description or freestanding item
-        if cats[current] and (cats[current][-1]["name"] or ""):
-            prev = cats[current][-1]
-            desc = (prev.get("description") or "").strip()
-            prev["description"] = (desc + " " + line).strip()
-        else:
-            cats[current].append({"name": line, "description": "", "price": 0.0, "confidence": round(float(row.get("conf", 80)),1), "raw": raw})
+        # Bullet "- Name - Desc" with no price (ignore junk bullets)
+        nd = _split_name_desc_no_price(line)
+        if nd:
+            n, d = nd
+            item = {
+                "name": n, "description": d, "price": 0.0,
+                "confidence": round(float(row.get("conf", 80)), 1),
+                "raw": raw, "_src_idx": idx, "_page": row.get("page"), "_col": row.get("col"),
+            }
+            cats[current].append(item)
+            debug["items"].append({
+                "name": item["name"], "desc": item["description"], "price": 0.0,
+                "category": current, "confidence": item["confidence"],
+                "source": {"page": row.get("page"), "line_idx": idx, "bbox": None, "matched_rule": "BULLET_NAME_DESC"},
+            })
+            prev_item_ref = item
+            prev_item_col = row.get("col")
+            continue
 
-    # drop empty categories
+        # Continuation → description (same column)
+        if prev_item_ref and prev_item_col is not None:
+            if row.get("col") == prev_item_col and _should_attach_as_description(line):
+                old = (prev_item_ref.get("description") or "").strip()
+                new_desc = (old + " " + line).strip() if old else line
+                # strip noise like trailing "- -" from desc
+                new_desc = _normalize_text(new_desc).rstrip(", -").strip()
+                if not _PUNCT_ONLY_RX.fullmatch(new_desc):
+                    prev_item_ref["description"] = new_desc
+                    debug["assignments"].append({
+                        "type": "description_attach", "to_item": prev_item_ref.get("name"),
+                        "category": current, "page": row.get("page"), "line": raw,
+                        "score": row.get("conf"), "reason": "continuation heuristic (same column)",
+                    })
+                    continue
+
+        # Freestanding item
+        if _PUNCT_ONLY_RX.fullmatch(line):
+            # skip pure punctuation rows entirely
+            continue
+
+        item = {
+            "name": line, "description": "", "price": 0.0,
+            "confidence": round(float(row.get("conf", 80)), 1),
+            "raw": raw, "_src_idx": idx, "_page": row.get("page"), "_col": row.get("col"),
+        }
+        cats[current].append(item)
+        debug["items"].append({
+            "name": item["name"], "desc": "", "price": 0.0, "category": current,
+            "confidence": item["confidence"],
+            "source": {"page": row.get("page"), "line_idx": idx, "bbox": None, "matched_rule": "FREESTANDING_LINE"},
+        })
+        prev_item_ref = item
+        prev_item_col = row.get("col")
+
+    # Drop empties (keep non-empty)
     cats = {k: [it for it in v if any([it.get("name"), it.get("price"), it.get("description")])] for k, v in cats.items()}
     cats = {k: v for k, v in cats.items() if v}
-    return cats or {"Uncategorized": [{"name":"No items recognized","description":"OCR returned no items.","price":0.0}]}
+    if not cats:
+        cats = {"Uncategorized": [{"name": "No items recognized", "description": "OCR returned no items.", "price": 0.0}]}
+    return cats, debug
 
+# -----------------------------
+# Post-processing
+# -----------------------------
+def _canonical_header(text: str) -> Optional[str]:
+    t = (text or "").strip().lower()
+    return HEADER_CANON.get(t)
+
+def _fix_common_ocr_name(name: str) -> str:
+    s = _normalize_text(name)
+    s = re.sub(r"^\s*[-•]+\s*", "", s)       # leading bullets
+    s = re.sub(r"\s*-\s*$", "", s)           # trailing dash
+    s = s.rstrip(",")                        # trailing comma
+    s = re.sub(r"\blced\b", "Iced", s, flags=re.I)
+    # collapse weird "( (" patterns from double pcs
+    s = re.sub(r"\(\s*\(", "(", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
+
+def _fix_common_desc(desc: str) -> str:
+    if not desc:
+        return ""
+    d = _normalize_text(desc).rstrip(", -").strip()
+    # strip leftover lone hyphen pairs
+    d = re.sub(r"(?:^|\s)-\s-$", "", d)
+    return d
+
+def _gather_headings(lines: List[dict]) -> List[dict]:
+    heads = []
+    for ln in lines:
+        txt = _normalize_text(ln.get("text", ""))
+        if _looks_like_section_heading(txt):
+            canon = _canonical_header(txt.lower()) or txt.title()
+            heads.append({"name": canon, "page": ln.get("page"), "col": ln.get("col"), "y": ln.get("y")})
+    heads.sort(key=lambda r: (int(r.get("page") or 0), int(r.get("col") or 0), int(r.get("y") or 0)))
+    return heads
+
+def _nearest_header_above(heads: List[dict], page: int, col: int, y: int) -> Optional[str]:
+    candidates = [h for h in heads if h["page"] == page and h["col"] == col and int(h["y"] or 0) <= y]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda h: int(h["y"] or 0))
+    return best["name"]
+
+def _guess_category(name: str, desc: str = "") -> Optional[str]:
+    text = f"{name} {desc}".lower()
+    # Wings bias if (6 pcs)
+    if "(6 pcs)" in text:
+        return "Wings"
+    best = None
+    best_hits = 0
+    for cat, kws in SEMANTIC_KEYWORDS.items():
+        hits = sum(1 for kw in kws if kw in text)
+        if hits > best_hits:
+            best_hits = hits
+            best = cat
+    return best if best_hits > 0 else None
+
+def _fold_soda_flavors(name: str, desc: str, raw: str) -> Tuple[str, str]:
+    base = name
+    if "soda can" not in base.lower():
+        return name, desc
+    bag = []
+    src = " ".join([desc or "", raw or ""]).lower()
+    for word in FLAVOR_HINTS:
+        if word in src:
+            bag.append(word)
+    if not bag:
+        return name, desc
+    seen = []
+    for t in bag:
+        tt = " ".join(w.capitalize() for w in t.split())
+        if tt not in seen:
+            seen.append(tt)
+    new_name = f"Soda Can - {', '.join(seen)}"
+    return new_name, ""
+
+def _merge_pcs(item: dict) -> None:
+    """Ensure '(6 pcs)' is carried from raw into the name when present without duplicating."""
+    raw = (item.get("raw") or "")
+    n = (item.get("name") or "")
+    has_in_raw = bool(PAREN_PCS_RX.search(raw))
+    has_in_name = bool(PAREN_PCS_RX.search(n))
+    if has_in_raw and not has_in_name:
+        nn = n.rstrip(", -")
+        item["name"] = f"{nn} (6 pcs)"
+
+def _strip_private_keys(item: dict) -> dict:
+    return {k: v for k, v in item.items() if not str(k).startswith("_")}
+
+def _consolidate_beverages(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) -> None:
+    if "Beverages" not in cats:
+        return
+    items = cats["Beverages"]
+    if not items:
+        return
+
+    soda_idx = None
+    for i, it in enumerate(items):
+        if "soda can" in (it.get("name", "").lower()):
+            soda_idx = i
+            break
+    if soda_idx is None:
+        return
+
+    base = items[soda_idx]
+    flavor_items = []
+    for i, it in enumerate(items):
+        if i == soda_idx:
+            continue
+        nm = (it.get("name") or "")
+        # Also harvest from items that have empty name but flavor in description (from "- - Coke,")
+        desc = (it.get("description") or "")
+        is_flavorish = any(t in nm.lower() for t in FLAVOR_HINTS) or any(t in desc.lower() for t in FLAVOR_HINTS)
+        if is_flavorish:
+            flavor_items.append(i)
+
+    if not flavor_items:
+        return
+
+    # Prefer a price found among flavor lines, fallback to existing base price
+    price = next((items[i]["price"] for i in flavor_items if items[i].get("price", 0) > 0), base.get("price", 0.0))
+    flavors = []
+
+    def add_flavors_from_text(t: str):
+        for token in re.split(r"[,\s]+", t.lower()):
+            token = token.strip().strip("-")
+            if token in FLAVOR_HINTS:
+                tt = " ".join(w.capitalize() for w in token.split())
+                if tt not in flavors:
+                    flavors.append(tt)
+
+    add_flavors_from_text(base.get("name", ""))
+    add_flavors_from_text(base.get("description", ""))
+    for i in flavor_items:
+        add_flavors_from_text(items[i].get("name", ""))
+        add_flavors_from_text(items[i].get("description", ""))
+
+    if not flavors:
+        return
+
+    new_name = f"Soda Can - {', '.join(flavors)}"
+    base["name"] = new_name
+    base["description"] = ""
+    if price:
+        base["price"] = price
+
+    for i in sorted(set(flavor_items), reverse=True):
+        removed = items.pop(i)
+        debug.setdefault("assignments", []).append({
+            "type": "merge_beverage_flavors",
+            "from_item": (removed.get("name") or removed.get("description")),
+            "into": new_name,
+            "price_used": price,
+            "reason": "consolidate soda flavors into Soda Can item (incl. junk bullets)"
+        })
+
+def _looks_like_ingredient_list(text: str) -> bool:
+    """Heuristic: ingredient-ish priced line that should be merged into a nearby bullet item."""
+    s = (text or "").strip()
+    low = s.lower()
+    if not s:
+        return False
+    # Common signs: comma lists, starts with "with", all lowercase short phrase, or contains typical toppings
+    if "," in s:
+        return True
+    if low.startswith("with "):
+        return True
+    words = re.findall(r"[A-Za-z]+", s)
+    if words and s == low and 1 <= len(words) <= 6:
+        return True
+    toppings = {"pepperoni", "mozzarella", "basil", "onion", "onions", "olive", "olives", "peppers", "mushrooms", "bbq"}
+    if any(w in low for w in toppings):
+        return True
+    return False
+
+def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) -> None:
+    """If a priced ingredient-ish line appears right after a bullet pizza, move its price into that pizza and drop the ingredient line."""
+    key = "Specialty Pizzas"
+    if key not in cats:
+        return
+    items = cats[key]
+    if not items:
+        return
+
+    # Work with indexes to allow removal; keep stability
+    to_remove = set()
+    last_bullet_idx = None
+    last_bullet_src = None
+
+    # Build a quick accessor for _src_idx if present (not stripped yet here)
+    def get_src_idx(it: dict) -> Optional[int]:
+        return it.get("_src_idx") if isinstance(it.get("_src_idx"), int) else None
+
+    for i, it in enumerate(items):
+        nm = it.get("name", "") or ""
+        raw = it.get("raw", "") or ""
+        price = float(it.get("price") or 0.0)
+        src = get_src_idx(it)
+
+        # Track last bullet pizza (raw starting "- " and no price)
+        if raw.strip().startswith("- ") and (price <= 0.0):
+            last_bullet_idx = i
+            last_bullet_src = src
+            continue
+
+        # Candidate ingredient list with price
+        if price > 0 and _looks_like_ingredient_list(nm):
+            # Only merge if we have a recent bullet above it
+            if last_bullet_idx is not None:
+                # Window by source proximity if we have the src indexes
+                ok = True
+                if last_bullet_src is not None and src is not None:
+                    ok = (0 <= (src - last_bullet_src) <= 4)
+                if ok:
+                    # Move price & append ingredients to description of bullet pizza
+                    tgt = items[last_bullet_idx]
+                    if float(tgt.get("price") or 0.0) <= 0.0:
+                        tgt["price"] = price
+                    # Fold the ingredient text into bullet description
+                    desc = (tgt.get("description") or "").strip()
+                    addon = nm
+                    if desc:
+                        new_desc = f"{desc} {addon}"
+                    else:
+                        new_desc = addon
+                    tgt["description"] = _fix_common_desc(new_desc)
+                    # Mark ingredient line for removal
+                    to_remove.add(i)
+                    debug.setdefault("assignments", []).append({
+                        "type": "merge_ingredient_into_bullet",
+                        "category": key,
+                        "from_item": nm,
+                        "into": tgt.get("name"),
+                        "price_moved": price,
+                        "reason": "priced ingredient line merged into preceding bullet pizza"
+                    })
+                    continue
+
+        # Non-bullet priced row resets the bullet anchor
+        if price > 0:
+            last_bullet_idx = None
+            last_bullet_src = None
+
+    if to_remove:
+        cats[key] = [it for j, it in enumerate(items) if j not in to_remove]
+
+def _cleanup_descriptions(cats: Dict[str, List[Dict[str, Any]]]) -> None:
+    for items in cats.values():
+        for it in items:
+            desc = _fix_common_desc(it.get("description") or "")
+            if desc and re.fullmatch(r"[\s,\-]+", desc):
+                desc = ""
+            it["description"] = desc
+
+def _post_process(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    lines: List[dict] = debug.get("lines") or []
+    heads = _gather_headings(lines)
+    idx_map: Dict[int, Tuple[int, int, int]] = {i: (int(ln.get("page") or 0), int(ln.get("col") or 0), int(ln.get("y") or 0)) for i, ln in enumerate(lines)}
+
+    new_cats: Dict[str, List[Dict[str, Any]]] = {}
+    for cat_name, items in cats.items():
+        for it in items:
+            it["name"] = _fix_common_ocr_name(it.get("name") or "")
+            it["description"] = _fix_common_desc(it.get("description") or "")
+            _merge_pcs(it)
+            it["name"], it["description"] = _fold_soda_flavors(it["name"], it.get("description") or "", it.get("raw") or "")
+
+            # Decide target category
+            tgt_cat = cat_name
+            guess = _guess_category(it.get("name", ""), it.get("description", ""))
+
+            if "_src_idx" in it:
+                page, col, y = idx_map.get(int(it["_src_idx"] or -1), (None, None, None))
+                same_col_hdr = _nearest_header_above(heads, page, col, y) if page is not None else None
+            else:
+                same_col_hdr = None
+
+            if same_col_hdr:
+                tgt_cat = same_col_hdr
+            elif guess:
+                tgt_cat = guess
+            else:
+                tgt_cat = cat_name
+
+            if cat_name == "Uncategorized" and (it.get("price", 0) or 0) > 0 and tgt_cat != cat_name:
+                debug.setdefault("assignments", []).append({
+                    "type": "category_reassign", "from": cat_name, "to": tgt_cat,
+                    "item": it.get("name"), "price": it.get("price"),
+                    "reason": "semantic guess" if not same_col_hdr else "nearest header above in same column",
+                })
+
+            new_cats.setdefault(tgt_cat, []).append(it)  # keep private keys for downstream merges
+
+    # 1) Merge priced ingredient lines into preceding bullet pizzas
+    _merge_ingredient_prices_in_specialty(new_cats, debug)
+
+    # 2) Consolidate soda flavors (handles junk bullets too)
+    _consolidate_beverages(new_cats, debug)
+
+    # 3) Cleanup descriptions, strip private keys as the last step
+    _cleanup_descriptions(new_cats)
+    new_cats = {k: [_strip_private_keys(it) for it in v] for k, v in new_cats.items() if v}
+    return new_cats
+
+# -----------------------------
+# Image/PDF loader
+# -----------------------------
 def _load_images_from_path(path: str) -> List:
     p = Path(path)
     if not p.exists():
@@ -257,21 +947,20 @@ def _load_images_from_path(path: str) -> List:
         img = Image.open(str(p)).convert("RGB")
         return [img]
     if p.suffix.lower() == ".pdf" and convert_from_path is not None:
-        # moderate DPI to balance speed/quality
-        return convert_from_path(str(p), dpi=220, poppler_path=os.getenv("POPPLER_PATH") or None)
+        return convert_from_path(str(p), dpi=280, poppler_path=os.getenv("POPPLER_PATH") or None)
     return []
 
-def extract_items_from_path(path: str) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Returns: { "Category": [ { name, description, price, confidence, raw }, ... ], ... }
-    """
+# -----------------------------
+# Public API
+# -----------------------------
+def extract_items_from_path(path: str) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Any]]:
     images = _load_images_from_path(path)
     if not images:
-        return {"Uncategorized":[{"name":"OCR not configured or file type unsupported","description":"","price":0.0}]}
+        cats = {"Uncategorized": [{"name":"OCR not configured or file type unsupported","description":"","price":0.0}]}
+        return cats, {"version": 12, "lines": [], "items": [], "assignments": [], "note": "no images loaded"}
 
     all_lines: List[dict] = []
     for im in images:
-        # Pillow image to OpenCV for preprocess (if cv2 available)
         im_bgr = None
         try:
             import numpy as np
@@ -283,17 +972,15 @@ def extract_items_from_path(path: str) -> Dict[str, List[Dict[str, Any]]]:
             im_bgr = _preprocess_image(im_bgr)
             words = _image_to_words(im_bgr)
         else:
-            # fallback: let pytesseract read directly from PIL image
             config = "--psm 6 -l eng"
             try:
-                # derive pseudo-words using TSV too (works with PIL)
                 df = pytesseract.image_to_data(im, output_type=Output.DATAFRAME, config=config)  # type: ignore
                 df = df[(df.conf != -1) & df.text.notna()]
                 words = [{
                     "text": str(r["text"]),
                     "conf": float(r["conf"]),
-                    "x": int(r["left"]), "y": int(r["top"]),
-                    "w": int(r["width"]), "h": int(r["height"]),
+                    "left": int(r["left"]), "top": int(r["top"]),
+                    "width": int(r["width"]), "height": int(r["height"]),
                     "cx": int(r["left"]) + int(r["width"]) / 2.0,
                     "cy": int(r["top"]) + int(r["height"]) / 2.0,
                     "page_num": int(r.get("page_num", 0))
@@ -301,9 +988,14 @@ def extract_items_from_path(path: str) -> Dict[str, List[Dict[str, Any]]]:
             except Exception:
                 words = []
 
-        labels = _cluster_columns(words, k=2)  # 2 columns common in menus; robust guards inside
+        labels = _cluster_columns(words, k=2)
         lines = _group_lines(words, labels)
         all_lines.extend(lines)
 
-    cats = _parse_lines_to_categories(all_lines)
-    return cats
+    merged_lines = _merge_broken_lines(all_lines)
+    cats, debug = _parse_lines_to_categories(merged_lines)
+    debug["pre_merged_line_count"] = len(all_lines)
+    debug["post_merged_line_count"] = len(merged_lines)
+
+    cats = _post_process(cats, debug)
+    return cats, debug

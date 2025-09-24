@@ -97,6 +97,14 @@
       <button class="btn btn-success">Publish to Menu</button>
     </form>
 
+    <!-- NEW: OCR Debug quick links -->
+    <hr style="border-color:#1f2a44; margin:12px 0;">
+    <h3>OCR Debug</h3>
+    <div style="display:grid; gap:6px;">
+      <a class="btn" href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}">View OCR Debug (JSON)</a>
+      <a class="btn" href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
+    </div>
+
     {% if draft.source_job_id %}
       <hr style="border-color:#1f2a44; margin:12px 0;">
       <a class="btn" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Back to Import Detail</a>
@@ -116,7 +124,10 @@
         <div class="meta">
           <div>Draft #{{ draft.id }}</div>
           {% if draft.restaurant_id is not none %}<div>Restaurant ID #{{ draft.restaurant_id }}</div>{% endif %}
-          {% if draft.source %}<div>Source: <span class="badge">{{ draft.source }}</span></div>{% endif %}
+          {% if draft.source %}
+            {% set src = (draft.source|string) %}
+            <div>Source: <span class="badge">{{ src[:60] }}{% if src|length > 60 %}…{% endif %}</span></div>
+          {% endif %}
           {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
           <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
         </div>
@@ -130,6 +141,7 @@
             <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
             <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
             <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
+            <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
             <button type="button" id="export-visible-btn">Export Visible as CSV</button>
           </div>
         </details>
