@@ -8,12 +8,14 @@ Pillow==10.4.0
 pdf2image==1.17.0   # rasterize PDFs (requires Poppler installed separately)
 
 # --- Spell/parse helper (Day 14) ---
-symspellpy==6.7.8
+# symspellpy pulls in editdistpy (C extension). Skip on 32-bit / Py3.13+ to avoid compiler issues.
+symspellpy==6.7.8; platform_machine == "AMD64" and python_version < "3.13"
 
 # --- Data & export support ---
 openpyxl==3.1.5     # Excel (XLSX) export
-pandas==2.2.2       # used for column-aware OCR helper
-scikit-learn==1.5.1 # ditto (optional but supported)
+# pandas & scikit-learn: install only where wheels exist
+pandas==2.2.2; platform_machine == "AMD64" and python_version < "3.13"
+scikit-learn==1.5.1; platform_machine == "AMD64" and python_version < "3.13"
 
 # --- Utils ---
 python-dotenv==1.0.1  # load .env for TESSERACT_CMD, POPPLER_PATH, secrets
