@@ -293,17 +293,32 @@ README.md # This file
 
 --- 
 
-## 🚀 Day 18: AI-Assisted Menu Extraction (Planned) 
+## 🚀 Day 18: Stability, OCR Env, and Exports
 
-- **Goal**: drop in an AI “menu extraction brain” alongside regex pipeline  
-- Plan:  
-  - Stage 1: Keep regex/heuristics as baseline  
-  - Stage 2: Add AI model (e.g., OpenAI GPT or custom) for cleanup + missing price recovery  
-  - Stage 3: Two-AI design:  
-    - Brain A: Menu extraction & structuring  
-    - Brain B: Conversational ordering  
-    - Shared schema for menu items (categories, names, prices, options)  
-  - Stage 4: Config switch to toggle AI cleanup layer  
-- Expected benefits: higher accuracy, scalability, less regex micromanagement  
+**Commit ladder**
+- **(1)** OCR environment setup — Installed & wired **Tesseract** and **Poppler**; `/ocr/health` shows both present.  
+  - Guarded optional deps on this box via environment markers:  
+    - `pandas==2.2.2; platform_machine == "AMD64" and python_version < "3.13"`  
+    - `scikit-learn==1.5.1; platform_machine == "AMD64" and python_version < "3.13"`  
+    - `symspellpy==6.7.8; platform_machine == "AMD64" and python_version < "3.13"`
+- **(2)** Fixed 500s on **/restaurants**, **/import**, **/imports** by reinitializing SQLite schema (tables present, zero rows baseline).  
+- **(3)** Draft Editor verified opens and functions for both **JPG** and **PDF** imports.  
+- **(4)** Exports verified end-to-end:  
+  - From **Import View** and **Draft Editor** → **CSV**, **JSON**, and **Excel (.xlsx)** all download correctly.  
+- **(5)** Dev UX: Added VS Code tasks with command echoing:  
+  - `Run Infra` (prints public ngrok URL + health)  
+  - `Stop Infra`
 
-🟡 **Day 18 in progress — AI integration design phase.**
+✅ **Day 18 complete — end-to-end intake stable on this machine (OCR + pages + Draft Editor + exports).**
+
+---
+
+## 🔭 Roadmap: AI-Assisted Menu Extraction (Design)
+
+- Keep regex/heuristics as a safe baseline.  
+- Add AI cleanup/recovery layer (e.g., GPT) for missing prices & structure normalization.  
+- Two-brain design later:  
+  - Brain A: Menu extraction & structuring  
+  - Brain B: Conversational ordering  
+- Config switch to toggle AI cleanup layer.
+
