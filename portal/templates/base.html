@@ -104,6 +104,9 @@
       .flash-enter-active { opacity:1; transform:translateY(0); transition:all .25s ease; }
     </style>
 
+    <!-- IMPORTANT: Load app.css AFTER inline <style> so it can override -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v=2">
+
     {% block head %}{% endblock %}
   </head>
   <body class="bg-bg text-ink">
