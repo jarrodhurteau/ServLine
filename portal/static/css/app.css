@@ -1,13 +1,44 @@
-/* === Draft Editor (scoped) ============================================== */
+/* =======================================================================
+   DRAFT EDITOR — FULL THEME + FLUSH-LEFT LAYOUT
+   Expands the page width and polishes the table + action buttons.
+   ======================================================================= */
+
+/* Make the outer wrapper full-width ONLY when it contains the editor */
+main.wrap:has(> .draft-editor-page) {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 10px !important; /* small breathing room */
+}
+
+/* Root palette for the editor */
 .draft-editor-page :root {
   --bg:#0b1220; --panel:#0e1729; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44;
   --brand:#2563eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
 }
 
-/* Layout */
-.draft-editor-page .layout{display:grid;grid-template-columns:320px 1fr;gap:14px}
-.draft-editor-page .sidebar{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 10px 28px rgba(0,0,0,.25);color:var(--ink);position:sticky;top:16px;height:fit-content}
+/* -------- Layout ------------------------------------------------------ */
+.draft-editor-page .layout{
+  display:grid;
+  grid-template-columns:320px 1fr; /* sidebar + main */
+  gap:14px;
+  width:100%;
+  align-items:start;
+}
+
+.draft-editor-page .sidebar{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:0 10px 28px rgba(0,0,0,.25);
+  color:var(--ink);
+  position:sticky;
+  top:16px;
+  height:fit-content;
+}
 .draft-editor-page .sidebar h3{margin:0 0 10px;font-size:1rem;color:#cfe0ff}
+
 .draft-editor-page .tree{list-style:none;padding-left:0;margin:0}
 .draft-editor-page .tree .cat{margin:6px 0}
 .draft-editor-page .tree .cat > .row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;background:#0b1527;border:1px solid #1b2540;border-radius:10px;padding:8px 10px}
@@ -21,11 +52,21 @@
 .draft-editor-page .size-pill:hover{background:#112147}
 .draft-editor-page .count{opacity:.9;font-weight:700}
 .draft-editor-page .helper{font-size:.85rem;color:var(--muted)}
-.draft-editor-page .draft-editor{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+
+.draft-editor-page .draft-editor{
+  background:var(--panel);
+  color:var(--ink);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:18px;
+  box-shadow:0 10px 28px rgba(0,0,0,.35);
+  width:100%;
+}
+
 .draft-editor-page .page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
 .draft-editor-page .meta{display:flex;gap:18px;color:var(--muted);font-size:.95rem;margin-top:6px;flex-wrap:wrap}
 
-/* Status + buttons */
+/* -------- Status & small UI bits ------------------------------------- */
 .draft-editor-page .status-pill{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:600;font-size:.85rem}
 .draft-editor-page .status-editing{background:#e0f2fe;color:#075985}
 .draft-editor-page .status-submitted{background:#fef3c7;color:#92400e}
@@ -38,19 +79,20 @@
 .draft-editor-page .toolbar{display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap}
 .draft-editor-page .toolbar .spacer{flex:1}
 
+/* Buttons inside the editor area (base.html defines global .btn as well) */
 .draft-editor-page .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#111827;text-decoration:none;cursor:pointer}
 .draft-editor-page .btn:hover{background:#f3f4f6}
 .draft-editor-page .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
 .draft-editor-page .btn-primary:hover{background:#1d4ed8}
 .draft-editor-page .btn-secondary{background:#111827;color:#fff;border-color:#111827}
 .draft-editor-page .btn-success{background:var(--ok);color:#fff;border-color:var(--ok)}
-.draft-editor-page .btn-danger{background:#b91c1c;color:#000;border-color:#b91c1c}
-.draft-editor-page .btn-danger:hover{background:#991b1b;color:#000}
+.draft-editor-page .btn-danger{background:#ef4444;color:#fff;border-color:#ef4444}
+.draft-editor-page .btn-danger:hover{background:#dc2626;border-color:#dc2626}
 .draft-editor-page .btn:disabled{opacity:.6;cursor:not-allowed}
 .draft-editor-page .badge{padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:.8rem}
 .draft-editor-page .dirty{display:none;margin-left:8px}
 
-/* Table */
+/* -------- Table ------------------------------------------------------- */
 .draft-editor-page .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
 .draft-editor-page table.editor{width:100%;border-collapse:separate;border-spacing:0}
 
@@ -74,7 +116,7 @@
 .draft-editor-page table.editor tbody tr:nth-child(odd){background:#0f1a2e}
 .draft-editor-page table.editor tbody tr:nth-child(even){background:#0b1527}
 
-/* Inputs & Textareas inside the table — normalize completely */
+/* Inputs & textareas inside the table — normalize tightly */
 .draft-editor-page table.editor input,
 .draft-editor-page table.editor textarea,
 .draft-editor-page table.editor select {
@@ -91,19 +133,34 @@
   padding:6px 8px;
 }
 
-/* Specific widths for narrower columns */
+/* Specific column widths */
 .draft-editor-page .cell-price{max-width:140px}
 .draft-editor-page .cell-number{max-width:110px}
-.draft-editor-page .row-actions{display:flex;gap:6px}
+
+/* -------- Row actions: keep buttons on one line ---------------------- */
+.draft-editor-page .row-actions{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-start;
+  flex-wrap:nowrap;          /* never stack */
+}
+.draft-editor-page .row-actions .btn{
+  padding:6px 10px;
+  font-size:.85rem;
+  white-space:nowrap;        /* NEVER break "Duplicate" or "Delete" */
+  word-break:normal;
+  overflow-wrap:normal;
+}
 
 /* Textareas behavior */
 .draft-editor-page .desc-text{
-  min-height:42px;
+  min-height:36px;           /* start compact */
   resize:vertical;
-  overflow:hidden; /* autosize removes scrollbars */
+  overflow:hidden;           /* autosize removes scrollbars */
 }
 .draft-editor-page .name-text{
-  min-height:36px;
+  min-height:30px;           /* even tighter by default */
   resize:vertical;
   overflow:hidden;
 }
@@ -114,7 +171,7 @@
 .draft-editor-page .conf-med{background:rgba(245,158,11,.18);color:#d97706;border:1px solid rgba(245,158,11,.35)}
 .draft-editor-page .conf-low{background:rgba(239,68,68,.18);color:#dc2626;border:1px solid rgba(239,68,68,.35)}
 
-/* Banners & toast */
+/* Export menu, banners, toast */
 .draft-editor-page .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
 .draft-editor-page .error-banner{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
 .draft-editor-page .success-banner{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
@@ -135,3 +192,6 @@
   .draft-editor-page .layout{grid-template-columns:1fr}
   .draft-editor-page .sidebar{position:static}
 }
+
+/* Align the textarea + badge in the name cell */
+.draft-editor-page .name-cell{display:flex;gap:6px;align-items:flex-start}

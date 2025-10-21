@@ -101,7 +101,7 @@
               <th style="min-width:120px;">Price</th>
               <th style="min-width:160px;">Category</th>
               <th style="min-width:90px;">Position</th>
-              <th style="width:120px;">Actions</th>
+              <th style="min-width:170px;">Actions</th>   <!-- widened so buttons never wrap -->
             </tr>
           </thead>
           <tbody id="items-body">
@@ -109,8 +109,8 @@
             <tr data-id="{{ it.id }}" data-cat="{{ (it.category or '')|e }}" data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
               <td><input type="checkbox" class="row-select" /></td>
               <td>
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <input class="cell-input name-input name" value="{{ it.name|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
+                <div class="name-cell">
+                  <textarea rows="1" class="cell-textarea name-text name name-input" {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
                   {% if it.confidence is not none %}
                     {% set conf = it.confidence|int %}
                     {% if conf >= 80 %}
@@ -123,7 +123,7 @@
                   {% endif %}
                 </div>
               </td>
-              <td><textarea class="cell-textarea desc-text description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
+              <td><textarea rows="1" class="cell-textarea desc-text description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
               <td><input class="cell-input cell-price price" value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}" inputmode="decimal" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td><input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td><input class="cell-input cell-number position" value="{{ it.position if it.position is not none else '' }}" inputmode="numeric" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
@@ -185,13 +185,12 @@
 
     function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
 
-    // autosize descriptions
+    // autosize descriptions + names
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
-    $$(".desc-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
+    $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
     function collectRowsFiltered(){
       const q = search.value.trim().toLowerCase();
-      // filter is applied via dataset flags set by outline clicks
       $$("#items-body tr").forEach(tr=>{
         const name=$(".name", tr)?.value?.toLowerCase()||"";
         const desc=$(".description", tr)?.value?.toLowerCase()||"";
@@ -205,18 +204,12 @@
       });
     }
 
-    // ---------------- Outline builder ----------------
     // We infer "(Size)" from end of name:  "Cheese Pizza (Small)"
     const sizeRx = /(.*)\s*\(([^)]+)\)\s*$/;
-
-    function normalizeBaseName(name){
-      const m = name.match(sizeRx);
-      const base = (m ? m[1] : name).trim();
-      return base.toLowerCase();
-    }
+    function normalizeBaseName(name){ const m = name.match(sizeRx); const base = (m ? m[1] : name).trim(); return base.toLowerCase(); }
 
     function gatherData(){
-      const data = {}; // category -> baseName -> { rows:[], sizes:[{label, rowId, price}] }
+      const data = {};
       $$("#items-body tr").forEach(tr=>{
         const rowId = tr.getAttribute("data-id");
         const cat = ($(".category", tr)?.value || tr.getAttribute("data-cat") || "").trim() || "(Uncategorized)";
@@ -230,37 +223,14 @@
         data[cat] ||= {};
         data[cat][base] ||= { rows: [], sizes: [] };
         data[cat][base].rows.push(rowId);
-        if (sizeLabel){
-          data[cat][base].sizes.push({ label: sizeLabel, rowId, price });
-        }
+        if (sizeLabel){ data[cat][base].sizes.push({ label: sizeLabel, rowId, price }); }
       });
       return data;
     }
 
-    function clearAllFilters(){
-      $$("#items-body tr").forEach(tr=>{
-        delete tr.dataset.filterCat;
-        delete tr.dataset.filterItem;
-      });
-    }
-
-    function setFilterByCategory(cat){
-      clearAllFilters();
-      if (cat === "__ALL__"){ collectRowsFiltered(); return; }
-      $$("#items-body tr").forEach(tr=>{
-        tr.dataset.filterCat = cat.toLowerCase();
-      });
-      collectRowsFiltered();
-    }
-
-    function setFilterByItem(cat, baseNorm){
-      clearAllFilters();
-      $$("#items-body tr").forEach(tr=>{
-        tr.dataset.filterCat = cat.toLowerCase();
-        tr.dataset.filterItem = baseNorm;
-      });
-      collectRowsFiltered();
-    }
+    function clearAllFilters(){ $$("#items-body tr").forEach(tr=>{ delete tr.dataset.filterCat; delete tr.dataset.filterItem; }); }
+    function setFilterByCategory(cat){ clearAllFilters(); if (cat==="__ALL__"){ collectRowsFiltered(); return; } $$("#items-body tr").forEach(tr=>{ tr.dataset.filterCat = cat.toLowerCase(); }); collectRowsFiltered(); }
+    function setFilterByItem(cat, baseNorm){ clearAllFilters(); $$("#items-body tr").forEach(tr=>{ tr.dataset.filterCat = cat.toLowerCase(); tr.dataset.filterItem = baseNorm; }); collectRowsFiltered(); }
 
     function focusRow(rowId){
       const tr = $(`#items-body tr[data-id="${CSS.escape(rowId)}"]`);
@@ -272,23 +242,21 @@
 
     function rebuildOutline(){
       const data = gatherData();
-
-      // Build sorted category list
       const cats = Object.keys(data).sort((a,b)=>{
         const au = a === "(Uncategorized)", bu = b === "(Uncategorized)";
         if (au && !bu) return 1; if (!au && bu) return -1;
         return a.localeCompare(b);
       });
 
+      const outline = $("#outline");
       outline.innerHTML = "";
-      // "All" row
+
       const liAll = document.createElement("li");
       liAll.className = "cat";
       liAll.innerHTML = `<div class="row" data-cat="__ALL__"><strong>All</strong><span class="count">${$$("#items-body tr").length}</span></div>`;
       outline.appendChild(liAll);
 
       liAll.querySelector(".row").addEventListener("click", ()=>{
-        // activate visual state
         $$("#outline .cat").forEach(e=>e.classList.remove("active"));
         liAll.classList.add("active");
         setFilterByCategory("__ALL__");
@@ -305,7 +273,6 @@
         const ulItems = document.createElement("ul");
         ulItems.className = "items";
 
-        // Category click filters by category
         li.querySelector(".row").addEventListener("click", ()=>{
           $$("#outline .cat").forEach(e=>e.classList.remove("active"));
           li.classList.add("active");
@@ -318,7 +285,6 @@
           liItem.className = "item";
           liItem.innerHTML = `<div class="row"><span>${base}</span><span class="count">${entry.rows.length}</span></div>`;
 
-          // click on item → filter by item (across sizes)
           liItem.querySelector(".row").addEventListener("click", (e)=>{
             e.stopPropagation();
             $$("#outline .item").forEach(x=>x.classList.remove("active"));
@@ -326,7 +292,6 @@
             setFilterByItem(cat, base.toLowerCase());
           });
 
-          // sizes as pills
           if (entry.sizes.length){
             const sizesDiv = document.createElement("div");
             sizesDiv.className = "sizes";
@@ -395,7 +360,7 @@
         lastSaved.textContent = data.saved_at || new Date().toISOString();
         setDirty(false); deletedIds=[];
         showSuccess("Saved");
-        rebuildOutline(); // update counts and groupings
+        rebuildOutline();
       } catch(e){ showError(String(e)); }
     }
 
@@ -410,7 +375,6 @@
       });
     }
 
-    // search filter + UI sync
     $("#search").addEventListener("input", collectRowsFiltered);
 
     // row ops
@@ -423,21 +387,24 @@
       tr.innerHTML = `
         <td><input type="checkbox" class="row-select" /></td>
         <td>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input class="cell-input name-input name" value="${(prefill.name||"").replace(/"/g,'&quot;')}" />
+          <div class="name-cell">
+            <textarea rows="1" class="cell-textarea name-text name name-input">${(prefill.name||"")
+              .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
             ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
           </div>
         </td>
-        <td><textarea class="cell-textarea desc-text description">${(prefill.description||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
+        <td><textarea rows="1" class="cell-textarea desc-text description">${(prefill.description||"")
+              .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
         <td><input class="cell-input cell-price price" value="${prefill.price_cents!=null? (prefill.price_cents/100).toFixed(2): ''}" inputmode="decimal" /></td>
         <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g,'&quot;')}" /></td>
         <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>
         <td class="row-actions">
           <button class="btn duplicate-btn">Duplicate</button>
-          <button class="btn btn-danger">Delete</button>
+          <button class="btn btn-danger delete-btn">Delete</button>
         </td>`;
       itemsBody.prepend(tr);
-      const ta=$(".desc-text", tr); if (ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
+      const taDesc=$(".desc-text", tr); if (taDesc){ autosize(taDesc); taDesc.addEventListener('input',()=>autosize(taDesc)); }
+      const taName=$(".name-text", tr); if (taName){ autosize(taName); taName.addEventListener('input',()=>autosize(taName)); }
       setDirty(true); rebuildOutline();
       return tr;
     }
@@ -452,13 +419,13 @@
         const nameEl=$(".name", clone); if(nameEl) nameEl.value=(nameEl.value||"")+" (copy)";
         itemsBody.insertBefore(clone, tr.nextSibling);
         const ta=$(".desc-text", clone); if(ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
+        const taN=$(".name-text", clone); if(taN){ autosize(taN); taN.addEventListener('input',()=>autosize(taN)); }
         setDirty(true); showToast("Duplicated"); rebuildOutline();
       } else if (btn.classList.contains("btn-danger")){
         queueDelete(tr); tr.remove(); setDirty(true); showToast("Deleted"); rebuildOutline();
       }
     });
 
-    // select all + bulk delete
     selectAll?.addEventListener("change", ()=>{ const checked=selectAll.checked; $$(".row-select").forEach(cb=>cb.checked=checked); });
     $("#delete-selected-btn").addEventListener("click", (e)=>{
       e.preventDefault();
@@ -469,7 +436,6 @@
     });
     function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
-    // keep category attr in sync for outline grouping
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;
       if (el && el.classList.contains("price")){ const cents=dollarsToCents(el.value); el.value=(cents/100).toFixed(2); }
@@ -477,17 +443,14 @@
       if (el && el.classList.contains("name")){ rebuildOutline(); }
     }, true);
 
-    // unsaved nav guard
     window.addEventListener("beforeunload",(e)=>{ if (dirty && isEditable){ e.preventDefault(); e.returnValue=""; } });
 
-    // autosave heartbeat
     let pingTimer=null;
     function startHeartbeat(){ if (!isEditable) return; stopHeartbeat(); pingTimer=setInterval(async ()=>{ if (document.hidden) return; try{ const res=await fetch(`/drafts/${draftId}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({autosave_ping:true})}); if (res.ok){ const data=await res.json(); if (data && data.saved_at && lastSaved) lastSaved.textContent=data.saved_at; } }catch(_){ } },30000); }
     function stopHeartbeat(){ if(pingTimer){ clearInterval(pingTimer); pingTimer=null; } }
     document.addEventListener("visibilitychange", ()=>{ if (document.hidden) stopHeartbeat(); else startHeartbeat(); });
     startHeartbeat();
 
-    // export visible CSV
     function toCsvCell(v){ const s=(v??"").toString(); return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s; }
     function visibleRowsToCsv(){
       const rows=$$("#items-body tr").filter(tr=>tr.style.display!=="none");
@@ -509,7 +472,6 @@
     function downloadFile(filename, content, mime){ var m=mime||'text/csv;charset=utf-8'; var blob=new Blob(["\uFEFF",content],{type:m}); var url=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
     exportVisibleBtn?.addEventListener("click", ()=>{ const csv=visibleRowsToCsv(); downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8'); showToast("Exported visible rows"); });
 
-    // initial render
     rebuildOutline();
     collectRowsFiltered();
   })();
