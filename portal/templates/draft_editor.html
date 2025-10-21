@@ -45,47 +45,55 @@
     <!-- MAIN -->
     <div class="draft-editor">
       <div class="page-header">
-        <div>
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
-            {% set s = draft.status %}
-            <span class="status-pill status-{{ s }}">{{ s }}</span>
-            <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
-          </div>
-          <div class="meta">
-            <div>Draft #{{ draft.id }}</div>
-            {% if draft.restaurant_id is not none %}<div>Restaurant ID #{{ draft.restaurant_id }}</div>{% endif %}
-            {% if draft.source %}
-              {% set src = (draft.source|string) %}
-              <div>Source: <span class="badge">{{ src[:60] }}{% if src|length > 60 %}…{% endif %}</span></div>
-            {% endif %}
-            {% if draft.source_job_id %}<div>Import Job #{{ draft.source_job_id }}</div>{% endif %}
-            <div>Last saved: <span id="last-saved">{{ draft.updated_at }}</span></div>
-          </div>
-        </div>
+        <div class="infobar">
+          <span class="chip"><span class="label">Draft #</span><span class="value">{{ draft.id }}</span></span>
+          {% if draft.restaurant_id is not none %}
+            <span class="chip"><span class="label">Restaurant</span><span class="value">#{{ draft.restaurant_id }}</span></span>
+          {% endif %}
+          {% if draft.source %}
+            {% set src = (draft.source|string) %}
+            <span class="chip"><span class="label">Source</span><span class="value">{{ src[:24] }}{% if src|length > 24 %}…{% endif %}</span></span>
+          {% endif %}
+          {% if draft.source_job_id %}
+            <span class="chip"><span class="label">Import Job</span><span class="value">#{{ draft.source_job_id }}</span></span>
+          {% endif %}
+          <span class="chip"><span class="label">Last saved</span><span id="last-saved" class="value">{{ draft.updated_at }}</span></span>
 
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
-          <details class="export">
-            <summary class="btn">Export ▾</summary>
-            <div class="menu">
-              <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
-              <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
-              <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
-              <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
-              <button type="button" id="export-visible-btn">Export Visible as CSV</button>
-            </div>
-          </details>
-          <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
+          <span class="status-pill">editing</span>
+          <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
+          <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
+
+          <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+            <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
+            <details class="export">
+              <summary class="btn">Export ▾</summary>
+              <div class="menu">
+                <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
+                <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
+                <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
+                <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
+                <button type="button" id="export-visible-btn">Export Visible as CSV</button>
+              </div>
+            </details>
+            <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
+          </div>
         </div>
-        <div class="helper">Use the left outline to filter: click a category, item, or a specific size to jump and edit.</div>
       </div>
 
+      <!-- Flash banners -->
       <div id="error-banner" class="error-banner"></div>
       <div id="success-banner" class="success-banner"></div>
 
-      <div class="toolbar">
-        <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
+      <!-- Sticky toolbar -->
+      <div class="toolbar-sticky">
+        <div class="search-wrap">
+          <!-- magnifying glass icon -->
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
+        </div>
         <div class="spacer"></div>
         <button id="add-row-btn" class="btn">Add Item</button>
         <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
@@ -101,7 +109,7 @@
               <th style="min-width:120px;">Price</th>
               <th style="min-width:160px;">Category</th>
               <th style="min-width:90px;">Position</th>
-              <th style="min-width:170px;">Actions</th>   <!-- widened so buttons never wrap -->
+              <th style="min-width:170px;">Actions</th>
             </tr>
           </thead>
           <tbody id="items-body">
@@ -204,7 +212,6 @@
       });
     }
 
-    // We infer "(Size)" from end of name:  "Cheese Pizza (Small)"
     const sizeRx = /(.*)\s*\(([^)]+)\)\s*$/;
     function normalizeBaseName(name){ const m = name.match(sizeRx); const base = (m ? m[1] : name).trim(); return base.toLowerCase(); }
 
@@ -285,7 +292,7 @@
           liItem.className = "item";
           liItem.innerHTML = `<div class="row"><span>${base}</span><span class="count">${entry.rows.length}</span></div>`;
 
-          liItem.querySelector(".row").addEventListener("click", (e)=>{
+        liItem.querySelector(".row").addEventListener("click", (e)=>{
             e.stopPropagation();
             $$("#outline .item").forEach(x=>x.classList.remove("active"));
             liItem.classList.add("active");
@@ -314,7 +321,7 @@
       });
     }
 
-    // ---------------- Save / Edit / Ops ----------------
+    /* -------- Save / Edit / Ops -------------------------------------- */
     function collectPayload(){
       const items = [];
       let errors = [];
@@ -360,7 +367,7 @@
         lastSaved.textContent = data.saved_at || new Date().toISOString();
         setDirty(false); deletedIds=[];
         showSuccess("Saved");
-        rebuildOutline();
+        rebuildOutline(); // update counts and groupings
       } catch(e){ showError(String(e)); }
     }
 
@@ -432,7 +439,8 @@
       const selected=$$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr"));
       if (!selected.length) return;
       selected.forEach(tr=>{ queueDelete(tr); tr.remove(); });
-      setDirty(true); showToast(`Deleted ${selected.length} item(s)`); rebuildOutline();
+      setDirty(true); showToast(`Deleted ${selected.length} item(s)`); 
+      rebuildOutline();
     });
     function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
