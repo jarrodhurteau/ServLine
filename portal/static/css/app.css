@@ -1,6 +1,6 @@
 /* =======================================================================
-   DRAFT EDITOR — FULL THEME + FLUSH-LEFT LAYOUT
-   Expands the page width and polishes the table + action buttons.
+   DRAFT EDITOR — THEME + LAYOUT + UI POLISH
+   (v3: bolder search icon)
    ======================================================================= */
 
 /* Make the outer wrapper full-width ONLY when it contains the editor */
@@ -15,6 +15,7 @@ main.wrap:has(> .draft-editor-page) {
 .draft-editor-page :root {
   --bg:#0b1220; --panel:#0e1729; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44;
   --brand:#2563eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
+  --chip:#0b1527; --chipBorder:#233253;
 }
 
 /* -------- Layout ------------------------------------------------------ */
@@ -58,39 +59,88 @@ main.wrap:has(> .draft-editor-page) {
   color:var(--ink);
   border:1px solid var(--line);
   border-radius:14px;
-  padding:18px;
+  padding:18px 18px 14px;
   box-shadow:0 10px 28px rgba(0,0,0,.35);
   width:100%;
 }
 
-.draft-editor-page .page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
-.draft-editor-page .meta{display:flex;gap:18px;color:var(--muted);font-size:.95rem;margin-top:6px;flex-wrap:wrap}
+/* -------- Header / Infobar ------------------------------------------- */
+.draft-editor-page .page-header{margin-bottom:8px}
+.draft-editor-page .infobar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  margin:0 0 6px;
+}
+.draft-editor-page .chip{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px; border-radius:999px;
+  background:var(--chip); border:1px solid var(--chipBorder);
+  color:var(--ink); font-size:.85rem; line-height:1;
+}
+.draft-editor-page .chip .label{opacity:.8}
+.draft-editor-page .chip .value{font-weight:700}
+.draft-editor-page .status-pill{display:inline-block;padding:5px 12px;border-radius:999px;font-weight:700;font-size:.85rem; background:#e0f2fe;color:#075985; border:1px solid #9fd5ff}
+.draft-editor-page .title-input{font-size:1.05rem;font-weight:700;background:#fff;color:#000;border:1px solid #d1d5db;border-radius:10px;padding:6px 8px;outline:none;min-width:280px}
 
-/* -------- Status & small UI bits ------------------------------------- */
-.draft-editor-page .status-pill{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:600;font-size:.85rem}
-.draft-editor-page .status-editing{background:#e0f2fe;color:#075985}
-.draft-editor-page .status-submitted{background:#fef3c7;color:#92400e}
-.draft-editor-page .status-approved{background:#dcfce7;color:#065f46}
-.draft-editor-page .status-rejected{background:#fee2e2;color:#991b1b}
-.draft-editor-page .status-archived{background:#e5e7eb;color:#374151}
+/* -------- Sticky toolbar --------------------------------------------- */
+.draft-editor-page .toolbar-sticky{
+  position:sticky; top:10px; z-index:20;
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:8px; border:1px solid var(--line); border-radius:10px;
+  background:rgba(13, 22, 43, .8); backdrop-filter: blur(6px);
+  margin:10px 0 12px;
+}
+.draft-editor-page .toolbar-sticky .spacer{flex:1}
 
-.draft-editor-page .title-input{font-size:1.15rem;font-weight:700;background:#fff;color:#000;border:1px solid #d1d5db;border-radius:8px;padding:4px 6px;outline:none}
+/* Search input + icon (BOLDER ICON) */
+.draft-editor-page .search-wrap{position:relative; min-width:280px; flex:1; max-width:520px}
+.draft-editor-page .search-wrap svg{
+  position:absolute; left:10px; top:50%; transform:translateY(-50%);
+  width:20px; height:20px;              /* bigger */
+  opacity:1;                            /* fully visible */
+  pointer-events:none;
+}
+.draft-editor-page .search-wrap svg path{
+  stroke-width:3;                        /* thicker line */
+}
+.draft-editor-page .search{
+  padding-left:40px;                     /* extra room for bigger icon */
+}
+.draft-editor-page .search::placeholder{
+  color:#334155;                         /* darker placeholder */
+  opacity:1;
+  font-weight:600;                       /* a bit bolder */
+}
 
-.draft-editor-page .toolbar{display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap}
-.draft-editor-page .toolbar .spacer{flex:1}
-
-/* Buttons inside the editor area (base.html defines global .btn as well) */
-.draft-editor-page .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#111827;text-decoration:none;cursor:pointer}
-.draft-editor-page .btn:hover{background:#f3f4f6}
+/* Buttons (local overrides, base.html also has a .btn) */
+.draft-editor-page .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid #2a3a5f;background:#14203a;color:#e8eefc;text-decoration:none;cursor:pointer}
+.draft-editor-page .btn:hover{background:#18264a}
 .draft-editor-page .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
 .draft-editor-page .btn-primary:hover{background:#1d4ed8}
-.draft-editor-page .btn-secondary{background:#111827;color:#fff;border-color:#111827}
-.draft-editor-page .btn-success{background:var(--ok);color:#fff;border-color:var(--ok)}
+.draft-editor-page .btn-secondary{background:#0f172a;color:#fff;border-color:#0f172a}
+
+/* BRIGHTER success button (Publish) */
+.draft-editor-page .btn-success{
+  background:#16c98a;
+  color:#052018;
+  border-color:#16c98a;
+  box-shadow:0 0 0 2px rgba(22,201,138,.15);
+}
+.draft-editor-page .btn-success:hover{
+  background:#12b07a;
+  border-color:#12b07a;
+  box-shadow:0 0 0 3px rgba(22,201,138,.25);
+}
+
 .draft-editor-page .btn-danger{background:#ef4444;color:#fff;border-color:#ef4444}
 .draft-editor-page .btn-danger:hover{background:#dc2626;border-color:#dc2626}
 .draft-editor-page .btn:disabled{opacity:.6;cursor:not-allowed}
 .draft-editor-page .badge{padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:.8rem}
 .draft-editor-page .dirty{display:none;margin-left:8px}
+
+/* -------- Flash banners ---------------------------------------------- */
+.draft-editor-page .error-banner{background:rgba(254,242,242,.95);color:#991b1b;border:1px solid #fecaca;padding:10px 12px;border-radius:10px;margin:8px 0;display:none}
+.draft-editor-page .success-banner{background:rgba(236,253,245,.95);color:#065f46;border:1px solid #a7f3d0;padding:10px 12px;border-radius:10px;margin:8px 0;display:none}
+.draft-editor-page .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
 
 /* -------- Table ------------------------------------------------------- */
 .draft-editor-page .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
@@ -111,7 +161,7 @@ main.wrap:has(> .draft-editor-page) {
   padding:10px;border-bottom:1px solid #24304d;text-align:left
 }
 .draft-editor-page table.editor tbody td{
-  padding:8px;border-bottom:1px solid #18233c;vertical-align:top
+  padding:8px;border-bottom:1px dashed #223356;vertical-align:top
 }
 .draft-editor-page table.editor tbody tr:nth-child(odd){background:#0f1a2e}
 .draft-editor-page table.editor tbody tr:nth-child(even){background:#0b1527}
@@ -127,10 +177,10 @@ main.wrap:has(> .draft-editor-page) {
   background:#fff !important;
   color:#000 !important;
   border:1px solid #d1d5db;
-  border-radius:8px;
+  border-radius:10px;
   font-size:.95rem;
   line-height:1.35;
-  padding:6px 8px;
+  padding:7px 9px;
 }
 
 /* Specific column widths */
@@ -154,16 +204,8 @@ main.wrap:has(> .draft-editor-page) {
 }
 
 /* Textareas behavior */
-.draft-editor-page .desc-text{
-  min-height:36px;           /* start compact */
-  resize:vertical;
-  overflow:hidden;           /* autosize removes scrollbars */
-}
-.draft-editor-page .name-text{
-  min-height:30px;           /* even tighter by default */
-  resize:vertical;
-  overflow:hidden;
-}
+.draft-editor-page .desc-text{min-height:36px;resize:vertical;overflow:hidden}
+.draft-editor-page .name-text{min-height:30px;resize:vertical;overflow:hidden}
 
 /* Confidence badges */
 .draft-editor-page .conf-badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:.72rem;font-weight:700;margin-left:6px}
@@ -171,12 +213,7 @@ main.wrap:has(> .draft-editor-page) {
 .draft-editor-page .conf-med{background:rgba(245,158,11,.18);color:#d97706;border:1px solid rgba(245,158,11,.35)}
 .draft-editor-page .conf-low{background:rgba(239,68,68,.18);color:#dc2626;border:1px solid rgba(239,68,68,.35)}
 
-/* Export menu, banners, toast */
-.draft-editor-page .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
-.draft-editor-page .error-banner{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
-.draft-editor-page .success-banner{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
-
-.draft-editor-page .search{min-width:240px}
+/* Export menu */
 .draft-editor-page details.export{position:relative}
 .draft-editor-page details.export summary{list-style:none;cursor:pointer;user-select:none}
 .draft-editor-page details.export .menu{position:absolute;right:0;top:110%;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 20px rgba(0,0,0,.15);min-width:220px;padding:6px;z-index:10}
@@ -185,6 +222,7 @@ main.wrap:has(> .draft-editor-page) {
 .draft-editor-page details.export .menu a:hover,
 .draft-editor-page details.export .menu button:hover{background:#f3f4f6}
 
+/* Row focus ring */
 .draft-editor-page .row-focus{outline:2px solid #60a5fa; outline-offset:-2px}
 
 /* Responsive */
