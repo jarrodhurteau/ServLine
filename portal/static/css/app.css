@@ -1,0 +1,94 @@
+/* === Draft Editor (scoped) ============================================== */
+.draft-editor-page :root {
+  --bg:#0b1220; --panel:#0e1729; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44;
+  --brand:#2563eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
+}
+.draft-editor-page .layout{display:grid;grid-template-columns:320px 1fr;gap:14px}
+.draft-editor-page .sidebar{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 10px 28px rgba(0,0,0,.25);color:var(--ink);position:sticky;top:16px;height:fit-content}
+.draft-editor-page .sidebar h3{margin:0 0 10px;font-size:1rem;color:#cfe0ff}
+.draft-editor-page .tree{list-style:none;padding-left:0;margin:0}
+.draft-editor-page .tree .cat{margin:6px 0}
+.draft-editor-page .tree .cat > .row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;background:#0b1527;border:1px solid #1b2540;border-radius:10px;padding:8px 10px}
+.draft-editor-page .tree .cat.active > .row{border-color:#3b82f6;background:#112147}
+.draft-editor-page .tree .items{margin:6px 0 6px 14px;border-left:2px dashed #24304d;padding-left:10px}
+.draft-editor-page .tree .item{margin:4px 0}
+.draft-editor-page .tree .item > .row{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;padding:6px 8px;border-radius:8px}
+.draft-editor-page .tree .item.active > .row{background:#0b1527}
+.draft-editor-page .tree .sizes{margin:4px 0 4px 16px}
+.draft-editor-page .size-pill{display:inline-flex;gap:8px;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid #334155;background:#0b1527;color:#e8eefc;font-size:.82rem;margin:2px 4px 2px 0;cursor:pointer}
+.draft-editor-page .size-pill:hover{background:#112147}
+.draft-editor-page .count{opacity:.9;font-weight:700}
+.draft-editor-page .helper{font-size:.85rem;color:var(--muted)}
+.draft-editor-page .draft-editor{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+.draft-editor-page .page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.draft-editor-page .meta{display:flex;gap:18px;color:var(--muted);font-size:.95rem;margin-top:6px;flex-wrap:wrap}
+.draft-editor-page .status-pill{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:600;font-size:.85rem}
+.draft-editor-page .status-editing{background:#e0f2fe;color:#075985}
+.draft-editor-page .status-submitted{background:#fef3c7;color:#92400e}
+.draft-editor-page .status-approved{background:#dcfce7;color:#065f46}
+.draft-editor-page .status-rejected{background:#fee2e2;color:#991b1b}
+.draft-editor-page .status-archived{background:#e5e7eb;color:#374151}
+.draft-editor-page .title-input{font-size:1.15rem;font-weight:700;background:#fff;color:#000;border:1px solid #d1d5db;border-radius:8px;padding:4px 6px;outline:none}
+.draft-editor-page .toolbar{display:flex;align-items:center;gap:8px;margin:12px 0;flex-wrap:wrap}
+.draft-editor-page .toolbar .spacer{flex:1}
+.draft-editor-page .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#111827;text-decoration:none;cursor:pointer}
+.draft-editor-page .btn:hover{background:#f3f4f6}
+.draft-editor-page .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+.draft-editor-page .btn-primary:hover{background:#1d4ed8}
+.draft-editor-page .btn-secondary{background:#111827;color:#fff;border-color:#111827}
+.draft-editor-page .btn-success{background:var(--ok);color:#fff;border-color:var(--ok)}
+.draft-editor-page .btn-danger{background:var(--err);color:#fff;border-color:var(--err)}
+.draft-editor-page .btn:disabled{opacity:.6;cursor:not-allowed}
+.draft-editor-page .badge{padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:.8rem}
+.draft-editor-page .dirty{display:none;margin-left:8px}
+.draft-editor-page .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
+.draft-editor-page table.editor{width:100%;border-collapse:separate;border-spacing:0}
+
+/* === Step 1: WRAPPING FIX (no truncation anywhere in editor) =========== */
+.draft-editor-page table.editor thead th,
+.draft-editor-page table.editor tbody td {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.draft-editor-page table.editor thead th{position:sticky;top:0;background:#0b1220;color:#e8eefc;font-weight:700;padding:10px;border-bottom:1px solid #24304d;text-align:left}
+.draft-editor-page table.editor tbody td{padding:8px;border-bottom:1px solid #18233c;vertical-align:top}
+.draft-editor-page table.editor tbody tr:nth-child(odd){background:#0f1a2e}
+.draft-editor-page table.editor tbody tr:nth-child(even){background:#0b1527}
+
+.draft-editor-page .cell-input,
+.draft-editor-page .cell-textarea,
+.draft-editor-page .title-input,
+.draft-editor-page input[type="text"],
+.draft-editor-page textarea {
+  background:#fff!important; color:#000!important; border:1px solid #d1d5db; border-radius:8px;
+}
+
+.draft-editor-page .name-input{width:100%;min-width:220px}
+.draft-editor-page .desc-text{width:100%;min-height:42px;resize:vertical;line-height:1.35}
+.draft-editor-page .cell-price{width:120px}
+.draft-editor-page .cell-number{width:90px}
+.draft-editor-page .row-actions{display:flex;gap:6px}
+.draft-editor-page .conf-badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:.72rem;font-weight:700;margin-left:6px}
+.draft-editor-page .conf-high{background:rgba(16,185,129,.18);color:#16a34a;border:1px solid rgba(16,185,129,.35)}
+.draft-editor-page .conf-med{background:rgba(245,158,11,.18);color:#d97706;border:1px solid rgba(245,158,11,.35)}
+.draft-editor-page .conf-low{background:rgba(239,68,68,.18);color:#dc2626;border:1px solid rgba(239,68,68,.35)}
+.draft-editor-page .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
+.draft-editor-page .error-banner{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
+.draft-editor-page .success-banner{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:10px 12px;border-radius:10px;margin:10px 0;display:none}
+.draft-editor-page .search{min-width:240px}
+.draft-editor-page details.export{position:relative}
+.draft-editor-page details.export summary{list-style:none;cursor:pointer;user-select:none}
+.draft-editor-page details.export .menu{position:absolute;right:0;top:110%;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 20px rgba(0,0,0,.15);min-width:220px;padding:6px;z-index:10}
+.draft-editor-page details.export .menu a,
+.draft-editor-page details.export .menu button{width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;color:#111827;text-decoration:none;display:block}
+.draft-editor-page details.export .menu a:hover,
+.draft-editor-page details.export .menu button:hover{background:#f3f4f6}
+.draft-editor-page .row-focus{outline:2px solid #60a5fa; outline-offset:-2px}
+@media (max-width: 1060px){
+  .draft-editor-page .layout{grid-template-columns:1fr}
+  .draft-editor-page .sidebar{position:static}
+}
