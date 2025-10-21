@@ -1,8 +1,10 @@
-# portal/app.py 
+# portal/app.py
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
     session, send_from_directory, flash, make_response
 )
+
+# --- Standard libs & typing ---
 import sqlite3
 from pathlib import Path
 from functools import wraps
@@ -33,6 +35,11 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from importlib.util import find_spec
 import pytesseract
 
+# ✅ Make sure the OCR worker is imported at app startup
+#    (this triggers the version banner inside ocr_worker.py)
+from portal import ocr_worker
+print("[App] Imported portal.ocr_worker")  # optional confirmation from app.py
+
 # ------------------------
 # App & Config
 # ------------------------
@@ -41,8 +48,16 @@ app = Flask(__name__)
 # --- Config (dev) ---
 app.config["SECRET_KEY"] = "dev-secret-change-me"          # replace later with env var
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024        # ~20 MB
+# Dev QoL: auto-reload templates and disable static caching when iterating on UI
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
 DEV_USERNAME = "admin"
 DEV_PASSWORD = "letmein"
+
+# --- Debug OCR routes ---
+from portal.routes_debug_preocr import debug_preocr
+app.register_blueprint(debug_preocr)
 
 # --- Paths ---
 ROOT = Path(__file__).resolve().parents[1]
@@ -370,7 +385,6 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
         return draft_id
 
     return None
-
 def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cents: int) -> bool:
     cur = conn.cursor()
     row = cur.execute(
@@ -466,17 +480,13 @@ def discard_draft_for_job(job_id: int) -> int:
 # ------------------------
 # Health / DB / OCR Health
 # ------------------------
-# (index and /health moved into core blueprint)
-
 @app.get("/ocr/health")
 def ocr_health():
     # Prefer explicit cmd if set; otherwise look up via PATH
     explicit_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
     which_cmd = shutil.which("tesseract") or shutil.which("tesseract.exe") or ""
-    # Choose a display cmd (explicit beats PATH)
     display_cmd = explicit_cmd or which_cmd
 
-    # Found = explicit path exists OR which found something
     tess_path_exists = (bool(explicit_cmd) and Path(explicit_cmd).exists()) or bool(which_cmd)
 
     try:
@@ -488,6 +498,9 @@ def ocr_health():
     have_sklearn = find_spec("sklearn") is not None
     column_mode = "enabled" if (have_pandas and have_sklearn) else "fallback"
 
+    # NEW: surface OCR worker version string so you can confirm live-reload worked
+    worker_version = getattr(ocr_worker, "OCR_WORKER_VERSION", None)
+
     return jsonify({
         "tesseract": {
             "cmd": display_cmd,
@@ -495,10 +508,11 @@ def ocr_health():
             "version": tess_version
         },
         "poppler": {
-            "poppler_path_env": POPPLER_PATH or "",
-            "poppler_bin_present": bool(POPPLER_PATH and Path(POPPLER_PATH).exists())
+            "poppler_path_env": os.getenv("POPPLER_PATH") or "",
+            "poppler_bin_present": bool((os.getenv("POPPLER_PATH") or "") and Path(os.getenv("POPPLER_PATH")).exists())
         },
-        "columns": {"pandas": have_pandas, "scikit_learn": have_sklearn, "mode": column_mode}
+        "columns": {"pandas": have_pandas, "scikit_learn": have_sklearn, "mode": column_mode},
+        "ocr_worker_version": worker_version,
     })
 
 @app.get("/db/health")
@@ -562,7 +576,6 @@ def _save_draft_json(job_id: int, draft: dict) -> str:
 # --- OCR helpers: image/PDF → text, then text → draft -----------------
 def _ocr_image_to_text(img_path: Path) -> str:
     try:
-        # Use tuned defaults; overridable via env
         return pytesseract.image_to_string(
             str(img_path),
             lang=TESSERACT_LANG,
@@ -582,10 +595,8 @@ def _pdf_to_text(pdf_path: Path) -> str:
     except Exception:
         return ""
 
-    # Use POPPLER_PATH from env if provided
     poppler_path = POPPLER_PATH
     try:
-        # Higher DPI tends to help OCR quality on menus
         pages = convert_from_path(str(pdf_path), dpi=300, poppler_path=poppler_path)
     except Exception:
         return ""
@@ -593,11 +604,9 @@ def _pdf_to_text(pdf_path: Path) -> str:
     buf = []
     for pg in pages:
         try:
-            # Light cleanup: grayscale -> autocontrast -> sharpen
             img = pg.convert("L")
             img = ImageOps.autocontrast(img)
             img = img.filter(ImageFilter.SHARPEN)
-
             txt = pytesseract.image_to_string(
                 img,
                 lang=TESSERACT_LANG,
@@ -658,7 +667,6 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
         if m:
             name = m.group("name").strip(" -·:—–")
             price = (m.group("price") or "").strip()
-            # Normalize currency and decimal comma → dot
             price_norm = price.replace("$", "").replace("€", "").replace("£", "").replace(" ", "")
             if ("," in price_norm) and ("." not in price_norm):
                 price_norm = price_norm.replace(",", ".")
@@ -679,7 +687,6 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
             desc = (prev_item.get("description") or "").strip()
             prev_item["description"] = (desc + " " + line).strip()
         else:
-            # no item yet; treat as a freestanding name (no price)
             current_cat["items"].append({"name": line, "description": "", "sizes": []})
             prev_item = current_cat["items"][-1]
 
@@ -696,13 +703,11 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
 # ----- Day 14: helper-backed draft builder -----
 def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     """
-    Use storage/ocr_helper.extract_items_from_path to build a draft JSON compatible
-    with our legacy schema.
+    Use storage/ocr_helper.extract_items_from_path to build a draft JSON.
 
     NOTE (Day 17): extract_items_from_path may return either:
       • dict[str, list[items]]  -> just categories
       • (dict[str, list[items]], debug: dict) -> categories + debug payload
-    We handle both. This function now returns a tuple: (draft_dict, debug_dict_or_None).
     """
     if extract_items_from_path is None:
         raise RuntimeError("ocr_helper not available")
@@ -710,7 +715,6 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     debug_payload = None
     cats_raw = extract_items_from_path(str(saved_file_path)) or {}
 
-    # Support tuple return for (cats, debug)
     if isinstance(cats_raw, tuple) and len(cats_raw) == 2:
         cats, debug_payload = cats_raw
     else:
@@ -723,7 +727,6 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
             name = (it.get("name") or "").strip()
             desc = (it.get("description") or "").strip()
             price = it.get("price")
-            # price could be cents or dollars depending on helper; normalize to dollars float for JSON
             if isinstance(price, str):
                 try:
                     price_val = float(price.replace("$", "").strip())
@@ -765,11 +768,11 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         update_import_job(job_id, status="processing")
 
         draft = None
-        debug_payload = None   # NEW: capture optional debug for OCR Inspector
+        debug_payload = None
         engine = ""
         helper_error = None
 
-        # 1) Preferred path: our Day-14 OCR helper (category-aware, normalized)
+        # 1) Preferred path: OCR helper
         if extract_items_from_path is not None:
             try:
                 draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
@@ -779,7 +782,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 draft = None
                 debug_payload = None
 
-        # 2) Fallback to legacy text OCR if helper unavailable or failed
+        # 2) Fallback to legacy text OCR
         if draft is None:
             suffix = saved_file_path.suffix.lower()
             text = ""
@@ -792,14 +795,9 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
             if text:
                 draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
-                # Minimal debug if helper not used
-                debug_payload = {
-                    "notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
-                    "items": [],
-                    "lines": text.splitlines()[:500]  # cap to keep small
-                }
+                debug_payload = {"notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
+                                 "items": [], "lines": text.splitlines()[:500]}
             else:
-                # gentle placeholder
                 draft = {
                     "job_id": job_id,
                     "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
@@ -812,10 +810,8 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 }
                 debug_payload = {"notes": ["no_text_extracted"]}
 
-        # Save legacy-compatible JSON for continuity with existing flows
         rel_draft_path = _save_draft_json(job_id, draft)
 
-        # Optional raw dump (legacy)
         try:
             raw_dump = f"(engine={engine})\n"
             if helper_error:
@@ -824,10 +820,8 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         except Exception:
             pass
 
-        # Mark job done first
         update_import_job(job_id, status="done", draft_path=rel_draft_path)
 
-        # NEW (Day 17): Immediately ensure a DB draft exists and persist OCR debug if supported
         try:
             if drafts_store is not None:
                 draft_id = _get_or_create_draft_for_job(job_id)
@@ -835,7 +829,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     try:
                         drafts_store.save_ocr_debug(draft_id, debug_payload)
                     except Exception:
-                        # Non-fatal; continue
                         pass
         except Exception:
             pass
@@ -861,7 +854,6 @@ def import_menu():
         save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        # NEW: capture restaurant scope
         restaurant_id = _resolve_restaurant_id_from_request()
         job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
 
@@ -888,10 +880,8 @@ def import_status(job_id):
     return jsonify(data)
 
 # ------------------------
-# HTML Pages (Portal UI) — use _safe_render
+# HTML Pages (Portal UI)
 # ------------------------
-# (index moved into core blueprint)
-
 @app.get("/restaurants")
 def restaurants_page():
     with db_connect() as conn:
@@ -922,7 +912,7 @@ def items_page(menu_id):
         return _safe_render("items.html", restaurant=rest, menu=menu, items=items)
 
 # ------------------------
-# Day 6: Auth (Login / Logout) — PRG + flashes
+# Day 6: Auth (Login / Logout)
 # ------------------------
 @app.get("/login")
 def login():
@@ -934,10 +924,9 @@ def login_post():
     password = (request.form.get("password") or "").strip()
     nxt = request.form.get("next") or url_for("index")
     if username == DEV_USERNAME and password == DEV_PASSWORD:
-        # Dev defaults to admin
         session["user"] = {"username": username, "role": "admin"}
         flash("Welcome back!", "success")
-        return redirect(nxt)  # PRG
+        return redirect(nxt)
     flash("Invalid credentials", "error")
     return redirect(url_for("login", next=request.form.get("next") or ""))
 
@@ -948,7 +937,7 @@ def logout():
     return redirect(url_for("index"))
 
 # ------------------------
-# Dev helper page: simple upload form (uses your login session)
+# Dev helper page: simple upload form
 # ------------------------
 @app.get("/dev/upload")
 @login_required
@@ -1000,18 +989,18 @@ def dev_upload_form():
     """
 
 # ------------------------
-# Imports pages (Day 8 behaviors + Day 13 actions)
+# Imports pages
 # ------------------------
 @app.get("/imports")
 @login_required
 def imports():
-    jobs = list_import_jobs()  # hide status='deleted'
+    jobs = list_import_jobs()
     return _safe_render("imports.html", jobs=jobs)
 
 @app.get("/imports/<int:job_id>")
 @login_required
 def imports_detail(job_id):
-    """Day 13: job detail page with actions."""
+    """Job detail page with actions."""
     row = get_import_job(job_id)
     if not row:
         abort(404)
@@ -1021,7 +1010,6 @@ def imports_detail(job_id):
         if abs_path and abs_path.exists():
             with open(abs_path, "r", encoding="utf-8") as f:
                 draft = json.load(f)
-    # Provide restaurants list for admin assignment UX
     with db_connect() as conn:
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
@@ -1044,7 +1032,7 @@ def imports_raw(job_id):
         data = json.load(f)
     return jsonify(data)
 
-# NEW: bridge to Draft Editor (always try DB-first, create from legacy if needed)
+# Bridge to Draft Editor (DB-first)
 @app.get("/imports/<int:job_id>/draft")
 @login_required
 def imports_draft(job_id: int):
@@ -1054,7 +1042,6 @@ def imports_draft(job_id: int):
     flash("Draft not ready for editor yet. Showing legacy import view.", "info")
     return redirect(url_for("imports_detail", job_id=job_id))
 
-# NEW: set/assign restaurant to import (and sync to linked draft)
 @app.post("/imports/<int:job_id>/set_restaurant")
 @login_required
 def imports_set_restaurant(job_id: int):
@@ -1070,7 +1057,6 @@ def imports_set_restaurant(job_id: int):
 
     try:
         update_import_job(job_id, restaurant_id=restaurant_id)
-        # sync a linked draft if present
         try:
             _require_drafts_storage()
             draft_id = _get_or_create_draft_for_job(job_id)
@@ -1083,7 +1069,6 @@ def imports_set_restaurant(job_id: int):
         flash(f"Failed to link restaurant: {e}", "error")
     return redirect(url_for("imports_detail", job_id=job_id))
 
-# NEW: approve draft → commit to menu_items (dedupe), set job approved
 @app.post("/imports/<int:job_id>/approve")
 @login_required
 def imports_approve(job_id: int):
@@ -1095,7 +1080,6 @@ def imports_approve(job_id: int):
         flash(f"Approve failed: {e}", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
-# NEW: discard draft items for job, mark job discarded
 @app.post("/imports/<int:job_id>/discard")
 @login_required
 def imports_discard(job_id: int):
@@ -1106,7 +1090,6 @@ def imports_discard(job_id: int):
         flash(f"Discard failed: {e}", "error")
     return redirect(url_for("imports_detail", job_id=job_id))
 
-# NEW: clone draft tied to an import job
 @app.post("/imports/<int:job_id>/clone")
 @login_required
 def imports_clone(job_id: int):
@@ -1128,17 +1111,14 @@ def imports_clone(job_id: int):
         flash(f"Clone failed: {e}", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
-# Legacy “view” kept (alias to detail)
 @app.get("/imports/view/<int:job_id>")
 @login_required
 def imports_view(job_id):
     return imports_detail(job_id)
 
-# Cleanup & per-job delete (soft delete via status)
 @app.route("/imports/cleanup", methods=["GET", "POST"])
 @login_required
 def imports_cleanup():
-    """Soft-delete any import_jobs whose original upload file is gone."""
     with db_connect() as conn:
         rows = conn.execute("SELECT id, filename, COALESCE(status,'') AS st FROM import_jobs").fetchall()
         to_delete = [
@@ -1282,7 +1262,6 @@ def _trash_draft_file(p: Path, ts: str):
 
 def _trash_job_artifacts_for_upload(upload_name: str):
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    # any draft json that references this upload
     u = upload_name.lower()
     for p in _iter_draft_json_files():
         try:
@@ -1292,7 +1271,6 @@ def _trash_job_artifacts_for_upload(upload_name: str):
                 _trash_draft_file(p, ts)
         except Exception:
             continue
-    # raw dumps with filename hints
     def _sweep_raw_dir(src_root: Path, trash_root: Path):
         if not src_root.exists():
             return
@@ -1426,7 +1404,6 @@ def _sweep_artifacts() -> dict:
     _move("*.tmp")
     _move("*.raw.json")
     _move("*.ocr.txt")
-    # move loose raw files to their trash buckets
     def _sweep_raw_dir(src_root: Path, trash_root: Path):
         if not src_root.exists():
             return
@@ -1494,7 +1471,6 @@ def uploads_empty_trash():
     flash(f"Permanently removed {total} file(s) from trash.", "success")
     return redirect(url_for("uploads_trash_page"))
 
-# --- Buttons referenced by template ---
 @app.post("/uploads/clean_raw")
 @login_required
 def uploads_clean_raw():
@@ -1509,14 +1485,14 @@ def uploads_clean_drafts():
     flash(f"Moved {count} draft file(s) to trash.", "success")
     return redirect(url_for("uploads_trash_page"))
 
-# --- Artifact Sweep button on bin page ---
 @app.post("/admin/artifacts/sweep")
 @login_required
 def artifacts_sweep():
     report = _sweep_artifacts()
     return jsonify({"status": "ok", **report})
+
 # ------------------------
-# Draft Review (legacy JSON-file flow) & Publish to live menu (kept)
+# Draft Review (legacy JSON-file flow) & Publish (kept)
 # ------------------------
 def _load_draft_json_by_job(job_id: int):
     row = get_import_job(job_id)
@@ -1544,7 +1520,6 @@ def draft_review_page(job_id):
     preview_url = url_for("serve_upload", filename=src_file) if src_file and _is_image(src_file) else None
     return _safe_render("draft_review.html", draft=draft, restaurants=restaurants, preview_url=preview_url)
 
-# NOTE: This legacy route keeps its historical path.
 @app.post("/drafts/<int:job_id>/publish")
 @login_required
 def publish_draft(job_id):
@@ -1603,7 +1578,7 @@ def publish_draft(job_id):
     return redirect(url_for("items_page", menu_id=menu_id))
 
 # ======================================================================
-# Day 12 — DRAFTS (DB-first): List + Editor + Save + Submit (kept)
+# Drafts (DB-first): List + Editor + Save + Submit
 # ======================================================================
 @app.get("/drafts")
 @login_required
@@ -1630,14 +1605,12 @@ def draft_editor(draft_id: int):
 
     items = drafts_store.get_draft_items(draft_id) or []
 
-    # Category list for sidebar filter
     categories = sorted({
         (it.get("category") or "").strip()
         for it in items
         if (it.get("category") or "").strip()
     })
 
-    # Provide restaurants for assignment dropdown
     with db_connect() as conn:
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
@@ -1660,7 +1633,6 @@ def draft_save(draft_id: int):
         return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
     payload = request.get_json(silent=True) or {}
 
-    # Lightweight ping for autosave heartbeat
     if payload.get("autosave_ping"):
         return jsonify({"ok": True, "saved_at": _now_iso(), "ping": True}), 200
 
@@ -1706,8 +1678,6 @@ def draft_submit(draft_id: int):
         flash(f"Submit failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
-# NEW (Day 14): Approve & Publish from Draft Editor (requires assigned restaurant)
-# NOTE: Route path changed to avoid colliding with the legacy publish route above.
 @app.post("/drafts/<int:draft_id>/publish_now")
 @login_required
 def draft_publish_now(draft_id: int):
@@ -1722,7 +1692,6 @@ def draft_publish_now(draft_id: int):
             flash("Draft not found.", "error")
             return redirect(url_for("drafts_list"))
 
-        # Source of restaurant_id: prefer draft metadata; allow override via form/json
         rid = draft.get("restaurant_id")
         if request.is_json:
             payload = request.get_json(silent=True) or {}
@@ -1739,7 +1708,6 @@ def draft_publish_now(draft_id: int):
             flash("Assign a restaurant before publishing.", "error")
             return redirect(url_for("draft_editor", draft_id=draft_id))
 
-        # Commit items to menu
         items = drafts_store.get_draft_items(draft_id) or []
         with db_connect() as conn:
             menu_id = _find_or_create_menu_for_restaurant(conn, int(restaurant_id))
@@ -1752,7 +1720,6 @@ def draft_publish_now(draft_id: int):
                 desc = (it.get("description") or "").strip()
                 price_cents = it.get("price_cents")
                 if price_cents is None:
-                    # allow plain price text as fallback
                     price_cents = _price_to_cents(it.get("price") or it.get("price_text"))
                 if not _dedupe_exists(conn, menu_id, name, int(price_cents)):
                     cur.execute(
@@ -1762,7 +1729,6 @@ def draft_publish_now(draft_id: int):
                     inserted += 1
             conn.commit()
 
-        # Mark draft approved/published in storage if supported
         try:
             if hasattr(drafts_store, "approve_publish"):
                 drafts_store.approve_publish(draft_id)
@@ -1777,7 +1743,6 @@ def draft_publish_now(draft_id: int):
         flash(f"Publish failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
-# NEW (Day 14): Assign restaurant for a draft (editor-side)
 @app.post("/drafts/<int:draft_id>/assign_restaurant")
 @login_required
 def draft_assign_restaurant(draft_id: int):
@@ -1798,7 +1763,7 @@ def draft_assign_restaurant(draft_id: int):
         flash(f"Failed to assign restaurant: {e}", "error")
     return redirect(url_for("draft_editor", draft_id=draft_id))
 
-# NEW (Day 17): OCR Inspector debug endpoints
+# OCR Inspector debug endpoints
 @app.get("/drafts/<int:draft_id>/ocr-debug.json")
 @login_required
 def draft_ocr_debug_json(draft_id: int):
@@ -1814,7 +1779,6 @@ def draft_ocr_debug_json(draft_id: int):
 @login_required
 def draft_ocr_debug_csv(draft_id: int):
     _require_drafts_storage()
-    # Tolerate missing function gracefully
     load_fn = getattr(drafts_store, "load_ocr_debug", None)
     if load_fn is None:
         return make_response("OCR debug storage not available", 404)
@@ -1822,7 +1786,6 @@ def draft_ocr_debug_csv(draft_id: int):
     if not dbg:
         return make_response("No OCR debug payload found for this draft", 404)
 
-    # Flatten a reasonable subset to CSV: primarily parsed items; fall back to assignments/tokens summary
     rows = []
     items = dbg.get("items") or []
     if items:
@@ -1841,7 +1804,6 @@ def draft_ocr_debug_csv(draft_id: int):
                 "matched_rule": src.get("matched_rule"),
             })
     else:
-        # minimal fallback: summarize assignments or first 100 tokens/lines
         for a in (dbg.get("assignments") or [])[:200]:
             rows.append({
                 "id": "",
@@ -1868,13 +1830,13 @@ def draft_ocr_debug_csv(draft_id: int):
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_ocr_debug.csv"'
     return resp
 
-# NEW: export CSV
+# Exporters
 @app.get("/drafts/<int:draft_id>/export.csv")
 @login_required
 def draft_export_csv(draft_id: int):
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id) or []   # <-- fixed to list
+    items = drafts_store.get_draft_items(draft_id) or []
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=["id", "name", "description", "price_cents", "category", "position"])
     writer.writeheader()
@@ -1887,13 +1849,12 @@ def draft_export_csv(draft_id: int):
             "category": it.get("category") or "",
             "position": it.get("position") if it.get("position") is not None else ""
         })
-    csv_data = buf.getvalue().encode("utf-8-sig")  # BOM to help Excel
+    csv_data = buf.getvalue().encode("utf-8-sig")
     resp = make_response(csv_data)
     resp.headers["Content-Type"] = "text/csv; charset=utf-8"
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.csv"'
     return resp
 
-# NEW: export JSON
 @app.get("/drafts/<int:draft_id>/export.json")
 @login_required
 def draft_export_json(draft_id: int):
@@ -1913,7 +1874,6 @@ def draft_export_json(draft_id: int):
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.json"'
     return resp
 
-# NEW: export XLSX
 @app.get("/drafts/<int:draft_id>/export.xlsx")
 @login_required
 def draft_export_xlsx(draft_id: int):
@@ -1926,7 +1886,7 @@ def draft_export_xlsx(draft_id: int):
 
     wb = Workbook()
     ws = wb.active
-    ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]  # Excel sheet name limit
+    ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]
 
     headers = ["id", "name", "description", "price_cents", "category", "position"]
     ws.append(headers)
@@ -1950,7 +1910,7 @@ def draft_export_xlsx(draft_id: int):
     return resp
 
 # ------------------------
-# Error handlers (bulletproof; avoid template recursion)
+# Error handlers
 # ------------------------
 @app.errorhandler(404)
 def not_found(e):
@@ -1959,7 +1919,6 @@ def not_found(e):
     except Exception:
         return "404 Not Found", 404
 
-# If not in debug, still avoid template recursion
 if os.environ.get("FLASK_DEBUG") != "1":
     @app.errorhandler(500)
     def server_error(e):
@@ -1969,12 +1928,11 @@ if os.environ.get("FLASK_DEBUG") != "1":
             return "500 Internal Server Error", 500
 
 # ------------------------
-# Import landing page + HTML POST handler (kept; now passes restaurants)
+# Import landing page + HTML POST handler
 # ------------------------
 @app.get("/import")
 @login_required
 def import_page():
-    # Provide restaurants to allow admin to pick a target at upload time
     with db_connect() as conn:
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
@@ -1984,7 +1942,6 @@ def import_page():
 @app.post("/import")
 @login_required
 def import_upload():
-    """HTML handler: save upload, start OCR job, then refresh with a flash."""
     try:
         file = request.files.get("file")
         if not file or file.filename == "":
@@ -1999,7 +1956,6 @@ def import_upload():
         save_path = UPLOAD_FOLDER / tmp_name
         file.save(str(save_path))
 
-        # NEW: capture restaurant scope (customer forced, admin optional)
         restaurant_id = _resolve_restaurant_id_from_request()
 
         job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
@@ -2018,9 +1974,8 @@ def import_upload():
     return redirect(url_for("import_page"))
 
 # ------------------------
-# Diagnostics: ping/routes/boom
+# Diagnostics
 # ------------------------
-# (index/health are in core blueprint; keep others here)
 @app.get("/__ping")
 def __ping():
     return jsonify({"ok": True, "time": _now_iso()})
@@ -2034,10 +1989,9 @@ def __boom():
     raise RuntimeError("Intentional test error")
 
 # ------------------------
-# Blueprint registration (Day 16 micro-refactor)
+# Blueprint registration (core)
 # ------------------------
 try:
-    # local import to avoid circulars if running in unusual contexts
     from .routes.core import core_bp  # type: ignore
 except Exception:
     from routes.core import core_bp  # fallback if relative import fails
@@ -2056,10 +2010,9 @@ if _os.environ.get("FLASK_DEBUG") == "1":
     @app.errorhandler(500)
     def _dev_rethrow(e):
         import traceback
-        traceback.print_exc()   # print to terminal
-        raise e                 # bubble to debugger
+        traceback.print_exc()
+        raise e
 
-    # Direct debug route to surface real errors for Draft Editor
     @app.get("/__debug/imports/<int:job_id>/draft")
     @login_required
     def imports_draft_debug(job_id: int):
