@@ -2,12 +2,15 @@
 {% block title %}Recycle Bin{% endblock %}
 {% block content %}
 
-<h1 class="mb-3">Recycle Bin</h1>
+<h1 class="mb-3 text-xl font-semibold">Recycle Bin</h1>
+
+{% if err_note %}
+  <div class="alert alert-warning mb-3">{{ err_note }}</div>
+{% endif %}
 
 <div class="mb-3 flex flex-wrap items-center gap-2">
-  <form method="post" action="{{ url_for('artifacts_sweep') }}" style="display:inline;">
-    <button type="submit" class="btn btn-primary">Artifact Sweep</button>
-  </form>
+  <button id="sweepBtn" type="button" class="btn btn-primary">Artifact Sweep</button>
+  <a href="{{ url_for('uploads_page') }}" class="btn">Back to Uploads</a>
   <span class="muted ml-auto">
     {{ trashed|length }} item{{ '' if trashed|length == 1 else 's' }} in bin
   </span>
@@ -17,61 +20,144 @@
   <p class="muted">Recycle Bin is empty.</p>
 {% else %}
   <!-- Restore selected -->
-  <form method="post" action="{{ url_for('uploads_restore') }}" class="mb-4">
-    <button type="submit" class="btn btn-primary">Restore Selected</button>
-    <table class="table mt-2">
-      <thead>
-        <tr>
-          <th style="width:44px;"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
-          <th>Filename</th>
-          <th>Trash Path</th>
-          <th>Size</th>
-          <th>Trashed At</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for t in trashed %}
-        <tr>
-          <td><input type="checkbox" name="trash_paths" value="{{ t.trash_path }}"></td>
-          <td><code>{{ t.name or '—' }}</code></td>
-          <td><code>{{ t.trash_path or '—' }}</code></td>
-          <td>
-            {% if t.size is defined %}
-              {{ ((t.size or 0) / 1024)|round(1) }} KB
-            {% else %}
-              —
-            {% endif %}
-          </td>
-          <td>{{ t.modified_iso or t.modified or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <form id="restoreForm" method="post" action="{{ url_for('uploads_restore') }}" class="mb-4">
+    <div class="flex items-center gap-2">
+      <button id="restoreBtn" type="submit" class="btn btn-primary" disabled>Restore Selected</button>
+      <button id="emptyBtn" type="button" class="btn btn-danger ml-auto">Empty Recycle Bin</button>
+    </div>
+
+    <div class="card mt-2">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:44px;"><input type="checkbox" id="checkAll"></th>
+            <th>Filename</th>
+            <th>Trash Path</th>
+            <th>Size</th>
+            <th>Trashed At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in trashed %}
+          <tr>
+            <td><input type="checkbox" name="trash_paths" value="{{ t.trash_path }}" class="rowcheck"></td>
+            <td><code>{{ t.name or '—' }}</code></td>
+            <td><code>{{ t.trash_path or '—' }}</code></td>
+            <td data-bytes="{{ t.size if t.size is defined else '' }}">
+              {% if t.size is defined %}{{ ((t.size or 0) / 1024)|round(1) }} KB{% else %}—{% endif %}
+            </td>
+            <td>
+              {% set ts = t.modified_iso or t.modified or '' %}
+              <time class="ts" datetime="{{ ts }}">{{ ts or '—' }}</time>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </form>
 
-  <!-- Batch maintenance actions -->
-  <div class="mb-2 flex flex-wrap gap-2">
+  <!-- Batch maintenance actions (separate forms to avoid nesting) -->
+  <div class="mt-3 flex flex-wrap gap-2">
     <form method="post" action="{{ url_for('uploads_clean_raw') }}" style="display:inline"
           onsubmit="return confirm('Move ALL raw artifacts (storage/drafts/raw and storage/raw) into the Recycle Bin?');">
-      <button type="submit" class="btn btn-primary">Clean Raw Artifacts → Bin</button>
+      <button type="submit" class="btn">Clean Raw Artifacts → Bin</button>
     </form>
 
     <form method="post" action="{{ url_for('uploads_clean_drafts') }}" style="display:inline;"
           onsubmit="return confirm('Move ALL draft JSONs (storage/drafts) into the Recycle Bin?');">
-      <button type="submit" class="btn btn-primary">Clean Draft JSONs → Bin</button>
-    </form>
-
-    <form method="post" action="{{ url_for('uploads_empty_trash') }}" style="display:inline; margin-left:auto;"
-          onsubmit="return confirm('Empty Recycle Bin permanently?');">
-      <button type="submit" class="btn btn-danger">Empty Recycle Bin</button>
+      <button type="submit" class="btn">Clean Draft JSONs → Bin</button>
     </form>
   </div>
 {% endif %}
 
 <script>
-function toggleAll(box){
-  const checks = document.querySelectorAll('input[name="trash_paths"]');
-  checks.forEach(c => c.checked = box.checked);
-}
+  // Utilities
+  const $ = (s, el=document)=>el.querySelector(s);
+  const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
+
+  // Artifact Sweep via fetch (no JSON nav)
+  const sweepBtn = $('#sweepBtn');
+  if (sweepBtn){
+    sweepBtn.addEventListener('click', async ()=>{
+      try{
+        const res = await fetch("{{ url_for('artifacts_sweep') }}", { method:'POST' });
+        if (!res.ok) throw new Error('Request failed');
+        const data = await res.json().catch(()=>({}));
+        const moved = (data && data.count) ? `Moved ${data.count} file(s).` : 'Sweep completed.';
+        alert('Artifact Sweep: ' + moved);
+        location.reload();
+      } catch {
+        alert('Artifact Sweep failed.');
+      }
+    });
+  }
+
+  // Friendly size formatting
+  (function(){
+    function formatBytes(b){
+      const n = Number(b||0);
+      if (!n) return '—';
+      if (n < 1024) return n + ' B';
+      const k = 1024, units = ['KB','MB','GB','TB'];
+      let i = -1, v = n;
+      do { v = v / k; i++; } while (v >= k && i < units.length-1);
+      return v.toFixed(v < 10 ? 1 : 0) + ' ' + units[i];
+    }
+    $$('td[data-bytes]').forEach(td=>{
+      const raw = td.getAttribute('data-bytes');
+      if (raw) td.textContent = formatBytes(raw);
+    });
+  })();
+
+  // Friendly timestamps
+  (function(){
+    function fmt(d){
+      try{
+        if (!d) return '—';
+        const dt = new Date(d);
+        if (isNaN(dt)) return d;
+        const opts = { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' };
+        return dt.toLocaleString(undefined, opts).replace(',', ' ·');
+      } catch { return d || '—'; }
+    }
+    $$('time.ts').forEach(t=>{
+      const raw = t.getAttribute('datetime') || t.textContent || '';
+      t.textContent = fmt(raw);
+    });
+  })();
+
+  // Selection controls
+  const restoreBtn = $('#restoreBtn');
+  const checkAll = $('#checkAll');
+  function rowChecks(){ return $$('.rowcheck'); }
+  function refreshRestore(){
+    if (restoreBtn) restoreBtn.disabled = !rowChecks().some(c => c.checked);
+  }
+  if (checkAll){
+    checkAll.addEventListener('change', ()=>{
+      rowChecks().forEach(c => c.checked = checkAll.checked);
+      refreshRestore();
+    });
+  }
+  document.addEventListener('change', (e)=>{
+    if (e.target.classList.contains('rowcheck')){
+      if (!e.target.checked && checkAll) checkAll.checked = false;
+      refreshRestore();
+    }
+  });
+
+  // Empty bin button posts to uploads_empty_trash with confirm
+  const emptyBtn = $('#emptyBtn');
+  if (emptyBtn){
+    emptyBtn.addEventListener('click', ()=>{
+      if (!confirm('Empty Recycle Bin permanently?')) return;
+      const f = document.createElement('form');
+      f.method = 'post';
+      f.action = "{{ url_for('uploads_empty_trash') }}";
+      document.body.appendChild(f);
+      f.submit();
+    });
+  }
 </script>
 {% endblock %}

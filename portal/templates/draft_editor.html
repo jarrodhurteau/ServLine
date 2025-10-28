@@ -118,7 +118,11 @@
               <td><input type="checkbox" class="row-select" /></td>
               <td>
                 <div class="name-cell">
-                  <textarea rows="1" class="cell-textarea name-text name name-input" {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
+                  <!-- Day 19: wrap + auto-size -->
+                  <textarea rows="1"
+                            class="cell-textarea name-text name name-input js-autosize prewrap text-wrap"
+                            data-autosize
+                            {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
                   {% if it.confidence is not none %}
                     {% set conf = it.confidence|int %}
                     {% if conf >= 80 %}
@@ -131,7 +135,13 @@
                   {% endif %}
                 </div>
               </td>
-              <td><textarea rows="1" class="cell-textarea desc-text description" {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea></td>
+              <td>
+                <!-- Day 19: wrap + auto-size -->
+                <textarea rows="1"
+                          class="cell-textarea desc-text description js-autosize prewrap text-wrap"
+                          data-autosize
+                          {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea>
+              </td>
               <td><input class="cell-input cell-price price" value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}" inputmode="decimal" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td><input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td><input class="cell-input cell-number position" value="{{ it.position if it.position is not none else '' }}" inputmode="numeric" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
@@ -193,7 +203,7 @@
 
     function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
 
-    // autosize descriptions + names
+    // Day 19: autosize names/descriptions (still keeps existing behavior)
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
@@ -292,7 +302,7 @@
           liItem.className = "item";
           liItem.innerHTML = `<div class="row"><span>${base}</span><span class="count">${entry.rows.length}</span></div>`;
 
-        liItem.querySelector(".row").addEventListener("click", (e)=>{
+          liItem.querySelector(".row").addEventListener("click", (e)=>{
             e.stopPropagation();
             $$("#outline .item").forEach(x=>x.classList.remove("active"));
             liItem.classList.add("active");
@@ -328,7 +338,7 @@
       $$("#items-body tr").forEach(tr=>{
         if (tr.style.display === "none") return;
         const idAttr=tr.getAttribute("data-id");
-        const id = idAttr && /^\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
+        const id = idAttr && /^\\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
         const name=$(".name", tr).value.trim();
         const description=$(".description", tr).value.trim();
         const priceStr=$(".price", tr).value.trim();
@@ -338,7 +348,7 @@
         if (!name){ errors.push("Name is required for all items."); tr.classList.add("row-error"); } else { tr.classList.remove("row-error"); }
         const price_cents=dollarsToCents(priceStr);
         let position=null; if (posStr!==""){ const p=Number(posStr); if (Number.isNaN(p) || !Number.isInteger(p)){ errors.push("Position must be an integer."); } else { position=p; } }
-        const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
+        const confidence = confStr && /^\\d+$/.test(confStr) ? Number(confStr) : null;
         items.push({ id, name, description, price_cents, category: category||null, position, confidence });
       });
       const title = $("#draft-title").value.trim();
@@ -360,7 +370,7 @@
         let insIdx=0;
         $$("#items-body tr").forEach(tr=>{
           const idAttr=tr.getAttribute("data-id");
-          if (!idAttr || !/^\d+$/.test(idAttr)){
+          if (!idAttr || !/^\\d+$/.test(idAttr)){
             const newId = data.inserted_ids?.[insIdx++]; if (newId) tr.setAttribute("data-id", String(newId));
           }
         });
@@ -395,12 +405,12 @@
         <td><input type="checkbox" class="row-select" /></td>
         <td>
           <div class="name-cell">
-            <textarea rows="1" class="cell-textarea name-text name name-input">${(prefill.name||"")
+            <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
               .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
             ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
           </div>
         </td>
-        <td><textarea rows="1" class="cell-textarea desc-text description">${(prefill.description||"")
+        <td><textarea rows="1" class="cell-textarea desc-text description js-autosize prewrap text-wrap" data-autosize>${(prefill.description||"")
               .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
         <td><input class="cell-input cell-price price" value="${prefill.price_cents!=null? (prefill.price_cents/100).toFixed(2): ''}" inputmode="decimal" /></td>
         <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g,'&quot;')}" /></td>
@@ -442,7 +452,7 @@
       setDirty(true); showToast(`Deleted ${selected.length} item(s)`); 
       rebuildOutline();
     });
-    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
+    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;

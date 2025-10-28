@@ -2,27 +2,26 @@
 {% block title %}Uploads{% endblock %}
 {% block content %}
 
-<h1 class="mb-3">Uploads</h1>
+<h1 class="mb-3 text-xl font-semibold">Uploads</h1>
 
 {% if files|length == 0 %}
   <p class="muted">No files in Uploads.</p>
 {% else %}
-  <!-- Toolbar: SEPARATE forms, no nesting -->
+  <!-- Toolbar: independent controls (no nested forms) -->
   <div class="mb-3 flex flex-wrap items-center gap-2">
-    <form method="post" action="{{ url_for('artifacts_sweep') }}" style="display:inline;">
-      <button type="submit" class="btn btn-primary">Artifact Sweep</button>
-    </form>
+    <button id="sweepBtn" type="button" class="btn btn-primary">Artifact Sweep</button>
 
-    <!-- Delete form has ONLY the delete button here; checkboxes live in the table form below -->
+    <!-- Delete form has ONLY the submit button; checkboxes live in the table below -->
     <form id="deleteForm" method="post" action="{{ url_for('uploads_delete') }}" style="display:inline;">
       <button id="deleteBtn" type="submit" class="btn btn-danger" disabled>Delete Selected (to Recycle Bin)</button>
     </form>
 
+    <a href="{{ url_for('uploads_trash_page') }}" class="btn">Recycle Bin</a>
     <span class="muted ml-auto">{{ files|length }} file{{ '' if files|length == 1 else 's' }}</span>
   </div>
 
-  <!-- Table form holds the checkboxes; submit is triggered by the separate delete form via JS -->
-  <form id="tableForm">
+  <!-- Table with selection checkboxes -->
+  <form id="tableForm" onsubmit="return false;">
     <div class="card">
       <table class="table">
         <thead>
@@ -39,11 +38,13 @@
           <tr>
             <td><input type="checkbox" name="names" value="{{ f.name }}" class="rowcheck"></td>
             <td><code>{{ f.name }}</code></td>
-            <td>{{ (f.size/1024)|round(1) }} KB</td>
-            <td>{{ f.modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td data-bytes="{{ f.size }}">{{ (f.size/1024)|round(1) }} KB</td>
+            <td><time class="ts" datetime="{{ f.modified.isoformat(timespec='seconds') }}">{{ f.modified.strftime("%Y-%m-%d %H:%M:%S") }}</time></td>
             <td>
               {% if f.name.lower().endswith(('.png','.jpg','.jpeg')) %}
-                <a href="{{ url_for('serve_upload', filename=f.name) }}" target="_blank" rel="noopener">Open</a>
+                <a href="{{ url_for('serve_upload', filename=f.name) }}" target="_blank" rel="noopener">
+                  <img src="{{ url_for('serve_upload', filename=f.name) }}" alt="preview" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line);" />
+                </a>
               {% else %}
                 <em class="muted">n/a</em>
               {% endif %}
@@ -56,32 +57,68 @@
   </form>
 
   <script>
-    // sync "Delete Selected" button enabled state
-    const deleteBtn = document.getElementById('deleteBtn');
-    const checkAll = document.getElementById('checkAll');
-    const rowChecks = () => Array.from(document.querySelectorAll('.rowcheck'));
+    // -------- Helpers
+    const $ = (s, el=document)=>el.querySelector(s);
+    const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
+
+    // Friendly size formatting
+    (function(){
+      function formatBytes(b){
+        const n = Number(b||0);
+        if (n < 1024) return n + ' B';
+        const k = 1024, units = ['KB','MB','GB','TB'];
+        let i = -1, v = n;
+        do { v = v / k; i++; } while (v >= k && i < units.length-1);
+        return v.toFixed(v < 10 ? 1 : 0) + ' ' + units[i];
+      }
+      $$('td[data-bytes]').forEach(td=>{
+        const raw = td.getAttribute('data-bytes');
+        td.textContent = formatBytes(raw);
+      });
+    })();
+
+    // Friendly timestamps (keeps raw as fallback)
+    (function(){
+      function fmt(d){
+        try{
+          const dt = new Date(d);
+          if (isNaN(dt)) return d;
+          const opts = { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' };
+          return dt.toLocaleString(undefined, opts).replace(',', ' ·');
+        } catch { return d; }
+      }
+      $$('time.ts').forEach(t=>{
+        const raw = t.getAttribute('datetime') || t.textContent || '';
+        t.textContent = fmt(raw);
+      });
+    })();
+
+    // Selection + Delete button enable
+    const deleteBtn = $('#deleteBtn');
+    const checkAll = $('#checkAll');
+    const rowChecks = () => $$('.rowcheck');
     function refreshDeleteEnabled(){
       deleteBtn.disabled = !rowChecks().some(c => c.checked);
     }
-    checkAll.addEventListener('change', () => {
+    checkAll.addEventListener('change', ()=>{
       rowChecks().forEach(c => c.checked = checkAll.checked);
       refreshDeleteEnabled();
     });
-    document.addEventListener('change', (e) => {
-      if (e.target.classList.contains('rowcheck')) {
+    document.addEventListener('change', (e)=>{
+      if (e.target.classList.contains('rowcheck')){
         if (!e.target.checked) checkAll.checked = false;
         refreshDeleteEnabled();
       }
     });
 
     // Submit the real delete POST with selected names
-    document.getElementById('deleteForm').addEventListener('submit', (e) => {
-      if (deleteBtn.disabled) { e.preventDefault(); return; }
+    $('#deleteForm').addEventListener('submit', (e)=>{
+      if (deleteBtn.disabled){ e.preventDefault(); return; }
       const form = document.createElement('form');
       form.method = 'post';
       form.action = "{{ url_for('uploads_delete') }}";
-      rowChecks().forEach(c => {
-        if (c.checked) {
+      rowChecks().forEach(c=>{
+        if (c.checked){
           const input = document.createElement('input');
           input.type = 'hidden';
           input.name = 'names';
@@ -92,6 +129,20 @@
       document.body.appendChild(form);
       form.submit();
       e.preventDefault();
+    });
+
+    // Artifact Sweep via fetch (no navigation to JSON)
+    $('#sweepBtn').addEventListener('click', async ()=>{
+      try{
+        const res = await fetch("{{ url_for('artifacts_sweep') }}", { method:'POST' });
+        if (!res.ok) throw new Error('Request failed');
+        const data = await res.json().catch(()=>({}));
+        const moved = (data && data.count) ? `Moved ${data.count} file(s).` : 'Sweep completed.';
+        alert('Artifact Sweep: ' + moved);
+        location.reload();
+      } catch (e){
+        alert('Artifact Sweep failed.');
+      }
     });
   </script>
 {% endif %}

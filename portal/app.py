@@ -15,6 +15,7 @@ import json
 import shutil
 from datetime import datetime
 from typing import Optional, Iterable, Tuple, List
+import hashlib  # <-- added for cat_hue filter
 
 # stdlib for exports
 import io
@@ -150,6 +151,19 @@ def _now_iso() -> str:
 # Safe render helper (prevents template-caused 500 loops)
 # ------------------------
 def _safe_render(template_name: str, **ctx):
+    # Try to print the exact template file being used
+    try:
+        if app and app.jinja_loader:
+            try:
+                # get_source returns (source, filename, uptodate)
+                _src, _filename, _ = app.jinja_loader.get_source(app.jinja_env, template_name)
+                print(f"[TEMPLATE DEBUG] → {template_name} from {_filename}")
+            except Exception as e:
+                print(f"[TEMPLATE DEBUG] (could not resolve path for {template_name}): {e}")
+    except Exception:
+        # If printing fails for any reason, we still render normally
+        pass
+
     try:
         return render_template(template_name, **ctx)
     except Exception:
@@ -159,9 +173,26 @@ def _safe_render(template_name: str, **ctx):
         body = f"<h1>{html.escape(template_name)} missing or failed</h1><pre>{tb}</pre>"
         return body, 200, {"Content-Type": "text/html; charset=utf-8"}
 
+
+
 # ------------------------
-# Template globals
+# Template globals + filters
 # ------------------------
+def _cat_hue(value: Optional[str]) -> int:
+    """
+    Deterministic hue (0–359) from a category string.
+    Usage in templates: style="--hue: {{ category|cat_hue }};"
+    """
+    s = (value or "").strip().lower()
+    if not s:
+        return 210  # default-ish blue
+    h = int(hashlib.md5(s.encode("utf-8")).hexdigest()[:8], 16) % 360
+    return h
+
+@app.template_filter("cat_hue")
+def jinja_cat_hue(value: Optional[str]) -> int:
+    return _cat_hue(value)
+
 @app.context_processor
 def inject_globals():
     """Provide `now` and `show_admin` to all templates."""
@@ -486,7 +517,6 @@ def ocr_health():
     explicit_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
     which_cmd = shutil.which("tesseract") or shutil.which("tesseract.exe") or ""
     display_cmd = explicit_cmd or which_cmd
-
     tess_path_exists = (bool(explicit_cmd) and Path(explicit_cmd).exists()) or bool(which_cmd)
 
     try:
@@ -511,8 +541,8 @@ def ocr_health():
     }
     try:
         worker_py = str(ROOT / ".venv311" / "Scripts" / "python.exe")
-        worker_probe["path"] = worker_py if Path(worker_py).exists() else None
-        if worker_probe["path"]:
+        if Path(worker_py).exists():
+            worker_probe["path"] = worker_py
             import subprocess
             code = (
                 "import json,sys\n"
@@ -531,7 +561,7 @@ def ocr_health():
             data = json.loads(out.strip())
             worker_probe.update(data)
             worker_probe["env_ok"] = bool(data.get("pandas")) and bool(data.get("scikit_learn"))
-            worker_probe["active"] = worker_probe["env_ok"]
+            worker_probe["active"] = bool(worker_probe["env_ok"])
     except Exception as e:
         worker_probe["error"] = str(e)
 
@@ -562,6 +592,7 @@ def ocr_health():
         },
         "ocr_worker_version": worker_version,
     })
+
 
 @app.get("/db/health")
 def db_health():
@@ -958,7 +989,6 @@ def items_page(menu_id):
             "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,),
         ).fetchall()
         return _safe_render("items.html", restaurant=rest, menu=menu, items=items)
-
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------

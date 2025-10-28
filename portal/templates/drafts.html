@@ -2,11 +2,48 @@
 {% block title %}Drafts · ServLine{% endblock %}
 
 {% block content %}
+  <style>
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
+    .pill-gray  { background:#e5e7eb; color:#374151; }
+    .pill-blue  { background:#dbeafe; color:#1e40af; }
+    .pill-yellow{ background:#fef3c7; color:#92400e; }
+    .pill-green { background:#dcfce7; color:#065f46; }
+    .pill-red   { background:#fee2e2; color:#991b1b; }
+    .pill-purple{ background:#ede9fe; color:#5b21b6; }
+    .filters { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .grow { flex: 1 1 auto; }
+    .w-40 { width: 10rem; }
+  </style>
+
   <h1 class="text-xl font-semibold mb-4">Drafts</h1>
 
-  <div class="mb-3">
-    <a href="{{ url_for('drafts_list') }}" class="btn">Refresh</a>
-  </div>
+  <!-- Filters / toolbar -->
+  <form class="card mb-3" method="get" action="{{ url_for('drafts_list') }}">
+    <div class="filters">
+      <div class="grow">
+        <label class="block text-sm muted mb-1">Status</label>
+        <select name="status" class="cell-input w-40">
+          {% set cur = (status or '') %}
+          <option value="" {{ '' == cur and 'selected' or '' }}>Any</option>
+          <option value="editing"   {{ 'editing'==cur and 'selected' or '' }}>Editing</option>
+          <option value="submitted" {{ 'submitted'==cur and 'selected' or '' }}>Submitted</option>
+          <option value="review"    {{ 'review'==cur and 'selected' or '' }}>Review</option>
+          <option value="approved"  {{ 'approved'==cur and 'selected' or '' }}>Approved</option>
+          <option value="published" {{ 'published'==cur and 'selected' or '' }}>Published</option>
+          <option value="discarded" {{ 'discarded'==cur and 'selected' or '' }}>Discarded</option>
+        </select>
+      </div>
+      <div class="grow">
+        <label class="block text-sm muted mb-1">Restaurant ID (optional)</label>
+        <input name="restaurant_id" class="cell-input w-40" inputmode="numeric"
+               value="{{ restaurant_id if restaurant_id is not none else '' }}" placeholder="e.g. 12" />
+      </div>
+      <div class="grow" style="align-self:flex-end">
+        <button class="btn btn-primary">Apply</button>
+        <a class="btn" href="{{ url_for('drafts_list') }}">Reset</a>
+      </div>
+    </div>
+  </form>
 
   <section class="card">
     {% if drafts %}
@@ -15,6 +52,7 @@
           <tr>
             <th>ID</th>
             <th>Title</th>
+            <th>Restaurant</th>
             <th>Status</th>
             <th>Updated</th>
             <th class="text-right">Actions</th>
@@ -22,13 +60,23 @@
         </thead>
         <tbody>
           {% for d in drafts %}
+            {% set st = (d.status or '')|lower %}
+            {% set pill_class =
+              'pill-gray'   if st in ['', 'pending'] else
+              'pill-blue'   if st in ['processing', 'restored'] else
+              'pill-green'  if st in ['approved', 'published', 'done'] else
+              'pill-yellow' if st in ['submitted', 'review'] else
+              'pill-purple' if st in ['editing'] else
+              'pill-red'
+            %}
             <tr>
               <td class="text-muted">#{{ d.id }}</td>
-              <td>{{ d.title }}</td>
-              <td>{{ d.status }}</td>
-              <td>{{ d.updated_at }}</td>
+              <td>{{ d.title or 'Untitled' }}</td>
+              <td>{% if d.restaurant_id %}#{{ d.restaurant_id }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td><span class="pill {{ pill_class }}">{{ d.status or '—' }}</span></td>
+              <td><time class="ts" datetime="{{ d.updated_at }}">{{ d.updated_at }}</time></td>
               <td class="text-right">
-                <a href="{{ url_for('draft_editor', draft_id=d.id) }}" class="btn">Open</a>
+                <a href="{{ url_for('draft_editor', draft_id=d.id) }}" class="btn btn-primary">Open</a>
               </td>
             </tr>
           {% endfor %}
@@ -38,4 +86,22 @@
       <p class="muted">No drafts yet.</p>
     {% endif %}
   </section>
+
+  <script>
+    // Friendlier timestamps
+    (function () {
+      function fmt(d) {
+        try {
+          const dt = new Date((d || '').replace(' ', 'T') + 'Z');
+          if (isNaN(dt)) return d;
+          const opts = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+          return dt.toLocaleString(undefined, opts).replace(',', ' ·');
+        } catch { return d; }
+      }
+      document.querySelectorAll('time.ts').forEach(t => {
+        const raw = t.getAttribute('datetime') || t.textContent || '';
+        t.textContent = fmt(raw);
+      });
+    })();
+  </script>
 {% endblock %}

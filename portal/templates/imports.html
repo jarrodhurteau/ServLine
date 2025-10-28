@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base.html" %} 
 {% block title %}Imports · ServLine{% endblock %}
 
 {% block content %}
@@ -14,6 +14,11 @@
 
     /* Actions alignment */
     .actions { display:flex; justify-content:flex-end; gap:.5rem; flex-wrap:wrap; }
+
+    /* Disable look for Edit until ready */
+    .btn[aria-disabled="true"] {
+      opacity:.55; pointer-events:none; filter:grayscale(20%);
+    }
   </style>
 
   <h1 class="text-xl font-semibold mb-4">Import Jobs</h1>
@@ -64,18 +69,23 @@
               'Discarded'   if st == 'discarded' else
               (st|capitalize if st else '—')
             %}
-            <tr>
+            <tr data-job-id="{{ j.id }}" data-status="{{ st }}">
               <td class="text-muted">#{{ j.id }}</td>
               <td>{{ j.filename }}</td>
-              <td><span class="pill {{ pill_class }}">{{ status_label }}</span></td>
+              <td>
+                <span class="pill {{ pill_class }}" data-status-pill>
+                  {{ status_label }}
+                </span>
+              </td>
               <td><time class="ts" datetime="{{ j.created_at }}">{{ j.created_at }}</time></td>
               <td><time class="ts" datetime="{{ j.updated_at }}">{{ j.updated_at }}</time></td>
               <td class="text-right">
                 <div class="actions">
-                  <a href="{{ url_for('imports_detail', job_id=j.id) }}" class="btn btn-primary">View</a>
-                  <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary">Raw OCR</a>
-                  <a href="{{ url_for('imports_draft', job_id=j.id) }}" class="btn btn-primary">Edit</a>
-                  <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline">
+                  <a href="{{ url_for('imports_detail', job_id=j.id) }}" class="btn btn-primary" data-view>View</a>
+                  <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary" data-raw>Raw OCR</a>
+                  {# Edit is enabled only when draft is ready; JS will toggle aria-disabled #}
+                  <a href="{{ url_for('imports_draft', job_id=j.id) }}" class="btn btn-primary" data-edit aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}">Edit</a>
+                  <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline" onsubmit="return confirm('Delete job #{{ j.id }}? This moves related files to Recycle Bin.');">
                     <button type="submit" class="btn btn-danger">Delete</button>
                   </form>
                 </div>
@@ -90,12 +100,11 @@
   </section>
 
   <script>
-    // Format timestamps to a friendlier display while preserving raw value as fallback
+    // --- Friendly timestamp formatting ---
     (function() {
       function fmt(d) {
         try {
-          // SQLite typically returns "YYYY-MM-DD HH:MM:SS"
-          const dt = new Date((d || '').replace(' ', 'T') + 'Z');
+          const dt = new Date((d || '').replace(' ', 'T') + 'Z'); // SQLite "YYYY-MM-DD HH:MM:SS"
           if (isNaN(dt)) return d;
           const opts = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
           return dt.toLocaleString(undefined, opts).replace(',', ' ·');
@@ -105,6 +114,89 @@
         const raw = t.getAttribute('datetime') || t.textContent || '';
         t.textContent = fmt(raw);
       });
+    })();
+
+    // --- Live status refresher for pending/processing jobs ---
+    (function(){
+      const PILL_CLASS = (st) => {
+        st = (st || '').toLowerCase();
+        if (!st || st === 'pending') return 'pill-gray';
+        if (['processing','restored'].includes(st)) return 'pill-blue';
+        if (['done','published','approved'].includes(st)) return 'pill-green';
+        if (['submitted','review'].includes(st)) return 'pill-yellow';
+        if (['editing'].includes(st)) return 'pill-purple';
+        if (['deleted','discarded','failed'].includes(st)) return 'pill-red';
+        return 'pill-gray';
+      };
+      const LABEL = (st) => {
+        st = (st || '').toLowerCase();
+        const map = {
+          pending: 'Pending', processing: 'Processing', done: 'Ready',
+          submitted: 'Submitted', editing: 'Editing', published: 'Published',
+          approved: 'Approved', restored: 'Restored', deleted: 'Deleted',
+          discarded: 'Discarded', failed: 'Failed'
+        };
+        return map[st] || (st ? (st[0].toUpperCase()+st.slice(1)) : '—');
+      };
+
+      const rows = Array.from(document.querySelectorAll('tr[data-job-id]'));
+      const live = () => rows.filter(r => ['pending','processing'].includes((r.dataset.status||'').toLowerCase()));
+
+      function updateRow(r, status, updatedAt, draftReady) {
+        r.dataset.status = status;
+        // pill
+        const pill = r.querySelector('[data-status-pill]');
+        if (pill) {
+          pill.className = 'pill ' + PILL_CLASS(status);
+          pill.textContent = LABEL(status);
+        }
+        // updated timestamp (fallback to raw)
+        if (updatedAt) {
+          const t = r.querySelectorAll('time.ts')[1];
+          if (t) { t.textContent = updatedAt; }
+        }
+        // toggle Edit enablement
+        const edit = r.querySelector('[data-edit]');
+        if (edit) {
+          const enable = !!draftReady && ['done','approved','published','editing','submitted','restored'].includes(status);
+          edit.setAttribute('aria-disabled', enable ? 'false' : 'true');
+        }
+      }
+
+      async function poll() {
+        const pendingRows = live();
+        if (!pendingRows.length) return; // nothing to do
+        await Promise.all(pendingRows.map(async r => {
+          const id = r.getAttribute('data-job-id');
+          try {
+            const res = await fetch(`/api/menus/import/${id}/status`, { headers: { 'Accept':'application/json' }});
+            if (!res.ok) return;
+            const data = await res.json();
+            const st = (data.status || '').toLowerCase();
+            const draftReady = !!data.draft_ready;
+            // Format updated_at like the header script
+            let niceUpdated = data.updated_at;
+            try {
+              const dt = new Date((niceUpdated || '').replace(' ', 'T') + 'Z');
+              if (!isNaN(dt)) {
+                const opts = { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' };
+                niceUpdated = dt.toLocaleString(undefined, opts).replace(',', ' ·');
+              }
+            } catch {}
+            updateRow(r, st, niceUpdated, draftReady);
+          } catch (e) { /* ignore network hiccups */ }
+        }));
+      }
+
+      // Poll quickly at first, then slow down
+      let fastTicks = 8; // ~40s fast mode
+      setInterval(() => {
+        poll();
+        if (fastTicks > 0) fastTicks--;
+      }, 5000);
+
+      // Also run once after a short delay so the page paints first
+      setTimeout(poll, 1200);
     })();
   </script>
 {% endblock %}

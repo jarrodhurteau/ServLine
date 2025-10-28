@@ -143,7 +143,7 @@ main.wrap:has(> .draft-editor-page) {
 .draft-editor-page .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25);display:none;z-index:1000}
 
 /* -------- Table ------------------------------------------------------- */
-.draft-editor-page .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
+.draft-editor-page .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px; margin-top:12px}
 .draft-editor-page table.editor{width:100%;border-collapse:separate;border-spacing:0}
 
 /* Wrap content in all cells */
@@ -181,6 +181,22 @@ main.wrap:has(> .draft-editor-page) {
   font-size:.95rem;
   line-height:1.35;
   padding:7px 9px;
+}
+
+/* --- Added: shared textarea behavior used by name/description fields --- */
+.draft-editor-page .cell-textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff !important;
+  color: #000 !important;
+  line-height: 1.3;
+  white-space: pre-wrap;   /* wrap long names/descriptions */
+  word-break: break-word;
+  overflow: hidden;        /* for JS autosize */
+  resize: vertical;        /* user can expand if desired */
 }
 
 /* Specific column widths */
@@ -233,3 +249,13 @@ main.wrap:has(> .draft-editor-page) {
 
 /* Align the textarea + badge in the name cell */
 .draft-editor-page .name-cell{display:flex;gap:6px;align-items:flex-start}
+
+/* --- Added: better focus visibility on editable fields --- */
+.draft-editor-page table.editor input:focus,
+.draft-editor-page table.editor textarea:focus,
+.draft-editor-page table.editor select:focus,
+.draft-editor-page .title-input:focus {
+  outline: 2px solid #7aa2ff;
+  outline-offset: 2px;
+  border-color: #7aa2ff;
+}
