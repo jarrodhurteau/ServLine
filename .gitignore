@@ -9,6 +9,7 @@ __pycache__/
 
 # --- Virtual environments ---
 .venv/
+.venv311/
 env/
 venv/
 
@@ -18,6 +19,7 @@ venv/
 
 # --- VS Code ---
 .vscode/
+!.vscode/tasks.json
 
 # --- System files ---
 .DS_Store
@@ -50,3 +52,10 @@ infra/current_url.txt
 *.old
 dev_tools/
 _bak_archive/
+
+# --- Build/Dist artifacts ---
+dist/
+build/
+
+# --- Misc ---
+*.pid
