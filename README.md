@@ -10,6 +10,7 @@ servline/
 portal/  # Flask portal website  
   app.py  
   requirements.txt  
+  contracts.py                      # lightweight draft schema validator (added Day 19 landmark)  
   templates/  
     base.html  
     index.html  
@@ -160,9 +161,11 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 - Template/UI alignment for **Imports**, **Import Detail**, **Drafts**, **Uploads**, and **Recycle Bin**.  
 - `_safe_render` helper added to prevent template-caused 500 loops.  
 - Live render verified via template debug traces.  
+- **Contract Validator added** (`portal/contracts.py`) for draft save/export schema consistency.  
+- **AI OCR flag scaffolded** (`AI_OCR_ENABLED=false`) for next-phase integration.  
 
-✅ **Day 19 complete — UX/UI unified and OCR refined.**  
-**Tag:** `day-19-ux` → checkpoint for portal alignment.
+✅ **Day 19 complete — UX/UI unified, OCR refined, and API contract frozen.**  
+**Tags:** `day-19-ux`, `v19-landmark` — checkpoint before AI OCR phase.
 
 ---
 
@@ -170,4 +173,5 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 - Integrate AI-based categorization + cleanup layer.  
 - Smarter auto-grouping for pizzas, burgers, wings, sides etc.  
 - Keep regex + heuristics as fallback for precision control.  
-- Prep for dual-brain model (OCR Brain + Conversation Brain).  
+- Prep for dual-brain architecture (OCR Brain + Conversation Brain).  
+- Maintain frozen contract and feature-flagged integration for safe UI iteration.

@@ -36,6 +36,14 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from importlib.util import find_spec
 import pytesseract
 
+# ✅ Try to import the contract validator (with safe fallback if file not added yet)
+try:
+    from portal.contracts import validate_draft_payload  # type: ignore
+except Exception:
+    def validate_draft_payload(_payload):  # type: ignore
+        # No-op validator so app still runs if contracts.py isn't present yet.
+        return True, ""
+
 # ✅ Make sure the OCR worker is imported at app startup
 #    (this triggers the version banner inside ocr_worker.py)
 from portal import ocr_worker
@@ -261,7 +269,7 @@ def _jobs_for_upload_filename(upload_name: str):
     with db_connect() as conn:
         return conn.execute(
             "SELECT id, draft_path FROM import_jobs WHERE filename=?",
-            (upload_name,),
+            (upload_name, ),
         ).fetchall()
 
 # ------------------------
@@ -1714,6 +1722,19 @@ def draft_save(draft_id: int):
     if payload.get("autosave_ping"):
         return jsonify({"ok": True, "saved_at": _now_iso(), "ping": True}), 200
 
+    # 🔒 Validate payload contract (prevents UI/AI drift)
+    probe = {
+        "draft_id": draft_id,
+        "items": payload.get("items") or [],
+        # extra fields tolerated by the validator (ignored if present)
+        "title": payload.get("title"),
+        "restaurant_id": payload.get("restaurant_id"),
+        "status": payload.get("status"),
+    }
+    ok, err = validate_draft_payload(probe)
+    if not ok:
+        return jsonify({"ok": False, "error": f"schema: {err}"}), 400
+
     title = (payload.get("title") or "").strip() or None
     items = payload.get("items") or []
     deleted_ids = payload.get("deleted_item_ids") or []
@@ -1947,6 +1968,12 @@ def draft_export_json(draft_id: int):
         "items": items,
         "exported_at": _now_iso(),
     }
+
+    # 🔒 Validate contract on the way out as well
+    ok, err = validate_draft_payload(payload)
+    if not ok:
+        return make_response(json.dumps({"error": f"schema: {err}"}, indent=2), 500)
+
     resp = make_response(json.dumps(payload, indent=2))
     resp.headers["Content-Type"] = "application/json; charset=utf-8"
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.json"'
