@@ -494,11 +494,50 @@ def ocr_health():
     except Exception:
         tess_version = None
 
-    have_pandas = find_spec("pandas") is not None
-    have_sklearn = find_spec("sklearn") is not None
-    column_mode = "enabled" if (have_pandas and have_sklearn) else "fallback"
+    # App (Flask) context libs — likely False on 3.13
+    from importlib.util import find_spec as _find_spec
+    have_pandas_app = _find_spec("pandas") is not None
+    have_sklearn_app = _find_spec("sklearn") is not None
 
-    # NEW: surface OCR worker version string so you can confirm live-reload worked
+    # Probe the OCR worker's interpreter (.venv311) to get true Column Mode status
+    worker_probe = {
+        "active": False,
+        "env_ok": False,
+        "pandas": False,
+        "scikit_learn": False,
+        "python": None,
+        "path": None,
+        "error": None,
+    }
+    try:
+        worker_py = str(ROOT / ".venv311" / "Scripts" / "python.exe")
+        worker_probe["path"] = worker_py if Path(worker_py).exists() else None
+        if worker_probe["path"]:
+            import subprocess
+            code = (
+                "import json,sys\n"
+                "res={'python':sys.executable}\n"
+                "try:\n"
+                " import pandas; res['pandas']=pandas.__version__\n"
+                "except Exception:\n"
+                " res['pandas']=False\n"
+                "try:\n"
+                " import sklearn; res['scikit_learn']=sklearn.__version__\n"
+                "except Exception:\n"
+                " res['scikit_learn']=False\n"
+                "print(json.dumps(res))\n"
+            )
+            out = subprocess.check_output([worker_py, "-c", code], text=True)
+            data = json.loads(out.strip())
+            worker_probe.update(data)
+            worker_probe["env_ok"] = bool(data.get("pandas")) and bool(data.get("scikit_learn"))
+            worker_probe["active"] = worker_probe["env_ok"]
+    except Exception as e:
+        worker_probe["error"] = str(e)
+
+    column_mode = "active" if worker_probe.get("env_ok") else "fallback"
+
+    # Surface OCR worker version string so you can confirm live-reload worked
     worker_version = getattr(ocr_worker, "OCR_WORKER_VERSION", None)
 
     return jsonify({
@@ -511,7 +550,16 @@ def ocr_health():
             "poppler_path_env": os.getenv("POPPLER_PATH") or "",
             "poppler_bin_present": bool((os.getenv("POPPLER_PATH") or "") and Path(os.getenv("POPPLER_PATH")).exists())
         },
-        "columns": {"pandas": have_pandas, "scikit_learn": have_sklearn, "mode": column_mode},
+        # Show both app and worker context (useful for debugging)
+        "columns": {
+            "mode": column_mode,
+            "pandas": worker_probe.get("pandas", False),
+            "scikit_learn": worker_probe.get("scikit_learn", False),
+            "app_context": {"pandas": have_pandas_app, "scikit_learn": have_sklearn_app},
+            "worker_python": worker_probe.get("python"),
+            "worker_path": worker_probe.get("path"),
+            "probe_error": worker_probe.get("error"),
+        },
         "ocr_worker_version": worker_version,
     })
 
@@ -1514,7 +1562,7 @@ def draft_review_page(job_id):
     draft = _load_draft_json_by_job(job_id)
     with db_connect() as conn:
         restaurants = conn.execute(
-            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY id"
+            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
     src_file = (draft.get("source", {}) or {}).get("file")
     preview_url = url_for("serve_upload", filename=src_file) if src_file and _is_image(src_file) else None

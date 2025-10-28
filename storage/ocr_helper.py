@@ -33,6 +33,91 @@ except Exception:
 import re
 import unicodedata
 
+# =============================
+# NORMALIZATION (common OCR fixes)
+# =============================
+import re as _re
+
+_NORMALIZE_SUBS = [
+    # leading 'l' read instead of 'I' on common words
+    (_re.compile(r'(?<=^|\s)lced\b', _re.IGNORECASE), 'Iced'),
+    # 'andwich' family (dropped leading 's')
+    (_re.compile(r'(?<=^|\s)andwiches\b', _re.IGNORECASE), 'sandwiches'),
+    (_re.compile(r'(?<=^|\s)andwich\b', _re.IGNORECASE), 'sandwich'),
+    # common menu vocab 1-letter drops (frequent left-edge crop)
+    (_re.compile(r'(?<=^|\s)oda\b', _re.IGNORECASE), 'Soda'),
+    (_re.compile(r'(?<=^|\s)pecial\b', _re.IGNORECASE), 'Special'),
+    # punctuation / spacing polish
+    (_re.compile(r'\s+([,:;])'), r'\1'),
+    (_re.compile(r'([(:])\s+'), r'\1'),
+    # stray leading bullets/dashes/dots
+    (_re.compile(r'^\s*[-–—•·]+\s*'), ''),
+]
+
+_NORMALIZE_DICT = {
+    'mozerella': 'mozzarella',
+    'mozerrella': 'mozzarella',
+    'mozzarela': 'mozzarella',
+    'parmesean': 'parmesan',
+    'bbq': 'BBQ',
+    'bleu': 'blue',
+    'meduim': 'medium',
+    'lunch spcial': 'lunch special',
+    'fountain sode': 'fountain soda',
+    'garic': 'garlic',
+    'peperoni': 'pepperoni',
+    'chese': 'cheese',
+    'chesee': 'cheese',
+    'hamurger': 'hamburger',
+    'cheseburger': 'cheeseburger',
+}
+
+_CATEGORY_LEX = {
+    'appetizers','sides','salads','wings','pizzas','burgers','subs','sandwiches',
+    'wraps','beverages','drinks','desserts','specials','combos','kids','pastas',
+}
+
+def _case_preserving_replace(s: str, new: str) -> str:
+    if s.isupper():
+        return new.upper()
+    if s.istitle():
+        return new.title()
+    return new
+
+def _normalize_menu_text(text: str, *, as_category: bool = False) -> str:
+    if not text:
+        return text
+    original = text
+
+    for rx, repl in _NORMALIZE_SUBS:
+        text = rx.sub(repl, text)
+
+    def fix_token(tok: str) -> str:
+        key = tok.lower()
+        if key in _NORMALIZE_DICT:
+            return _case_preserving_replace(tok, _NORMALIZE_DICT[key])
+        if key.endswith('andwich'):
+            return _case_preserving_replace(tok, 'sandwich')
+        if key.endswith('andwiches'):
+            return _case_preserving_replace(tok, 'sandwiches')
+        return tok
+
+    tokens = _re.split(r'(\W+)', text)
+    tokens = [fix_token(t) if i % 2 == 0 else t for i, t in enumerate(tokens)]
+    text = ''.join(tokens)
+
+    text = _re.sub(r'\s{2,}', ' ', text).strip(' \t-–—•·')
+
+    if as_category:
+        low = text.strip().lower()
+        if low in _CATEGORY_LEX or (len(text) <= 32 and text.isupper()):
+            text = text.title()
+
+    return text if text else original
+# =============================
+# /NORMALIZATION
+# =============================
+
 # -----------------------------
 # Regex & heuristics
 # -----------------------------
@@ -319,7 +404,7 @@ def _merge_broken_lines(lines: List[dict]) -> List[dict]:
         if not s.startswith("- "):
             return False
         core = s[2:].strip()
-        if " - " in core:  # bullet with internal " - " → clearly a new item
+        if " - " in core:
             return True
         if PRICE_ONLY_RX.match(core) or _has_price(core):
             return False
@@ -342,7 +427,6 @@ def _merge_broken_lines(lines: List[dict]) -> List[dict]:
         if dy > int(h * 1.25) + 6:
             return False
 
-        # Don't attach if the next line looks like a fresh bullet/item
         if _looks_like_new_item_title(curr_text):
             return False
 
@@ -420,14 +504,11 @@ def _split_name_desc_price(line: str) -> Tuple[str, str, float]:
         return parts[0], parts[1], price_val
     return head, "", price_val
 
-# Bullet "- Name - Desc" even when there is NO price
 BULLET_NAME_DESC_RX = re.compile(r"^\s*-\s*(?P<name>[^-].*?)\s*-\s*(?P<desc>.+?)\s*$")
-
 _PUNCT_ONLY_RX = re.compile(r"^[\s\-,.&()]+$")
 
 def _split_name_desc_no_price(line: str) -> Optional[Tuple[str, str]]:
     s = _normalize_text(line)
-    # Drop junk bullets like "- -" outright
     if s in {"- -", "-"}:
         return None
     m = BULLET_NAME_DESC_RX.match(s)
@@ -435,10 +516,8 @@ def _split_name_desc_no_price(line: str) -> Optional[Tuple[str, str]]:
         return None
     name = (m.group("name") or "").strip()
     desc = (m.group("desc") or "").strip()
-    # Guard: require at least one letter in the name; ignore "- - Coke,"
     if not name or _PUNCT_ONLY_RX.fullmatch(name) or not re.search(r"[A-Za-z]", name):
         return None
-    # tidy trailing punctuation
     name = name.rstrip(",- ").strip()
     desc = desc.rstrip(",- ").strip()
     return name, desc
@@ -447,12 +526,10 @@ def _should_attach_as_description(line: str) -> bool:
     if not line:
         return False
     s = line.strip()
-    # reject pure punctuation / hyphen filler like "- -" or "--"
     if _PUNCT_ONLY_RX.fullmatch(s):
         return False
     if PRICE_ONLY_RX.match(s):
         return False
-    # If it's a bullet that itself looks like a new item (e.g., "- French Fries - Golden and"), don't attach
     if s.startswith("- "):
         if " - " in s[2:]:
             return False
@@ -479,7 +556,7 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
     cats[current] = []
 
     debug: Dict[str, Any] = {
-        "version": 12,
+        "version": 13,
         "lines": lines,
         "items": [],
         "assignments": [],
@@ -487,7 +564,7 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
 
     def new_cat(name: str, src_line: Optional[dict] = None, reason: str = ""):
         nonlocal current, prev_item_ref, prev_item_col
-        current = (name or "Misc").strip()
+        current = _normalize_menu_text((name or "Misc").strip(), as_category=True)
         cats.setdefault(current, [])
         prev_item_ref = None
         prev_item_col = None
@@ -529,8 +606,9 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
         pairs = list(SIZE_PAIR_RX.finditer(line))
         if pairs and len(pairs) >= 2:
             base = SIZE_PAIR_RX.split(line)[0].strip().rstrip(":-").strip() or "Untitled"
+            base = _normalize_menu_text(base)
             for m in pairs:
-                label = (m.group("label") or "").strip().title()
+                label = _normalize_menu_text((m.group("label") or "").strip().title())
                 price = _to_float_price(m.group("price") or "")
                 if price <= 0:
                     continue
@@ -555,6 +633,8 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
         # Price-terminated
         name, desc, price = _split_name_desc_price(line)
         if price > 0 and name:
+            name = _normalize_menu_text(name)
+            desc = _normalize_menu_text(desc)
             item = {
                 "name": name, "description": desc, "price": price,
                 "confidence": round(float(row.get("conf", 80)), 1),
@@ -574,6 +654,8 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
         nd = _split_name_desc_no_price(line)
         if nd:
             n, d = nd
+            n = _normalize_menu_text(n)
+            d = _normalize_menu_text(d)
             item = {
                 "name": n, "description": d, "price": 0.0,
                 "confidence": round(float(row.get("conf", 80)), 1),
@@ -594,8 +676,8 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
             if row.get("col") == prev_item_col and _should_attach_as_description(line):
                 old = (prev_item_ref.get("description") or "").strip()
                 new_desc = (old + " " + line).strip() if old else line
-                # strip noise like trailing "- -" from desc
                 new_desc = _normalize_text(new_desc).rstrip(", -").strip()
+                new_desc = _normalize_menu_text(new_desc)
                 if not _PUNCT_ONLY_RX.fullmatch(new_desc):
                     prev_item_ref["description"] = new_desc
                     debug["assignments"].append({
@@ -605,13 +687,12 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
                     })
                     continue
 
-        # Freestanding item
         if _PUNCT_ONLY_RX.fullmatch(line):
-            # skip pure punctuation rows entirely
             continue
 
+        # Freestanding item (no price; keep normalized)
         item = {
-            "name": line, "description": "", "price": 0.0,
+            "name": _normalize_menu_text(line), "description": "", "price": 0.0,
             "confidence": round(float(row.get("conf", 80)), 1),
             "raw": raw, "_src_idx": idx, "_page": row.get("page"), "_col": row.get("col"),
         }
@@ -640,11 +721,10 @@ def _canonical_header(text: str) -> Optional[str]:
 
 def _fix_common_ocr_name(name: str) -> str:
     s = _normalize_text(name)
-    s = re.sub(r"^\s*[-•]+\s*", "", s)       # leading bullets
-    s = re.sub(r"\s*-\s*$", "", s)           # trailing dash
-    s = s.rstrip(",")                        # trailing comma
+    s = re.sub(r"^\s*[-•]+\s*", "", s)
+    s = re.sub(r"\s*-\s*$", "", s)
+    s = s.rstrip(",")
     s = re.sub(r"\blced\b", "Iced", s, flags=re.I)
-    # collapse weird "( (" patterns from double pcs
     s = re.sub(r"\(\s*\(", "(", s)
     s = re.sub(r"\s{2,}", " ", s)
     return s.strip()
@@ -653,14 +733,13 @@ def _fix_common_desc(desc: str) -> str:
     if not desc:
         return ""
     d = _normalize_text(desc).rstrip(", -").strip()
-    # strip leftover lone hyphen pairs
     d = re.sub(r"(?:^|\s)-\s-$", "", d)
     return d
 
 def _gather_headings(lines: List[dict]) -> List[dict]:
     heads = []
     for ln in lines:
-        txt = _normalize_text(ln.get("text", ""))
+        txt = _normalize_menu_text(_normalize_text(ln.get("text", "")), as_category=True)
         if _looks_like_section_heading(txt):
             canon = _canonical_header(txt.lower()) or txt.title()
             heads.append({"name": canon, "page": ln.get("page"), "col": ln.get("col"), "y": ln.get("y")})
@@ -676,7 +755,6 @@ def _nearest_header_above(heads: List[dict], page: int, col: int, y: int) -> Opt
 
 def _guess_category(name: str, desc: str = "") -> Optional[str]:
     text = f"{name} {desc}".lower()
-    # Wings bias if (6 pcs)
     if "(6 pcs)" in text:
         return "Wings"
     best = None
@@ -708,7 +786,6 @@ def _fold_soda_flavors(name: str, desc: str, raw: str) -> Tuple[str, str]:
     return new_name, ""
 
 def _merge_pcs(item: dict) -> None:
-    """Ensure '(6 pcs)' is carried from raw into the name when present without duplicating."""
     raw = (item.get("raw") or "")
     n = (item.get("name") or "")
     has_in_raw = bool(PAREN_PCS_RX.search(raw))
@@ -741,7 +818,6 @@ def _consolidate_beverages(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[st
         if i == soda_idx:
             continue
         nm = (it.get("name") or "")
-        # Also harvest from items that have empty name but flavor in description (from "- - Coke,")
         desc = (it.get("description") or "")
         is_flavorish = any(t in nm.lower() for t in FLAVOR_HINTS) or any(t in desc.lower() for t in FLAVOR_HINTS)
         if is_flavorish:
@@ -750,7 +826,6 @@ def _consolidate_beverages(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[st
     if not flavor_items:
         return
 
-    # Prefer a price found among flavor lines, fallback to existing base price
     price = next((items[i]["price"] for i in flavor_items if items[i].get("price", 0) > 0), base.get("price", 0.0))
     flavors = []
 
@@ -788,12 +863,10 @@ def _consolidate_beverages(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[st
         })
 
 def _looks_like_ingredient_list(text: str) -> bool:
-    """Heuristic: ingredient-ish priced line that should be merged into a nearby bullet item."""
     s = (text or "").strip()
     low = s.lower()
     if not s:
         return False
-    # Common signs: comma lists, starts with "with", all lowercase short phrase, or contains typical toppings
     if "," in s:
         return True
     if low.startswith("with "):
@@ -807,7 +880,6 @@ def _looks_like_ingredient_list(text: str) -> bool:
     return False
 
 def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) -> None:
-    """If a priced ingredient-ish line appears right after a bullet pizza, move its price into that pizza and drop the ingredient line."""
     key = "Specialty Pizzas"
     if key not in cats:
         return
@@ -815,12 +887,10 @@ def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]],
     if not items:
         return
 
-    # Work with indexes to allow removal; keep stability
     to_remove = set()
     last_bullet_idx = None
     last_bullet_src = None
 
-    # Build a quick accessor for _src_idx if present (not stripped yet here)
     def get_src_idx(it: dict) -> Optional[int]:
         return it.get("_src_idx") if isinstance(it.get("_src_idx"), int) else None
 
@@ -830,26 +900,20 @@ def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]],
         price = float(it.get("price") or 0.0)
         src = get_src_idx(it)
 
-        # Track last bullet pizza (raw starting "- " and no price)
         if raw.strip().startswith("- ") and (price <= 0.0):
             last_bullet_idx = i
             last_bullet_src = src
             continue
 
-        # Candidate ingredient list with price
         if price > 0 and _looks_like_ingredient_list(nm):
-            # Only merge if we have a recent bullet above it
             if last_bullet_idx is not None:
-                # Window by source proximity if we have the src indexes
                 ok = True
                 if last_bullet_src is not None and src is not None:
                     ok = (0 <= (src - last_bullet_src) <= 4)
                 if ok:
-                    # Move price & append ingredients to description of bullet pizza
                     tgt = items[last_bullet_idx]
                     if float(tgt.get("price") or 0.0) <= 0.0:
                         tgt["price"] = price
-                    # Fold the ingredient text into bullet description
                     desc = (tgt.get("description") or "").strip()
                     addon = nm
                     if desc:
@@ -857,7 +921,6 @@ def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]],
                     else:
                         new_desc = addon
                     tgt["description"] = _fix_common_desc(new_desc)
-                    # Mark ingredient line for removal
                     to_remove.add(i)
                     debug.setdefault("assignments", []).append({
                         "type": "merge_ingredient_into_bullet",
@@ -869,7 +932,6 @@ def _merge_ingredient_prices_in_specialty(cats: Dict[str, List[Dict[str, Any]]],
                     })
                     continue
 
-        # Non-bullet priced row resets the bullet anchor
         if price > 0:
             last_bullet_idx = None
             last_bullet_src = None
@@ -892,14 +954,16 @@ def _post_process(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) 
 
     new_cats: Dict[str, List[Dict[str, Any]]] = {}
     for cat_name, items in cats.items():
+        norm_cat_name = _normalize_menu_text(cat_name, as_category=True)
         for it in items:
-            it["name"] = _fix_common_ocr_name(it.get("name") or "")
-            it["description"] = _fix_common_desc(it.get("description") or "")
+            nm = _normalize_menu_text(_fix_common_ocr_name(it.get("name") or ""))
+            ds = _normalize_menu_text(_fix_common_desc(it.get("description") or ""))
+            it["name"] = nm
+            it["description"] = ds
             _merge_pcs(it)
             it["name"], it["description"] = _fold_soda_flavors(it["name"], it.get("description") or "", it.get("raw") or "")
 
-            # Decide target category
-            tgt_cat = cat_name
+            tgt_cat = norm_cat_name
             guess = _guess_category(it.get("name", ""), it.get("description", ""))
 
             if "_src_idx" in it:
@@ -909,28 +973,21 @@ def _post_process(cats: Dict[str, List[Dict[str, Any]]], debug: Dict[str, Any]) 
                 same_col_hdr = None
 
             if same_col_hdr:
-                tgt_cat = same_col_hdr
+                tgt_cat = _normalize_menu_text(same_col_hdr, as_category=True)
             elif guess:
-                tgt_cat = guess
-            else:
-                tgt_cat = cat_name
+                tgt_cat = _normalize_menu_text(guess, as_category=True)
 
             if cat_name == "Uncategorized" and (it.get("price", 0) or 0) > 0 and tgt_cat != cat_name:
-                debug.setdefault("assignments", []).append({
+                debug.setdefault("assignments").append({
                     "type": "category_reassign", "from": cat_name, "to": tgt_cat,
                     "item": it.get("name"), "price": it.get("price"),
                     "reason": "semantic guess" if not same_col_hdr else "nearest header above in same column",
                 })
 
-            new_cats.setdefault(tgt_cat, []).append(it)  # keep private keys for downstream merges
+            new_cats.setdefault(tgt_cat, []).append(it)
 
-    # 1) Merge priced ingredient lines into preceding bullet pizzas
     _merge_ingredient_prices_in_specialty(new_cats, debug)
-
-    # 2) Consolidate soda flavors (handles junk bullets too)
     _consolidate_beverages(new_cats, debug)
-
-    # 3) Cleanup descriptions, strip private keys as the last step
     _cleanup_descriptions(new_cats)
     new_cats = {k: [_strip_private_keys(it) for it in v] for k, v in new_cats.items() if v}
     return new_cats
@@ -957,7 +1014,7 @@ def extract_items_from_path(path: str) -> Tuple[Dict[str, List[Dict[str, Any]]],
     images = _load_images_from_path(path)
     if not images:
         cats = {"Uncategorized": [{"name":"OCR not configured or file type unsupported","description":"","price":0.0}]}
-        return cats, {"version": 12, "lines": [], "items": [], "assignments": [], "note": "no images loaded"}
+        return cats, {"version": 13, "lines": [], "items": [], "assignments": [], "note": "no images loaded"}
 
     all_lines: List[dict] = []
     for im in images:
