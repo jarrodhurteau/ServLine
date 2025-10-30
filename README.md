@@ -169,9 +169,24 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 
 ---
 
-## 🔜 Next Up — Day 20: AI-Assisted Menu Refinement  
-- Integrate AI-based categorization + cleanup layer.  
-- Smarter auto-grouping for pizzas, burgers, wings, sides etc.  
-- Keep regex + heuristics as fallback for precision control.  
-- Prep for dual-brain architecture (OCR Brain + Conversation Brain).  
-- Maintain frozen contract and feature-flagged integration for safe UI iteration.
+### 🚀 Day 20 – AI Heuristics Phase A + Editor Integration  
+- Introduced AI-based menu refinement endpoints:  
+  - `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
+- Added **“AI Commit to Draft”** button inside the Draft Editor with AJAX call and auto-reload (no JSON redirect).  
+- Centralized `TAXONOMY_SEED` for consistent category heuristics.  
+- Repaired export header quotes (CSV/JSON/XLSX downloads clean).  
+- Verified OCR health endpoint and worker probe after integration.  
+- Live test confirmed draft updates from AI heuristics (Phase A baseline).  
+
+✅ **Day 20 complete — AI Heuristics Phase A operational + in-editor commit flow working.**  
+**Tags:** `day-20-heuristics-phase-a`, `v20-landmark`
+
+---
+
+## 🔜 Next Up — Day 21 : Heuristics Phase B (Parser & Description Stitcher)  
+- Strengthen item/description detection and multi-line joins.  
+- Stricter category recognition (e.g., “BURGERS & SANDWICHES” → “Sandwiches”).  
+- Handle two-column menus and price-on-next-line patterns.  
+- Merge ingredient lines into natural comma-separated descriptions.  
+- Add confidence weighting and rule trace tooltips for debug visibility.  
+- Lay foundation for Phase C (Lightweight ML classifier + heuristics fusion).  

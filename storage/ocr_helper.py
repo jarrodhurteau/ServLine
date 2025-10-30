@@ -1,8 +1,12 @@
 # storage/ocr_helper.py
 from __future__ import annotations
 import os
+import sys
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
+
+# ---- Canary to prove this helper is the one running
+OCR_HELPER_CANARY = "ocr_helper_active_v20"
 
 # optional deps
 try:
@@ -70,6 +74,12 @@ _NORMALIZE_DICT = {
     'chesee': 'cheese',
     'hamurger': 'hamburger',
     'cheseburger': 'cheeseburger',
+    # extra safety nets for common slips
+    'peporoni': 'pepperoni',
+    'mozzerella': 'mozzarella',
+    'mozarella': 'mozzarella',
+    'chiken': 'chicken',
+    'chiicken': 'chicken',
 }
 
 _CATEGORY_LEX = {
@@ -310,6 +320,43 @@ def _line_height(d: dict) -> int:
 def _has_price(s: str) -> bool:
     return bool(PRICE_RX.search(s))
 
+# Normalizer for noisy category headers like ": ANDWICHE" / "EE BEVERAGES"
+def _normalize_category_header(s: str) -> str:
+    if not s:
+        return s
+    s = _normalize_text(s)
+    # strip leading punctuation and bullets/colons
+    s = re.sub(r"^[\s:;,\-–—•·]+", "", s)
+    # drop tiny all-caps prefixes Tesseract sometimes prepends ("E ", "EE ")
+    s = re.sub(r"^[A-Z]{1,2}\s+(?=[A-Z])", "", s)
+
+    low = s.lower()
+    fixes = {
+        "andwich": "Sandwiches",
+        "andwiches": "Sandwiches",
+        "andwiche": "Sandwiches",
+        "beverage": "Beverages",
+        "beverages": "Beverages",
+        "wings": "Wings",
+        "salads": "Salads",
+        "sides": "Sides & Apps",
+        "apps": "Sides & Apps",
+        "appetizers": "Sides & Apps",
+        "pizza": "Pizza",
+        "pizzas": "Pizza",
+        "specialty pizzas": "Specialty Pizzas",
+        "burgers & sandwiches": "Burgers & Sandwiches",
+    }
+    for key, val in fixes.items():
+        if low == key or low.rstrip("e") == key:
+            return val
+    for key, val in fixes.items():
+        if key in low:
+            return val
+    if s.isupper():
+        s = s.title()
+    return s
+
 # -----------------------------
 # Line grouping & merging
 # -----------------------------
@@ -486,16 +533,26 @@ def _looks_like_section_heading(line: str) -> bool:
                 return True
     return False
 
+# IMPROVED: choose best price on the line (prefer decimals, filter tiny numbers)
 def _split_name_desc_price(line: str) -> Tuple[str, str, float]:
     s = _normalize_text(line)
-    last = None
-    for m in PRICE_RX.finditer(s):
-        last = m
-    if not last:
+    matches = list(PRICE_RX.finditer(s))
+    if not matches:
         return s.strip(), "", 0.0
-    price_val = _to_float_price(last.group(0))
-    head = s[: last.start()].strip().strip("-:").strip()
 
+    def price_of(m):
+        return _to_float_price(m.group(0))
+
+    with_dec = [m for m in matches if m.group('dec')]
+    cands = with_dec if with_dec else matches
+    prices = [(price_of(m), m) for m in cands]
+    if any(p >= 3.0 for p, _ in prices):
+        prices = [(p, m) for p, m in prices if p >= 3.0]
+
+    best_m = max(prices, key=lambda t: t[0])[1]
+    price_val = price_of(best_m)
+
+    head = s[: best_m.start()].strip().strip("-:").strip()
     if " - " in head:
         parts = [p.strip() for p in head.split(" - ", 1)]
     else:
@@ -563,11 +620,12 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
     }
 
     def new_cat(name: str, src_line: Optional[dict] = None, reason: str = ""):
-        nonlocal current, prev_item_ref, prev_item_col
-        current = _normalize_menu_text((name or "Misc").strip(), as_category=True)
+        nonlocal current, prev_item_ref, prev_item_col, recent_items
+        current = _normalize_category_header((name or "Misc").strip())
         cats.setdefault(current, [])
         prev_item_ref = None
         prev_item_col = None
+        recent_items = []  # reset recent window on header switch
         if src_line:
             debug["assignments"].append({
                 "type": "category_header",
@@ -583,6 +641,15 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
     SKIP_TITLES = {"menu", "menu:", "our menu"}
     prev_item_ref: Optional[dict] = None
     prev_item_col: Optional[int] = None
+    # Track a small rolling window of recent items in the same column to help attach orphan prices.
+    recent_items: List[Tuple[int, dict]] = []  # (col, item_dict)
+
+    def _remember_item(col: int, item: dict):
+        # Keep last 3 items per parsing run; they’re already normalized downstream.
+        nonlocal recent_items
+        recent_items.append((col, item))
+        if len(recent_items) > 3:
+            recent_items = recent_items[-3:]
 
     for idx, row in enumerate(lines):
         raw = row["text"]
@@ -602,7 +669,7 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
             new_cat(line.title(), row, reason="heading heuristic (caps/title-case + keywords)")
             continue
 
-        # Multi-size
+        # --- Day 20: handle multi-size "Label: $Price" pairs on one line
         pairs = list(SIZE_PAIR_RX.finditer(line))
         if pairs and len(pairs) >= 2:
             base = SIZE_PAIR_RX.split(line)[0].strip().rstrip(":-").strip() or "Untitled"
@@ -628,9 +695,10 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
                 })
             prev_item_ref = None
             prev_item_col = None
+            recent_items = []
             continue
 
-        # Price-terminated
+        # --- Price-terminated (Name [- Desc]) ... Price
         name, desc, price = _split_name_desc_price(line)
         if price > 0 and name:
             name = _normalize_menu_text(name)
@@ -648,6 +716,48 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
             })
             prev_item_ref = item
             prev_item_col = row.get("col")
+            _remember_item(prev_item_col, item)
+            continue
+
+        # --- Day 20: handle PRICE-ONLY line → attach to nearest recent item in same column
+        if PRICE_ONLY_RX.match(line):
+            p = _to_float_price(line)
+            if p > 0:
+                attached = False
+                # Prefer immediate previous item, same column
+                if prev_item_ref and prev_item_col is not None and row.get("col") == prev_item_col:
+                    if float(prev_item_ref.get("price") or 0.0) <= 0.0:
+                        prev_item_ref["price"] = p
+                        debug["assignments"].append({
+                            "type": "price_attach",
+                            "to_item": prev_item_ref.get("name"),
+                            "category": current,
+                            "page": row.get("page"),
+                            "line": raw,
+                            "score": row.get("conf"),
+                            "reason": "price-only line attached to previous item (same column)",
+                        })
+                        attached = True
+                # Fallback: look back up to two earlier items in same column
+                if not attached:
+                    for col, it in reversed(recent_items[:-1]):  # skip the immediate prev already tested
+                        if col == row.get("col") and float(it.get("price") or 0.0) <= 0.0:
+                            it["price"] = p
+                            debug["assignments"].append({
+                                "type": "price_attach_backfill",
+                                "to_item": it.get("name"),
+                                "category": current,
+                                "page": row.get("page"),
+                                "line": raw,
+                                "score": row.get("conf"),
+                                "reason": "price-only line attached to nearest prior item (same column)",
+                            })
+                            attached = True
+                            break
+                if attached:
+                    # do not create a new item for a lone price line
+                    continue
+            # fall-through: price line that couldn't be attached → ignore as noise
             continue
 
         # Bullet "- Name - Desc" with no price (ignore junk bullets)
@@ -669,6 +779,7 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
             })
             prev_item_ref = item
             prev_item_col = row.get("col")
+            _remember_item(prev_item_col, item)
             continue
 
         # Continuation → description (same column)
@@ -704,6 +815,7 @@ def _parse_lines_to_categories(lines: List[dict]) -> Tuple[Dict[str, List[dict]]
         })
         prev_item_ref = item
         prev_item_col = row.get("col")
+        _remember_item(prev_item_col, item)
 
     # Drop empties (keep non-empty)
     cats = {k: [it for it in v if any([it.get("name"), it.get("price"), it.get("description")])] for k, v in cats.items()}
@@ -739,7 +851,7 @@ def _fix_common_desc(desc: str) -> str:
 def _gather_headings(lines: List[dict]) -> List[dict]:
     heads = []
     for ln in lines:
-        txt = _normalize_menu_text(_normalize_text(ln.get("text", "")), as_category=True)
+        txt = _normalize_category_header(_normalize_text(ln.get("text", "")))
         if _looks_like_section_heading(txt):
             canon = _canonical_header(txt.lower()) or txt.title()
             heads.append({"name": canon, "page": ln.get("page"), "col": ln.get("col"), "y": ln.get("y")})
@@ -1011,10 +1123,17 @@ def _load_images_from_path(path: str) -> List:
 # Public API
 # -----------------------------
 def extract_items_from_path(path: str) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Any]]:
+    # Canary marker to prove code path
+    debug_base = {"canary": OCR_HELPER_CANARY}
+
+    # helpful console breadcrumb
+    print(f"[OCR_HELPER] Canary={OCR_HELPER_CANARY} path={path}", file=sys.stderr)
+
     images = _load_images_from_path(path)
     if not images:
         cats = {"Uncategorized": [{"name":"OCR not configured or file type unsupported","description":"","price":0.0}]}
-        return cats, {"version": 13, "lines": [], "items": [], "assignments": [], "note": "no images loaded"}
+        dbg = {**debug_base, "version": 13, "lines": [], "items": [], "assignments": [], "note": "no images loaded"}
+        return cats, dbg
 
     all_lines: List[dict] = []
     for im in images:
@@ -1053,6 +1172,9 @@ def extract_items_from_path(path: str) -> Tuple[Dict[str, List[Dict[str, Any]]],
     cats, debug = _parse_lines_to_categories(merged_lines)
     debug["pre_merged_line_count"] = len(all_lines)
     debug["post_merged_line_count"] = len(merged_lines)
+
+    # merge canary into debug payload
+    debug = {**debug_base, **debug}
 
     cats = _post_process(cats, debug)
     return cats, debug
