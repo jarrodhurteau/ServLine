@@ -3,6 +3,50 @@
 
 {% block content %}
 <div class="draft-editor-page">
+  <style>
+    /* ===== Confidence Heat-Map & Provenance ===== */
+    /* subtle row tinting based on confidence */
+    #items-body tr.conf-high-row { background: linear-gradient(to right, rgba(40, 167, 69, 0.10), transparent 30%); }
+    #items-body tr.conf-med-row  { background: linear-gradient(to right, rgba(255, 193, 7, 0.10),  transparent 30%); }
+    #items-body tr.conf-low-row  { background: linear-gradient(to right, rgba(220, 53, 69, 0.10),  transparent 30%); }
+
+    /* provenance “i” pin + tooltip */
+    .prov-pin {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:18px; height:18px; border-radius:50%;
+      border:1px solid var(--line); color:var(--muted); font-size:11px;
+      margin-left:6px; cursor:help; user-select:none;
+      background: rgba(255,255,255,0.04);
+    }
+    .prov-pin:hover { color: var(--ink); border-color: var(--brand); }
+
+    .prov-tip {
+      position: fixed; z-index: 9999; pointer-events: none;
+      background: #0e1628; color: var(--ink); border:1px solid var(--line);
+      border-radius: 10px; padding:10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+      font-size: .85rem; min-width: 240px; max-width: 420px; display:none;
+    }
+    .prov-tip .head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+    .prov-tip .dot { width:8px; height:8px; border-radius:50%; }
+    .prov-tip .dot.high { background:#28a745; }
+    .prov-tip .dot.med  { background:#ffc107; }
+    .prov-tip .dot.low  { background:#dc3545; }
+    .prov-tip .kv { display:grid; grid-template-columns: 96px 1fr; gap:4px 10px; color: var(--muted); }
+    .prov-tip .kv b { color: var(--ink); font-weight:600; }
+    .prov-tip .links { margin-top:8px; display:flex; gap:10px; }
+    .prov-tip a { color:#b7cdfb; text-decoration:none; }
+    .prov-tip a:hover { text-decoration:underline; }
+
+    /* confidence badge colors (already present visually; ensure strong color) */
+    .conf-badge { margin-left:6px; padding:2px 6px; border-radius:8px; font-size:.75rem; font-weight:600; }
+    .conf-high { background: rgba(40,167,69,.15); color:#9ae6b4; border:1px solid rgba(40,167,69,.35); }
+    .conf-med  { background: rgba(255,193,7,.14); color:#ffe08a; border:1px solid rgba(255,193,7,.35); }
+    .conf-low  { background: rgba(220,53,69,.14); color:#ffb3b8; border:1px solid rgba(220,53,69,.35); }
+
+    /* focus flash */
+    .row-focus { outline: 2px solid var(--brand); outline-offset: -2px; }
+  </style>
+
   <div class="layout">
     <!-- SIDEBAR (Outline) -->
     <aside class="sidebar">
@@ -64,6 +108,11 @@
           <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
 
           <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+            {% if draft.source_job_id %}
+              <!-- Optional AI Preview (heuristics) -->
+              <a class="btn" target="_blank" rel="noopener"
+                 href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}">AI Preview (heuristics)</a>
+            {% endif %}
             <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
             <details class="export">
               <summary class="btn">Export ▾</summary>
@@ -114,7 +163,9 @@
           </thead>
           <tbody id="items-body">
             {% for it in items %}
-            <tr data-id="{{ it.id }}" data-cat="{{ (it.category or '')|e }}" data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
+            <tr data-id="{{ it.id }}"
+                data-cat="{{ (it.category or '')|e }}"
+                data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
               <td><input type="checkbox" class="row-select" /></td>
               <td>
                 <div class="name-cell">
@@ -133,6 +184,14 @@
                       <span class="conf-badge conf-low">{{ conf }}%</span>
                     {% endif %}
                   {% endif %}
+
+                  <!-- NEW: provenance hover pin -->
+                  <span class="prov-pin"
+                        title="Source & confidence"
+                        data-prov-name="{{ (it.name or '')|e }}"
+                        data-prov-cat="{{ (it.category or '(Uncategorized)')|e }}"
+                        data-prov-conf="{{ it.confidence if it.confidence is not none else '' }}"
+                        data-prov-pos="{{ it.position if it.position is not none else '' }}">i</span>
                 </div>
               </td>
               <td>
@@ -168,8 +227,10 @@
   </div>
 
   <script id="draft-meta" type="application/json">
-  {{ {"id": draft.id, "status": draft.status}|tojson }}
+  {{ {"id": draft.id, "status": draft.status, "source_job_id": draft.source_job_id}|tojson }}
   </script>
+
+  <div id="prov-tip" class="prov-tip" role="tooltip" aria-hidden="true"></div>
 
   <script>
   (function(){
@@ -192,6 +253,7 @@
     const search = $("#search");
     const lastSaved = $("#last-saved");
     const exportVisibleBtn = $("#export-visible-btn");
+    const provTip = $("#prov-tip");
 
     let dirty = false;
     let deletedIds = [];
@@ -206,6 +268,20 @@
     // Day 19: autosize names/descriptions (still keeps existing behavior)
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
+
+    // === Confidence heat-map classing per row ===
+    function applyConfidenceTint(){
+      $$("#items-body tr").forEach(tr=>{
+        tr.classList.remove("conf-high-row","conf-med-row","conf-low-row");
+        const raw = tr.getAttribute("data-confidence");
+        if (!raw) return;
+        const c = Number(raw);
+        if (Number.isNaN(c)) return;
+        if (c >= 80) tr.classList.add("conf-high-row");
+        else if (c >= 60) tr.classList.add("conf-med-row");
+        else tr.classList.add("conf-low-row");
+      });
+    }
 
     function collectRowsFiltered(){
       const q = search.value.trim().toLowerCase();
@@ -338,7 +414,7 @@
       $$("#items-body tr").forEach(tr=>{
         if (tr.style.display === "none") return;
         const idAttr=tr.getAttribute("data-id");
-        const id = idAttr && /^\\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
+        const id = idAttr && /^\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
         const name=$(".name", tr).value.trim();
         const description=$(".description", tr).value.trim();
         const priceStr=$(".price", tr).value.trim();
@@ -348,7 +424,7 @@
         if (!name){ errors.push("Name is required for all items."); tr.classList.add("row-error"); } else { tr.classList.remove("row-error"); }
         const price_cents=dollarsToCents(priceStr);
         let position=null; if (posStr!==""){ const p=Number(posStr); if (Number.isNaN(p) || !Number.isInteger(p)){ errors.push("Position must be an integer."); } else { position=p; } }
-        const confidence = confStr && /^\\d+$/.test(confStr) ? Number(confStr) : null;
+        const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
         items.push({ id, name, description, price_cents, category: category||null, position, confidence });
       });
       const title = $("#draft-title").value.trim();
@@ -370,7 +446,7 @@
         let insIdx=0;
         $$("#items-body tr").forEach(tr=>{
           const idAttr=tr.getAttribute("data-id");
-          if (!idAttr || !/^\\d+$/.test(idAttr)){
+          if (!idAttr || !/^\d+$/.test(idAttr)){
             const newId = data.inserted_ids?.[insIdx++]; if (newId) tr.setAttribute("data-id", String(newId));
           }
         });
@@ -382,7 +458,7 @@
     }
 
     if (isEditable){
-      itemsBody.addEventListener("input", ()=>{ setDirty(true); });
+      itemsBody.addEventListener("input", ()=>{ setDirty(true); applyConfidenceTint(); });
       titleInput.addEventListener("input", ()=>setDirty(true));
       saveBtn.addEventListener("click", (e)=>{ e.preventDefault(); saveNow(); });
       document.addEventListener("keydown", (e)=>{
@@ -408,6 +484,12 @@
             <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
               .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
             ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
+            <span class="prov-pin"
+                  title="Source & confidence"
+                  data-prov-name="${(prefill.name||'').replace(/"/g,'&quot;')}"
+                  data-prov-cat="${(prefill.category||'(Uncategorized)').replace(/"/g,'&quot;')}"
+                  data-prov-conf="${prefill.confidence!=null? String(prefill.confidence): ''}"
+                  data-prov-pos="${prefill.position!=null? String(prefill.position): ''}">i</span>
           </div>
         </td>
         <td><textarea rows="1" class="cell-textarea desc-text description js-autosize prewrap text-wrap" data-autosize>${(prefill.description||"")
@@ -422,7 +504,7 @@
       itemsBody.prepend(tr);
       const taDesc=$(".desc-text", tr); if (taDesc){ autosize(taDesc); taDesc.addEventListener('input',()=>autosize(taDesc)); }
       const taName=$(".name-text", tr); if (taName){ autosize(taName); taName.addEventListener('input',()=>autosize(taName)); }
-      setDirty(true); rebuildOutline();
+      setDirty(true); rebuildOutline(); applyConfidenceTint(); wireRowProvPins(tr);
       return tr;
     }
 
@@ -437,9 +519,9 @@
         itemsBody.insertBefore(clone, tr.nextSibling);
         const ta=$(".desc-text", clone); if(ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
         const taN=$(".name-text", clone); if(taN){ autosize(taN); taN.addEventListener('input',()=>autosize(taN)); }
-        setDirty(true); showToast("Duplicated"); rebuildOutline();
+        setDirty(true); showToast("Duplicated"); rebuildOutline(); applyConfidenceTint(); wireRowProvPins(clone);
       } else if (btn.classList.contains("btn-danger")){
-        queueDelete(tr); tr.remove(); setDirty(true); showToast("Deleted"); rebuildOutline();
+        queueDelete(tr); tr.remove(); setDirty(true); showToast("Deleted"); rebuildOutline(); applyConfidenceTint();
       }
     });
 
@@ -450,9 +532,9 @@
       if (!selected.length) return;
       selected.forEach(tr=>{ queueDelete(tr); tr.remove(); });
       setDirty(true); showToast(`Deleted ${selected.length} item(s)`); 
-      rebuildOutline();
+      rebuildOutline(); applyConfidenceTint();
     });
-    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
+    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;
@@ -490,8 +572,71 @@
     function downloadFile(filename, content, mime){ var m=mime||'text/csv;charset=utf-8'; var blob=new Blob(["\uFEFF",content],{type:m}); var url=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
     exportVisibleBtn?.addEventListener("click", ()=>{ const csv=visibleRowsToCsv(); downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8'); showToast("Exported visible rows"); });
 
+    // ===== Provenance tooltip wiring =====
+    function renderProvTip({name, cat, conf, pos}){
+      const confNum = conf==="" ? null : Number(conf);
+      const bucket = confNum==null ? "low" : (confNum>=80 ? "high" : (confNum>=60 ? "med":"low"));
+      const prettyConf = confNum==null ? "—" : `${confNum}%`;
+      provTip.innerHTML = `
+        <div class="head">
+          <span class="dot ${bucket}"></span>
+          <strong>Provenance</strong>
+        </div>
+        <div class="kv">
+          <span>Item</span><b>${escapeHtml(name||"")}</b>
+          <span>Category</span><b>${escapeHtml(cat||"(Uncategorized)")}</b>
+          <span>Confidence</span><b>${prettyConf}</b>
+          <span>Position</span><b>${pos==null||pos===""?"—":escapeHtml(String(pos))}</b>
+        </div>
+        <div class="links">
+          <a href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}" target="_blank" rel="noopener">OCR Debug JSON</a>
+          <a href="{{ url_for('draft_ocr_debug_csv',  draft_id=draft.id) }}" target="_blank" rel="noopener">OCR Debug CSV</a>
+          {% if draft.source_job_id %}
+          <a href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}" target="_blank" rel="noopener">AI Preview</a>
+          {% endif %}
+        </div>
+      `;
+    }
+    function escapeHtml(s){ return (s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+
+    function wireRowProvPins(scope){
+      (scope? $$(".prov-pin", scope) : $$(".prov-pin")).forEach(pin=>{
+        // open
+        pin.addEventListener("mouseenter", (e)=>{
+          const d = {
+            name: pin.dataset.provName || pin.closest("tr")?.querySelector(".name")?.value || "",
+            cat:  pin.dataset.provCat  || pin.closest("tr")?.getAttribute("data-cat") || "",
+            conf: pin.dataset.provConf || pin.closest("tr")?.getAttribute("data-confidence") || "",
+            pos:  pin.dataset.provPos  || pin.closest("tr")?.querySelector(".position")?.value || ""
+          };
+          renderProvTip(d);
+          provTip.style.display = "block";
+          positionProvTip(e);
+        });
+        // move
+        pin.addEventListener("mousemove", positionProvTip);
+        // close
+        pin.addEventListener("mouseleave", ()=>{ provTip.style.display = "none"; });
+      });
+    }
+    function positionProvTip(evt){
+      const pad = 12;
+      let x = evt.clientX + pad, y = evt.clientY + pad;
+      const r = provTip.getBoundingClientRect();
+      if (x + r.width > window.innerWidth - 10) x = evt.clientX - r.width - pad;
+      if (y + r.height > window.innerHeight - 10) y = evt.clientY - r.height - pad;
+      provTip.style.left = x + "px";
+      provTip.style.top  = y + "px";
+    }
+
+    // initial wiring
+    wireRowProvPins();
+    applyConfidenceTint();
+
+    // ===== existing init =====
     rebuildOutline();
     collectRowsFiltered();
+
   })();
   </script>
 </div>

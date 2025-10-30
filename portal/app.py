@@ -91,6 +91,13 @@ POPPLER_PATH = os.getenv("POPPLER_PATH") or None
 TESSERACT_LANG = os.getenv("TESSERACT_LANG") or "eng"
 TESSERACT_CONFIG = os.getenv("TESSERACT_CONFIG") or "--oem 1 --psm 6"
 
+# Day 20 — Canonical taxonomy seed (editable)
+TAXONOMY_SEED = [
+    "pizzas", "calzones", "salads", "wings", "appetizers", "burgers", "sandwiches", "subs",
+    "pasta", "steaks", "seafood", "tacos", "burritos", "sides", "desserts", "beverages",
+    "breakfast", "lunch specials", "dinner specials", "kids menu"
+]
+
 # Windows-friendly Tesseract discovery:
 # 1) Respect explicit env var if it exists
 # 2) Else use PATH
@@ -122,6 +129,12 @@ try:
     from storage.ocr_helper import extract_items_from_path
 except Exception:
     extract_items_from_path = None  # fallback to legacy OCR if helper not available
+
+# AI OCR Heuristics (Day 20)
+try:
+    from storage.ai_ocr_helper import analyze_ocr_text  # Phase A (heuristics-only)
+except Exception:
+    analyze_ocr_text = None
 
 # uploads (kept out of git via .gitignore)
 UPLOAD_FOLDER = ROOT / "uploads"
@@ -2077,6 +2090,58 @@ def import_upload():
     except Exception as e:
         flash(f"Server error while saving upload: {e}", "error")
     return redirect(url_for("import_page"))
+
+# ------------------------
+# AI Heuristics Preview (Day 20 Phase A)
+# ------------------------
+@app.get("/imports/<int:job_id>/ai/preview")
+@login_required
+def imports_ai_preview(job_id: int):
+    """
+    Day 20 (Phase A): Heuristics-only AI preview.
+    Re-OCRs the original upload for this job, runs analyze_ocr_text(), and returns JSON.
+    No draft/db writes occur here — it's a read-only preview.
+    """
+    if analyze_ocr_text is None:
+        return jsonify({"ok": False, "error": "AI helper not available"}), 501
+
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    src_name = (row["filename"] or "").strip()
+    if not src_name:
+        return jsonify({"ok": False, "error": "No source filename on job"}), 400
+
+    src_path = (UPLOAD_FOLDER / src_name).resolve()
+    if not src_path.exists():
+        return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
+
+    # Extract raw text for analysis
+    try:
+        suffix = src_path.suffix.lower()
+        if suffix in (".png", ".jpg", ".jpeg"):
+            raw_text = _ocr_image_to_text(src_path)
+        elif suffix == ".pdf":
+            raw_text = _pdf_to_text(src_path)
+        else:
+            return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
+
+    if not raw_text:
+        return jsonify({"ok": False, "error": "Could not extract text for preview"}), 500
+
+    # Run heuristics analysis (Phase A)
+    doc = analyze_ocr_text(raw_text, layout=None, taxonomy=TAXONOMY_SEED, restaurant_profile=None)
+
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "filename": src_name,
+        "extracted_chars": len(raw_text),
+        "preview": doc
+    }), 200
 
 # ------------------------
 # Diagnostics
