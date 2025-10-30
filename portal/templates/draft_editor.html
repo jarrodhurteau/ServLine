@@ -5,12 +5,10 @@
 <div class="draft-editor-page">
   <style>
     /* ===== Confidence Heat-Map & Provenance ===== */
-    /* subtle row tinting based on confidence */
     #items-body tr.conf-high-row { background: linear-gradient(to right, rgba(40, 167, 69, 0.10), transparent 30%); }
     #items-body tr.conf-med-row  { background: linear-gradient(to right, rgba(255, 193, 7, 0.10),  transparent 30%); }
     #items-body tr.conf-low-row  { background: linear-gradient(to right, rgba(220, 53, 69, 0.10),  transparent 30%); }
 
-    /* provenance “i” pin + tooltip */
     .prov-pin {
       display:inline-flex; align-items:center; justify-content:center;
       width:18px; height:18px; border-radius:50%;
@@ -37,18 +35,16 @@
     .prov-tip a { color:#b7cdfb; text-decoration:none; }
     .prov-tip a:hover { text-decoration:underline; }
 
-    /* confidence badge colors (already present visually; ensure strong color) */
     .conf-badge { margin-left:6px; padding:2px 6px; border-radius:8px; font-size:.75rem; font-weight:600; }
     .conf-high { background: rgba(40,167,69,.15); color:#9ae6b4; border:1px solid rgba(40,167,69,.35); }
     .conf-med  { background: rgba(255,193,7,.14); color:#ffe08a; border:1px solid rgba(255,193,7,.35); }
     .conf-low  { background: rgba(220,53,69,.14); color:#ffb3b8; border:1px solid rgba(220,53,69,.35); }
 
-    /* focus flash */
     .row-focus { outline: 2px solid var(--brand); outline-offset: -2px; }
   </style>
 
   <div class="layout">
-    <!-- SIDEBAR (Outline) -->
+    <!-- SIDEBAR -->
     <aside class="sidebar">
       <h3>Menu Outline</h3>
       <ul id="outline" class="tree"></ul>
@@ -72,7 +68,7 @@
         <button class="btn btn-success">Publish to Menu</button>
       </form>
 
-      <!-- NEW: OCR Debug quick links -->
+      <!-- OCR Debug -->
       <hr style="border-color:#1f2a44; margin:12px 0;">
       <h3>OCR Debug</h3>
       <div style="display:grid; gap:6px;">
@@ -109,7 +105,6 @@
 
           <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
             {% if draft.source_job_id %}
-              <!-- Optional AI Preview (heuristics) -->
               <a class="btn" target="_blank" rel="noopener"
                  href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}">AI Preview (heuristics)</a>
             {% endif %}
@@ -124,6 +119,12 @@
                 <button type="button" id="export-visible-btn">Export Visible as CSV</button>
               </div>
             </details>
+
+            <!-- NEW: AI Commit Button inside the editor (fetch + auto-reload) -->
+            <button id="ai-commit-btn" class="btn btn-secondary" title="Re-run AI heuristics and commit results into this draft">
+              AI Commit to Draft
+            </button>
+
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
           </div>
         </div>
@@ -136,7 +137,6 @@
       <!-- Sticky toolbar -->
       <div class="toolbar-sticky">
         <div class="search-wrap">
-          <!-- magnifying glass icon -->
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -169,7 +169,6 @@
               <td><input type="checkbox" class="row-select" /></td>
               <td>
                 <div class="name-cell">
-                  <!-- Day 19: wrap + auto-size -->
                   <textarea rows="1"
                             class="cell-textarea name-text name name-input js-autosize prewrap text-wrap"
                             data-autosize
@@ -184,8 +183,6 @@
                       <span class="conf-badge conf-low">{{ conf }}%</span>
                     {% endif %}
                   {% endif %}
-
-                  <!-- NEW: provenance hover pin -->
                   <span class="prov-pin"
                         title="Source & confidence"
                         data-prov-name="{{ (it.name or '')|e }}"
@@ -195,7 +192,6 @@
                 </div>
               </td>
               <td>
-                <!-- Day 19: wrap + auto-size -->
                 <textarea rows="1"
                           class="cell-textarea desc-text description js-autosize prewrap text-wrap"
                           data-autosize
@@ -226,8 +222,9 @@
     </div>
   </div>
 
+  <!-- Expose minimal meta -->
   <script id="draft-meta" type="application/json">
-  {{ {"id": draft.id, "status": draft.status, "source_job_id": draft.source_job_id}|tojson }}
+    {{ {"id": draft.id, "status": draft.status, "source_job_id": draft.source_job_id}|tojson }}
   </script>
 
   <div id="prov-tip" class="prov-tip" role="tooltip" aria-hidden="true"></div>
@@ -237,6 +234,7 @@
     const meta = JSON.parse(document.getElementById('draft-meta').textContent || '{}');
     const draftId = Number(meta.id);
     const isEditable = String(meta.status||'') === 'editing';
+    const sourceJobId = meta.source_job_id ? Number(meta.source_job_id) : null;
 
     const $ = (s, el=document)=>el.querySelector(s);
     const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
@@ -254,6 +252,7 @@
     const lastSaved = $("#last-saved");
     const exportVisibleBtn = $("#export-visible-btn");
     const provTip = $("#prov-tip");
+    const aiBtn = $("#ai-commit-btn");
 
     let dirty = false;
     let deletedIds = [];
@@ -262,21 +261,55 @@
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
-
     function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
 
-    // Day 19: autosize names/descriptions (still keeps existing behavior)
+    // Enable/disable AI button based on job link
+    if (!sourceJobId) {
+      aiBtn.setAttribute("disabled","disabled");
+      aiBtn.title = "No import job linked to this draft.";
+    }
+
+    // AI Commit: call JSON endpoint and reload editor
+    aiBtn.addEventListener("click", async (e)=>{
+      e.preventDefault();
+      if (!sourceJobId){ return; }
+      aiBtn.disabled = true;
+      const originalText = aiBtn.textContent;
+      aiBtn.textContent = "Running AI…";
+      showToast("Running AI commit…");
+
+      try{
+        const res = await fetch(`/imports/${sourceJobId}/ai/commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}) // no body needed; endpoint re-derives from job
+        });
+        let data = {};
+        try { data = await res.json(); } catch(_){}
+
+        if (!res.ok || data.ok === false){
+          const msg = data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+
+        showSuccess("AI committed to draft. Reloading…");
+        setTimeout(()=>{ window.location.reload(); }, 800);
+      } catch(err){
+        showError("AI commit failed: " + String(err.message || err));
+        aiBtn.disabled = false;
+        aiBtn.textContent = originalText;
+      }
+    });
+
+    // Day 19: autosize
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
-    // === Confidence heat-map classing per row ===
     function applyConfidenceTint(){
       $$("#items-body tr").forEach(tr=>{
         tr.classList.remove("conf-high-row","conf-med-row","conf-low-row");
-        const raw = tr.getAttribute("data-confidence");
-        if (!raw) return;
-        const c = Number(raw);
-        if (Number.isNaN(c)) return;
+        const raw = tr.getAttribute("data-confidence"); if (!raw) return;
+        const c = Number(raw); if (Number.isNaN(c)) return;
         if (c >= 80) tr.classList.add("conf-high-row");
         else if (c >= 60) tr.classList.add("conf-med-row");
         else tr.classList.add("conf-low-row");
@@ -326,7 +359,7 @@
     function setFilterByItem(cat, baseNorm){ clearAllFilters(); $$("#items-body tr").forEach(tr=>{ tr.dataset.filterCat = cat.toLowerCase(); tr.dataset.filterItem = baseNorm; }); collectRowsFiltered(); }
 
     function focusRow(rowId){
-      const tr = $(`#items-body tr[data-id="${CSS.escape(rowId)}"]`);
+      const tr = document.querySelector(`#items-body tr[data-id="${CSS.escape(rowId)}"]`);
       if (!tr) return;
       tr.scrollIntoView({behavior:"smooth", block:"center"});
       tr.classList.add("row-focus");
@@ -341,7 +374,7 @@
         return a.localeCompare(b);
       });
 
-      const outline = $("#outline");
+      const outline = document.getElementById("outline");
       outline.innerHTML = "";
 
       const liAll = document.createElement("li");
@@ -442,7 +475,6 @@
         });
         const data = await res.json();
         if (!res.ok || data.ok===false) throw new Error(data.error || "Save failed");
-        // map server ids
         let insIdx=0;
         $$("#items-body tr").forEach(tr=>{
           const idAttr=tr.getAttribute("data-id");
@@ -453,7 +485,7 @@
         lastSaved.textContent = data.saved_at || new Date().toISOString();
         setDirty(false); deletedIds=[];
         showSuccess("Saved");
-        rebuildOutline(); // update counts and groupings
+        rebuildOutline();
       } catch(e){ showError(String(e)); }
     }
 
@@ -525,6 +557,8 @@
       }
     });
 
+    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
+
     selectAll?.addEventListener("change", ()=>{ const checked=selectAll.checked; $$(".row-select").forEach(cb=>cb.checked=checked); });
     $("#delete-selected-btn").addEventListener("click", (e)=>{
       e.preventDefault();
@@ -534,7 +568,6 @@
       setDirty(true); showToast(`Deleted ${selected.length} item(s)`); 
       rebuildOutline(); applyConfidenceTint();
     });
-    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
 
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;
@@ -545,6 +578,7 @@
 
     window.addEventListener("beforeunload",(e)=>{ if (dirty && isEditable){ e.preventDefault(); e.returnValue=""; } });
 
+    // Heartbeat
     let pingTimer=null;
     function startHeartbeat(){ if (!isEditable) return; stopHeartbeat(); pingTimer=setInterval(async ()=>{ if (document.hidden) return; try{ const res=await fetch(`/drafts/${draftId}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({autosave_ping:true})}); if (res.ok){ const data=await res.json(); if (data && data.saved_at && lastSaved) lastSaved.textContent=data.saved_at; } }catch(_){ } },30000); }
     function stopHeartbeat(){ if(pingTimer){ clearInterval(pingTimer); pingTimer=null; } }
@@ -572,7 +606,7 @@
     function downloadFile(filename, content, mime){ var m=mime||'text/csv;charset=utf-8'; var blob=new Blob(["\uFEFF",content],{type:m}); var url=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
     exportVisibleBtn?.addEventListener("click", ()=>{ const csv=visibleRowsToCsv(); downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8'); showToast("Exported visible rows"); });
 
-    // ===== Provenance tooltip wiring =====
+    // Provenance tooltip
     function renderProvTip({name, cat, conf, pos}){
       const confNum = conf==="" ? null : Number(conf);
       const bucket = confNum==null ? "low" : (confNum>=80 ? "high" : (confNum>=60 ? "med":"low"));
@@ -601,7 +635,6 @@
 
     function wireRowProvPins(scope){
       (scope? $$(".prov-pin", scope) : $$(".prov-pin")).forEach(pin=>{
-        // open
         pin.addEventListener("mouseenter", (e)=>{
           const d = {
             name: pin.dataset.provName || pin.closest("tr")?.querySelector(".name")?.value || "",
@@ -613,9 +646,7 @@
           provTip.style.display = "block";
           positionProvTip(e);
         });
-        // move
         pin.addEventListener("mousemove", positionProvTip);
-        // close
         pin.addEventListener("mouseleave", ()=>{ provTip.style.display = "none"; });
       });
     }
@@ -629,14 +660,10 @@
       provTip.style.top  = y + "px";
     }
 
-    // initial wiring
     wireRowProvPins();
     applyConfidenceTint();
-
-    // ===== existing init =====
     rebuildOutline();
     collectRowsFiltered();
-
   })();
   </script>
 </div>

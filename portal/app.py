@@ -194,8 +194,6 @@ def _safe_render(template_name: str, **ctx):
         body = f"<h1>{html.escape(template_name)} missing or failed</h1><pre>{tb}</pre>"
         return body, 200, {"Content-Type": "text/html; charset=utf-8"}
 
-
-
 # ------------------------
 # Template globals + filters
 # ------------------------
@@ -295,7 +293,6 @@ def login_required(view_func):
             return redirect(url_for("login", next=request.path))
         return view_func(*args, **kwargs)
     return wrapper
-
 # ------------------------
 # Role/restaurant helpers (ADMIN vs CUSTOMER scoping)
 # ------------------------
@@ -437,6 +434,8 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
         return draft_id
 
     return None
+
+# ---------- MISSING HELPERS (wired to /imports actions) ----------
 def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cents: int) -> bool:
     cur = conn.cursor()
     row = cur.execute(
@@ -528,6 +527,7 @@ def discard_draft_for_job(job_id: int) -> int:
         pass
 
     return int(deleted)
+# ---------- /MISSING HELPERS ----------
 
 # ------------------------
 # Health / DB / OCR Health
@@ -613,8 +613,6 @@ def ocr_health():
         },
         "ocr_worker_version": worker_version,
     })
-
-
 @app.get("/db/health")
 def db_health():
     try:
@@ -1010,6 +1008,7 @@ def items_page(menu_id):
             "SELECT * FROM menu_items WHERE menu_id=? AND is_available=1 ORDER BY id", (menu_id,),
         ).fetchall()
         return _safe_render("items.html", restaurant=rest, menu=menu, items=items)
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------
@@ -2028,6 +2027,118 @@ def draft_export_xlsx(draft_id: int):
     return resp
 
 # ------------------------
+# NEW: Fix descriptions endpoint used by the editor button
+# ------------------------
+def _clean_desc(name: str, desc: Optional[str]) -> Optional[str]:
+    """
+    Heuristics:
+      - Trim, collapse whitespace.
+      - Drop leading repeats of the name: "Pepperoni: pepperoni slices..." -> "pepperoni slices..."
+      - Remove surrounding quotes and stray punctuation at ends.
+      - If desc becomes empty, return None.
+    """
+    nm = (name or "").strip()
+    d = (desc or "").strip()
+
+    if not d:
+        return None
+
+    # If description begins with the name (case-insensitive), remove that prefix + common separators
+    lowered = d.lower()
+    nm_low = nm.lower()
+    prefixes = [f"{nm_low} - ", f"{nm_low} — ", f"{nm_low} – ", f"{nm_low}: ", f"{nm_low} —", f"{nm_low} –", f"{nm_low}:"]
+    for pre in prefixes:
+        if lowered.startswith(pre):
+            d = d[len(pre):].lstrip()
+            lowered = d.lower()
+            break
+
+    # Strip wrapping quotes/parens
+    d = d.strip(" '\"\t\r\n")
+    # Fix bad spacing around punctuation
+    d = re.sub(r"\s+([,.;:!?])", r"\1", d)
+    d = re.sub(r"\s{2,}", " ", d).strip()
+
+    return d or None
+
+def _split_name_into_desc_if_needed(name: str, desc: Optional[str]) -> Tuple[str, Optional[str]]:
+    """
+    If description is empty but name contains " - " or " — ", split once and move the tail to description.
+    Keep conservative: only when the left part isn't too long (title-like) and right part has letters.
+    """
+    nm = (name or "").strip()
+    if (desc or "").strip():
+        return nm, (desc or None)
+
+    for sep in [" - ", " — ", " – ", ":", " · "]:
+        if sep in nm:
+            left, right = nm.split(sep, 1)
+            left, right = left.strip(), right.strip()
+            if left and right and any(c.isalpha() for c in right) and len(left) <= 80:
+                return left, right
+    return nm, (desc or None)
+
+@app.route("/drafts/<int:draft_id>/fix-descriptions", methods=["POST", "GET"])
+@login_required
+def fix_descriptions_for_draft(draft_id: int):
+    """
+    Clean up funky descriptions in-place. Safe, idempotent heuristics.
+    - POST: returns JSON {ok, updated_count}. Editor JS will reload.
+    - GET: redirect back to the editor (if someone clicks it directly).
+    """
+    _require_drafts_storage()
+    if request.method == "GET":
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    items = drafts_store.get_draft_items(draft_id) or []
+    updates = []
+
+    for it in items:
+        _id = it.get("id")
+        if _id is None:
+            continue
+        name = (it.get("name") or "").strip()
+        desc = it.get("description")
+        # Optionally split long names into name+desc if desc is empty
+        new_name, maybe_desc = _split_name_into_desc_if_needed(name, desc)
+        # Always run the desc cleaner
+        new_desc = _clean_desc(new_name, maybe_desc)
+
+        # Only push updates when something has changed
+        changed = False
+        upd = {"id": int(_id)}
+
+        if new_name != name:
+            upd["name"] = new_name
+            changed = True
+        # Normalize empty -> None; DB layer should treat None as NULL
+        norm_desc = new_desc if (new_desc and new_desc.strip()) else None
+        # Only update if different from current (normalize current too)
+        cur_norm = (desc or None)
+        if (norm_desc or None) != (cur_norm or None):
+            upd["description"] = norm_desc
+            changed = True
+
+        if changed:
+            updates.append(upd)
+
+    updated_count = 0
+    if updates:
+        try:
+            res = drafts_store.upsert_draft_items(draft_id, updates)
+            updated_count = len(res.get("updated_ids", [])) + len(res.get("inserted_ids", []))
+            # bump updated_at
+            try:
+                ds = drafts_store.get_draft(draft_id) or {}
+                drafts_store.save_draft_metadata(draft_id, title=ds.get("title"))
+            except Exception:
+                pass
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"update failed: {e}"}), 500
+
+    return jsonify({"ok": True, "updated_count": int(updated_count)}), 200
+
+# ------------------------
 # Error handlers
 # ------------------------
 @app.errorhandler(404)
@@ -2141,6 +2252,110 @@ def imports_ai_preview(job_id: int):
         "filename": src_name,
         "extracted_chars": len(raw_text),
         "preview": doc
+    }), 200
+
+# ------------------------
+# AI Heuristics → Commit into Draft (NEW)
+# ------------------------
+@app.post("/imports/<int:job_id>/ai/commit")
+@login_required
+def imports_ai_commit(job_id: int):
+    """
+    Re-OCR the original upload (same as /ai/preview), run analyze_ocr_text(),
+    then replace the draft items for this job with the cleaned items.
+    """
+    if analyze_ocr_text is None:
+        return jsonify({"ok": False, "error": "AI helper not available"}), 501
+
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    src_name = (row["filename"] or "").strip()
+    if not src_name:
+        return jsonify({"ok": False, "error": "No source filename on job"}), 400
+
+    src_path = (UPLOAD_FOLDER / src_name).resolve()
+    if not src_path.exists():
+        return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
+
+    # Extract raw text (same logic as preview)
+    try:
+        suffix = src_path.suffix.lower()
+        if suffix in (".png", ".jpg", ".jpeg"):
+            raw_text = _ocr_image_to_text(src_path)
+        elif suffix == ".pdf":
+            raw_text = _pdf_to_text(src_path)
+        else:
+            return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
+
+    if not raw_text:
+        return jsonify({"ok": False, "error": "Could not extract text for commit"}), 500
+
+    # Run heuristics
+    doc = analyze_ocr_text(raw_text, layout=None, taxonomy=TAXONOMY_SEED, restaurant_profile=None)
+    items_ai = (doc or {}).get("items") or []
+
+    # Map AI preview items -> draft_items schema (name, description, price_cents, category, confidence)
+    def _to_cents(v) -> int:
+        try:
+            return int(round(float(v) * 100))
+        except Exception:
+            return 0
+
+    new_items = []
+    for it in items_ai:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        desc = (it.get("description") or "") or ""
+        cat = (it.get("category") or "") or None
+        conf = it.get("confidence")
+        pcs = it.get("price_candidates") or []
+        price_cents = 0
+        if pcs:
+            try:
+                price_cents = _to_cents(pcs[0].get("value"))
+            except Exception:
+                price_cents = 0
+        new_items.append({
+            "name": name,
+            "description": desc.strip() or None,
+            "price_cents": int(price_cents),
+            "category": cat,
+            "position": None,
+            "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf
+        })
+
+    # Replace items in the draft for this job
+    _require_drafts_storage()
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        return jsonify({"ok": False, "error": "No draft available for this job"}), 400
+
+    existing = drafts_store.get_draft_items(draft_id) or []
+    existing_ids = [it.get("id") for it in existing if it.get("id") is not None]
+    if existing_ids:
+        try:
+            drafts_store.delete_draft_items(draft_id, existing_ids)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Failed to clear existing items: {e}"}), 500
+
+    ins = drafts_store.upsert_draft_items(draft_id, new_items)
+    # Nudge updated_at so the draft bubbles in /drafts
+    try:
+        drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"))
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "draft_id": draft_id,
+        "inserted_count": len(ins.get("inserted_ids", [])),
+        "updated_count": len(ins.get("updated_ids", [])),
     }), 200
 
 # ------------------------
