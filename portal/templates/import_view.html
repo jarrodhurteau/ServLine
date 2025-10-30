@@ -3,7 +3,6 @@
 
 {% block content %}
   <style>
-    /* Status pills */
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
     .pill-gray  { background:#e5e7eb; color:#374151; }
     .pill-blue  { background:#dbeafe; color:#1e40af; }
@@ -19,14 +18,15 @@
     .kv .k { color:var(--muted); }
     .kv code { color:#b7cdfb; }
 
-    /* Disabled look for export buttons until draft_id is resolved */
     .btn[aria-disabled="true"] { opacity:.6; pointer-events:none; }
-
-    /* Action column stacks nicely on narrow screens */
     .sidebar-actions { display:flex; flex-direction:column; gap:.5rem; }
+
+    /* NEW: AI section styling */
+    .ai-section { border:1px dashed var(--line); border-radius:12px; padding:10px; }
+    .ai-title { font-weight:700; letter-spacing:.02em; }
+    .ai-note { font-size:.9rem; color:var(--muted); margin-top:2px; }
   </style>
 
-  <!-- Header card -->
   <section class="card">
     <div class="flex items-center gap-3 flex-wrap">
       <h1 class="text-xl font-semibold">Import #{{ job.id }}</h1>
@@ -51,7 +51,6 @@
     <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
       <!-- Main column -->
       <div class="md:col-span-2 space-y-3">
-        <!-- Meta -->
         <div class="rounded-xl border border-line p-3">
           <div class="kv">
             <div class="k">File</div>
@@ -82,7 +81,6 @@
           </div>
         {% endif %}
 
-        <!-- Draft JSON preview (collapsible) -->
         <details class="rounded-xl border border-line">
           <summary class="px-3 py-2 cursor-pointer select-none">Draft Preview (JSON)</summary>
           <div class="p-3 overflow-auto" style="max-height:520px">
@@ -118,17 +116,30 @@
           <a href="{{ url_for('serve_upload', filename=src_file) }}" target="_blank" rel="noopener noreferrer" class="btn w-full">View Source Image</a>
         {% endif %}
 
-        <!-- Clone -->
         <form action="{{ url_for('imports_clone', job_id=job.id) }}" method="post">
           <button type="submit" class="btn w-full">Clone Draft</button>
         </form>
 
-        <!-- Export (auto-enabled once draft_id is resolved) -->
+        <!-- ===== AI TOOLS (always visible) ===== -->
+        <div class="ai-section">
+          <div class="ai-title">⚡ AI Tools</div>
+          <div class="ai-note">Preview uses heuristics only (Phase A). Commit replaces current draft items.</div>
+          <a class="btn btn-ghost w-full"
+             href="{{ url_for('imports_ai_preview', job_id=job.id) }}"
+             target="_blank" rel="noopener">
+            AI Preview (JSON)
+          </a>
+          <form id="ai-commit-form" action="{{ url_for('imports_ai_commit', job_id=job.id) }}" method="post">
+            <button type="submit" class="btn w-full">AI Commit to Draft</button>
+          </form>
+        </div>
+        <!-- ==================================== -->
+
+        <!-- Export (enabled after resolving draft_id) -->
         <a id="export-csv"  class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Export CSV</a>
         <a id="export-json" class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Export JSON</a>
         <a id="export-xlsx" class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Download Excel</a>
 
-        <!-- Approve / Discard -->
         <form id="approve-form" action="{{ url_for('imports_approve', job_id=job.id) }}" method="post">
           <button type="submit" class="btn btn-success w-full"
                   {% if st in ['approved','published','discarded'] %}disabled{% endif %}>
@@ -147,7 +158,10 @@
   </section>
 
   <script>
-    // Friendly timestamp formatting (keeps raw text as fallback)
+    // Marker to confirm hot-reload/template path
+    console.log("import_view.html loaded: AI Tools section should be visible.");
+
+    // Friendly timestamp formatting
     (function() {
       function fmt(d) {
         try {
@@ -163,19 +177,17 @@
       });
     })();
 
-    // Confirm dialogs for risky actions
+    // Confirms for risky actions
     (function(){
       const approve = document.getElementById('approve-form');
       const discard = document.getElementById('discard-form');
-      approve?.addEventListener('submit', (e)=>{
-        if(!confirm('Approve this draft into the menu?')) e.preventDefault();
-      });
-      discard?.addEventListener('submit', (e)=>{
-        if(!confirm('Discard all items from this draft? This cannot be undone.')) e.preventDefault();
-      });
+      const aiCommit = document.getElementById('ai-commit-form');
+      approve?.addEventListener('submit', (e)=>{ if(!confirm('Approve this draft into the menu?')) e.preventDefault(); });
+      discard?.addEventListener('submit', (e)=>{ if(!confirm('Discard all items from this draft?')) e.preventDefault(); });
+      aiCommit?.addEventListener('submit', (e)=>{ if(!confirm('Re-OCR and replace current draft items with AI-cleaned items?')) e.preventDefault(); });
     })();
 
-    // Resolve the DB-backed draft_id so Export buttons can link directly.
+    // Resolve draft id for exports
     (async function() {
       const csvBtn  = document.getElementById('export-csv');
       const jsonBtn = document.getElementById('export-json');
@@ -190,19 +202,16 @@
       }
 
       try {
-        // Follow redirect to /drafts/<id>/edit and extract the id from final URL
         const res = await fetch("{{ url_for('imports_draft', job_id=job.id) }}", {
           method: "GET",
           redirect: "follow",
           credentials: "same-origin",
           headers: { "X-Requested-With": "fetch" }
         });
-
         const url = res.url || '';
         const m = url.match(/\/drafts\/(\d+)\/edit\/?$/);
         if (!m) throw new Error("Could not resolve draft id");
         const draftId = m[1];
-
         enable(csvBtn,  `/drafts/${draftId}/export.csv`);
         enable(jsonBtn, `/drafts/${draftId}/export.json`);
         enable(xlsxBtn, `/drafts/${draftId}/export.xlsx`);

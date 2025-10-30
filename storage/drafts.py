@@ -111,6 +111,12 @@ def _coerce_opt_int(v: Any) -> Optional[int]:
     except Exception:
         return None
 
+def _to_cents(p: Any) -> int:
+    try:
+        return int(round(float(p) * 100))
+    except Exception:
+        return 0
+
 # ------------------------------------------------------------
 # OCR Inspector debug sidecars
 # ------------------------------------------------------------
@@ -326,7 +332,7 @@ def delete_draft_items(draft_id: int, item_ids: Iterable[int]) -> int:
         return int(cur.rowcount)
 
 # ------------------------------------------------------------
-# Import bridge (legacy JSON → DB-first draft)
+# Import bridge (legacy JSON → DB-first draft) + AI bridge
 # ------------------------------------------------------------
 def find_draft_by_source_job(job_id: int) -> Optional[Dict[str, Any]]:
     with db_connect() as conn:
@@ -336,33 +342,10 @@ def find_draft_by_source_job(job_id: int) -> Optional[Dict[str, Any]]:
         ).fetchone()
         return _row_to_dict(row) if row else None
 
-def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) -> Dict[str, Any]:
+def _flat_from_legacy_categories(draft_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Accepts JSON like:
-    {
-      "job_id": ...,
-      "source": {"type":"upload","file":"...","ocr_engine":"..."},
-      "categories": [
-        {"name":"Pizzas","items":[
-           {"name":"Cheese Pizza", "description":"", "sizes":[{"name":"Small","price":9.99}], "confidence": 68}
-        ]}
-      ]
-    }
-    Explodes sizes into individual rows; if no sizes, uses item.price or 0.
+    Legacy path: explode categories/items/sizes to flat rows.
     """
-    title = f"Imported {datetime.utcnow().date()}"
-
-    # Persist full source JSON (stringified) so editor can display provenance
-    source_blob = json.dumps(draft_json.get("source") or {}, ensure_ascii=False)
-
-    draft_id = _insert_draft(
-        title=title,
-        restaurant_id=None,
-        status="editing",
-        source=source_blob,
-        source_job_id=int(import_job_id)
-    )
-
     flat_items: List[Dict[str, Any]] = []
     for cat in (draft_json.get("categories") or []):
         cat_name = (cat.get("name") or "").strip() or None
@@ -377,11 +360,7 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
             if sizes:
                 for s in sizes:
                     size_name = (s.get("name") or "").strip()
-                    price = s.get("price", 0)
-                    try:
-                        cents = int(round(float(price) * 100))
-                    except Exception:
-                        cents = 0
+                    cents = _to_cents(s.get("price", 0))
                     name = f"{base} ({size_name})" if size_name else base
                     flat_items.append({
                         "name": name,
@@ -392,11 +371,7 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                         "confidence": confidence
                     })
             else:
-                price = item.get("price", 0)
-                try:
-                    cents = int(round(float(price) * 100))
-                except Exception:
-                    cents = 0
+                cents = _to_cents(item.get("price", 0))
                 flat_items.append({
                     "name": base,
                     "description": desc,
@@ -405,8 +380,112 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                     "position": None,
                     "confidence": confidence
                 })
+    return flat_items
 
+def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    AI path: map ai_ocr_helper.analyze_ocr_text(...) → flat rows.
+    - Picks first price_candidate as main price.
+    - Keeps description/category; converts confidence (0.6/0.8) → int percent-ish.
+    - Ignores variants for now (could explode later).
+    """
+    flat: List[Dict[str, Any]] = []
+    for it in ai_items or []:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        desc = (it.get("description") or None)
+        cat = (it.get("category") or None)
+        pcs = it.get("price_candidates") or []
+        price = 0.0
+        if pcs:
+            try:
+                price = float((pcs[0] or {}).get("value", 0.0))
+            except Exception:
+                price = 0.0
+        conf_float = it.get("confidence")
+        # normalize 0.0-1.0 to 0-100 if needed; accept ints as-is
+        if isinstance(conf_float, float):
+            if conf_float <= 1.0:
+                confidence = int(round(conf_float * 100))
+            else:
+                confidence = int(round(conf_float))
+        else:
+            confidence = _coerce_opt_int(conf_float)
+
+        flat.append({
+            "name": name,
+            "description": (desc or "").strip() or None,
+            "price_cents": _to_cents(price),
+            "category": cat,
+            "position": None,
+            "confidence": confidence
+        })
+    return flat
+
+def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) -> Dict[str, Any]:
+    """
+    Accepts either:
+      (A) Legacy JSON (categories/items/sizes)  -> builds rows from 'categories'
+      (B) AI JSON:
+          - {'ai_preview': {'items': [...]}}  or
+          - {'preview': {'items': [...]}}     or
+          - {'items': [...]}                  (direct)
+          Each AI item should look like ai_ocr_helper.analyze_ocr_text(...) output.
+
+    We choose AI when present; otherwise fallback to legacy.
+    """
+    title = f"Imported {datetime.utcnow().date()}"
+
+    # Persist source sidecar (raw)
+    source_blob = json.dumps(draft_json.get("source") or {}, ensure_ascii=False)
+
+    # Create draft shell
+    draft_id = _insert_draft(
+        title=title,
+        restaurant_id=None,
+        status="editing",
+        source=source_blob,
+        source_job_id=int(import_job_id)
+    )
+
+    # ---------- Prefer AI items if provided ----------
+    ai_items = None
+    if isinstance(draft_json.get("ai_preview"), dict):
+        ai_items = (draft_json["ai_preview"] or {}).get("items")
+    if ai_items is None and isinstance(draft_json.get("preview"), dict):
+        ai_items = (draft_json["preview"] or {}).get("items")
+    if ai_items is None and isinstance(draft_json.get("items"), list):
+        ai_items = draft_json.get("items")
+
+    if ai_items:
+        flat_items = _flat_from_ai_items(ai_items)
+        _insert_items_bulk(draft_id, flat_items)
+        # Save a rich debug sidecar so OCR Inspector / Dev tabs can render the AI provenance
+        try:
+            save_ocr_debug(draft_id, {
+                "bridge": "ai",
+                "import_job_id": import_job_id,
+                "ai_items_count": len(ai_items or []),
+                "ai_sample": (ai_items[:20] if isinstance(ai_items, list) else None),
+                "source_meta": draft_json.get("source") or {},
+            })
+        except Exception:
+            pass
+        return {"id": draft_id, "draft_id": draft_id}
+
+    # ---------- Fallback: legacy categories path ----------
+    flat_items = _flat_from_legacy_categories(draft_json)
     _insert_items_bulk(draft_id, flat_items)
+    try:
+        save_ocr_debug(draft_id, {
+            "bridge": "legacy",
+            "import_job_id": import_job_id,
+            "legacy_categories_count": len(draft_json.get("categories") or []),
+            "source_meta": draft_json.get("source") or {},
+        })
+    except Exception:
+        pass
     return {"id": draft_id, "draft_id": draft_id}
 
 # ------------------------------------------------------------
