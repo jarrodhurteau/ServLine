@@ -72,7 +72,7 @@ Version control, POS order scaffolding, event hooks.
 
 ### 🚀 Day 5 – Router & Ordering Logic  
 Voice router with upsell events and per-shop order logs.  
-✅ **Day 5 complete — call flow router working.**
+✅ **Day 5 complete — call-flow router working.**
 
 ---
 
@@ -137,7 +137,7 @@ Modularization attempt caused routing issues → rolled back to Day 14.
 ---
 
 ### 🚀 Day 16 – Infra & PDF OCR Success  
-run_infra/stop_infra scripts with PID tracking, verified Tesseract + Poppler + PDF OCR.  
+`run_infra`/`stop_infra` scripts with PID tracking, verified Tesseract + Poppler + PDF OCR.  
 ✅ **Day 16 complete — infra stable + PDF OCR functional.**
 
 ---
@@ -183,10 +183,22 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 
 ---
 
-## 🔜 Next Up — Day 21 : Heuristics Phase B (Parser & Description Stitcher)  
-- Strengthen item/description detection and multi-line joins.  
-- Stricter category recognition (e.g., “BURGERS & SANDWICHES” → “Sandwiches”).  
-- Handle two-column menus and price-on-next-line patterns.  
-- Merge ingredient lines into natural comma-separated descriptions.  
-- Add confidence weighting and rule trace tooltips for debug visibility.  
-- Lay foundation for Phase C (Lightweight ML classifier + heuristics fusion).  
+### 🚀 Day 21 – OCR System Rebuild & Cleanup  
+- Created modular OCR architecture: `servline/ocr/pipeline_new.py` (new core) + `storage/ocr_facade.py` (front controller).  
+- Added engine selector via `SERVLINE_OCR_ENGINE` env var (new vs legacy).  
+- Verified imports, Tesseract version, and Poppler paths via `f.health()`.  
+- Confirmed new pipeline stub runs clean (no import errors).  
+- Cleaned file tree + moved legacy code into `storage/_legacy/`.  
+- Locked `.gitignore` and file rules for new OCR structure.  
+
+✅ **Day 21 complete — OCR rebuild framework in place, ready for Day 22 Phase builds.**  
+**Tags:** `day-21-ocr-rebuild`, `v21-landmark`
+
+---
+
+## 🔜 Next Up — Day 22 : OCR Core Revamp (Phased Build)  
+**Phase 1:** Text block segmenter (PDF → images → text regions).  
+**Phase 2:** Line parser (price detection, item/desc stitching).  
+**Phase 3:** Category inference + two-column merge logic.  
+**Phase 4:** Confidence weighting + structured JSON assembly.  
+**Phase 5:** End-to-end test against sample menus for accuracy parity with OnlineOCR.  
