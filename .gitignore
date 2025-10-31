@@ -16,6 +16,32 @@ venv/
 # --- Databases (don’t track live DBs) ---
 *.db
 *.sqlite
+*.sqlite3
+storage/servline.db
+
+# --- OCR / Debug / Sidecars ---
+storage/.debug/
+storage/*.ocr.txt
+storage/*.raw.json
+storage/*.json
+storage/*.txt
+*.debug.log
+
+# --- Uploads (keep .gitkeep only) ---
+uploads/*
+!uploads/.gitkeep
+uploads/.trash/
+uploads/.ocr_cache/
+
+# --- Drafts & Raw artifacts (keep .gitkeep only) ---
+storage/drafts/*
+!storage/drafts/.gitkeep
+storage/raw/*
+!storage/raw/.gitkeep
+
+# --- Infra artifacts ---
+infra/.pids/
+infra/current_url.txt
 
 # --- VS Code ---
 .vscode/
@@ -24,29 +50,11 @@ venv/
 # --- System files ---
 .DS_Store
 Thumbs.db
-
-# --- Uploads (keep .gitkeep only) ---
-uploads/*
-!uploads/.gitkeep
-
-# --- Drafts & Raw artifacts (keep .gitkeep only) ---
-storage/drafts/*
-!storage/drafts/.gitkeep
-storage/raw/*
-!storage/raw/.gitkeep
+desktop.ini
 
 # --- Runtime & secrets ---
 .env
-storage/*.txt
-storage/*.json
-storage/*.ocr.txt
-storage/*.raw.json
-
-# --- Infra artifacts ---
-infra/.pids/
-infra/current_url.txt
-
-# --- Backups & scratch ---
+.env.*
 *.bak
 *.bak*
 *.old
@@ -56,6 +64,31 @@ _bak_archive/
 # --- Build/Dist artifacts ---
 dist/
 build/
-
-# --- Misc ---
 *.pid
+
+# --- Docker / Compose / Runtime ---
+*.pid
+*.pid.lock
+*.sock
+docker-compose.override.yml
+
+# --- Temporary & cache directories ---
+.cache/
+tmp/
+temp/
+__temp__/
+
+# --- Local generated media / test outputs ---
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.gif
+
+# --- Fixtures ---
+fixtures/menus/**/outputs/
+
+# --- Ignore legacy OCR helpers if archived ---
+storage/_legacy/
