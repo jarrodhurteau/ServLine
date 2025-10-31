@@ -124,11 +124,13 @@ try:
 except Exception:
     drafts_store = None  # guarded below
 
-# OCR helper (Day 14)
+# OCR engine (Day 21 revamp)
 try:
-    from storage.ocr_helper import extract_items_from_path
-except Exception:
-    extract_items_from_path = None  # fallback to legacy OCR if helper not available
+    from storage.ocr_facade import extract_menu_from_pdf as extract_items_from_path
+    from storage.ocr_facade import health as ocr_health
+except Exception as e:
+    extract_items_from_path = None
+    ocr_health = lambda: {"engine": "error", "error": repr(e)}
 
 # AI OCR Heuristics (Day 20)
 try:
@@ -903,8 +905,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     "categories": [
                         {"name": "Uncategorized", "items": [
                             {"name": "OCR not configured", "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.", "sizes": []}
-                        ]}
-                    ],
+                        ]}]
                 }
                 debug_payload = {"notes": ["no_text_extracted"]}
 
@@ -2083,12 +2084,25 @@ def _split_name_into_desc_if_needed(name: str, desc: Optional[str]) -> Tuple[str
 def fix_descriptions_for_draft(draft_id: int):
     """
     Clean up funky descriptions in-place. Safe, idempotent heuristics.
-    - POST: returns JSON {ok, updated_count}. Editor JS will reload.
-    - GET: redirect back to the editor (if someone clicks it directly).
+
+    Behavior:
+      - GET  → redirect back to editor (no mutation).
+      - POST (AJAX/JSON) → returns JSON {ok, updated_count} (editor JS can reload).
+      - POST (regular form OR ?redirect=1) → flash + redirect back to editor (no JSON blank page).
     """
     _require_drafts_storage()
+
     if request.method == "GET":
         return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    # --- detect if caller wants redirect instead of JSON ---
+    ct = (request.headers.get("Content-Type") or "").lower()
+    is_form_post = ct.startswith("application/x-www-form-urlencoded") or ct.startswith("multipart/form-data")
+    wants_redirect = (
+        request.args.get("redirect") == "1"
+        or (request.form.get("redirect") == "1" if is_form_post else False)
+        or is_form_post
+    )
 
     items = drafts_store.get_draft_items(draft_id) or []
     updates = []
@@ -2134,7 +2148,14 @@ def fix_descriptions_for_draft(draft_id: int):
             except Exception:
                 pass
         except Exception as e:
+            if wants_redirect:
+                flash(f"Description cleanup failed: {e}", "error")
+                return redirect(url_for("draft_editor", draft_id=draft_id))
             return jsonify({"ok": False, "error": f"update failed: {e}"}), 500
+
+    if wants_redirect:
+        flash(f"Cleaned descriptions — {int(updated_count)} item(s) updated.", "success")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
 
     return jsonify({"ok": True, "updated_count": int(updated_count)}), 200
 

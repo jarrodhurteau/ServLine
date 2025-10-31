@@ -120,7 +120,13 @@
               </div>
             </details>
 
-            <!-- NEW: AI Commit Button inside the editor (fetch + auto-reload) -->
+            <!-- NEW: Fix Descriptions button (fetch + auto-reload) -->
+            <button id="fix-descriptions-btn" class="btn btn-secondary"
+                    title="Split 'Name — details' into description, trim dupes/punctuation, and tidy multi-line joins">
+              🧹 Fix Descriptions
+            </button>
+
+            <!-- AI Commit stays -->
             <button id="ai-commit-btn" class="btn btn-secondary" title="Re-run AI heuristics and commit results into this draft">
               AI Commit to Draft
             </button>
@@ -253,6 +259,7 @@
     const exportVisibleBtn = $("#export-visible-btn");
     const provTip = $("#prov-tip");
     const aiBtn = $("#ai-commit-btn");
+    const fixBtn = $("#fix-descriptions-btn");
 
     let dirty = false;
     let deletedIds = [];
@@ -269,6 +276,31 @@
       aiBtn.title = "No import job linked to this draft.";
     }
 
+    // NEW: Fix Descriptions handler (POST -> reload)
+    fixBtn?.addEventListener("click", async (e)=>{
+      e.preventDefault();
+      fixBtn.disabled = true;
+      const original = fixBtn.textContent;
+      fixBtn.textContent = "Cleaning…";
+      showToast("Fixing descriptions…");
+      try{
+        const res = await fetch(`/drafts/${draftId}/fix-descriptions`, {
+          method: "POST",
+          headers: { "Accept": "application/json" }
+        });
+        if (!res.ok){
+          const t = await res.text().catch(()=>res.statusText);
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+        // Expect JSON but we just reload either way
+        setTimeout(()=>window.location.reload(), 300);
+      }catch(err){
+        showError("Fix Descriptions failed: " + String(err.message || err));
+        fixBtn.disabled = false;
+        fixBtn.textContent = original;
+      }
+    });
+
     // AI Commit: call JSON endpoint and reload editor
     aiBtn.addEventListener("click", async (e)=>{
       e.preventDefault();
@@ -282,16 +314,14 @@
         const res = await fetch(`/imports/${sourceJobId}/ai/commit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}) // no body needed; endpoint re-derives from job
+          body: JSON.stringify({})
         });
         let data = {};
         try { data = await res.json(); } catch(_){}
-
         if (!res.ok || data.ok === false){
           const msg = data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${res.status}`;
           throw new Error(msg);
         }
-
         showSuccess("AI committed to draft. Reloading…");
         setTimeout(()=>{ window.location.reload(); }, 800);
       } catch(err){

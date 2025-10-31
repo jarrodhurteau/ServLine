@@ -209,6 +209,10 @@ def save_draft_metadata(draft_id: int, *, title: Optional[str] = None,
 def submit_draft(draft_id: int) -> None:
     save_draft_metadata(int(draft_id), status="submitted")
 
+def approve_publish(draft_id: int) -> None:
+    """Mark draft as published (used by /drafts/<id>/publish_now)."""
+    save_draft_metadata(int(draft_id), status="published")
+
 def _insert_draft(*, title: Optional[str], restaurant_id: Optional[int],
                   status: str = "editing", source: Optional[str] = None,
                   source_job_id: Optional[int] = None) -> int:

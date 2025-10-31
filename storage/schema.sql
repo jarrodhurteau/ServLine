@@ -108,8 +108,26 @@ CREATE INDEX IF NOT EXISTS idx_draft_items_cat   ON draft_items(draft_id, catego
 CREATE INDEX IF NOT EXISTS idx_draft_items_pos   ON draft_items(draft_id, position);
 
 -----------------------------------------------------------------------
+-- Day 21+: Performance helpers and dedupe indices
+-----------------------------------------------------------------------
+
+-- Speeds up approve_draft_to_menu() which checks for existing menu items
+CREATE INDEX IF NOT EXISTS idx_menu_items_dedupe
+  ON menu_items(menu_id, name, price_cents);
+
+-- Improves lookups and sorting for imports dashboard
+CREATE INDEX IF NOT EXISTS idx_import_jobs_filename
+  ON import_jobs(filename);
+
+CREATE INDEX IF NOT EXISTS idx_import_jobs_updated
+  ON import_jobs(updated_at);
+
+-- Common compound filter for active job listings
+CREATE INDEX IF NOT EXISTS idx_import_jobs_status_updated
+  ON import_jobs(status, updated_at);
+
+-----------------------------------------------------------------------
 -- (Optional) helpers: simple updated_at bumpers
--- You already update timestamps in app/storage code; these are optional.
 -----------------------------------------------------------------------
 /* Example triggers if you want SQLite to auto-bump updated_at:
 -- DRAFTS
