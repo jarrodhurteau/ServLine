@@ -38,7 +38,7 @@ if ENGINE == "old":
     try:
         # Keep this file out of the main import path in normal use.
         # If you truly need rollback, create storage/_old_ocr_helpers.py
-        from storage import _old_ocr_helpers as _old  # type: ignore
+        from storage._legacy import _old_ocr_helpers as _old  # type: ignore
     except Exception as e:
         _OLD_IMPORT_ERROR = e
 
@@ -272,3 +272,4 @@ def _attach_meta(result: Dict[str, Any], engine: str, duration_s: float) -> Dict
 def _log_ocr_usage(engine: str, duration: float, ok: bool, err: Optional[BaseException] = None) -> None:
     status = "OK" if ok else f"ERROR: {repr(err)}"
     print(f"[OCR] engine={engine} duration={duration:.3f}s status={status}")
+
