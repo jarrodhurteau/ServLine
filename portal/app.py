@@ -127,10 +127,10 @@ except Exception:
 # OCR engine (Day 21 revamp)
 try:
     from storage.ocr_facade import extract_menu_from_pdf as extract_items_from_path
-    from storage.ocr_facade import health as ocr_health
+    from storage.ocr_facade import health as ocr_health_lib
 except Exception as e:
     extract_items_from_path = None
-    ocr_health = lambda: {"engine": "error", "error": repr(e)}
+    ocr_health_lib = lambda: {"engine": "error", "error": repr(e)}
 
 # AI OCR Heuristics (Day 20)
 try:
@@ -295,6 +295,7 @@ def login_required(view_func):
             return redirect(url_for("login", next=request.path))
         return view_func(*args, **kwargs)
     return wrapper
+
 # ------------------------
 # Role/restaurant helpers (ADMIN vs CUSTOMER scoping)
 # ------------------------
@@ -338,6 +339,7 @@ def _resolve_restaurant_id_from_request() -> Optional[int]:
 
 def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id: int) -> int:
     """Return an existing active menu for the restaurant, or create a new one."""
+    cur = conn.cursor
     cur = conn.cursor()
     row = cur.execute(
         "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
@@ -535,7 +537,7 @@ def discard_draft_for_job(job_id: int) -> int:
 # Health / DB / OCR Health
 # ------------------------
 @app.get("/ocr/health")
-def ocr_health():
+def ocr_health_route():
     # Prefer explicit cmd if set; otherwise look up via PATH
     explicit_cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
     which_cmd = shutil.which("tesseract") or shutil.which("tesseract.exe") or ""
@@ -614,7 +616,9 @@ def ocr_health():
             "probe_error": worker_probe.get("error"),
         },
         "ocr_worker_version": worker_version,
+        "ocr_lib_health": (ocr_health_lib() if callable(ocr_health_lib) else None),
     })
+
 @app.get("/db/health")
 def db_health():
     try:
@@ -1086,6 +1090,52 @@ def dev_upload_form():
       </body>
     </html>
     """
+
+# ------------------------
+# **NEW** Import landing page + HTML POST handler
+# ------------------------
+@app.route("/import", methods=["GET"], strict_slashes=False)
+@login_required
+def import_page():
+    with db_connect() as conn:
+        restaurants = conn.execute(
+            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
+        ).fetchall()
+    return _safe_render("import.html", restaurants=restaurants)
+
+@app.route("/import", methods=["POST"], strict_slashes=False)
+@login_required
+def import_upload():
+    try:
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose a file to upload.", "error")
+            return redirect(url_for("import_page"))
+        if not allowed_file(file.filename):
+            flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
+            return redirect(url_for("import_page"))
+
+        base_name = secure_filename(file.filename) or "upload"
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        restaurant_id = _resolve_restaurant_id_from_request()
+        job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
+
+        threading.Thread(
+            target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
+        ).start()
+
+        if restaurant_id:
+            flash(f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.", "success")
+        else:
+            flash(f"Import started for {base_name} (job #{job_id}). Tip: assign a restaurant on the import page before approving.", "success")
+    except RequestEntityTooLarge:
+        flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+    except Exception as e:
+        flash(f"Server error while saving upload: {e}", "error")
+    return redirect(url_for("import_page"))
 
 # ------------------------
 # Imports pages
@@ -2160,70 +2210,6 @@ def fix_descriptions_for_draft(draft_id: int):
     return jsonify({"ok": True, "updated_count": int(updated_count)}), 200
 
 # ------------------------
-# Error handlers
-# ------------------------
-@app.errorhandler(404)
-def not_found(e):
-    try:
-        return render_template("errors/404.html"), 404
-    except Exception:
-        return "404 Not Found", 404
-
-if os.environ.get("FLASK_DEBUG") != "1":
-    @app.errorhandler(500)
-    def server_error(e):
-        try:
-            return render_template("errors/500.html"), 500
-        except Exception:
-            return "500 Internal Server Error", 500
-
-# ------------------------
-# Import landing page + HTML POST handler
-# ------------------------
-@app.get("/import")
-@login_required
-def import_page():
-    with db_connect() as conn:
-        restaurants = conn.execute(
-            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
-        ).fetchall()
-    return _safe_render("import.html", restaurants=restaurants)
-
-@app.post("/import")
-@login_required
-def import_upload():
-    try:
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            flash("Please choose a file to upload.", "error")
-            return redirect(url_for("import_page"))
-        if not allowed_file(file.filename):
-            flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
-            return redirect(url_for("import_page"))
-
-        base_name = secure_filename(file.filename) or "upload"
-        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
-        save_path = UPLOAD_FOLDER / tmp_name
-        file.save(str(save_path))
-
-        restaurant_id = _resolve_restaurant_id_from_request()
-
-        job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
-        threading.Thread(
-            target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
-        ).start()
-
-        if restaurant_id:
-            flash(f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.", "success")
-        else:
-            flash(f"Import started for {base_name} (job #{job_id}). Tip: assign a restaurant on the import page before approving.", "success")
-    except RequestEntityTooLarge:
-        flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
-    except Exception as e:
-        flash(f"Server error while saving upload: {e}", "error")
-    return redirect(url_for("import_page"))
-
-# ------------------------
 # AI Heuristics Preview (Day 20 Phase A)
 # ------------------------
 @app.get("/imports/<int:job_id>/ai/preview")
@@ -2276,7 +2262,7 @@ def imports_ai_preview(job_id: int):
     }), 200
 
 # ------------------------
-# AI Heuristics → Commit into Draft (NEW)
+# AI Heuristics → Commit into Draft (with redirect-friendly behavior)
 # ------------------------
 @app.post("/imports/<int:job_id>/ai/commit")
 @login_required
@@ -2284,20 +2270,45 @@ def imports_ai_commit(job_id: int):
     """
     Re-OCR the original upload (same as /ai/preview), run analyze_ocr_text(),
     then replace the draft items for this job with the cleaned items.
+
+    Behavior:
+      - JSON/AJAX: returns JSON.
+      - Regular form post or ?redirect=1: flashes + redirects back to Draft Editor.
     """
+    # detect redirect vs JSON (matches fix-descriptions pattern)
+    ct = (request.headers.get("Content-Type") or "").lower()
+    is_form_post = ct.startswith("application/x-www-form-urlencoded") or ct.startswith("multipart/form-data")
+    wants_redirect = (
+        request.args.get("redirect") == "1"
+        or (request.form.get("redirect") == "1" if is_form_post else False)
+        or is_form_post
+    )
+
     if analyze_ocr_text is None:
+        if wants_redirect:
+            flash("AI helper not available.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "AI helper not available"}), 501
 
     row = get_import_job(job_id)
     if not row:
+        if wants_redirect:
+            flash("Import job not found.", "error")
+            return redirect(url_for("imports"))
         abort(404)
 
     src_name = (row["filename"] or "").strip()
     if not src_name:
+        if wants_redirect:
+            flash("No source filename on job.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "No source filename on job"}), 400
 
     src_path = (UPLOAD_FOLDER / src_name).resolve()
     if not src_path.exists():
+        if wants_redirect:
+            flash("Upload file not found on disk.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
 
     # Extract raw text (same logic as preview)
@@ -2308,10 +2319,20 @@ def imports_ai_commit(job_id: int):
         elif suffix == ".pdf":
             raw_text = _pdf_to_text(src_path)
         else:
+            if wants_redirect:
+                flash(f"Unsupported file type: {suffix}", "error")
+                return redirect(url_for("imports_detail", job_id=job_id))
             return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
     except Exception as e:
+        if wants_redirect:
+            flash(f"OCR error: {e}", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
 
+    if not raw_text:
+        if wants_redirect:
+            flash("Could not extract text for commit.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
     if not raw_text:
         return jsonify({"ok": False, "error": "Could not extract text for commit"}), 500
 
@@ -2354,6 +2375,9 @@ def imports_ai_commit(job_id: int):
     _require_drafts_storage()
     draft_id = _get_or_create_draft_for_job(job_id)
     if not draft_id:
+        if wants_redirect:
+            flash("No draft available for this job.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "No draft available for this job"}), 400
 
     existing = drafts_store.get_draft_items(draft_id) or []
@@ -2362,6 +2386,9 @@ def imports_ai_commit(job_id: int):
         try:
             drafts_store.delete_draft_items(draft_id, existing_ids)
         except Exception as e:
+            if wants_redirect:
+                flash(f"Failed to clear existing items: {e}", "error")
+                return redirect(url_for("draft_editor", draft_id=draft_id))
             return jsonify({"ok": False, "error": f"Failed to clear existing items: {e}"}), 500
 
     ins = drafts_store.upsert_draft_items(draft_id, new_items)
@@ -2370,6 +2397,10 @@ def imports_ai_commit(job_id: int):
         drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"))
     except Exception:
         pass
+
+    if wants_redirect:
+        flash(f"AI commit complete — {len(ins.get('inserted_ids', []))} item(s) inserted.", "success")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
 
     return jsonify({
         "ok": True,
