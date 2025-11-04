@@ -129,7 +129,8 @@
              target="_blank" rel="noopener">
             AI Preview (JSON)
           </a>
-          <form id="ai-commit-form" action="{{ url_for('imports_ai_commit', job_id=job.id) }}" method="post">
+          <!-- CHANGED: add ?redirect=1 so POST redirects back (no blank JSON page) -->
+          <form id="ai-commit-form" action="{{ url_for('imports_ai_commit', job_id=job.id) }}?redirect=1" method="post">
             <button type="submit" class="btn w-full">AI Commit to Draft</button>
           </form>
         </div>

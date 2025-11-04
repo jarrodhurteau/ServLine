@@ -4,7 +4,102 @@ import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+import re
+
+# ------------------------------------------------------------
+# Optional ocr_utils import (shim if missing)
+# ------------------------------------------------------------
+try:
+    # Real helpers (preferred) if you have storage/ocr_utils.py
+    from . import ocr_utils  # type: ignore
+except Exception:
+    # Minimal, robust fallbacks so runtime & Pylance stay happy.
+    class _OCRUtilsShim:
+        # Sane menu price clamp in cents: $1.00–$99.99
+        PRICE_MIN: int = 100
+        PRICE_MAX: int = 9999
+
+        # Loose price matcher: $12, 12.99, 8, 8.99, 899 (interpreted as 8.99)
+        _price_rx = re.compile(
+            r"""
+            (?<!\d)                                  # no digit before
+            (?:\$?\s*)                               # optional currency
+            (?:
+                (?P<dollars>\d{1,3})(?:\.(?P<cents>\d{1,2}))?  # 8 or 8.99 or 123.4
+                |
+                (?P<compact>\d{3,4})                # 899 or 1299
+            )
+            (?!\d)                                   # no digit after
+            """,
+            re.X,
+        )
+
+        def _to_cents(self, dollars: Optional[str], cents: Optional[str], compact: Optional[str]) -> Optional[int]:
+            try:
+                if compact:
+                    # Interpret "899" as 8.99, "1299" as 12.99, etc.
+                    if len(compact) == 3:
+                        return int(compact)  # already cents (8.99 -> 899)
+                    if len(compact) == 4:
+                        return int(compact)  # 12.99 -> 1299
+                    # Very large compact numbers are unlikely to be menu prices
+                    return None
+                if dollars is not None:
+                    d = int(dollars)
+                    c = int((cents or "0").ljust(2, "0")[:2])
+                    return d * 100 + c
+            except Exception:
+                return None
+            return None
+
+        def find_price_candidates(self, text: str) -> List[int]:
+            hits: List[int] = []
+            for m in self._price_rx.finditer(text or ""):
+                cents = self._to_cents(m.group("dollars"), m.group("cents"), m.group("compact"))
+                if cents is None:
+                    continue
+                if self.PRICE_MIN <= cents <= self.PRICE_MAX:
+                    hits.append(int(cents))
+            return hits
+
+        def is_garbage_line(self, s: str, *, price_hit: bool = False) -> bool:
+            """
+            Very conservative filter for nonsense OCR lines.
+            Allows through short lines if we already have a valid price_hit.
+            """
+            if not s:
+                return True
+            t = s.strip()
+
+            # If we already have a valid price for this line, be lenient.
+            if price_hit:
+                if len(t) <= 1:
+                    return True
+                # still drop blatantly non-alphabetic junk like '---' or '()[]'
+                if not any(ch.isalpha() for ch in t) and not any(ch.isdigit() for ch in t):
+                    return True
+                return False
+
+            # Without a price, require at least some letters and a minimum length.
+            if len(t) < 3:
+                return True
+            letters = sum(ch.isalpha() for ch in t)
+            digits = sum(ch.isdigit() for ch in t)
+            if letters == 0 and digits == 0:
+                return True
+
+            # Too many symbols relative to letters → likely junk.
+            symbols = sum(not (ch.isalnum() or ch.isspace()) for ch in t)
+            if letters and symbols > letters * 2:
+                return True
+
+            # Heuristic: weird glyph soup (no spaces, many mixed-case flips) is often junk.
+            if "  " in t and letters < 2:
+                return True
+            return False
+
+    ocr_utils = _OCRUtilsShim()  # type: ignore
 
 # ------------------------------------------------------------
 # Paths / DB
@@ -116,6 +211,42 @@ def _to_cents(p: Any) -> int:
         return int(round(float(p) * 100))
     except Exception:
         return 0
+
+def _clamp_price_cents(cents: Optional[int]) -> Optional[int]:
+    """Clamp into sane menu range (default Day-22 guard: $1.00–$99.99)."""
+    if cents is None:
+        return None
+    if cents < ocr_utils.PRICE_MIN or cents > ocr_utils.PRICE_MAX:
+        return None
+    return int(cents)
+
+def _pick_price_from_ai_or_text(ai_price_candidates: List[Dict[str, Any]], name: str, desc: Optional[str]) -> Optional[int]:
+    """
+    Choose a main price (in cents).
+    1) Prefer AI-provided candidates (value may be dollars as float).
+    2) Else, extract from text (name + description) using OCR regex.
+    """
+    # 1) AI candidates (often {'value': 12.99}):
+    for c in ai_price_candidates or []:
+        try:
+            v = c.get("value")
+            if v is None:
+                continue
+            cents = int(round(float(v) * 100))
+            cents = _clamp_price_cents(cents)
+            if cents is not None:
+                return cents
+        except Exception:
+            continue
+
+    # 2) Text extraction (supports 8.99 / $12 / 899 etc.)
+    text = f"{name} {(desc or '')}".strip()
+    hits = ocr_utils.find_price_candidates(text)
+    for c in hits:
+        cents = _clamp_price_cents(int(c))
+        if cents is not None:
+            return cents
+    return None
 
 # ------------------------------------------------------------
 # OCR Inspector debug sidecars
@@ -389,26 +520,35 @@ def _flat_from_legacy_categories(draft_json: Dict[str, Any]) -> List[Dict[str, A
 def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     AI path: map ai_ocr_helper.analyze_ocr_text(...) → flat rows.
-    - Picks first price_candidate as main price.
-    - Keeps description/category; converts confidence (0.6/0.8) → int percent-ish.
-    - Ignores variants for now (could explode later).
+    Hardening (Day 22):
+      - Garbage guard: drop lines that fail is_garbage_line (unless valid price present).
+      - Price normalization: prefer AI price candidates, else extract from text; clamp to sane range.
     """
     flat: List[Dict[str, Any]] = []
+
     for it in ai_items or []:
-        name = (it.get("name") or "").strip()
-        if not name:
+        name_raw = (it.get("name") or "").strip()
+        if not name_raw:
             continue
-        desc = (it.get("description") or None)
+
+        desc_raw = (it.get("description") or None)
         cat = (it.get("category") or None)
         pcs = it.get("price_candidates") or []
-        price = 0.0
-        if pcs:
-            try:
-                price = float((pcs[0] or {}).get("value", 0.0))
-            except Exception:
-                price = 0.0
+
+        # Pick a main price (in cents) with clamps
+        cents_main = _pick_price_from_ai_or_text(pcs, name_raw, desc_raw)
+        price_hit = cents_main is not None
+
+        # Garbage guard on the NAME (allow leniency if a valid price is present)
+        if ocr_utils.is_garbage_line(name_raw, price_hit=bool(price_hit)):
+            # Skip nonsense like "von", symbol storms, etc.
+            continue
+
+        # Final price_cents (0 if missing)
+        price_cents = int(cents_main) if cents_main is not None else 0
+
+        # Confidence mapping (keep your original logic)
         conf_float = it.get("confidence")
-        # normalize 0.0-1.0 to 0-100 if needed; accept ints as-is
         if isinstance(conf_float, float):
             if conf_float <= 1.0:
                 confidence = int(round(conf_float * 100))
@@ -418,13 +558,14 @@ def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             confidence = _coerce_opt_int(conf_float)
 
         flat.append({
-            "name": name,
-            "description": (desc or "").strip() or None,
-            "price_cents": _to_cents(price),
+            "name": name_raw,
+            "description": (desc_raw or "").strip() or None,
+            "price_cents": price_cents,
             "category": cat,
             "position": None,
             "confidence": confidence
         })
+
     return flat
 
 def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) -> Dict[str, Any]:
@@ -473,6 +614,10 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                 "ai_items_count": len(ai_items or []),
                 "ai_sample": (ai_items[:20] if isinstance(ai_items, list) else None),
                 "source_meta": draft_json.get("source") or {},
+                "guards": {
+                    "dropped_by_is_garbage_line": True,
+                    "price_clamp_range": [ocr_utils.PRICE_MIN, ocr_utils.PRICE_MAX],
+                }
             })
         except Exception:
             pass

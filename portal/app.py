@@ -16,6 +16,13 @@ import shutil
 from datetime import datetime
 from typing import Optional, Iterable, Tuple, List
 import hashlib  # <-- added for cat_hue filter
+import time     # <-- NEW: for gentle polling after upload
+from storage import drafts
+
+
+# --- Forward decls for type checkers (real implementations appear later) ---
+def _ocr_image_to_text(img_path: Path) -> str: ...
+def _pdf_to_text(pdf_path: Path) -> str: ...
 
 # stdlib for exports
 import io
@@ -867,6 +874,55 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     }
     return draft_dict, debug_payload
 
+# ---------- NEW: wrap ocr_worker result into draft schema ----------
+def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dict) -> dict:
+    """
+    The worker returns either a category-like block (with 'items') or a single item.
+    We normalize into our draft schema with minimal transformation.
+    """
+    # Determine category name and item list
+    if isinstance(worker_obj, dict) and "items" in worker_obj:
+        cat_name = (worker_obj.get("category") or worker_obj.get("name") or "Uncategorized").strip() or "Uncategorized"
+        items = worker_obj.get("items") or []
+    else:
+        cat_name = (worker_obj.get("category") if isinstance(worker_obj, dict) else None) or "Uncategorized"
+        items = [worker_obj] if isinstance(worker_obj, dict) else []
+
+    # Map items into our expected fields (name, description, sizes)
+    norm_items = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        nm = (it.get("name") or "").strip()
+        if not nm:
+            continue
+        desc = (it.get("description") or "").strip()
+        sizes_in = it.get("sizes") or []
+        sizes_out = []
+        for s in sizes_in:
+            if not isinstance(s, dict):
+                continue
+            sn = (s.get("name") or "").strip()
+            try:
+                sp = float(s.get("price")) if s.get("price") is not None else 0.0
+            except Exception:
+                sp = 0.0
+            if sn or sp:
+                sizes_out.append({"name": sn, "price": round(sp, 2)})
+        norm_items.append({
+            "name": nm,
+            "description": desc,
+            "sizes": sizes_out
+        })
+
+    categories = [{"name": cat_name, "items": norm_items}] if norm_items else [{"name": "Uncategorized", "items": []}]
+    return {
+        "job_id": job_id,
+        "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "ocr_worker"},
+        "extracted_at": _now_iso(),
+        "categories": categories,
+    }
+
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
@@ -876,8 +932,21 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         engine = ""
         helper_error = None
 
-        # 1) Preferred path: OCR helper
-        if extract_items_from_path is not None:
+        suffix = saved_file_path.suffix.lower()
+
+        # 0) **Preferred for IMAGES**: use ocr_worker first
+        if suffix in (".png", ".jpg", ".jpeg"):
+            try:
+                raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(saved_file_path), job_id=str(job_id))
+                draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
+                engine = "ocr_worker"
+            except Exception as e:
+                # If the worker fails, we fall through to helper/legacy
+                helper_error = f"ocr_worker_failed: {e}"
+                draft = None
+
+        # 1) Helper path (used for PDFs, and as fallback for images)
+        if draft is None and extract_items_from_path is not None:
             try:
                 draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
                 engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
@@ -886,9 +955,8 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 draft = None
                 debug_payload = None
 
-        # 2) Fallback to legacy text OCR
+        # 2) Legacy fallback to direct Tesseract text OCR + heuristics
         if draft is None:
-            suffix = saved_file_path.suffix.lower()
             text = ""
             if suffix in (".png", ".jpg", ".jpeg"):
                 engine = "tesseract"
@@ -1131,6 +1199,10 @@ def import_upload():
             flash(f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.", "success")
         else:
             flash(f"Import started for {base_name} (job #{job_id}). Tip: assign a restaurant on the import page before approving.", "success")
+
+        # 🚀 NEW: jump to a short 'wait' endpoint that redirects to the editor when ready
+        return redirect(url_for("imports_after_upload", job_id=job_id))
+
     except RequestEntityTooLarge:
         flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
     except Exception as e:
@@ -1164,6 +1236,30 @@ def imports_detail(job_id):
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
     return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants)
+
+# 🔔 NEW: gentle post-upload redirect helper (polls briefly, then routes you)
+@app.get("/imports/<int:job_id>/after-upload")
+@login_required
+def imports_after_upload(job_id: int):
+    """
+    After an upload, poll briefly for the draft to appear.
+    - If ready within ~12s, send user straight to Draft Editor.
+    - Otherwise, land on the import detail page (which shows status).
+    """
+    deadline = time.time() + 12.0
+    while time.time() < deadline:
+        row = get_import_job(job_id)
+        if not row:
+            break
+        abs_draft = _abs_from_rel(row["draft_path"])
+        if abs_draft and abs_draft.exists():
+            draft_id = _get_or_create_draft_for_job(job_id)
+            if draft_id:
+                return redirect(url_for("draft_editor", draft_id=draft_id))
+            return redirect(url_for("imports_detail", job_id=job_id))
+        time.sleep(0.5)
+    # Fallback: show the job page; it will indicate processing state.
+    return redirect(url_for("imports_detail", job_id=job_id))
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
@@ -1263,7 +1359,8 @@ def imports_clone(job_id: int):
 @app.get("/imports/view/<int:job_id>")
 @login_required
 def imports_view(job_id):
-    return imports_detail(job_id)
+    # Pylance-safe redirect instead of direct function reference
+    return redirect(url_for("imports_detail", job_id=job_id))
 
 @app.route("/imports/cleanup", methods=["GET", "POST"])
 @login_required

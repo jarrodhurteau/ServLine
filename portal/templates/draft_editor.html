@@ -41,6 +41,9 @@
     .conf-low  { background: rgba(220,53,69,.14); color:#ffb3b8; border:1px solid rgba(220,53,69,.35); }
 
     .row-focus { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+    /* small helper note under publish */
+    .helper-note { color: var(--muted); font-size: .85rem; margin-top: 6px; }
   </style>
 
   <div class="layout">
@@ -66,6 +69,9 @@
       <!-- Publish -->
       <form action="{{ url_for('draft_publish_now', draft_id=draft.id) }}" method="post" style="margin-top:10px;">
         <button class="btn btn-success">Publish to Menu</button>
+        {% if not draft.restaurant_id %}
+          <div class="helper-note">Tip: assign a restaurant first (above) so items publish to the right menu.</div>
+        {% endif %}
       </form>
 
       <!-- OCR Debug -->
@@ -120,16 +126,24 @@
               </div>
             </details>
 
-            <!-- NEW: Fix Descriptions button (fetch + auto-reload) -->
-            <button id="fix-descriptions-btn" class="btn btn-secondary"
-                    title="Split 'Name — details' into description, trim dupes/punctuation, and tidy multi-line joins">
-              🧹 Fix Descriptions
-            </button>
+            <!-- NEW: Fix Descriptions (form → redirect; no blank JSON) -->
+            <form action="{{ url_for('fix_descriptions_for_draft', draft_id=draft.id) }}?redirect=1" method="post" style="display:inline;">
+              <button class="btn btn-secondary"
+                      title="Split 'Name — details' into description, trim dupes/punctuation, and tidy multi-line joins">
+                🧹 Fix Descriptions
+              </button>
+            </form>
 
-            <!-- AI Commit stays -->
-            <button id="ai-commit-btn" class="btn btn-secondary" title="Re-run AI heuristics and commit results into this draft">
-              AI Commit to Draft
-            </button>
+            <!-- NEW: AI Commit to Draft (form → redirect) -->
+            {% if draft.source_job_id %}
+            <form action="{{ url_for('imports_ai_commit', job_id=draft.source_job_id) }}?redirect=1" method="post" style="display:inline;">
+              <button class="btn btn-secondary" title="Re-run AI heuristics and commit results into this draft">
+                AI Commit to Draft
+              </button>
+            </form>
+            {% else %}
+            <button class="btn btn-secondary" title="No import job linked to this draft" disabled>AI Commit to Draft</button>
+            {% endif %}
 
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
           </div>
@@ -258,8 +272,6 @@
     const lastSaved = $("#last-saved");
     const exportVisibleBtn = $("#export-visible-btn");
     const provTip = $("#prov-tip");
-    const aiBtn = $("#ai-commit-btn");
-    const fixBtn = $("#fix-descriptions-btn");
 
     let dirty = false;
     let deletedIds = [];
@@ -269,67 +281,6 @@
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
     function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
-
-    // Enable/disable AI button based on job link
-    if (!sourceJobId) {
-      aiBtn.setAttribute("disabled","disabled");
-      aiBtn.title = "No import job linked to this draft.";
-    }
-
-    // NEW: Fix Descriptions handler (POST -> reload)
-    fixBtn?.addEventListener("click", async (e)=>{
-      e.preventDefault();
-      fixBtn.disabled = true;
-      const original = fixBtn.textContent;
-      fixBtn.textContent = "Cleaning…";
-      showToast("Fixing descriptions…");
-      try{
-        const res = await fetch(`/drafts/${draftId}/fix-descriptions`, {
-          method: "POST",
-          headers: { "Accept": "application/json" }
-        });
-        if (!res.ok){
-          const t = await res.text().catch(()=>res.statusText);
-          throw new Error(t || `HTTP ${res.status}`);
-        }
-        // Expect JSON but we just reload either way
-        setTimeout(()=>window.location.reload(), 300);
-      }catch(err){
-        showError("Fix Descriptions failed: " + String(err.message || err));
-        fixBtn.disabled = false;
-        fixBtn.textContent = original;
-      }
-    });
-
-    // AI Commit: call JSON endpoint and reload editor
-    aiBtn.addEventListener("click", async (e)=>{
-      e.preventDefault();
-      if (!sourceJobId){ return; }
-      aiBtn.disabled = true;
-      const originalText = aiBtn.textContent;
-      aiBtn.textContent = "Running AI…";
-      showToast("Running AI commit…");
-
-      try{
-        const res = await fetch(`/imports/${sourceJobId}/ai/commit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        });
-        let data = {};
-        try { data = await res.json(); } catch(_){}
-        if (!res.ok || data.ok === false){
-          const msg = data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${res.status}`;
-          throw new Error(msg);
-        }
-        showSuccess("AI committed to draft. Reloading…");
-        setTimeout(()=>{ window.location.reload(); }, 800);
-      } catch(err){
-        showError("AI commit failed: " + String(err.message || err));
-        aiBtn.disabled = false;
-        aiBtn.textContent = originalText;
-      }
-    });
 
     // Day 19: autosize
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
