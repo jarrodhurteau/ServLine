@@ -1,7 +1,7 @@
 # portal/app.py
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
-    session, send_from_directory, flash, make_response
+    session, send_from_directory, flash, make_response, send_file        # ← added send_file
 )
 
 # --- Standard libs & typing ---
@@ -396,7 +396,7 @@ def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row)
     cur = conn.cursor()
     if rest_id:
         m = cur.execute(
-            "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
+            "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER  BY id LIMIT 1",
             (rest_id,),
         ).fetchone()
         if m:
@@ -674,6 +674,144 @@ def get_menu_items(menu_id):
             abort(404, description="No items found for that menu")
         return jsonify([dict(r) for r in rows])
 
+# =========================================================
+#  NEW: Manual rotate preview (working copy) helpers/routes
+# =========================================================
+
+def _work_image_path(job_id: int) -> Path:
+    """JPEG working copy (user-rotatable) tied to job id."""
+    return RAW_FOLDER / f"job_{job_id}_work.jpg"
+
+def _ensure_work_image(job_id: int, src_path: Path) -> Optional[Path]:
+    """
+    Ensure a JPEG preview exists for the job:
+    - Images: convert/copy to RGB JPEG
+    - PDFs: rasterize first page
+    """
+    try:
+        p = _work_image_path(job_id)
+        if p.exists():
+            return p
+
+        suffix = src_path.suffix.lower()
+        if suffix in (".png", ".jpg", ".jpeg"):
+            from PIL import Image
+            with Image.open(src_path) as im:
+                if im.mode != "RGB":
+                    im = im.convert("RGB")
+                p.parent.mkdir(parents=True, exist_ok=True)
+                im.save(p, "JPEG", quality=92, optimize=True)
+            return p
+
+        if suffix == ".pdf":
+            try:
+                from pdf2image import convert_from_path
+            except Exception:
+                return None
+            pages = convert_from_path(str(src_path), dpi=200, poppler_path=POPPLER_PATH)
+            if not pages:
+                return None
+            im = pages[0]
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            im.save(p, "JPEG", quality=92, optimize=True)
+            return p
+    except Exception:
+        return None
+    return None
+
+def _get_work_image_if_any(job_id: int) -> Optional[Path]:
+    p = _work_image_path(job_id)
+    return p if p.exists() else None
+
+def _path_for_ocr(job_id: int, original: Path) -> Tuple[Path, str]:
+    """
+    Return (path, type_tag). If the user has rotated a working copy,
+    use it and tag as 'image'. Otherwise return the original path.
+    """
+    p = _get_work_image_if_any(job_id)
+    if p and p.exists():
+        return p, "image"
+    return original, ("image" if original.suffix.lower() in (".jpg", ".jpeg", ".png") else "pdf")
+
+@app.get("/imports/<int:job_id>/preview.jpg")
+@login_required
+def imports_preview_image(job_id: int):
+    """
+    Serve/create the rotatable working preview JPEG for this job.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+    src = (UPLOAD_FOLDER / (row["filename"] or "")).resolve()
+    if not src.exists():
+        abort(404)
+    p = _ensure_work_image(job_id, src) or _get_work_image_if_any(job_id)
+    if not p or not p.exists():
+        # As last resort, stream the original if it's already an image
+        if src.suffix.lower() in (".jpg", ".jpeg", ".png"):
+            return send_file(str(src), mimetype="image/jpeg")
+        abort(404)
+    return send_file(str(p), mimetype="image/jpeg")
+
+@app.route("/imports/<int:job_id>/rotate", methods=["POST", "GET"])
+@login_required
+def imports_rotate_image(job_id: int):
+    """
+    Rotate working preview: dir=left|right OR angle=±90/180.
+    - GET/POST both supported.
+    - If form/redirect requested, flash+redirect back to import view.
+    - Else returns JSON.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+    src = (UPLOAD_FOLDER / (row["filename"] or "")).resolve()
+    if not src.exists():
+        abort(404)
+
+    # Ensure working copy exists first
+    wp = _ensure_work_image(job_id, src) or _get_work_image_if_any(job_id)
+    if not wp or not wp.exists():
+        return jsonify({"ok": False, "error": "preview not available"}), 400
+
+    # Parse direction/angle
+    direction = (request.values.get("dir") or "").strip().lower()
+    angle_param = request.values.get("angle")
+    angle = 0
+    if angle_param:
+        try:
+            angle = int(angle_param)
+        except Exception:
+            angle = 0
+    elif direction in ("left", "counterclockwise", "ccw"):
+        angle = 90
+    elif direction in ("right", "clockwise", "cw"):
+        angle = -90
+    else:
+        angle = 90  # default: left
+
+    from PIL import Image
+    try:
+        with Image.open(wp) as im:
+            im = im.rotate(angle, expand=True)  # PIL is CCW-positive
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            im.save(wp, "JPEG", quality=92, optimize=True)
+    except Exception as e:
+        wants_redirect = request.args.get("redirect") == "1" or request.method == "POST"
+        if wants_redirect:
+            flash(f"Rotate failed: {e}", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    wants_redirect = request.args.get("redirect") == "1" or request.method == "POST"
+    if wants_redirect:
+        flash("Image rotated.", "success")
+        return redirect(url_for("imports_detail", job_id=job_id))
+    return jsonify({"ok": True, "angle": angle})
+
 # ------------------------
 # Import flow: Upload -> Job -> Worker -> Draft JSON (OCR)
 # ------------------------
@@ -927,25 +1065,31 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
         update_import_job(job_id, status="processing")
 
+        # Always create a user-rotatable working preview up-front
+        try:
+            _ensure_work_image(job_id, saved_file_path)
+        except Exception:
+            pass
+
         draft = None
         debug_payload = None
         engine = ""
         helper_error = None
 
-        suffix = saved_file_path.suffix.lower()
+        # Prefer working image (respects later user rotation too if we rerun)
+        src_for_ocr, type_tag = _path_for_ocr(job_id, saved_file_path)
 
-        # 0) **Preferred for IMAGES**: use ocr_worker first
-        if suffix in (".png", ".jpg", ".jpeg"):
+        # 0) **Preferred when we have an image**: use ocr_worker
+        if type_tag == "image":
             try:
-                raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(saved_file_path), job_id=str(job_id))
+                raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(src_for_ocr), job_id=str(job_id))
                 draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
                 engine = "ocr_worker"
             except Exception as e:
-                # If the worker fails, we fall through to helper/legacy
                 helper_error = f"ocr_worker_failed: {e}"
                 draft = None
 
-        # 1) Helper path (used for PDFs, and as fallback for images)
+        # 1) Helper path (typically for PDFs), fallback if image path failed
         if draft is None and extract_items_from_path is not None:
             try:
                 draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
@@ -958,10 +1102,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         # 2) Legacy fallback to direct Tesseract text OCR + heuristics
         if draft is None:
             text = ""
-            if suffix in (".png", ".jpg", ".jpeg"):
+            if type_tag == "image":
                 engine = "tesseract"
-                text = _ocr_image_to_text(saved_file_path)
-            elif suffix == ".pdf":
+                text = _ocr_image_to_text(src_for_ocr)
+            else:
                 engine = "tesseract+pdf2image"
                 text = _pdf_to_text(saved_file_path)
 
@@ -1235,7 +1379,13 @@ def imports_detail(job_id):
         restaurants = conn.execute(
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
-    return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants)
+
+    # NEW: surface preview + rotate endpoints
+    preview_url = url_for("imports_preview_image", job_id=job_id)
+    rotate_url = url_for("imports_rotate_image", job_id=job_id)
+
+    return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants,
+                        preview_img_url=preview_url, rotate_action_url=rotate_url)
 
 # 🔔 NEW: gentle post-upload redirect helper (polls briefly, then routes you)
 @app.get("/imports/<int:job_id>/after-upload")
@@ -1870,6 +2020,19 @@ def draft_editor(draft_id: int):
         restaurants=restaurants,
     )
 
+# --- AI Cleanup route ---
+@app.post("/drafts/<int:draft_id>/cleanup")
+def cleanup_draft(draft_id: int):
+    from storage.ai_cleanup import apply_ai_cleanup
+    try:
+        updated = apply_ai_cleanup(int(draft_id))
+        flash(f"AI cleanup complete: {updated} item(s) updated.", "success")
+    except Exception as e:
+        app.logger.exception("AI cleanup failed")
+        flash(f"AI cleanup failed: {e}", "error")
+    return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+
+
 @app.post("/drafts/<int:draft_id>/save")
 @login_required
 def draft_save(draft_id: int):
@@ -2316,6 +2479,8 @@ def imports_ai_preview(job_id: int):
     Day 20 (Phase A): Heuristics-only AI preview.
     Re-OCRs the original upload for this job, runs analyze_ocr_text(), and returns JSON.
     No draft/db writes occur here — it's a read-only preview.
+
+    NOW prefers the user-rotated working image if present.
     """
     if analyze_ocr_text is None:
         return jsonify({"ok": False, "error": "AI helper not available"}), 501
@@ -2332,15 +2497,19 @@ def imports_ai_preview(job_id: int):
     if not src_path.exists():
         return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
 
-    # Extract raw text for analysis
+    # Prefer working image if available
+    work = _get_work_image_if_any(job_id)
     try:
-        suffix = src_path.suffix.lower()
-        if suffix in (".png", ".jpg", ".jpeg"):
-            raw_text = _ocr_image_to_text(src_path)
-        elif suffix == ".pdf":
-            raw_text = _pdf_to_text(src_path)
+        if work and work.exists():
+            raw_text = _ocr_image_to_text(work)
         else:
-            return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
+            suffix = src_path.suffix.lower()
+            if suffix in (".png", ".jpg", ".jpeg"):
+                raw_text = _ocr_image_to_text(src_path)
+            elif suffix == ".pdf":
+                raw_text = _pdf_to_text(src_path)
+            else:
+                return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
 
@@ -2371,6 +2540,8 @@ def imports_ai_commit(job_id: int):
     Behavior:
       - JSON/AJAX: returns JSON.
       - Regular form post or ?redirect=1: flashes + redirects back to Draft Editor.
+
+    NOW prefers the user-rotated working image if present.
     """
     # detect redirect vs JSON (matches fix-descriptions pattern)
     ct = (request.headers.get("Content-Type") or "").lower()
@@ -2408,18 +2579,22 @@ def imports_ai_commit(job_id: int):
             return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
 
-    # Extract raw text (same logic as preview)
+    # Extract raw text (prefers working copy)
     try:
-        suffix = src_path.suffix.lower()
-        if suffix in (".png", ".jpg", ".jpeg"):
-            raw_text = _ocr_image_to_text(src_path)
-        elif suffix == ".pdf":
-            raw_text = _pdf_to_text(src_path)
+        work = _get_work_image_if_any(job_id)
+        if work and work.exists():
+            raw_text = _ocr_image_to_text(work)
         else:
-            if wants_redirect:
-                flash(f"Unsupported file type: {suffix}", "error")
-                return redirect(url_for("imports_detail", job_id=job_id))
-            return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
+            suffix = src_path.suffix.lower()
+            if suffix in (".png", ".jpg", ".jpeg"):
+                raw_text = _ocr_image_to_text(src_path)
+            elif suffix == ".pdf":
+                raw_text = _pdf_to_text(src_path)
+            else:
+                if wants_redirect:
+                    flash(f"Unsupported file type: {suffix}", "error")
+                    return redirect(url_for("imports_detail", job_id=job_id))
+                return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
     except Exception as e:
         if wants_redirect:
             flash(f"OCR error: {e}", "error")
@@ -2430,7 +2605,6 @@ def imports_ai_commit(job_id: int):
         if wants_redirect:
             flash("Could not extract text for commit.", "error")
             return redirect(url_for("imports_detail", job_id=job_id))
-    if not raw_text:
         return jsonify({"ok": False, "error": "Could not extract text for commit"}), 500
 
     # Run heuristics

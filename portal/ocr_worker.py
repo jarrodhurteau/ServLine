@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 
 # -------- version banner (visible on server start) ----------
-OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + autorotate + psm6→psm3 fallback / debug-save + multi-price parse v3.7 (fix: multi-token size header)"
+OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + psm6→psm3 fallback / debug-save + multi-price parse v3.7 (fix: multi-token size header) [legacy auto-rotate disabled]"
 print(f"[OCR] Loaded ocr_worker.py -> {OCR_WORKER_VERSION}")
 
 # Debug saves
@@ -27,6 +27,14 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 OCR_CONFIG_MAIN = "--oem 3 --psm 6 -l eng -c preserve_interword_spaces=1"
 # Fallback: auto layout sometimes rescues mixed/odd scans
 OCR_CONFIG_FALLBACK = "--oem 3 --psm 3 -l eng -c preserve_interword_spaces=1"
+
+# ======================================================================
+#                    ORIENTATION CONTROL (disable legacy)
+# ======================================================================
+
+# We now normalize orientation upstream in servline/storage/ocr_facade.py.
+# Keep this True to prevent double-rotation here.
+DISABLE_LEGACY_AUTOROTATE: bool = True
 
 # ======================================================================
 #                         PREPROCESSING
@@ -58,10 +66,13 @@ def _rotate_any(gray: np.ndarray, angle_deg: float) -> np.ndarray:
 
 def _auto_orient(gray: np.ndarray) -> np.ndarray:
     """
-    Use Tesseract OSD to auto-rotate if needed.
-    Falls back silently if OSD unavailable. Expected angles: 0/90/180/270, but
-    we support arbitrary degrees in case OSD reports a non-right angle.
+    (LEGACY) Use Tesseract OSD to auto-rotate if needed.
+    Disabled by default; rotation now handled upstream to avoid double-rotation.
     """
+    if DISABLE_LEGACY_AUTOROTATE:
+        print("[Auto-rotate] Skipped in ocr_worker (handled upstream by ocr_facade)")
+        return gray
+
     try:
         osd = pytesseract.image_to_osd(gray, config="--psm 0")
         m = re.search(r"Rotate:\s*([0-9]+)", osd)

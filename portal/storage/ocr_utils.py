@@ -6,6 +6,9 @@ ServLine OCR Utils — helpers for PDF→image, preprocessing, and env checks.
 - Optional deskew
 - Simple two-column split via vertical projection
 - Garbage guards + price normalization helpers
+
+⚠️ New in Phase 2 pt.3 (orientation hardening):
+- Deterministic orientation normalize: EXIF transpose → Tesseract OSD → probe 0/90/180/270
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import os
 import re
 import glob
 import math
+import io
 from typing import List, Optional, Tuple, Iterable, Any, TYPE_CHECKING
 
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance
@@ -105,6 +109,100 @@ def pdf_to_images_from_bytes(pdf_bytes: bytes, dpi: int = 300) -> List[Image.Ima
     if poppler_path and os.name == "nt":
         return convert_from_bytes(pdf_bytes, dpi=dpi, poppler_path=poppler_path)
     return convert_from_bytes(pdf_bytes, dpi=dpi)
+
+
+# =============================
+# Orientation normalization (NEW)
+# =============================
+
+def apply_exif_orientation(img: Image.Image) -> Image.Image:
+    """
+    Rotate pixels according to EXIF Orientation, then strip EXIF so
+    downstream consumers can't rotate again. Returns RGB image.
+    """
+    try:
+        fixed = ImageOps.exif_transpose(img)
+        buf = io.BytesIO()
+        # Save to PNG to drop EXIF; reopen to get a clean image object
+        fixed.save(buf, format="PNG")
+        buf.seek(0)
+        return Image.open(buf).convert("RGB")
+    except Exception:
+        return img.convert("RGB")
+
+
+def detect_orientation_osd(img: Image.Image) -> Optional[int]:
+    """
+    Ask Tesseract OSD for the rotation. Returns 0/90/180/270 or None.
+    """
+    try:
+        osd = pytesseract.image_to_osd(img)
+        m = re.search(r"Rotate:\s*(\d+)", osd or "")
+        if not m:
+            return None
+        deg = int(m.group(1)) % 360
+        if deg in (0, 90, 180, 270):
+            return deg
+    except Exception:
+        return None
+    return None
+
+
+def _quick_score(img: Image.Image) -> float:
+    """
+    Fast plausibility score of text for a given rotation.
+    Uses text density + average token length; higher is better.
+    """
+    try:
+        txt = pytesseract.image_to_string(
+            img,
+            config="--oem 3 --psm 6 -c preserve_interword_spaces=1",
+        )
+        if not txt:
+            return 0.0
+        letters = sum(ch.isalpha() for ch in txt)
+        spaces = txt.count(" ")
+        tokens = [t for t in re.split(r"\s+", txt) if t]
+        avg_len = (sum(len(t) for t in tokens) / max(1, len(tokens)))
+        alpha_ratio = letters / max(1, letters + spaces)
+        return alpha_ratio * 0.6 + min(avg_len, 10) * 0.4
+    except Exception:
+        return 0.0
+
+
+def probe_best_rotation(img: Image.Image) -> int:
+    """
+    Try 0/90/180/270 on thumbnails and pick the best-scoring rotation.
+    Returns degrees clockwise to apply (0,90,180,270).
+    """
+    candidates = (0, 90, 180, 270)
+    base = img.copy()
+    best_deg, best_score = 0, -1.0
+    for deg in candidates:
+        test = base.rotate(-deg, expand=True)  # rotate CW by deg
+        thumb = test.copy()
+        thumb.thumbnail((1200, 1200))
+        score = _quick_score(thumb)
+        if score > best_score:
+            best_deg, best_score = deg, score
+    return best_deg
+
+
+def normalize_orientation(img: Image.Image) -> Tuple[Image.Image, int]:
+    """
+    Deterministic orientation normalize:
+    1) EXIF transpose & strip
+    2) Tesseract OSD if available
+    3) Probe 0/90/180/270 as fallback
+
+    Returns (upright_image, degrees_applied_clockwise).
+    """
+    step1 = apply_exif_orientation(img)
+    deg = detect_orientation_osd(step1)
+    if deg is None:
+        deg = probe_best_rotation(step1)
+    upright = step1.rotate(-deg, expand=True) if deg else step1
+    return upright, int(deg or 0)
 
 
 # =============================

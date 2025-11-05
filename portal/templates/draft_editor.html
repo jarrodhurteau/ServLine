@@ -44,6 +44,51 @@
 
     /* small helper note under publish */
     .helper-note { color: var(--muted); font-size: .85rem; margin-top: 6px; }
+
+    /* ================== FIXES ================== */
+
+    /* 🧩 Sidebar containment: scrolls independently, never overlays editor */
+    .sidebar {
+      position: sticky;
+      top: 80px;
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: rgba(20,20,30,0.85);
+      padding-right: 6px;
+      z-index: 5; /* below header/toolbars but above page background */
+    }
+
+    /* 🧩 Export dropdown stacking & placement above banners */
+    details.export { position: relative; }
+    details.export .menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 1000 !important;
+      background: #1a2236;
+      border: 1px solid #2b3552;
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 240px;
+      box-shadow: 0 12px 24px rgba(0,0,0,0.35);
+    }
+    details.export .menu a,
+    details.export .menu button {
+      display: block;
+      color: #cbd5e1;
+      text-align: left;
+      padding: 6px 4px;
+      width: 100%;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: .9rem;
+    }
+    details.export .menu a:hover,
+    details.export .menu button:hover {
+      color: #fff;
+    }
   </style>
 
   <div class="layout">
@@ -131,6 +176,13 @@
               <button class="btn btn-secondary"
                       title="Split 'Name — details' into description, trim dupes/punctuation, and tidy multi-line joins">
                 🧹 Fix Descriptions
+              </button>
+            </form>
+
+            <!-- NEW: Clean with AI (form → redirect) -->
+            <form method="post" action="{{ url_for('cleanup_draft', draft_id=draft.id) }}" style="display:inline;">
+              <button class="btn btn-secondary" title="Clean names, attach prices, and categorize items">
+                ✨ Clean with AI
               </button>
             </form>
 
@@ -512,7 +564,7 @@
         <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>
         <td class="row-actions">
           <button class="btn duplicate-btn">Duplicate</button>
-          <button class="btn btn-danger delete-btn">Delete</button>
+          <button class="btn btn-danger">Delete</button>
         </td>`;
       itemsBody.prepend(tr);
       const taDesc=$(".desc-text", tr); if (taDesc){ autosize(taDesc); taDesc.addEventListener('input',()=>autosize(taDesc)); }

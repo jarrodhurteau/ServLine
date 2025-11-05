@@ -21,7 +21,7 @@
     .btn[aria-disabled="true"] { opacity:.6; pointer-events:none; }
     .sidebar-actions { display:flex; flex-direction:column; gap:.5rem; }
 
-    /* NEW: AI section styling */
+    /* AI section styling */
     .ai-section { border:1px dashed var(--line); border-radius:12px; padding:10px; }
     .ai-title { font-weight:700; letter-spacing:.02em; }
     .ai-note { font-size:.9rem; color:var(--muted); margin-top:2px; }
@@ -69,11 +69,29 @@
           </div>
         </div>
 
+        {# ==== NEW: Source Preview with Manual Rotate (uses preview_img_url & rotate_action_url) ==== #}
+        {% if preview_img_url %}
+          <div class="rounded-xl border border-line p-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <strong>Source Preview (rotate if sideways)</strong>
+              <form method="post" action="{{ rotate_action_url }}?redirect=1" class="flex gap-2">
+                <button class="btn btn-sm" name="dir" value="left" type="submit">⟲ Rotate Left</button>
+                <button class="btn btn-sm" name="dir" value="right" type="submit">⟳ Rotate Right</button>
+              </form>
+            </div>
+            <div class="preview mt-2" style="max-height:70vh; overflow:auto;">
+              <img src="{{ preview_img_url }}?t={{ now }}" alt="Working preview (rotatable)" />
+            </div>
+            <p class="muted mt-2">After rotating, use <em>AI Commit to Draft</em> to re-OCR this rotated image.</p>
+          </div>
+        {% endif %}
+        {# ==== /NEW ==== #}
+
+        {# Fallback: original source image preview if working preview isn't available #}
         {% set src = (draft.get('source', {}) if draft else {}) %}
         {% set src_file = src.get('file') if src else None %}
         {% set is_img = src_file and ((src_file|lower).endswith('.png') or (src_file|lower).endswith('.jpg') or (src_file|lower).endswith('.jpeg')) %}
-
-        {% if is_img %}
+        {% if (not preview_img_url) and is_img %}
           <div class="preview">
             <a href="{{ url_for('serve_upload', filename=src_file) }}" target="_blank" rel="noopener noreferrer">
               <img src="{{ url_for('serve_upload', filename=src_file) }}" alt="Source upload preview" />
@@ -120,7 +138,7 @@
           <button type="submit" class="btn w-full">Clone Draft</button>
         </form>
 
-        <!-- ===== AI TOOLS (always visible) ===== -->
+        <!-- ===== AI TOOLS ===== -->
         <div class="ai-section">
           <div class="ai-title">⚡ AI Tools</div>
           <div class="ai-note">Preview uses heuristics only (Phase A). Commit replaces current draft items.</div>
@@ -129,12 +147,12 @@
              target="_blank" rel="noopener">
             AI Preview (JSON)
           </a>
-          <!-- CHANGED: add ?redirect=1 so POST redirects back (no blank JSON page) -->
+          <!-- POST with redirect so no blank JSON page -->
           <form id="ai-commit-form" action="{{ url_for('imports_ai_commit', job_id=job.id) }}?redirect=1" method="post">
             <button type="submit" class="btn w-full">AI Commit to Draft</button>
           </form>
         </div>
-        <!-- ==================================== -->
+        <!-- ===================== -->
 
         <!-- Export (enabled after resolving draft_id) -->
         <a id="export-csv"  class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Export CSV</a>
@@ -160,7 +178,7 @@
 
   <script>
     // Marker to confirm hot-reload/template path
-    console.log("import_view.html loaded: AI Tools section should be visible.");
+    console.log("import_view.html loaded: rotate preview + AI Tools.");
 
     // Friendly timestamp formatting
     (function() {
