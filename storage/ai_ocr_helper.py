@@ -1,7 +1,8 @@
 # storage/ai_ocr_helper.py
 """
-AI OCR Helper — Day20/21 Phase A→B (rev7)
-Cleans noisy OCR lines into sane menu items:
+AI OCR Helper — Day20/21 → Phase 2 pt.4  (rev9)
+
+Cleans noisy OCR lines into sane menu items.
 
 Core (Phase A):
 - Picks best price(s) from a line (prefers decimals; filters tiny counts)
@@ -28,6 +29,19 @@ rev7 changes:
 - Name gating + symbol/vowel checks to drop garbled strings
 - Stronger header detection (caps-ish, short, or keyworded)
 - Confidence bumps based on price sanity
+- Orphan price-only line attach (attach loose price lines to the last item lacking a price)
+
+rev8 changes:
+- Drop-lines/sections blacklist (e.g., TOPPINGS / BUILD YOUR OWN / ADD-ONS / BYO / EXTRA)
+- Ignore “Slices”, “By the Slice”, and similar non-item counters
+- Guard against lone size label items (“s”, “l”, etc.)
+- Category-aware price sanity hints (very cheap beverages; toppings ≤ ~$10)
+- Additional junk-name filters and header-leak scrub
+
+rev9 changes:
+- **Multi-item splitter**: explode a single OCR line containing two-or-more
+  dot-leader segments (NAME .... PRICE NAME .... PRICE …) into separate
+  pseudo-lines before normal parsing.
 """
 
 from __future__ import annotations
@@ -88,7 +102,8 @@ def _symbol_ratio(s: str) -> float:
 _FOODISH = {
     "pizza","cheese","pepperoni","sausage","salad","wing","wings","burger","sub",
     "fries","soda","drink","drinks","water","lemonade","tea","coffee","bread",
-    "garlic","parmesan","mozzarella","bbq","buffalo","chicken","meat","veggie"
+    "garlic","parmesan","mozzarella","bbq","buffalo","chicken","meat","veggie",
+    "mushroom","onion","tomato","olive","ham","bacon","tuna","philly","steak",
 }
 
 def _looks_foodish(s: str) -> bool:
@@ -98,6 +113,9 @@ def _looks_foodish(s: str) -> bool:
 def _passes_name_gate(name: str, has_price: bool) -> bool:
     """Reject heavy OCR mush; allow a bit more noise if a price is present."""
     if not name:
+        return False
+    # hard drop if lone size shorthand
+    if name.strip().lower() in {"s","m","l","xl","lg"}:
         return False
     a = _alpha_ratio(name)
     v = _vowel_ratio(name)
@@ -132,8 +150,15 @@ _PRICE_MAX = 60.00
 _PRICE_RX = re.compile(r"\$?\s*(\d{1,3})(?:[.,](\d{1,2}))?\b")
 _PRICE_FULL_RX = re.compile(r"^\$?\s*\d{1,3}(?:[.,]\d{1,2})?\s*$")
 
-# Dot leaders or wide-gap leaders: left .... 12.99   OR   left    12.99
-_DOT_LEADER_RX = re.compile(r"(?P<left>.+?)(?:\s?\.{2,}\s?|\s{3,})(?P<right>\$?\s*\d{1,3}(?:[.,]\d{1,2})?)\s*$")
+# Dot leaders or wide-gap leaders (single)
+_DOT_LEADER_RX = re.compile(
+    r"(?P<left>.+?)(?:\s?\.{2,}\s?|\s{3,})(?P<right>\$?\s*\d{1,3}(?:[.,]\d{1,2})?)\s*$"
+)
+
+# Dot leaders global (multi) — for multi-item splitter
+_MULTI_LEADER_RX = re.compile(
+    r"(?P<left>.+?)(?:\s?\.{2,}\s?|\s{3,})(?P<right>\$?\s*\d{1,3}(?:[.,]\d{1,2})?)"
+)
 
 # Size tokens and pairs (Small/Large, S/M/L, inches like 12")
 _SIZE_TOKEN = r'(?:XS|S|SM|M|MD|L|LG|XL|XXL|Kids|Kid|Junior|Large|Small|Medium|12"|14"|16"|18"|20"|10"|8")'
@@ -172,10 +197,8 @@ def _best_price_candidates(line: str) -> List[float]:
         n, d = m.group(1), m.group(2)
         val = _to_price(f"{n}.{d}" if d is not None else n)
         cands.append(val)
-
     # filter low and absurd highs
     cands = [p for p in cands if _PRICE_MIN <= p <= _PRICE_MAX]
-
     # Round/dedupe; sort high→low so the first is our base
     uniq = sorted({round(p, 2) for p in cands}, reverse=True)
     return uniq
@@ -240,7 +263,10 @@ def _looks_ingredients(s: str) -> bool:
     low = (s or "").strip().lower()
     if not low:
         return False
-    if "," in low or low.startswith(("with ","lettuce","tomato","onion","onions","basil","mozzarella","mushroom","peppers","pepper","olives","olive","bbq","garlic","parmesan","cucumber","greens","red","green")):
+    if "," in low or low.startswith((
+        "with ","lettuce","tomato","onion","onions","basil","mozzarella","mushroom","peppers",
+        "pepper","olives","olive","bbq","garlic","parmesan","cucumber","greens","red","green",
+    )):
         return True
     words = re.findall(r"[A-Za-z]+", low)
     return bool(words) and low == " ".join(words) and 1 <= len(words) <= 6
@@ -264,15 +290,97 @@ def _guess_category(name: str, desc: str, fallback: str) -> str:
             best = (hits, cat)
     return best[1]
 
+# ---------- category price sanity windows (hints; non-blocking) ----------
+def _category_price_window(cat: str) -> Tuple[float, float]:
+    low = (cat or "").lower()
+    if "beverage" in low or "drink" in low:
+        return (0.99, 8.50)
+    if "sides" in low or "apps" in low:
+        return (2.50, 14.99)
+    if "wing" in low:
+        return (5.00, 24.99)
+    if "salad" in low:
+        return (4.00, 18.99)
+    if "burger" in low or "sandwich" in low:
+        return (6.00, 24.99)
+    if "pizza" in low:
+        return (6.00, 60.00)
+    return (_PRICE_MIN, _PRICE_MAX)
+
+def _clamp_by_category(cands: List[Dict[str, float]], cat: str) -> List[Dict[str, float]]:
+    lo, hi = _category_price_window(cat)
+    out = []
+    seen = set()
+    for c in cands:
+        v = round(float(c.get("value", 0.0) or 0.0), 2)
+        if lo <= v <= hi and v not in seen:
+            out.append({"type": c.get("type","base"), "value": v})
+            seen.add(v)
+    return out
+
+# ---------- drop-lines / skip heuristics ----------
+_DROP_SECTION_WORDS = {
+    "topping", "toppings", "build your own", "build-your-own", " byo ", "add-ons", "add on", "extras", "extra",
+    "choose your", "pick your", "any topping", "each topping", "additional topping", "additional top",
+}
+_SLICES_WORDS = {"slice", "slices", "by the slice", "per slice"}
+
+def _is_drop_line(s: str) -> bool:
+    low = (s or "").lower().strip()
+    if not low:
+        return False
+    # clear “SLICES / By the slice” counters
+    if any(w in low for w in _SLICES_WORDS):
+        return True
+    # clear “TOPPINGS / BUILD YOUR OWN / ADD-ONS / EXTRAS”
+    if any(w in low for w in _DROP_SECTION_WORDS):
+        return True
+    # obvious non-item housekeeping
+    if low.startswith(("tax","delivery","fees","minimum","we reserve","no substitutions")):
+        return True
+    return False
+
+# ---------- multi-item splitter (new in rev9) ----------
+def _explode_multi_items(line: str) -> List[str]:
+    """
+    If a single OCR line contains two-or-more dot-leader item patterns,
+    split it into separate 'name .... price' pseudo-lines.
+    Example:
+      'MEATBALL PARM .... 13.99  MAMA'S BURGER .... 11.99'
+      -> ['MEATBALL PARM .... 13.99', 'MAMA'S BURGER .... 11.99']
+    """
+    if not line:
+        return []
+    matches = list(_MULTI_LEADER_RX.finditer(line))
+    if len(matches) < 2:
+        return [line]  # nothing to explode
+
+    # Build chunks from consecutive leader matches (use spans to slice cleanly)
+    chunks: List[str] = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = m.end()
+        # Determine right bound: up to next match start, else to end of string
+        right_bound = matches[i+1].start() if (i+1) < len(matches) else len(line)
+        segment = line[start:right_bound].strip(" ,;-—–")
+        # Ensure the segment actually has a leader price; otherwise skip
+        if _DOT_LEADER_RX.search(segment) or _MULTI_LEADER_RX.search(segment):
+            chunks.append(segment.strip())
+    # Fallback if something went weird
+    return chunks or [line]
+
 # ---------- splitter ----------
 def _split_line_into_chunks(line: str) -> List[str]:
     """
     Split on pipes and very wide gaps (≥3 spaces) to simulate two columns.
+    Then, if a chunk contains multiple dot-leader patterns, explode it into
+    multiple pseudo-lines (rev9).
     Keep order; remove empties.
     """
     if not line:
         return []
-    # First split by pipe
+
+    # First: split by pipe
     parts = re.split(r"\s*\|\s*", line)
     chunks: List[str] = []
     for p in parts:
@@ -280,7 +388,16 @@ def _split_line_into_chunks(line: str) -> List[str]:
         subs = re.split(r"\s{3,}", p)
         for s in subs:
             s2 = _basic_clean(s)
-            if s2:
+            if not s2:
+                continue
+            # NEW: explode multi-item leaders inside each sub-chunk
+            exploded = _explode_multi_items(s2)
+            if exploded and len(exploded) > 1:
+                for e in exploded:
+                    e2 = _basic_clean(e)
+                    if e2:
+                        chunks.append(e2)
+            else:
                 chunks.append(s2)
     return chunks or [line]
 
@@ -322,6 +439,9 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
         raw_chunks: List[Tuple[int, str]] = []
         for idx, raw_line in enumerate(b["lines"]):
             for ch in _split_line_into_chunks(raw_line):
+                # skip global drop-lines up front
+                if _is_drop_line(ch):
+                    continue
                 raw_chunks.append((idx, ch))
 
         i = 0
@@ -329,6 +449,7 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
 
         while i < len(raw_chunks):
             _, chunk = raw_chunks[i]
+            chunk_strip = (chunk or "").strip()
 
             # drop obvious header fragments that slipped as lines
             if re.fullmatch(r"[:;,\-–—•·]*[A-Z]{2,}[\w &]*", chunk) and any(h in chunk.lower() for h in _HEADER_WORDS):
@@ -337,6 +458,31 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                 carry_item = None
                 i += 1
                 continue
+
+            # re-check drop-line here as well (after potential header update)
+            if _is_drop_line(chunk):
+                i += 1
+                continue
+
+            # 0) ORPHAN PRICE-ONLY LINE
+            # If a chunk is just a price (e.g., "12.99" or "$12.99") and we already have an item without prices,
+            # attach it to the most recent item.
+            if _PRICE_FULL_RX.fullmatch(chunk_strip or ""):
+                pr_list = _best_price_candidates(chunk_strip)
+                if pr_list and items:
+                    tgt = carry_item or items[-1]
+                    if tgt is not None:
+                        pcs = list(tgt.get("price_candidates") or [])
+                        base = round(pr_list[0], 2)
+                        if not any(round(p.get("value", 0), 2) == base for p in pcs):
+                            pcs.append({"type": "orphan_attach", "value": base})
+                            # category-aware clamp
+                            pcs = _clamp_by_category(pcs, tgt.get("category") or fallback_cat)
+                            tgt["price_candidates"] = pcs
+                            tgt["confidence"] = max(float(tgt.get("confidence") or 0.6), _price_conf_bump(pcs))
+                        carry_item = None
+                        i += 1
+                        continue
 
             # 1) Dot-leader rule (or wide gap leaders)
             dl = _DOT_LEADER_RX.search(chunk)
@@ -360,6 +506,9 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                 if not _passes_name_gate(name_core, bool(price_candidates or variants)):
                     i += 1
                     continue
+
+                # cat-aware clamp
+                price_candidates = _clamp_by_category(price_candidates, cat)
 
                 items.append({
                     "name": name_core,
@@ -415,6 +564,8 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                     [{"type": "base", "value": round(p,2)} for p in prices] if prices
                     else [{"type": "sizepair", "value": round(sizes_here[0][1],2)}]
                 )
+                # cat-aware clamp
+                price_candidates = _clamp_by_category(price_candidates, cat)
                 conf = _price_conf_bump(price_candidates)
 
                 items.append({
@@ -434,9 +585,9 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             if not _looks_ingredients(name_core):
                 # peek next
                 nxt = raw_chunks[i+1][1] if (i+1) < len(raw_chunks) else ""
-                nxt_sizes, nxt_rem = _parse_size_pairs(nxt)
+                nxt_sizes, _ = _parse_size_pairs(nxt)
                 nxt_prices = _best_price_candidates(nxt)
-                nxt_is_price_only = (bool(nxt_prices) and _PRICE_FULL_RX.fullmatch(nxt.strip() or "") is not None)
+                nxt_is_price_only = (bool(nxt_prices) and _PRICE_FULL_RX.fullmatch((nxt or "").strip()) is not None)
 
                 if nxt_is_price_only or nxt_sizes:
                     desc = ""
@@ -458,6 +609,8 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                     if not _passes_name_gate(name_core, True):
                         i += 2
                         continue
+
+                    pc = _clamp_by_category(pc, cat)
 
                     items.append({
                         "name": name_core or "Untitled",
@@ -485,6 +638,10 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                     i += 1
                     continue
                 cat = _guess_category(name_core, "", fallback_cat)
+                # extra guard: don't create items from obvious non-item counters
+                if _is_drop_line(name_core):
+                    i += 1
+                    continue
                 ni = {
                     "name": name_core,
                     "description": None,
@@ -500,7 +657,7 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             i += 1
 
     # --- NOISE SCRUB / STITCHERS ---
-    _NONWORD_RUN = re.compile(r"\b(?![aeiouyAEIOUY])([A-Za-z]){3,}\b")  # 3+ letter no-vowel junk (e.g., "eee", "ncs")
+    _NONWORD_RUN = re.compile(r"\b(?![aeiouyAEIOUY])([A-Za-z]){3,}\b")  # 3+ letter no-vowel junk
     _REPEAT_CHARS = re.compile(r"(.)\1\1+")  # any char repeated 3+ times
     _NOISE_TOKENS = {"ee","ie","e","nics","ncs","ees"}  # frequent stray OCR syllables
     _TOK_SPLIT = re.compile(r"[,\s/;]+")
@@ -552,7 +709,7 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
         # Drop junk header-ish residue (e.g., ": ANDWICHE")
         headerish = re.fullmatch(r"[:;,\-–—•·\s]*[A-Z &]{2,}$", name or "")
         looks_like_header_word = any(w in (name or "").lower() for w in
-                                     ["salad","salads","wings","beverage","beverages","pizza","pizzas","andwich"])
+                                     ["salad","salads","wings","beverage","beverages","pizza","pizzas","andwich","topping","toppings"])
         if headerish or (looks_like_header_word and not re.search(r"[a-z]", name or "")):
             continue
 
@@ -591,6 +748,11 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
         if (not it.get("price_candidates")) and it.get("variants"):
             v0 = it["variants"][0]
             it["price_candidates"] = [{"type": "variant_seed", "value": round(float(v0.get("price", 0)) or 0, 2)}]
+
+        # final cat-aware clamp for candidates
+        if it.get("price_candidates"):
+            it["price_candidates"] = _clamp_by_category(list(it["price_candidates"]), it.get("category") or "")
+
         repaired.append(it)
     items = repaired
 
