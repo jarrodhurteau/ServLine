@@ -13,13 +13,14 @@
       <a class="btn btn-primary" href="{{ url_for('ocr_health_route') }}">OCR Health</a>
     </div>
 
+    <!-- Upload panels -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <!-- Upload Image -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Upload Image</h2>
-        <form action="{{ url_for('import_upload') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+        <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
-          <button class="btn btn-primary w-full">Upload Image</button>
+          <button type="submit" class="btn btn-primary w-full" id="imgBtn">Upload Image</button>
         </form>
         <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
       </div>
@@ -27,16 +28,114 @@
       <!-- Upload PDF -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Upload PDF</h2>
-        <form action="{{ url_for('import_upload') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+        <form id="pdfForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
-          <button class="btn btn-primary w-full">Upload PDF</button>
+          <button type="submit" class="btn btn-primary w-full" id="pdfBtn">Upload PDF</button>
         </form>
         <p class="muted mt-2 text-sm">For digital menus. We’ll extract text and structure a draft.</p>
       </div>
+    </div>
+
+    <!-- Shared upload progress UI -->
+    <style>
+      .progress-wrap { display:none; margin-top:16px; background:#0f1a2f; border:1px solid #243252; border-radius:10px; padding:12px; }
+      .progress-bar  { width:0%; height:10px; background:#7aa2ff; border-radius:6px; transition:width .15s linear; }
+      .progress-label{ margin-top:8px; font-size:.9rem; color:#9fb0d1; }
+      .progress-wrap.active { display:block; }
+    </style>
+    <div id="uploadProgress" class="progress-wrap">
+      <div class="progress-bar" id="uploadBar"></div>
+      <div class="progress-label" id="uploadLabel">Preparing upload…</div>
     </div>
 
     <div class="mt-4 text-xs muted">
       Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.
     </div>
   </section>
+
+  <!-- Inline upload script: uses JSON API to get job_id, then redirects to /imports/view/<job_id> -->
+  <script>
+  (function () {
+    const progressWrap = document.getElementById('uploadProgress');
+    const bar = document.getElementById('uploadBar');
+    const label = document.getElementById('uploadLabel');
+
+    function setActive(on) {
+      progressWrap.classList.toggle('active', !!on);
+      if (!on) { bar.style.width = '0%'; label.textContent = ''; }
+    }
+
+    function disableDuringUpload(disabled) {
+      document.getElementById('imgBtn')?.toggleAttribute('disabled', disabled);
+      document.getElementById('pdfBtn')?.toggleAttribute('disabled', disabled);
+    }
+
+    function doUpload(formEl) {
+      const fileInput = formEl.querySelector('input[type="file"]');
+      if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+        alert('Please choose a file first.');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+
+      // Optional: if the server infers restaurant from session, nothing else is needed.
+      // If you later add a <select name="restaurant_id">, the FormData will include it automatically.
+
+      setActive(true);
+      disableDuringUpload(true);
+      bar.style.width = '0%';
+      label.textContent = 'Uploading… 0%';
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/menus/import', true);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.max(0, Math.min(100, Math.round((e.loaded / e.total) * 100)));
+          bar.style.width = pct + '%';
+          label.textContent = `Uploading… ${pct}%`;
+        } else {
+          label.textContent = 'Uploading…';
+        }
+      };
+
+      xhr.onerror = () => {
+        setActive(false);
+        disableDuringUpload(false);
+        alert('Network error during upload.');
+      };
+
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 4) {
+          let data = {};
+          try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) {}
+          if (xhr.status >= 200 && xhr.status < 300 && data.job_id) {
+            bar.style.width = '100%';
+            label.textContent = 'Processing on server…';
+            // hand off to preview page (rotation / actions live there)
+            window.location.href = `/imports/view/${data.job_id}`;
+          } else {
+            setActive(false);
+            disableDuringUpload(false);
+            alert(data.error || 'Upload failed.');
+          }
+        }
+      };
+
+      xhr.send(fd);
+    }
+
+    document.getElementById('imgForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      doUpload(e.currentTarget);
+    });
+
+    document.getElementById('pdfForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      doUpload(e.currentTarget);
+    });
+  })();
+  </script>
 {% endblock %}

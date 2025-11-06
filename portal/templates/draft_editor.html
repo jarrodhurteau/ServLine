@@ -42,53 +42,37 @@
 
     .row-focus { outline: 2px solid var(--brand); outline-offset: -2px; }
 
-    /* small helper note under publish */
+    /* Helper note under publish */
     .helper-note { color: var(--muted); font-size: .85rem; margin-top: 6px; }
 
-    /* ================== FIXES ================== */
-
-    /* 🧩 Sidebar containment: scrolls independently, never overlays editor */
+    /* Sidebar containment */
     .sidebar {
-      position: sticky;
-      top: 80px;
-      max-height: calc(100vh - 100px);
-      overflow-y: auto;
-      overflow-x: hidden;
-      background: rgba(20,20,30,0.85);
-      padding-right: 6px;
-      z-index: 5; /* below header/toolbars but above page background */
+      position: sticky; top: 80px; max-height: calc(100vh - 100px);
+      overflow-y: auto; overflow-x: hidden; background: rgba(20,20,30,0.85);
+      padding-right: 6px; z-index: 5;
     }
 
-    /* 🧩 Export dropdown stacking & placement above banners */
+    /* Export dropdown */
     details.export { position: relative; }
-    details.export .menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 6px);
-      z-index: 1000 !important;
-      background: #1a2236;
-      border: 1px solid #2b3552;
-      border-radius: 8px;
-      padding: 8px 10px;
-      min-width: 240px;
-      box-shadow: 0 12px 24px rgba(0,0,0,0.35);
+    details.export .menu{
+      position:absolute; right:0; top:calc(100% + 6px); z-index:1000 !important;
+      background:#1a2236; border:1px solid #2b3552; border-radius:8px; padding:8px 10px; min-width:240px;
+      box-shadow:0 12px 24px rgba(0,0,0,0.35);
     }
-    details.export .menu a,
-    details.export .menu button {
-      display: block;
-      color: #cbd5e1;
-      text-align: left;
-      padding: 6px 4px;
-      width: 100%;
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      font-size: .9rem;
+    details.export .menu a, details.export .menu button{
+      display:block; color:#cbd5e1; text-align:left; padding:6px 4px; width:100%;
+      background:transparent; border:none; cursor:pointer; font-size:.9rem;
     }
-    details.export .menu a:hover,
-    details.export .menu button:hover {
-      color: #fff;
-    }
+    details.export .menu a:hover, details.export .menu button:hover{ color:#fff; }
+
+    /* ===== Status pill (parity with import view) ===== */
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
+    .pill-gray  { background:#e5e7eb; color:#374151; }
+    .pill-blue  { background:#dbeafe; color:#1e40af; }
+    .pill-yellow{ background:#fef3c7; color:#92400e; }
+    .pill-green { background:#dcfce7; color:#065f46; }
+    .pill-red   { background:#fee2e2; color:#991b1b; }
+    .pill-purple{ background:#ede9fe; color:#5b21b6; }
   </style>
 
   <div class="layout">
@@ -124,7 +108,7 @@
       <h3>OCR Debug</h3>
       <div style="display:grid; gap:6px;">
         <a class="btn" href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}">View OCR Debug (JSON)</a>
-        <a class="btn" href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
+        <a class="btn" href="{{ url_for('draft_ocr_debug_csv',  draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
       </div>
 
       {% if draft.source_job_id %}
@@ -154,12 +138,12 @@
           <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
           <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
 
-          <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+          <div style="margin-left:auto; display:flex; gap:8px; align-items:center; white-space:nowrap;">
             {% if draft.source_job_id %}
-              <a class="btn" target="_blank" rel="noopener"
-                 href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}">AI Preview (heuristics)</a>
+              <a class="btn" target="_blank" rel="noopener" href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}">AI Preview (heuristics)</a>
             {% endif %}
             <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
+
             <details class="export">
               <summary class="btn">Export ▾</summary>
               <div class="menu">
@@ -171,30 +155,27 @@
               </div>
             </details>
 
-            <!-- NEW: Fix Descriptions (form → redirect; no blank JSON) -->
-            <form action="{{ url_for('fix_descriptions_for_draft', draft_id=draft.id) }}?redirect=1" method="post" style="display:inline;">
-              <button class="btn btn-secondary"
-                      title="Split 'Name — details' into description, trim dupes/punctuation, and tidy multi-line joins">
-                🧹 Fix Descriptions
-              </button>
+            <!-- Clean & Refine = Fix Descriptions + Clean with AI -->
+            <form id="refine-form" action="#" method="post" style="display:inline;">
+              <button class="btn btn-secondary" title="Join split lines, merge descriptions, and polish OCR noise.">✨ Clean & Refine</button>
             </form>
 
-            <!-- NEW: Clean with AI (form → redirect) -->
-            <form method="post" action="{{ url_for('cleanup_draft', draft_id=draft.id) }}" style="display:inline;">
-              <button class="btn btn-secondary" title="Clean names, attach prices, and categorize items">
-                ✨ Clean with AI
-              </button>
-            </form>
-
-            <!-- NEW: AI Commit to Draft (form → redirect) -->
+            <!-- Finalize with AI Cleanup (form → redirect + status pill) -->
             {% if draft.source_job_id %}
-            <form action="{{ url_for('imports_ai_commit', job_id=draft.source_job_id) }}?redirect=1" method="post" style="display:inline;">
-              <button class="btn btn-secondary" title="Re-run AI heuristics and commit results into this draft">
-                AI Commit to Draft
-              </button>
-            </form>
+              <form id="finalize-ai-form"
+                    action="{{ url_for('imports_ai_commit', job_id=draft.source_job_id) }}?redirect=1"
+                    method="post"
+                    style="display:inline-flex; align-items:center; gap:8px;">
+                <button class="btn btn-secondary" id="finalize-ai-btn"
+                        title="Finalize with AI cleanup — merge and polish items">
+                  ✨ Finalize with AI Cleanup
+                </button>
+                <span id="finalize-status" class="pill pill-gray" style="display:none;">Idle</span>
+              </form>
             {% else %}
-            <button class="btn btn-secondary" title="No import job linked to this draft" disabled>AI Commit to Draft</button>
+              <button class="btn btn-secondary" title="No import job linked to this draft" disabled>
+                ✨ Finalize with AI Cleanup
+              </button>
             {% endif %}
 
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
@@ -210,8 +191,7 @@
       <div class="toolbar-sticky">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
         </div>
@@ -269,9 +249,17 @@
                           data-autosize
                           {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.description or '')|e }}</textarea>
               </td>
-              <td><input class="cell-input cell-price price" value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}" inputmode="decimal" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
-              <td><input list="category-datalist" class="cell-input category" value="{{ (it.category or '')|e }}" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
-              <td><input class="cell-input cell-number position" value="{{ it.position if it.position is not none else '' }}" inputmode="numeric" {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              <td><input class="cell-input cell-price price"
+                         value="{{ '%.2f'|format((it.price_cents|default(0,true)|int) / 100.0) }}"
+                         inputmode="decimal"
+                         {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              <td><input list="category-datalist" class="cell-input category"
+                         value="{{ (it.category or '')|e }}"
+                         {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              <td><input class="cell-input cell-number position"
+                         value="{{ it.position if it.position is not none else '' }}"
+                         inputmode="numeric"
+                         {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td class="row-actions">
                 <button class="btn duplicate-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Duplicate</button>
                 <button class="btn btn-danger delete-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
@@ -284,7 +272,7 @@
 
       <datalist id="category-datalist">
         {% for c in categories %}
-        <option value="{{ c|e }}"></option>
+          <option value="{{ c|e }}"></option>
         {% endfor %}
         <option value="(Uncategorized)"></option>
       </datalist>
@@ -308,7 +296,7 @@
     const isEditable = String(meta.status||'') === 'editing';
     const sourceJobId = meta.source_job_id ? Number(meta.source_job_id) : null;
 
-    const $ = (s, el=document)=>el.querySelector(s);
+    const $  = (s, el=document)=>el.querySelector(s);
     const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
 
     const itemsBody = $("#items-body");
@@ -328,13 +316,34 @@
     let dirty = false;
     let deletedIds = [];
 
+    /* Clean & Refine sequence */
+    const refineForm = document.getElementById('refine-form');
+    if (refineForm) {
+      refineForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          if (window.showProgressBar) showProgressBar(30000, 'Cleaning & refining…');
+
+          await fetch('{{ url_for("fix_descriptions_for_draft", draft_id=draft.id) }}', {
+            method: 'POST', credentials: 'same-origin'
+          });
+          await fetch('{{ url_for("cleanup_draft", draft_id=draft.id) }}', {
+            method: 'POST', credentials: 'same-origin'
+          });
+        } catch (err) {
+          console.error('Refine error:', err);
+        } finally {
+          window.location.reload();
+        }
+      });
+    }
+
     function setDirty(v){ dirty=!!v; dirtyIndicator.style.display = dirty? "inline-block":"none"; }
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
     function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
 
-    // Day 19: autosize
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
@@ -558,7 +567,7 @@
           </div>
         </td>
         <td><textarea rows="1" class="cell-textarea desc-text description js-autosize prewrap text-wrap" data-autosize>${(prefill.description||"")
-              .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
+            .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
         <td><input class="cell-input cell-price price" value="${prefill.price_cents!=null? (prefill.price_cents/100).toFixed(2): ''}" inputmode="decimal" /></td>
         <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g,'&quot;')}" /></td>
         <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>
@@ -697,6 +706,34 @@
     applyConfidenceTint();
     rebuildOutline();
     collectRowsFiltered();
+
+    // ---- Live status pill for Finalize with AI ----
+    (function(){
+      const form = document.getElementById('finalize-ai-form');
+      const pill = document.getElementById('finalize-status');
+      if (!form || !pill) return;
+
+      const PILL_CLASSES = {
+        idle:     'pill-gray',
+        working:  'pill-blue',
+        done:     'pill-green',
+        failed:   'pill-red'
+      };
+
+      function setPill(state, text) {
+        pill.className = 'pill ' + (PILL_CLASSES[state] || 'pill-gray');
+        pill.textContent = text;
+        pill.style.display = 'inline-block';
+      }
+
+      form.addEventListener('submit', () => {
+        setPill('working', 'Running…');
+        if (window.showProgressBar) showProgressBar(45000, 'Finalizing with AI cleanup…');
+        // optimistic visual update before redirect lands back here
+        setTimeout(() => setPill('done', 'Refreshing…'), 20000);
+      });
+    })();
+
   })();
   </script>
 </div>

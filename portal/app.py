@@ -346,7 +346,6 @@ def _resolve_restaurant_id_from_request() -> Optional[int]:
 
 def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id: int) -> int:
     """Return an existing active menu for the restaurant, or create a new one."""
-    cur = conn.cursor
     cur = conn.cursor()
     row = cur.execute(
         "SELECT id FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id LIMIT 1",
@@ -1318,11 +1317,19 @@ def import_page():
 @app.route("/import", methods=["POST"], strict_slashes=False)
 @login_required
 def import_upload():
+    """
+    Handles uploaded menu files (images or PDFs) and launches the OCR import job.
+
+    After saving and processing the file, this route redirects to the Import Preview
+    page where you can review the parsed output, rotate the image if needed, and confirm
+    before editing the generated draft.
+    """
     try:
         file = request.files.get("file")
         if not file or file.filename == "":
             flash("Please choose a file to upload.", "error")
             return redirect(url_for("import_page"))
+
         if not allowed_file(file.filename):
             flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
             return redirect(url_for("import_page"))
@@ -1335,23 +1342,36 @@ def import_upload():
         restaurant_id = _resolve_restaurant_id_from_request()
         job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
 
+        # Run OCR asynchronously
         threading.Thread(
             target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True
         ).start()
 
+        # Flash success with optional restaurant info
         if restaurant_id:
-            flash(f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.", "success")
+            flash(
+                f"Import started for {base_name} (job #{job_id}) — linked to restaurant #{restaurant_id}.",
+                "success",
+            )
         else:
-            flash(f"Import started for {base_name} (job #{job_id}). Tip: assign a restaurant on the import page before approving.", "success")
+            flash(
+                f"Import started for {base_name} (job #{job_id}). "
+                "Tip: assign a restaurant on the import page before approving.",
+                "success",
+            )
 
-        # 🚀 NEW: jump to a short 'wait' endpoint that redirects to the editor when ready
-        return redirect(url_for("imports_after_upload", job_id=job_id))
+        # ✅ NEW: Redirect straight to Import Preview instead of waiting for Draft Editor
+        flash("Import complete — review preview below and rotate if needed.", "success")
+        return redirect(url_for("imports_view", job_id=job_id))
 
     except RequestEntityTooLarge:
         flash("File too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+
     except Exception as e:
         flash(f"Server error while saving upload: {e}", "error")
+
     return redirect(url_for("import_page"))
+
 
 # ------------------------
 # Imports pages
@@ -1386,30 +1406,6 @@ def imports_detail(job_id):
 
     return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants,
                         preview_img_url=preview_url, rotate_action_url=rotate_url)
-
-# 🔔 NEW: gentle post-upload redirect helper (polls briefly, then routes you)
-@app.get("/imports/<int:job_id>/after-upload")
-@login_required
-def imports_after_upload(job_id: int):
-    """
-    After an upload, poll briefly for the draft to appear.
-    - If ready within ~12s, send user straight to Draft Editor.
-    - Otherwise, land on the import detail page (which shows status).
-    """
-    deadline = time.time() + 12.0
-    while time.time() < deadline:
-        row = get_import_job(job_id)
-        if not row:
-            break
-        abs_draft = _abs_from_rel(row["draft_path"])
-        if abs_draft and abs_draft.exists():
-            draft_id = _get_or_create_draft_for_job(job_id)
-            if draft_id:
-                return redirect(url_for("draft_editor", draft_id=draft_id))
-            return redirect(url_for("imports_detail", job_id=job_id))
-        time.sleep(0.5)
-    # Fallback: show the job page; it will indicate processing state.
-    return redirect(url_for("imports_detail", job_id=job_id))
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
@@ -2022,6 +2018,7 @@ def draft_editor(draft_id: int):
 
 # --- AI Cleanup route ---
 @app.post("/drafts/<int:draft_id>/cleanup")
+@login_required
 def cleanup_draft(draft_id: int):
     from storage.ai_cleanup import apply_ai_cleanup
     try:

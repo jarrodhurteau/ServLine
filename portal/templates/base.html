@@ -200,6 +200,50 @@
       </div>
     </footer>
 
+     <!-- Global loading overlay (reusable across pages) -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+      <div class="w-2/3 max-w-xl bg-gray-200 rounded-full h-3 overflow-hidden shadow">
+        <div id="loading-bar" class="h-full bg-blue-600 transition-all duration-300" style="width:0%"></div>
+      </div>
+      <span id="loading-label" class="ml-3 text-sm text-white/90 select-none">Working…</span>
+    </div>
+
+    <script>
+      // Global progress overlay helpers
+      (function(){
+        const overlay = document.getElementById('loading-overlay');
+        const bar = document.getElementById('loading-bar');
+        const label = document.getElementById('loading-label');
+        let timer = null, progress = 0;
+
+        window.showProgressBar = function(duration=30000, text='Working…'){
+          if (!overlay || !bar || !label) return;
+          label.textContent = text;
+          overlay.classList.remove('hidden');
+          progress = 0; bar.style.width = '0%';
+
+          const totalSteps = Math.max(1, Math.floor(duration / 20));
+          const stepInc = 95 / totalSteps; // creep to ~95%; finish on hide
+
+          clearInterval(timer);
+          timer = setInterval(function(){
+            progress = Math.min(95, progress + stepInc);
+            bar.style.width = progress.toFixed(2) + '%';
+          }, 20);
+        };
+
+        window.hideProgressBar = function(){
+          if (!overlay || !bar) return;
+          clearInterval(timer);
+          bar.style.width = '100%';
+          setTimeout(function(){
+            overlay.classList.add('hidden');
+            bar.style.width = '0%';
+          }, 300);
+        };
+      })();
+    </script>
+
     <!-- Day 19: tiny helper for auto-resizing textareas -->
     <script>
       (function () {

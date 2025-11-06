@@ -25,6 +25,17 @@
     .ai-section { border:1px dashed var(--line); border-radius:12px; padding:10px; }
     .ai-title { font-weight:700; letter-spacing:.02em; }
     .ai-note { font-size:.9rem; color:var(--muted); margin-top:2px; }
+
+    /* Indeterminate progress bar */
+    .progress-wrap { display:none; height:10px; background:rgba(122,162,255,.15); border-radius:999px; overflow:hidden; border:1px solid var(--line); }
+    .progress-bar { height:100%; width:40%; border-radius:999px; background:var(--brand, #7aa2ff); animation: indet 1.2s infinite linear; transform:translateX(-40%); }
+    @keyframes indet {
+      0%   { transform: translateX(-40%); }
+      50%  { transform: translateX(60%); }
+      100% { transform: translateX(140%); }
+    }
+
+    .preview-placeholder { color:var(--muted); font-size:.9rem; padding:.5rem 0; }
   </style>
 
   <section class="card">
@@ -40,12 +51,17 @@
         'pill-purple' if st in ['editing'] else
         'pill-red'
       %}
-      <span class="pill {{ pill_class }}">{{ (job.status or '—')|capitalize }}</span>
+      <span id="status-pill" class="pill {{ pill_class }}">{{ (job.status or '—')|capitalize }}</span>
 
       <div class="ml-auto flex gap-2">
         <a href="{{ url_for('imports') }}" class="btn">Back to Imports</a>
-        <a href="{{ url_for('imports_draft', job_id=job.id) }}" class="btn btn-primary">Open Draft Editor</a>
+        <a id="open-editor-btn" href="{{ url_for('imports_draft', job_id=job.id) }}" class="btn btn-primary">Open Draft Editor</a>
       </div>
+    </div>
+
+    <!-- live progress (indeterminate while processing) -->
+    <div id="progress-wrap" class="progress-wrap mt-3" aria-hidden="true">
+      <div class="progress-bar"></div>
     </div>
 
     <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -54,13 +70,13 @@
         <div class="rounded-xl border border-line p-3">
           <div class="kv">
             <div class="k">File</div>
-            <div><code>{{ job.filename }}</code></div>
+            <div><code id="file-name">{{ job.filename }}</code></div>
 
             <div class="k">Created</div>
             <div><time class="ts" datetime="{{ job.created_at }}">{{ job.created_at }}</time></div>
 
             <div class="k">Updated</div>
-            <div><time class="ts" datetime="{{ job.updated_at }}">{{ job.updated_at }}</time></div>
+            <div><time id="updated-at" class="ts" datetime="{{ job.updated_at }}">{{ job.updated_at }}</time></div>
 
             {% if job.restaurant_id %}
               <div class="k">Restaurant</div>
@@ -69,43 +85,30 @@
           </div>
         </div>
 
-        {# ==== NEW: Source Preview with Manual Rotate (uses preview_img_url & rotate_action_url) ==== #}
-        {% if preview_img_url %}
-          <div class="rounded-xl border border-line p-3">
-            <div class="flex items-center justify-between gap-2 flex-wrap">
-              <strong>Source Preview (rotate if sideways)</strong>
-              <form method="post" action="{{ rotate_action_url }}?redirect=1" class="flex gap-2">
-                <button class="btn btn-sm" name="dir" value="left" type="submit">⟲ Rotate Left</button>
-                <button class="btn btn-sm" name="dir" value="right" type="submit">⟳ Rotate Right</button>
-              </form>
-            </div>
-            <div class="preview mt-2" style="max-height:70vh; overflow:auto;">
-              <img src="{{ preview_img_url }}?t={{ now }}" alt="Working preview (rotatable)" />
-            </div>
-            <p class="muted mt-2">After rotating, use <em>AI Commit to Draft</em> to re-OCR this rotated image.</p>
+        <!-- ==== Source Preview with Manual Rotate ==== -->
+        <div class="rounded-xl border border-line p-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <strong>Source Preview (rotate if sideways)</strong>
+            <form method="post" action="{{ url_for('imports_rotate_image', job_id=job.id) }}?redirect=1" class="flex gap-2">
+              <button class="btn btn-sm" name="dir" value="left"  type="submit">⟲ Rotate Left</button>
+              <button class="btn btn-sm" name="dir" value="right" type="submit">⟳ Rotate Right</button>
+            </form>
           </div>
-        {% endif %}
-        {# ==== /NEW ==== #}
-
-        {# Fallback: original source image preview if working preview isn't available #}
-        {% set src = (draft.get('source', {}) if draft else {}) %}
-        {% set src_file = src.get('file') if src else None %}
-        {% set is_img = src_file and ((src_file|lower).endswith('.png') or (src_file|lower).endswith('.jpg') or (src_file|lower).endswith('.jpeg')) %}
-        {% if (not preview_img_url) and is_img %}
-          <div class="preview">
-            <a href="{{ url_for('serve_upload', filename=src_file) }}" target="_blank" rel="noopener noreferrer">
-              <img src="{{ url_for('serve_upload', filename=src_file) }}" alt="Source upload preview" />
-            </a>
+          <div class="preview mt-2" style="max-height:70vh; overflow:auto;">
+            <div id="preview-placeholder" class="preview-placeholder">Working preview (rotatable)…</div>
+            <img id="preview-img" src="" alt="Working preview (rotatable)" style="display:none;" />
           </div>
-        {% endif %}
+          <p class="muted mt-2">After rotating, use <em>Finalize with AI Cleanup</em> to re-OCR this rotated image.</p>
+        </div>
+        <!-- ==== /Source Preview ==== -->
 
         <details class="rounded-xl border border-line">
           <summary class="px-3 py-2 cursor-pointer select-none">Draft Preview (JSON)</summary>
           <div class="p-3 overflow-auto" style="max-height:520px">
             {% if draft %}
-              <pre class="rounded-xl border border-line bg-[#0a1222] p-3" style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
+              <pre id="draft-json" class="rounded-xl border border-line bg-[#0a1222] p-3" style="white-space: pre-wrap;">{{ draft | tojson(indent=2) }}</pre>
             {% else %}
-              <em class="muted">No draft available yet.</em>
+              <em id="draft-json-empty" class="muted">No draft available yet.</em>
             {% endif %}
           </div>
         </details>
@@ -130,26 +133,29 @@
 
         <a href="{{ url_for('imports_raw', job_id=job.id) }}" class="btn btn-ghost w-full">View Raw OCR</a>
 
-        {% if is_img %}
-          <a href="{{ url_for('serve_upload', filename=src_file) }}" target="_blank" rel="noopener noreferrer" class="btn w-full">View Source Image</a>
-        {% endif %}
-
         <form action="{{ url_for('imports_clone', job_id=job.id) }}" method="post">
           <button type="submit" class="btn w-full">Clone Draft</button>
         </form>
 
-        <!-- ===== AI TOOLS ===== -->
+               <!-- ===== AI TOOLS ===== -->
         <div class="ai-section">
           <div class="ai-title">⚡ AI Tools</div>
-          <div class="ai-note">Preview uses heuristics only (Phase A). Commit replaces current draft items.</div>
+          <div class="ai-note">
+            Preview uses heuristics only (Phase A). Commit replaces current draft items.
+          </div>
+
           <a class="btn btn-ghost w-full"
              href="{{ url_for('imports_ai_preview', job_id=job.id) }}"
              target="_blank" rel="noopener">
             AI Preview (JSON)
           </a>
+
           <!-- POST with redirect so no blank JSON page -->
-          <form id="ai-commit-form" action="{{ url_for('imports_ai_commit', job_id=job.id) }}?redirect=1" method="post">
-            <button type="submit" class="btn w-full">AI Commit to Draft</button>
+          <form id="ai-commit-form"
+                action="{{ url_for('imports_ai_commit', job_id=job.id) }}?redirect=1"
+                method="post"
+                title="Automatically improve names, merge split descriptions, and clean OCR noise.">
+            <button type="submit" class="btn w-full">Finalize with AI Cleanup</button>
           </form>
         </div>
         <!-- ===================== -->
@@ -160,85 +166,175 @@
         <a id="export-xlsx" class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Download Excel</a>
 
         <form id="approve-form" action="{{ url_for('imports_approve', job_id=job.id) }}" method="post">
-          <button type="submit" class="btn btn-success w-full"
-                  {% if st in ['approved','published','discarded'] %}disabled{% endif %}>
-            Approve Draft
-          </button>
+          <button type="submit" class="btn btn-success w-full">Approve Draft</button>
         </form>
 
         <form id="discard-form" action="{{ url_for('imports_discard', job_id=job.id) }}" method="post">
-          <button type="submit" class="btn btn-danger w-full"
-                  {% if st in ['discarded','approved','published'] %}disabled{% endif %}>
-            Discard Draft
-          </button>
+          <button type="submit" class="btn btn-danger w-full">Discard Draft</button>
         </form>
       </aside>
     </div>
   </section>
 
+  <div id="page-data" data-job-id="{{ job.id }}"></div>
+
   <script>
-    // Marker to confirm hot-reload/template path
-    console.log("import_view.html loaded: rotate preview + AI Tools.");
+    console.log("import_view.html (live status + preview) loaded.");
 
-    // Friendly timestamp formatting
-    (function() {
-      function fmt(d) {
-        try {
-          const dt = new Date((d || '').replace(' ', 'T') + 'Z');
-          if (isNaN(dt)) return d;
-          const opts = { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' };
-          return dt.toLocaleString(undefined, opts).replace(',', ' ·');
-        } catch { return d; }
-      }
-      document.querySelectorAll('time.ts').forEach(t => {
-        const raw = t.getAttribute('datetime') || t.textContent || '';
-        t.textContent = fmt(raw);
-      });
-    })();
+    // map status → pill class
+    const PILL_CLASSES = {
+      pending:  'pill-gray',
+      deleted:  'pill-gray',
+      processing:'pill-blue',
+      restored: 'pill-blue',
+      done:     'pill-green',
+      approved: 'pill-green',
+      published:'pill-green',
+      editing:  'pill-purple',
+      submitted:'pill-yellow',
+      review:   'pill-yellow',
+      failed:   'pill-red',
+      error:    'pill-red'
+    };
 
-    // Confirms for risky actions
-    (function(){
-      const approve = document.getElementById('approve-form');
-      const discard = document.getElementById('discard-form');
-      const aiCommit = document.getElementById('ai-commit-form');
-      approve?.addEventListener('submit', (e)=>{ if(!confirm('Approve this draft into the menu?')) e.preventDefault(); });
-      discard?.addEventListener('submit', (e)=>{ if(!confirm('Discard all items from this draft?')) e.preventDefault(); });
-      aiCommit?.addEventListener('submit', (e)=>{ if(!confirm('Re-OCR and replace current draft items with AI-cleaned items?')) e.preventDefault(); });
-    })();
+    const jobId = Number((document.getElementById('page-data') || {}).dataset.jobId || '0');
+    const statusPill  = document.getElementById('status-pill');
+    const progressWrap= document.getElementById('progress-wrap');
+    const updatedAtEl = document.getElementById('updated-at');
+    const previewImg  = document.getElementById('preview-img');
+    const previewPh   = document.getElementById('preview-placeholder');
 
-    // Resolve draft id for exports
-    (async function() {
+    const previewURL  = "{{ preview_img_url if preview_img_url else url_for('imports_preview_image', job_id=job.id) }}";
+    const statusURL   = "{{ url_for('import_status', job_id=job.id) }}";
+
+    let imgReady = false;
+    function cacheBust(url){ const t = Date.now(); return url + (url.includes('?') ? '&' : '?') + 't=' + t; }
+
+    function showPreview(src){
+      previewImg.src = src;
+      previewImg.onload = () => {
+        imgReady = true;
+        previewImg.style.display = '';
+        if (previewPh) previewPh.style.display = 'none';
+      };
+      previewImg.onerror = () => {
+        imgReady = false;
+        previewImg.style.display = 'none';
+        if (previewPh) previewPh.style.display = '';
+      };
+    }
+
+    // initial attempt (works if the JPEG was already built)
+    showPreview(cacheBust(previewURL));
+
+    // retry the preview every 2s until it shows
+    const previewTimer = setInterval(() => {
+      if (imgReady) { clearInterval(previewTimer); return; }
+      showPreview(cacheBust(previewURL));
+    }, 2000);
+
+    // friendly timestamp
+    function fmtTime(s){
+      try{
+        const dt = new Date((s||'').replace(' ','T') + 'Z');
+        if (isNaN(dt)) return s;
+        return dt.toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}).replace(',', ' ·');
+      }catch{ return s; }
+    }
+    document.querySelectorAll('time.ts').forEach(t => {
+      const raw = t.getAttribute('datetime') || t.textContent || '';
+      t.textContent = fmtTime(raw);
+    });
+
+    // enable export links after resolving draft id (unchanged)
+    (async function resolveExports(){
       const csvBtn  = document.getElementById('export-csv');
       const jsonBtn = document.getElementById('export-json');
       const xlsxBtn = document.getElementById('export-xlsx');
-
-      function enable(el, href) {
-        if (!el) return;
-        el.href = href;
-        el.removeAttribute('aria-disabled');
-        el.title = '';
-        el.setAttribute('download', '');
-      }
-
+      function enable(el, href){ if(!el) return; el.href = href; el.removeAttribute('aria-disabled'); el.title=''; el.setAttribute('download',''); }
       try {
-        const res = await fetch("{{ url_for('imports_draft', job_id=job.id) }}", {
-          method: "GET",
-          redirect: "follow",
-          credentials: "same-origin",
-          headers: { "X-Requested-With": "fetch" }
-        });
-        const url = res.url || '';
-        const m = url.match(/\/drafts\/(\d+)\/edit\/?$/);
-        if (!m) throw new Error("Could not resolve draft id");
+        const res = await fetch("{{ url_for('imports_draft', job_id=job.id) }}", { redirect:"follow", credentials:"same-origin", headers:{ "X-Requested-With":"fetch" }});
+        const m = (res.url||'').match(/\/drafts\/(\d+)\/edit\/?$/);
+        if(!m) throw 0;
         const draftId = m[1];
         enable(csvBtn,  `/drafts/${draftId}/export.csv`);
         enable(jsonBtn, `/drafts/${draftId}/export.json`);
         enable(xlsxBtn, `/drafts/${draftId}/export.xlsx`);
-      } catch (e) {
+      } catch(e){
         if (csvBtn)  csvBtn.title  = 'Draft not ready yet';
         if (jsonBtn) jsonBtn.title = 'Draft not ready yet';
         if (xlsxBtn) xlsxBtn.title = 'Draft not ready yet';
       }
     })();
+
+    // live status poller
+    const terminal = new Set(['done','approved','published','discarded','failed','error']);
+    const pollMs = 1500;
+
+    async function pollStatus(){
+      try{
+        const r = await fetch(statusURL, { credentials: 'same-origin', headers: { 'Accept': 'application/json' }});
+        if(!r.ok) throw 0;
+        const data = await r.json();
+
+        // update pill
+        const st = String((data.status||'').toLowerCase() || '');
+        statusPill.textContent = (st ? st[0].toUpperCase()+st.slice(1) : '—');
+        statusPill.className = 'pill ' + (PILL_CLASSES[st] || 'pill-gray');
+
+        // show/hide progress bar
+        if (st === 'pending' || st === 'processing'){
+          progressWrap.style.display = 'block';
+        } else {
+          progressWrap.style.display = 'none';
+        }
+
+        // update "Updated" time if backend changed it
+        if (data.updated_at && updatedAtEl){
+          updatedAtEl.setAttribute('datetime', data.updated_at);
+          updatedAtEl.textContent = fmtTime(data.updated_at);
+        }
+
+        // when draft becomes ready, refresh preview (bust cache) once
+        if (data.draft_ready && !imgReady){
+          showPreview(cacheBust(previewURL));
+        }
+
+        // stop polling on terminal states
+        if (terminal.has(st)){
+          return; // stop polling
+        }
+      }catch(e){
+        // ignore transient errors; keep polling
+      }
+      setTimeout(pollStatus, pollMs);
+    }
+    pollStatus();
+
+        // confirms for risky actions
+    (function () {
+      const approve  = document.getElementById('approve-form');
+      const discard  = document.getElementById('discard-form');
+      const aiCommit = document.getElementById('ai-commit-form');
+
+      approve?.addEventListener('submit', (e) => {
+        if (!confirm('Approve this draft into the menu?')) e.preventDefault();
+      });
+      discard?.addEventListener('submit', (e) => {
+        if (!confirm('Discard all items from this draft?')) e.preventDefault();
+      });
+
+      if (aiCommit) {
+        aiCommit.addEventListener('submit', (e) => {
+          if (!confirm('Replace current draft items with AI-cleaned items?')) {
+            e.preventDefault();
+            return;
+          }
+          // show overlay while the server processes the AI pass and redirects
+          if (window.showProgressBar) showProgressBar(60000, 'Finalizing with AI…');
+        });
+      }
+    })();
+
   </script>
 {% endblock %}
