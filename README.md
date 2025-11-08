@@ -10,7 +10,7 @@ servline/
 portal/  # Flask portal website  
   app.py  
   requirements.txt  
-  contracts.py                      # lightweight draft schema validator (added Day 19 landmark)  
+  contracts.py                          # lightweight draft schema validator (added Day 19 landmark)  
   templates/  
     base.html  
     index.html  
@@ -158,20 +158,20 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 ### 🚀 Day 19 – UX / UI Alignment + OCR Precision  
 - Draft Editor UX polish (auto-wrapping textareas + color-coded category chips).  
 - OCR preprocessing tuned (CLAHE, denoise, unsharp, psm config, spell fixer).  
-- Template/UI alignment for **Imports**, **Import Detail**, **Drafts**, **Uploads**, and **Recycle Bin**.  
+- Template/UI alignment for Imports, Import Detail, Drafts, Uploads, and Recycle Bin.  
 - `_safe_render` helper added to prevent template-caused 500 loops.  
 - Live render verified via template debug traces.  
-- **Contract Validator added** (`portal/contracts.py`) for draft save/export schema consistency.  
+- **Contract Validator** added (`portal/contracts.py`) for draft save/export schema consistency.  
 - **AI OCR flag scaffolded** (`AI_OCR_ENABLED=false`) for next-phase integration.  
 
 ✅ **Day 19 complete — UX/UI unified, OCR refined, and API contract frozen.**  
-**Tags:** `day-19-ux`, `v19-landmark` — checkpoint before AI OCR phase.
+**Tags:** `day-19-ux`, `v19-landmark` — checkpoint before AI OCR phase.  
 
 ---
 
 ### 🚀 Day 20 – AI Heuristics Phase A + Editor Integration  
 - Introduced AI-based menu refinement endpoints:  
-  - `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
+    - `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
 - Added **“AI Commit to Draft”** button inside the Draft Editor with AJAX call and auto-reload (no JSON redirect).  
 - Centralized `TAXONOMY_SEED` for consistent category heuristics.  
 - Repaired export header quotes (CSV/JSON/XLSX downloads clean).  
@@ -179,7 +179,7 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 - Live test confirmed draft updates from AI heuristics (Phase A baseline).  
 
 ✅ **Day 20 complete — AI Heuristics Phase A operational + in-editor commit flow working.**  
-**Tags:** `day-20-heuristics-phase-a`, `v20-landmark`
+**Tags:** `day-20-heuristics-phase-a`, `v20-landmark`  
 
 ---
 
@@ -192,13 +192,30 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 - Locked `.gitignore` and file rules for new OCR structure.  
 
 ✅ **Day 21 complete — OCR rebuild framework in place, ready for Day 22 Phase builds.**  
-**Tags:** `day-21-ocr-rebuild`, `v21-landmark`
+**Tags:** `day-21-ocr-rebuild`, `v21-landmark`  
 
 ---
 
-## 🔜 Next Up — Day 22 : OCR Core Revamp (Phased Build)  
-**Phase 1:** Text block segmenter (PDF → images → text regions).  
-**Phase 2:** Line parser (price detection, item/desc stitching).  
-**Phase 3:** Category inference + two-column merge logic.  
-**Phase 4:** Confidence weighting + structured JSON assembly.  
-**Phase 5:** End-to-end test against sample menus for accuracy parity with OnlineOCR.  
+### 🚀 Day 22 – Phase 2 pt. 5 · Draft Editor Polish & AI Cleanup Loop Finalization  
+- ✅ **Phase 2 pt. 1:** OCR precision & preprocessing (grayscale, border, contrast, unsharp mask).  
+- ✅ **Phase 2 pt. 2:** Import view + AI Commit endpoint (JSON/CSV exports + status sync).  
+- ✅ **Phase 2 pt. 3:** Draft Editor ↔ Import AI Commit link (flow from job → draft → editor).  
+- ✅ **Phase 2 pt. 4:** Import view UI buttons + status pills for processing/finalized.  
+- ✅ **Phase 2 pt. 4½:** Draft Editor rename → “Finalize with AI Cleanup” + live status pill parity.  
+- ✅ **Phase 2 pt. 5:** Backend AI cleanup loop + status feedback + UI polish (export visible, tooltip, outline rebuild).  
+
+**Highlights:**  
+- Status-pill parity in Draft Editor (mirrors Import view).  
+- Live Finalize button UX (“Running…” → “Refreshing…”).  
+- “Clean & Refine” combo flow (join lines → AI cleanup → auto reload).  
+- Export menu z-index fix + “Export Visible as CSV.”  
+- Confidence heat-map + provenance tooltip with OCR Debug / AI Preview links.  
+- Outline rebuild on edit + price normalization + autosave heartbeat.  
+
+✅ **Day 22 complete — Phase 2 fully finished.**  
+**Tags:** `day-22-phase-2-pt-5`, `phase-2-complete`  
+
+---
+
+## 🔭 Next Up — Day 23 (Phase 3 pt. 1)  
+**Focus:** Text-Block Segmentation & Layout Parser foundation — group raw OCR lines into logical menu items for machine learning inference.  
