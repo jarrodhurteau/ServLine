@@ -1,4 +1,4 @@
-# portal/app.py
+# portal/app.py 
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
     session, send_from_directory, flash, make_response, send_file        # ← added send_file
@@ -1902,7 +1902,7 @@ def _is_image(name: str) -> bool:
 
 @app.get("/drafts/<int:job_id>")
 @login_required
-def draft_review_page(job_id):
+def draft_review_page(job_id: int):
     draft = _load_draft_json_by_job(job_id)
     with db_connect() as conn:
         restaurants = conn.execute(
@@ -1914,7 +1914,7 @@ def draft_review_page(job_id):
 
 @app.post("/drafts/<int:job_id>/publish")
 @login_required
-def publish_draft(job_id):
+def publish_draft(job_id: int):
     draft = _load_draft_json_by_job(job_id)
     restaurant_id = request.form.get("restaurant_id")
     menu_name = (request.form.get("menu_name") or "").strip() or f"Imported {datetime.utcnow().date()}"
@@ -2016,18 +2016,60 @@ def draft_editor(draft_id: int):
         restaurants=restaurants,
     )
 
-# --- AI Cleanup route ---
+# --- NEW: Draft status probe for polling ---
+@app.get("/drafts/<int:draft_id>/status")
+@login_required
+def draft_status(draft_id: int):
+    _require_drafts_storage()
+    d = drafts_store.get_draft(draft_id) or {}
+    status = (d.get("status") or "editing")
+    return jsonify({"ok": True, "status": status, "draft_id": draft_id})
+
+# --- AI Cleanup route (now supports AJAX JSON or redirect, with status flips) ---
 @app.post("/drafts/<int:draft_id>/cleanup")
 @login_required
 def cleanup_draft(draft_id: int):
     from storage.ai_cleanup import apply_ai_cleanup
+    _require_drafts_storage()
+
+    # Detect redirect vs JSON
+    ct = (request.headers.get("Content-Type") or "").lower()
+    is_form_post = ct.startswith("application/x-www-form-urlencoded") or ct.startswith("multipart/form-data")
+    wants_redirect = (
+        request.args.get("redirect") == "1"
+        or (request.form.get("redirect") == "1" if is_form_post else False)
+        or is_form_post
+        or (request.headers.get("X-Requested-With") == "fetch" and "text/html" in (request.headers.get("Accept") or ""))
+    )
+
+    # Flip to processing for polling UIs
+    try:
+        drafts_store.save_draft_metadata(int(draft_id), status="processing")
+    except Exception:
+        pass
+
     try:
         updated = apply_ai_cleanup(int(draft_id))
-        flash(f"AI cleanup complete: {updated} item(s) updated.", "success")
+        try:
+            drafts_store.save_draft_metadata(int(draft_id), status="finalized")
+        except Exception:
+            pass
+
+        if wants_redirect:
+            flash(f"AI cleanup complete: {updated} item(s) updated.", "success")
+            return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+        return jsonify({"ok": True, "updated": int(updated), "status": "finalized"}), 200
+
     except Exception as e:
         app.logger.exception("AI cleanup failed")
-        flash(f"AI cleanup failed: {e}", "error")
-    return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+        try:
+            drafts_store.save_draft_metadata(int(draft_id), status="editing")
+        except Exception:
+            pass
+        if wants_redirect:
+            flash(f"AI cleanup failed: {e}", "error")
+            return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+        return jsonify({"ok": False, "error": str(e), "status": "editing"}), 500
 
 
 @app.post("/drafts/<int:draft_id>/save")

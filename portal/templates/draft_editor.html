@@ -134,7 +134,17 @@
           {% endif %}
           <span class="chip"><span class="label">Last saved</span><span id="last-saved" class="value">{{ draft.updated_at }}</span></span>
 
-          <span class="status-pill">editing</span>
+          {% set s = (draft.status or 'editing') %}
+          <span class="pill
+            {% if s=='editing' %}pill-blue
+            {% elif s in ['review','reviewing'] %}pill-yellow
+            {% elif s in ['finalizing','finalize'] %}pill-purple
+            {% elif s in ['published','complete','approved'] %}pill-green
+            {% elif s in ['failed','error'] %}pill-red
+            {% else %}pill-gray{% endif %}">
+            {{ s }}
+          </span>
+
           <input id="draft-title" class="title-input" value="{{ draft.title|e }}" {% if draft.status != 'editing' %}disabled{% endif %} />
           <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
 
