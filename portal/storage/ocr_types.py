@@ -1,6 +1,7 @@
 """
-ServLine OCR Types — extended for Phase 3 segmentation
-Defines lightweight TypedDicts for bbox, words, lines, blocks, and new text-block groupings.
+ServLine OCR Types — Phase 3 (Segmentation + Category Inference)
+Defines TypedDicts for bbox, words, lines, blocks, and segmented text blocks with
+optional category metadata for overlay/debug UI.
 """
 
 from __future__ import annotations
@@ -45,32 +46,42 @@ class Block(TypedDict):
     lines: List[Line]
     # Optional metadata for Phase 2 and beyond
     category: NotRequired[str]
-    rule_trace: NotRequired[List[str]]
-    confidence: NotRequired[float]  # 0.0–1.0
+    rule_trace: NotRequired[str]           # string trace (e.g., "rule[...]|ml[...]")
+    confidence: NotRequired[float]         # 0.0–1.0
 
 
 # ────────────────────────────────────────────────
-# 🧠 NEW: TextBlock and OCRBlock for Phase 3 segmentation
+# 🧠 TextBlock and OCRBlock for Phase 3 segmentation
 # ────────────────────────────────────────────────
 
 class TextBlock(TypedDict):
     """
-    Represents a merged logical region of related lines (item name + description + price).
+    Represents a merged logical region of related lines (e.g., header or item cluster).
     """
     bbox: BBox
     lines: List[Line]
     merged_text: str
-    block_type: NotRequired[str]  # "item" | "price" | "header" | None
+    block_type: NotRequired[str]           # "item" | "price" | "header" | "section" | etc.
+    # NEW in Phase 3 pt.2 (optional fields populated by category inference):
+    id: NotRequired[str]                   # stable identifier if assigned upstream
+    category: NotRequired[Optional[str]]   # canonical label or None
+    category_confidence: NotRequired[Optional[float]]  # 0.0–1.0 or None
+    rule_trace: NotRequired[Optional[str]] # explanation string (rules/ML fusion)
 
 
 class OCRBlock(TypedDict):
     """
-    Optional normalized variant used in OCR pipeline results and previews.
+    Compact block representation used in pipeline results and preview overlays.
     """
-    bbox: List[int]  # [x1, y1, x2, y2]
+    bbox: List[int]                        # [x1, y1, x2, y2]
     merged_text: str
     block_type: Optional[str]
-    lines: List[Dict[str, object]]  # flattened line representation
+    lines: List[Dict[str, object]]         # flattened line representation
+    # NEW: mirrored category info for debug overlay coloring/tooltips
+    id: NotRequired[str]
+    category: NotRequired[Optional[str]]
+    category_confidence: NotRequired[Optional[float]]
+    rule_trace: NotRequired[Optional[str]]
 
 
 # ────────────────────────────────────────────────

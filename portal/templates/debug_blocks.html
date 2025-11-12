@@ -7,47 +7,76 @@
   .debug-img  { display: block; max-width: 100%; height: auto; }
   .debug-svg  { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
-  /* Color scheme for overlay types */
+  /* Overlay colors (type-based) */
   .b-header { stroke: #7c3aed; fill: rgba(124,58,237,.15); }
   .b-item   { stroke: #2563eb; fill: rgba(37,99,235,.12); }
   .b-price  { stroke: #059669; fill: rgba(5,150,105,.15); }
   .b-none   { stroke: #6b7280; fill: rgba(107,114,128,.10); }
 
-  .label { font: 12px/1.2 ui-sans-serif, system-ui; fill: #111827; }
+  .label { font: 12px/1.2 ui-sans-serif, system-ui; fill: #111827; paint-order: stroke; stroke: #fff; stroke-width: 2px; }
+
+  /* Pills & legend */
+  .pill { display:inline-flex; align-items:center; gap:.4rem; padding:.25rem .55rem; border-radius:999px; font-weight:600; font-size:.80rem; border:1px solid transparent; }
+  .pill-gray  { background:#f3f4f6; color:#111827; border-color:#e5e7eb; }
+  .pill-green { background:#dcfce7; color:#065f46; border-color:#bbf7d0; }
+  .pill-red   { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
+  .pill-blue  { background:#dbeafe; color:#1e3a8a; border-color:#bfdbfe; }
+  .legend { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .legend span { display:inline-flex; align-items:center; gap:.35rem; font-size:.85rem; color:#374151; }
+  .key { width:14px; height:14px; border-radius:3px; display:inline-block; }
+  .key-header { background: rgba(124,58,237,.5); border:2px solid #7c3aed; }
+  .key-item   { background: rgba(37,99,235,.4); border:2px solid #2563eb; }
+  .key-price  { background: rgba(5,150,105,.45); border:2px solid #059669; }
+  .key-none   { background: rgba(107,114,128,.35); border:2px solid #6b7280; }
+
+  /* Simple tooltip */
+  .tip { position:absolute; z-index:30; background:#111827; color:#f9fafb; font-size:.80rem; padding:.35rem .5rem; border-radius:.5rem; pointer-events:none; max-width:360px; white-space:pre-wrap; line-height:1.25; display:none; }
 </style>
 
 <div class="p-6">
-  <h1 class="text-2xl font-semibold mb-3">Text-Block Segmentation Debug</h1>
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-semibold">Text-Block Segmentation Debug</h1>
+    <div class="flex items-center gap-2">
+      <a href="{{ back_url }}" class="pill pill-blue" title="Back to import">← Back</a>
+      <form action="{{ rotate_action_url }}" method="post" class="inline">
+        <input type="hidden" name="redirect" value="1">
+        <button class="pill pill-gray" name="dir" value="left" title="Rotate left 90°">⟲ Rotate</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-2 mb-3">
+    <span id="pill-worker" class="pill pill-gray" title="OCR worker / columns mode">Worker: …</span>
+    <span id="pill-model" class="pill pill-gray" style="display:none;" title="Category model status">Model: …</span>
+  </div>
+
   <p class="text-sm text-gray-600 mb-4">
-    Bounding boxes colored by block type (<span style="color:#7c3aed;">headers</span>,
-    <span style="color:#2563eb;">items</span>,
-    <span style="color:#059669;">prices</span>).
+    Bounding boxes colored by block type. Labels prefer the inferred <em>category</em> (if present), otherwise the raw <em>block_type</em>.
   </p>
 
-  <div class="debug-wrap">
-    <img id="dbg-img" src="{{ image_url }}" alt="Debug Image" class="debug-img">
+  <div class="legend mb-4">
+    <span><i class="key key-header"></i> header</span>
+    <span><i class="key key-item"></i> item</span>
+    <span><i class="key key-price"></i> price</span>
+    <span><i class="key key-none"></i> other</span>
+  </div>
+
+  <div class="debug-wrap" id="wrap">
+    <img id="dbg-img" src="{{ preview_img_url }}" alt="Debug Image" class="debug-img">
     <svg id="dbg-svg" class="debug-svg" aria-label="Overlay"></svg>
+    <div id="tooltip" class="tip" role="tooltip"></div>
   </div>
 </div>
 
-<!-- Safer way to pass server data into JS without confusing the linter -->
-<script id="blocks-json" type="application/json">{{ blocks|tojson }}</script>
-
 <script>
 (function() {
-  // Parse block data from the JSON script tag
-  const dataEl = document.getElementById('blocks-json');
-  /** @type {Array<{bbox:[number,number,number,number], block_type?:string}>} */
-  let blocksData = [];
-  try {
-    blocksData = JSON.parse((dataEl && dataEl.textContent) ? dataEl.textContent : '[]') || [];
-  } catch (e) {
-    console.warn('Failed to parse blocks JSON:', e);
-    blocksData = [];
-  }
-
-  const img = document.getElementById('dbg-img');
   const svg = document.getElementById('dbg-svg');
+  const img = document.getElementById('dbg-img');
+  const tip = document.getElementById('tooltip');
+  const pillWorker = document.getElementById('pill-worker');
+  const pillModel  = document.getElementById('pill-model');
+
+  const blocksFeed = "{{ blocks_json_url }}";
 
   function cls(type) {
     if (type === 'header') return 'b-header';
@@ -56,16 +85,36 @@
     return 'b-none';
   }
 
-  function render() {
+  function labelFor(b) {
+    const cat = (b.category || '').trim();
+    if (cat) return cat;
+    return (b.block_type || 'none');
+  }
+
+  function fmtConfidence(v) {
+    if (v == null) return '';
+    const pct = typeof v === 'number' && v <= 1 ? Math.round(v * 100) : Math.round(Number(v));
+    if (isFinite(pct)) return ` (${pct}%)`;
+    return '';
+  }
+
+  function showTip(html, x, y) {
+    tip.style.display = 'block';
+    tip.style.left = (x + 12) + 'px';
+    tip.style.top  = (y + 12) + 'px';
+    tip.innerHTML = html;
+  }
+  function hideTip() { tip.style.display = 'none'; }
+
+  function render(previewBlocks) {
     const w = img.naturalWidth || img.clientWidth || 1;
     const h = img.naturalHeight || img.clientHeight || 1;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-    blocksData.forEach((b) => {
+    previewBlocks.forEach((b) => {
       if (!b || !Array.isArray(b.bbox) || b.bbox.length !== 4) return;
       const [x1, y1, x2, y2] = b.bbox;
-
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 
       const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -77,20 +126,87 @@
       r.setAttribute('stroke-width', '2');
       g.appendChild(r);
 
-      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.textContent = b.block_type || 'none';
-      label.setAttribute('x', String(x1 + 4));
-      label.setAttribute('y', String(y1 + 14));
-      label.setAttribute('class', 'label');
-      g.appendChild(label);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.textContent = labelFor(b);
+      t.setAttribute('x', String(x1 + 4));
+      t.setAttribute('y', String(y1 + 14));
+      t.setAttribute('class', 'label');
+      g.appendChild(t);
+
+      // Hover tooltip (category, confidence, rule_trace)
+      g.style.pointerEvents = 'all';
+      g.addEventListener('mousemove', (ev) => {
+        const conf = b.category_confidence ?? b.confidence;
+        const trace = Array.isArray(b.rule_trace) ? b.rule_trace.join(' • ') : (b.rule_trace || '');
+        const lines = [
+          `<strong>${(b.category || b.block_type || 'none')}</strong>${fmtConfidence(conf)}`,
+          b.merged_text ? `<div style="opacity:.85; max-width:340px;">${escapeHtml(b.merged_text)}</div>` : '',
+          trace ? `<div style="opacity:.7;">${escapeHtml(trace)}</div>` : ''
+        ].filter(Boolean).join('<hr style="border:none;border-top:1px solid #374151;opacity:.3;margin:.35rem 0;">');
+        showTip(lines, ev.clientX, ev.clientY);
+      });
+      g.addEventListener('mouseleave', hideTip);
 
       svg.appendChild(g);
     });
   }
 
-  if (img.complete) render();
-  else img.addEventListener('load', render);
-  window.addEventListener('resize', render);
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  async function loadBlocks() {
+    try {
+      const res = await fetch(blocksFeed, {headers: {'Accept':'application/json'}});
+      if (!res.ok) throw new Error('blocks fetch failed: ' + res.status);
+      const js = await res.json();
+      const preview = js.preview_blocks || js.blocks || [];
+      if (img.complete) render(preview);
+      else img.addEventListener('load', () => render(preview), { once: true });
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      const res = await fetch('/ocr/health', {headers:{'Accept':'application/json'}});
+      if (!res.ok) throw new Error('health fetch failed');
+      const h = await res.json();
+
+      // Worker/columns pill
+      const mode = (((h || {}).columns || {}).mode) || 'unknown';
+      const workerVer = (h || {}).ocr_worker_version || '';
+      pillWorker.textContent = `Worker: ${mode}${workerVer ? ` · v${workerVer}` : ''}`;
+      pillWorker.className = 'pill ' + (mode === 'active' ? 'pill-green' : (mode === 'fallback' ? 'pill-gray' : 'pill-red'));
+
+      // Optional model pill (auto-hide if not exposed yet)
+      // Expecting structure like: { ml: { category_model: { exists, algo, labels } } }
+      const cm = (((h || {}).ml || {}).category_model) || null;
+      if (cm && (typeof cm.exists === 'boolean')) {
+        pillModel.style.display = 'inline-flex';
+        const ok = !!cm.exists;
+        const algo = cm.algo ? String(cm.algo) : 'unknown';
+        const labelsCount = Array.isArray(cm.labels) ? cm.labels.length : (cm.labels_count || null);
+        pillModel.textContent = ok
+          ? `Model: OK${labelsCount != null ? ` · ${labelsCount} labels` : ''}`
+          : 'Model: Missing';
+        pillModel.title = ok ? `algo: ${algo}${labelsCount!=null?`, labels: ${labelsCount}`:''}` : 'No model file detected';
+        pillModel.className = 'pill ' + (ok ? 'pill-green' : 'pill-red');
+      } else {
+        // Nothing exposed yet — keep hidden
+        pillModel.style.display = 'none';
+      }
+    } catch (e) {
+      pillWorker.textContent = 'Worker: unknown';
+      pillWorker.className = 'pill pill-red';
+      pillModel.style.display = 'none';
+    }
+  }
+
+  loadBlocks();
+  loadHealth();
+  window.addEventListener('resize', () => { /* re-fetch not needed; SVG scales via viewBox */ });
 })();
 </script>
 {% endblock %}

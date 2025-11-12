@@ -1615,7 +1615,6 @@ def imports_delete_job(job_id):
         conn.commit()
     flash(f"Job #{job_id} moved to deleted.", "success")
     return redirect(url_for("imports"))
-
 # ------------------------
 # Serving uploads (secure; block .trash)
 # ------------------------
@@ -2821,7 +2820,6 @@ except Exception:
     from routes.core import core_bp  # fallback if relative import fails
 
 app.register_blueprint(core_bp)
-
 # ------------------------
 # Run
 # ------------------------
