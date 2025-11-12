@@ -119,7 +119,7 @@ New tables + `/drafts` list, full editor with search/add/duplicate/delete, auto-
 ---
 
 ### 🚀 Day 13 – OCR Online → Draft → Approve  
-Full OCR integration (Tesseract + Poppler), import→draft→approve workflow, CSV/JSON/XLSX export.  
+Full OCR integration (Tesseract + Poppler), import → draft → approve workflow, CSV/JSON/XLSX export.  
 ✅ **Day 13 complete — upload → OCR → draft → approve works end-to-end.**
 
 ---
@@ -171,7 +171,7 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 
 ### 🚀 Day 20 – AI Heuristics Phase A + Editor Integration  
 - Introduced AI-based menu refinement endpoints:  
-    - `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
+   `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
 - Added **“AI Commit to Draft”** button inside the Draft Editor with AJAX call and auto-reload (no JSON redirect).  
 - Centralized `TAXONOMY_SEED` for consistent category heuristics.  
 - Repaired export header quotes (CSV/JSON/XLSX downloads clean).  
@@ -213,9 +213,31 @@ Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).
 - Outline rebuild on edit + price normalization + autosave heartbeat.  
 
 ✅ **Day 22 complete — Phase 2 fully finished.**  
-**Tags:** `day-22-phase-2-pt-5`, `phase-2-complete`  
+**Tags:** `day-22-phase-2-pt-5`, `phase-2-complete`
+ 
+---
+
+### 🚀 Day 23 – Phase 3 pts 1-2 · Rotate → Preview → AI Finalize → Edit  
+- Added rotatable preview (`/imports/<id>/rotate`) with JPEG cache update.  
+- Implemented live status poll (`/api/menus/import/<id>/status`) + UI pill refresh.  
+- `AI Preview` (JSON) and `Finalize with AI Cleanup` flows redirect directly to Draft Editor.  
+- Verified Fix Descriptions, Exports (CSV/JSON/XLSX), and Publish Now paths.  
+- All Phase 3 pt 1–2 functional tests passed end-to-end.  
+
+✅ **Day 23 complete — Phase 3 pts 1–2 finished and stable.**  
+**Tags:** `day-23-phase-3-pt-2`, `phase-3-rotate-preview-ai-finalize`  
 
 ---
 
-## 🔭 Next Up — Day 23 (Phase 3 pt. 1)  
-**Focus:** Text-Block Segmentation & Layout Parser foundation — group raw OCR lines into logical menu items for machine learning inference.  
+## 🔭 Next Up — Phase 3 (Days 24 → 26)  
+
+| Day | Focus | Key Deliverables |
+|------|--------|----------------|
+| **Day 24 – Phase 3 pts 3–4** | 🧩 **Category Inference + AI Cleanup Rev 2** | Add `category_infer.py` and integrate into `ai_cleanup`. Implement multi-column merge logic for OCR results. Improve context-aware name/description repair and price normalization. Test auto-categorized two-column menus. |
+| **Day 25 – Phase 3 pts 5–6a** | 🔥 **Confidence Heat-Map + UI Polish Pass** | Add visual confidence overlay (`/debug/blocks/<id>`) and Draft Editor threshold slider. Polish buttons/text, update README screenshots. |
+| **Day 26 – Phase 3 pt 6b** | 🏁 **Final QA + Docs + Tagging** | Full regression test (all flows from upload → publish), final README/docs, and tag `phase-3-complete`. |
+
+---
+
+✅ With Day 23 complete, the system now runs full “Rotate → Preview → AI Finalize → Edit” cycles.  
+Next milestone — **Day 24: Category Inference + AI Cleanup Rev 2**.
