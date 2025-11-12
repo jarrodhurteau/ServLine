@@ -18,7 +18,7 @@ import re
 import glob
 import math
 import io
-from typing import List, Optional, Tuple, Iterable, Any, TYPE_CHECKING
+from typing import List, Optional, Tuple, Iterable, Any, TYPE_CHECKING, Dict
 
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 from pdf2image import convert_from_path, convert_from_bytes
@@ -40,6 +40,13 @@ try:
     from numpy.typing import NDArray  # type: ignore
 except Exception:  # pragma: no cover
     NDArray = Any  # type: ignore
+
+# Phase 3 types
+try:
+    from .ocr_types import BBox, Line, TextBlock  # TypedDicts
+except Exception:
+    # Soft fallback if local import style differs during IDE refactors
+    from storage.ocr_types import BBox, Line, TextBlock  # type: ignore
 
 
 # =============================
@@ -443,3 +450,152 @@ def median(values: List[float]) -> float:
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+# =============================
+# Phase 3 — Text-Block Segmentation
+# =============================
+
+def bbox_to_x1y1x2y2(b: BBox) -> Tuple[int, int, int, int]:
+    """Convert {x,y,w,h} → (x1,y1,x2,y2)."""
+    x1, y1 = int(b["x"]), int(b["y"])
+    x2, y2 = x1 + int(b["w"]), y1 + int(b["h"])
+    return (x1, y1, x2, y2)
+
+
+def _xyxy_to_bbox(x1: int, y1: int, x2: int, y2: int) -> BBox:
+    """Convert (x1,y1,x2,y2) → {x,y,w,h} with non-negative w/h."""
+    return {"x": int(x1), "y": int(y1), "w": max(0, int(x2 - x1)), "h": max(0, int(y2 - y1))}
+
+
+def _expand_xyxy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    return (min(ax1, bx1), min(ay1, by1), max(ax2, bx2), max(ay2, by2))
+
+
+def _vert_overlap_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> int:
+    """Return vertical overlap in pixels for two XYXY boxes."""
+    top = max(a[1], b[1])
+    bottom = min(a[3], b[3])
+    return max(0, bottom - top)
+
+
+def _horiz_gap_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> int:
+    """Return horizontal gap in pixels (0 if overlapping)."""
+    if b[0] > a[2]:
+        return b[0] - a[2]
+    if a[0] > b[2]:
+        return a[0] - b[2]
+    return 0
+
+
+def _rough_align_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int], tol_px: int) -> bool:
+    """Left/right edge rough alignment within tolerance."""
+    left_aligned = abs(a[0] - b[0]) <= tol_px
+    right_aligned = abs(a[2] - b[2]) <= tol_px
+    return left_aligned or right_aligned
+
+
+def _merge_lines_text(lines: List[Line]) -> str:
+    """Join line texts top→bottom with newlines (preserve line breaks for parser)."""
+    out: List[str] = []
+    for ln in sorted(lines, key=lambda l: (l["bbox"]["y"], l["bbox"]["x"])):
+        t = (ln.get("text") or "").rstrip()
+        if t:
+            out.append(t)
+    return "\n".join(out)
+
+
+def _guess_block_type(lines: List[Line]) -> Optional[str]:
+    """Light heuristic: all-caps short → header; many digits → price; else item."""
+    merged = _merge_lines_text(lines)
+    m = merged.replace("\n", " ").strip()
+    if not m:
+        return None
+    if m.isupper() and len(m) <= 40:
+        return "header"
+    digits = sum(ch.isdigit() for ch in m)
+    if digits >= max(4, len(m) // 3):
+        return "price"
+    return "item"
+
+
+def group_text_blocks(
+    lines: List[Line],
+    *,
+    align_tol_px: int = 14,
+    vert_overlap_px: int = 8,
+    horiz_gap_px: int = 24,
+) -> List[TextBlock]:
+    """
+    Cluster OCR lines into logical text blocks using simple geometric cues:
+    - vertical overlap + (small horizontal gap OR rough left/right alignment)
+    - merge bbox and maintain line order
+
+    Returns a list of TextBlock dicts: {bbox:{x,y,w,h}, lines:[...], merged_text:str, block_type?:str}
+    """
+    if not lines:
+        return []
+
+    # Sort stable top→bottom, then left→right
+    sorted_lines = sorted(lines, key=lambda l: (l["bbox"]["y"], l["bbox"]["x"]))
+
+    # Each block stores: xyxy bbox and line list; we convert back to {x,y,w,h} later.
+    blocks_xy: List[Tuple[Tuple[int, int, int, int], List[Line]]] = []
+
+    for ln in sorted_lines:
+        lb = bbox_to_x1y1x2y2(ln["bbox"])
+        placed = False
+        for i, (bb, lst) in enumerate(blocks_xy):
+            v_overlap = _vert_overlap_xy(bb, lb)
+            h_gap = _horiz_gap_xy(bb, lb)
+            if v_overlap >= vert_overlap_px and (h_gap <= horiz_gap_px or _rough_align_xy(bb, lb, align_tol_px)):
+                # append to this block
+                lst.append(ln)
+                blocks_xy[i] = (_expand_xyxy(bb, lb), lst)
+                placed = True
+                break
+        if not placed:
+            blocks_xy.append((lb, [ln]))
+
+    out: List[TextBlock] = []
+    for bb, lst in blocks_xy:
+        lst.sort(key=lambda l: (l["bbox"]["y"], l["bbox"]["x"]))
+        merged = _merge_lines_text(lst)
+        btype = _guess_block_type(lst)
+        out.append({
+            "bbox": _xyxy_to_bbox(*bb),
+            "lines": lst,
+            "merged_text": merged,
+            "block_type": btype,  # optional
+        })
+    return out
+
+
+def blocks_for_preview(blocks: List[TextBlock]) -> List[Dict[str, object]]:
+    """
+    Convert TextBlock list to compact preview-friendly dicts:
+    { "bbox":[x1,y1,x2,y2], "merged_text": "...", "block_type": "...", "lines":[{text,bbox,confidence}] }
+    """
+    preview: List[Dict[str, object]] = []
+    for b in blocks:
+        x1, y1, x2, y2 = bbox_to_x1y1x2y2(b["bbox"])
+        p_lines: List[Dict[str, object]] = []
+        for ln in b["lines"]:
+            lb = ln["bbox"]
+            p_lines.append({
+                "text": ln.get("text", ""),
+                "bbox": [lb["x"], lb["y"], lb["x"] + lb["w"], lb["y"] + lb["h"]],
+                "confidence": float(  # Line may not carry explicit conf; derive avg from words if present
+                    (sum(w.get("conf", 0.0) for w in (ln.get("words") or [])) / max(1, len(ln.get("words") or [])))
+                    if ln.get("words") else 0.0
+                ),
+            })
+        preview.append({
+            "bbox": [x1, y1, x2, y2],
+            "merged_text": b.get("merged_text", ""),
+            "block_type": b.get("block_type"),
+            "lines": p_lines,
+        })
+    return preview

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Debug · Text-Block Segmentation{% endblock %}
+
+{% block content %}
+<style>
+  .debug-wrap { position: relative; display: inline-block; }
+  .debug-img  { display: block; max-width: 100%; height: auto; }
+  .debug-svg  { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* Color scheme for overlay types */
+  .b-header { stroke: #7c3aed; fill: rgba(124,58,237,.15); }
+  .b-item   { stroke: #2563eb; fill: rgba(37,99,235,.12); }
+  .b-price  { stroke: #059669; fill: rgba(5,150,105,.15); }
+  .b-none   { stroke: #6b7280; fill: rgba(107,114,128,.10); }
+
+  .label { font: 12px/1.2 ui-sans-serif, system-ui; fill: #111827; }
+</style>
+
+<div class="p-6">
+  <h1 class="text-2xl font-semibold mb-3">Text-Block Segmentation Debug</h1>
+  <p class="text-sm text-gray-600 mb-4">
+    Bounding boxes colored by block type (<span style="color:#7c3aed;">headers</span>,
+    <span style="color:#2563eb;">items</span>,
+    <span style="color:#059669;">prices</span>).
+  </p>
+
+  <div class="debug-wrap">
+    <img id="dbg-img" src="{{ image_url }}" alt="Debug Image" class="debug-img">
+    <svg id="dbg-svg" class="debug-svg" aria-label="Overlay"></svg>
+  </div>
+</div>
+
+<!-- Safer way to pass server data into JS without confusing the linter -->
+<script id="blocks-json" type="application/json">{{ blocks|tojson }}</script>
+
+<script>
+(function() {
+  // Parse block data from the JSON script tag
+  const dataEl = document.getElementById('blocks-json');
+  /** @type {Array<{bbox:[number,number,number,number], block_type?:string}>} */
+  let blocksData = [];
+  try {
+    blocksData = JSON.parse((dataEl && dataEl.textContent) ? dataEl.textContent : '[]') || [];
+  } catch (e) {
+    console.warn('Failed to parse blocks JSON:', e);
+    blocksData = [];
+  }
+
+  const img = document.getElementById('dbg-img');
+  const svg = document.getElementById('dbg-svg');
+
+  function cls(type) {
+    if (type === 'header') return 'b-header';
+    if (type === 'price')  return 'b-price';
+    if (type === 'item')   return 'b-item';
+    return 'b-none';
+  }
+
+  function render() {
+    const w = img.naturalWidth || img.clientWidth || 1;
+    const h = img.naturalHeight || img.clientHeight || 1;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    blocksData.forEach((b) => {
+      if (!b || !Array.isArray(b.bbox) || b.bbox.length !== 4) return;
+      const [x1, y1, x2, y2] = b.bbox;
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+
+      const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', String(x1));
+      r.setAttribute('y', String(y1));
+      r.setAttribute('width', String(Math.max(0, x2 - x1)));
+      r.setAttribute('height', String(Math.max(0, y2 - y1)));
+      r.setAttribute('class', cls(b.block_type));
+      r.setAttribute('stroke-width', '2');
+      g.appendChild(r);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.textContent = b.block_type || 'none';
+      label.setAttribute('x', String(x1 + 4));
+      label.setAttribute('y', String(y1 + 14));
+      label.setAttribute('class', 'label');
+      g.appendChild(label);
+
+      svg.appendChild(g);
+    });
+  }
+
+  if (img.complete) render();
+  else img.addEventListener('load', render);
+  window.addEventListener('resize', render);
+})();
+</script>
+{% endblock %}

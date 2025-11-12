@@ -1,12 +1,16 @@
 # storage/ocr_pipeline.py
 """
-ServLine OCR Pipeline — Phase 2 (High-Clarity OCR)
+ServLine OCR Pipeline — Phase 3 (Segmentation Kickoff)
 
-Upgrades from Phase 1.5:
+Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
 - Apply preprocess_page() → CLAHE + adaptive threshold + denoise + unsharp + deskew.
 - Split two-column layouts with split_columns().
-- Keep all existing gating, grouping, and metadata logic intact.
+- Word→Line→Block grouping for legacy consumers.
+
+NEW in Phase 3 pt.1:
+- Text-block segmentation via ocr_utils.group_text_blocks()
+- Preview-friendly blocks (xyxy + merged_text + block_type) for debug overlay
 """
 
 from __future__ import annotations
@@ -18,8 +22,7 @@ import pytesseract
 from pytesseract import image_to_osd
 
 from . import ocr_utils
-from .ocr_types import Block, Line, Word, BBox
-
+from .ocr_types import Block, Line, Word, BBox  # TypedDicts; Phase-2 compatibility
 
 # -----------------------------
 # Tunable heuristics
@@ -116,7 +119,7 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
 
 
 # -----------------------------
-# Grouping
+# Grouping (Phase 2 legacy)
 # -----------------------------
 
 def _group_words_to_lines(words: List[Word]) -> List[Line]:
@@ -229,7 +232,7 @@ def segment_document(
     pdf_bytes: Optional[bytes] = None,
     dpi: int = DEFAULT_DPI,
 ) -> Dict[str, Any]:
-    """Render a PDF or image file, run high-clarity OCR, and return blocks."""
+    """Render a PDF or image file, run high-clarity OCR, and return blocks + Phase-3 text blocks."""
     if not pdf_path and not pdf_bytes:
         raise ValueError("Either pdf_path or pdf_bytes must be provided.")
 
@@ -240,7 +243,10 @@ def segment_document(
         pages = ocr_utils.pdf_to_images_from_bytes(pdf_bytes, dpi=dpi)
         source = "bytes"
 
-    all_blocks: List[Block] = []
+    all_blocks: List[Block] = []            # Phase-2 block groups (legacy)
+    all_text_blocks: List[Dict[str, Any]] = []   # Phase-3 raw text blocks ({bbox{x,y,w,h}, lines, merged_text, block_type})
+    all_preview_blocks: List[Dict[str, Any]] = []  # Phase-3 preview blocks ({bbox[x1..], merged_text, block_type, lines[], page, column})
+
     page_index = 1
 
     for im in pages:
@@ -272,6 +278,8 @@ def segment_document(
                 if w:
                     words.append(w)
             words.sort(key=lambda ww: (ww["bbox"]["y"], ww["bbox"]["x"]))
+
+            # Phase-2 legacy lines/blocks
             lines = _group_words_to_lines(words)
             blocks = _group_lines_to_blocks(lines)
             for b in blocks:
@@ -279,19 +287,32 @@ def segment_document(
                 b.setdefault("meta", {})["column"] = col_idx
             all_blocks.extend(blocks)
 
+            # Phase-3: text-block segmentation
+            tblocks = ocr_utils.group_text_blocks(lines)
+            all_text_blocks.extend(tblocks)
+
+            # Compact preview records (xyxy coords), annotate page/column for overlay UI
+            pblocks = ocr_utils.blocks_for_preview(tblocks)
+            for pb in pblocks:
+                pb["page"] = page_index
+                pb["column"] = col_idx
+            all_preview_blocks.extend(pblocks)
+
         page_index += 1
 
     segmented: Dict[str, Any] = {
         "pages": len(pages),
         "dpi": dpi,
-        "blocks": all_blocks,
+        "blocks": all_blocks,                # Phase-2 compatible
+        "text_blocks": all_text_blocks,      # Phase-3 raw TextBlock dicts
+        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records
         "meta": {
             "source": source,
             "engine": "tesseract",
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity",
+            "mode": "high_clarity+segmentation",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }
@@ -300,4 +321,4 @@ def segment_document(
 
 if __name__ == "__main__":
     sample = segment_document(pdf_path="fixtures/sample_menus/pizza_real.pdf")
-    print(list(sample.keys()), "Blocks:", len(sample["blocks"]))
+    print(list(sample.keys()), "Blocks:", len(sample["blocks"]), "TextBlocks:", len(sample.get("text_blocks", [])))

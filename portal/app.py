@@ -14,11 +14,10 @@ import threading
 import json
 import shutil
 from datetime import datetime
-from typing import Optional, Iterable, Tuple, List
+from typing import Optional, Iterable, Tuple, List, Dict, Any
 import hashlib  # <-- added for cat_hue filter
 import time     # <-- NEW: for gentle polling after upload
 from storage import drafts
-
 
 # --- Forward decls for type checkers (real implementations appear later) ---
 def _ocr_image_to_text(img_path: Path) -> str: ...
@@ -359,7 +358,6 @@ def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id:
         (int(restaurant_id), name)
     )
     return int(cur.lastrowid)
-
 # ------------------------
 # Small helpers for Day 13 flow
 # ------------------------
@@ -1010,7 +1008,6 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
         "categories": categories,
     }
     return draft_dict, debug_payload
-
 # ---------- NEW: wrap ocr_worker result into draft schema ----------
 def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dict) -> dict:
     """
@@ -1084,6 +1081,14 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(src_for_ocr), job_id=str(job_id))
                 draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
                 engine = "ocr_worker"
+                # If the worker exposed segmentation, store it for debug overlays
+                if drafts_store is not None and hasattr(drafts_store, "save_ocr_debug"):
+                    try:
+                        dbg_obj = worker_obj.get("debug") if isinstance(worker_obj, dict) else None
+                        if dbg_obj:
+                            drafts_store.save_ocr_debug(_get_or_create_draft_for_job(job_id) or 0, dbg_obj)
+                    except Exception:
+                        pass
             except Exception as e:
                 helper_error = f"ocr_worker_failed: {e}"
                 draft = None
@@ -1301,7 +1306,6 @@ def dev_upload_form():
       </body>
     </html>
     """
-
 # ------------------------
 # **NEW** Import landing page + HTML POST handler
 # ------------------------
@@ -1407,6 +1411,40 @@ def imports_detail(job_id):
     return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants,
                         preview_img_url=preview_url, rotate_action_url=rotate_url)
 
+# === NEW ===
+# Visual OCR Blocks Debugger page (renders debug_blocks.html)
+@app.get("/debug/blocks/<int:job_id>")
+@login_required
+def debug_blocks_page(job_id: int):
+    """
+    Render the overlay debugger for a given import job.
+    Template expects:
+      - preview_img_url: image to overlay boxes on
+      - blocks_json_url: JSON feed with 'preview_blocks' / 'text_blocks'
+      - rotate_action_url: rotate handler so users can fix orientation
+      - back_url: link back to the import detail page
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    # Best-effort: ensure a preview exists
+    try:
+        src = (UPLOAD_FOLDER / (row["filename"] or "")).resolve()
+        if src.exists():
+            _ensure_work_image(job_id, src)
+    except Exception:
+        pass
+
+    return _safe_render(
+        "debug_blocks.html",
+        job=row,
+        preview_img_url=url_for("imports_preview_image", job_id=job_id),
+        blocks_json_url=url_for("imports_blocks", job_id=job_id),
+        rotate_action_url=url_for("imports_rotate_image", job_id=job_id),
+        back_url=url_for("imports_detail", job_id=job_id),
+    )
+
 @app.get("/imports/raw/<int:job_id>")
 @login_required
 def imports_raw(job_id):
@@ -1422,6 +1460,45 @@ def imports_raw(job_id):
     with open(abs_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return jsonify(data)
+
+# ---- NEW: Segmentation preview bridges (JSON) ----
+def _load_debug_for_draft(draft_id: int) -> Dict[str, Any]:
+    """Helper to fetch OCR debug payload saved by worker/helper."""
+    _require_drafts_storage()
+    load_fn = getattr(drafts_store, "load_ocr_debug", None)
+    if not load_fn:
+        return {}
+    dbg = load_fn(draft_id) or {}
+    # Normalize possible shapes
+    if not isinstance(dbg, dict):
+        return {}
+    return dbg
+@app.get("/drafts/<int:draft_id>/blocks")
+@login_required
+def drafts_blocks(draft_id: int):
+    """
+    Returns segmentation overlays for the draft editor:
+    {
+      preview_blocks: [ {bbox:[x1,y1,x2,y2], block_type, merged_text, lines:[...]}, ... ],
+      text_blocks:    [ raw text-blocks if available ],
+    }
+    """
+    dbg = _load_debug_for_draft(draft_id)
+    preview_blocks = dbg.get("preview_blocks") or []
+    text_blocks = dbg.get("text_blocks") or dbg.get("blocks") or []
+    return jsonify({"ok": True, "draft_id": draft_id, "preview_blocks": preview_blocks, "text_blocks": text_blocks})
+
+@app.get("/imports/<int:job_id>/blocks")
+@login_required
+def imports_blocks(job_id: int):
+    """
+    Convenience bridge: look up draft for import job and delegate to /drafts/<id>/blocks.
+    """
+    _require_drafts_storage()
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        return jsonify({"ok": False, "error": "No draft found for job"}), 404
+    return drafts_blocks(draft_id)  # returns a Response
 
 # Bridge to Draft Editor (DB-first)
 @app.get("/imports/<int:job_id>/draft")
