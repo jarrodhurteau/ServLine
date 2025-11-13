@@ -32,11 +32,15 @@ portal/  # Flask portal website
 infra/  # Infra scripts (ngrok, Flask runner, stop scripts)  
   run_infra.ps1  
   stop_infra.ps1  
-storage/  # SQLite database + seed + schema + artifacts  
+storage/  # SQLite database + OCR pipeline + seed + schema  
   servline.db  
   schema.sql  
   seed_dev.sql  
   drafts.py  
+  ocr_pipeline.py (Phase 3 pipeline)  
+  ocr_utils.py  
+  ocr_types.py  
+  ocr_facade.py  
 uploads/  # User-uploaded menu files (+ .trash for recycle bin)  
 .gitignore  
 .vscode/  # VS Code tasks (auto-run infra, stop infra)  
@@ -131,113 +135,107 @@ Safer rendering, debug utilities, improved OCR parsing (columns, headings, merge
 ---
 
 ### 🚀 Day 15 – Failed App Split Attempt  
-Modularization attempt caused routing issues → rolled back to Day 14.  
+Modularization attempt caused routing issues → rolled back.  
 ❌ **Day 15 failed — reset to Day 14.**
 
 ---
 
 ### 🚀 Day 16 – Infra & PDF OCR Success  
-`run_infra`/`stop_infra` scripts with PID tracking, verified Tesseract + Poppler + PDF OCR.  
+`run_infra`/`stop_infra` scripts with PIDs, verified Tesseract + Poppler paths, PDF OCR passing.  
 ✅ **Day 16 complete — infra stable + PDF OCR functional.**
 
 ---
 
 ### 🚀 Day 17 – OCR Helper Deep Fixes  
-v12 OCR helper: smarter category/header logic, price/desc merging, duplicate cleanup, enriched debug JSON.  
+v12 OCR helper: smarter category/header logic, price/desc merging, duplicate cleanup, richer debug JSON.  
 ✅ **Day 17 complete — OCR helper hardened and clean.**
 
 ---
 
 ### 🚀 Day 18 – Stability, OCR Env & Exports  
-Confirmed env paths + deps (Tesseract, Poppler, pandas, scikit-learn).  
-Fixed 500s → all pages functional, verified all exports (CSV/JSON/XLSX).  
+Fixed OCR/Poppler environment, confirmed pandas/scikit-learn, repaired all exports.  
 ✅ **Day 18 complete — OCR + Draft Editor + Exports stable.**
 
 ---
 
-### 🚀 Day 19 – UX / UI Alignment + OCR Precision  
-- Draft Editor UX polish (auto-wrapping textareas + color-coded category chips).  
-- OCR preprocessing tuned (CLAHE, denoise, unsharp, psm config, spell fixer).  
-- Template/UI alignment for Imports, Import Detail, Drafts, Uploads, and Recycle Bin.  
-- `_safe_render` helper added to prevent template-caused 500 loops.  
-- Live render verified via template debug traces.  
-- **Contract Validator** added (`portal/contracts.py`) for draft save/export schema consistency.  
-- **AI OCR flag scaffolded** (`AI_OCR_ENABLED=false`) for next-phase integration.  
+### 🚀 Day 19 – UI/UX Polish + OCR Precision  
+- Auto-wrapping textareas  
+- Category chips with deterministic hues  
+- OCR preprocessing boost (CLAHE, denoise, unsharp, psm tuning, spell fixer)  
+- `_safe_render` protection  
+- Contract validator for draft export  
+- AI OCR flag scaffold  
 
-✅ **Day 19 complete — UX/UI unified, OCR refined, and API contract frozen.**  
-**Tags:** `day-19-ux`, `v19-landmark` — checkpoint before AI OCR phase.  
+✅ **Day 19 complete — platform unified + OCR optimized.**
 
 ---
 
 ### 🚀 Day 20 – AI Heuristics Phase A + Editor Integration  
-- Introduced AI-based menu refinement endpoints:  
-   `GET /imports/<job_id>/ai/preview` and `POST /imports/<job_id>/ai/commit`.  
-- Added **“AI Commit to Draft”** button inside the Draft Editor with AJAX call and auto-reload (no JSON redirect).  
-- Centralized `TAXONOMY_SEED` for consistent category heuristics.  
-- Repaired export header quotes (CSV/JSON/XLSX downloads clean).  
-- Verified OCR health endpoint and worker probe after integration.  
-- Live test confirmed draft updates from AI heuristics (Phase A baseline).  
+AI Preview + Commit endpoints  
+“Finalize with AI Cleanup” integrated directly into editor with auto-refresh  
+Baseline AI cleanup working end-to-end  
 
-✅ **Day 20 complete — AI Heuristics Phase A operational + in-editor commit flow working.**  
-**Tags:** `day-20-heuristics-phase-a`, `v20-landmark`  
+✅ **Day 20 complete — AI cleanup Phase A operational.**
 
 ---
 
-### 🚀 Day 21 – OCR System Rebuild & Cleanup  
-- Created modular OCR architecture: `servline/ocr/pipeline_new.py` (new core) + `storage/ocr_facade.py` (front controller).  
-- Added engine selector via `SERVLINE_OCR_ENGINE` env var (new vs legacy).  
-- Verified imports, Tesseract version, and Poppler paths via `f.health()`.  
-- Confirmed new pipeline stub runs clean (no import errors).  
-- Cleaned file tree + moved legacy code into `storage/_legacy/`.  
-- Locked `.gitignore` and file rules for new OCR structure.  
-
-✅ **Day 21 complete — OCR rebuild framework in place, ready for Day 22 Phase builds.**  
-**Tags:** `day-21-ocr-rebuild`, `v21-landmark`  
+### 🚀 Day 21 – OCR System Rebuild  
+New modular pipeline, engine selector, legacy isolation, clean file tree.  
+✅ **Day 21 complete — OCR rebuild framework in place.**
 
 ---
 
-### 🚀 Day 22 – Phase 2 pt. 5 · Draft Editor Polish & AI Cleanup Loop Finalization  
-- ✅ **Phase 2 pt. 1:** OCR precision & preprocessing (grayscale, border, contrast, unsharp mask).  
-- ✅ **Phase 2 pt. 2:** Import view + AI Commit endpoint (JSON/CSV exports + status sync).  
-- ✅ **Phase 2 pt. 3:** Draft Editor ↔ Import AI Commit link (flow from job → draft → editor).  
-- ✅ **Phase 2 pt. 4:** Import view UI buttons + status pills for processing/finalized.  
-- ✅ **Phase 2 pt. 4½:** Draft Editor rename → “Finalize with AI Cleanup” + live status pill parity.  
-- ✅ **Phase 2 pt. 5:** Backend AI cleanup loop + status feedback + UI polish (export visible, tooltip, outline rebuild).  
-
-**Highlights:**  
-- Status-pill parity in Draft Editor (mirrors Import view).  
-- Live Finalize button UX (“Running…” → “Refreshing…”).  
-- “Clean & Refine” combo flow (join lines → AI cleanup → auto reload).  
-- Export menu z-index fix + “Export Visible as CSV.”  
-- Confidence heat-map + provenance tooltip with OCR Debug / AI Preview links.  
-- Outline rebuild on edit + price normalization + autosave heartbeat.  
-
-✅ **Day 22 complete — Phase 2 fully finished.**  
-**Tags:** `day-22-phase-2-pt-5`, `phase-2-complete`
- 
----
-
-### 🚀 Day 23 – Phase 3 pts 1-2 · Rotate → Preview → AI Finalize → Edit  
-- Added rotatable preview (`/imports/<id>/rotate`) with JPEG cache update.  
-- Implemented live status poll (`/api/menus/import/<id>/status`) + UI pill refresh.  
-- `AI Preview` (JSON) and `Finalize with AI Cleanup` flows redirect directly to Draft Editor.  
-- Verified Fix Descriptions, Exports (CSV/JSON/XLSX), and Publish Now paths.  
-- All Phase 3 pt 1–2 functional tests passed end-to-end.  
-
-✅ **Day 23 complete — Phase 3 pts 1–2 finished and stable.**  
-**Tags:** `day-23-phase-3-pt-2`, `phase-3-rotate-preview-ai-finalize`  
+### 🚀 Day 22 – Phase 2 Wrap-Up  
+Draft Editor polish, AI cleanup loop, status parity, export fixes, live pill refresh, outline rebuild.  
+✅ **Day 22 complete — Phase 2 fully delivered.**
 
 ---
 
-## 🔭 Next Up — Phase 3 (Days 24 → 26)  
+### 🚀 Day 23 – Phase 3 pts 1–2  
+Rotation preview, status poller, AI finalize redirect, editor integration.  
+All flows stable: Upload → Rotate → Preview → AI Finalize → Edit.  
+
+✅ **Day 23 complete — Phase 3 (1–2) online.**
+
+---
+
+## 🚀 **Day 24 – Phase 3 pt.3–4: Category Infer + Two-Column Merge (MAJOR OCR BREAKTHROUGH)**
+
+### ✔ What We Delivered
+- **Category inference engine wired into final pipeline**, after segmentation + cleanup  
+- **Integrated `category_infer.py` into `ai_cleanup` and ocr_pipeline → unified output**  
+- **Added `_debug/ocr_text` category overlay + sample category report**  
+- **Implemented *universal two-column price pairing* (Option-A geometry approach):**  
+  - Works even when the menu is detected as *single column*  
+  - No dependency on split_columns  
+  - Uses bounding box + alignment heuristics  
+  - Handles vertical text drift, skew, irregular spacing  
+- **Massively improved price merging accuracy** (Wings, subs, sandwiches, calzones, wraps)  
+- **Draft Editor reflects correct categories and prices**  
+- Full end-to-end tests passed on **two real pizza menus**
+
+### ⭐ Result
+Day 24 produced the **cleanest imports ServLine has ever done**, and Phase 3 is now more than halfway complete.
+
+✅ **Day 24 complete — Category Infer + Two-Column Merge fully working.**  
+**Tags:** `day-24-phase-3-pt-4`, `ocr-two-column-merge`, `category-infer-integrated`
+
+---
+
+## 🔭 Next Up — Phase 3 (Days 25 → 26)
 
 | Day | Focus | Key Deliverables |
 |------|--------|----------------|
-| **Day 24 – Phase 3 pts 3–4** | 🧩 **Category Inference + AI Cleanup Rev 2** | Add `category_infer.py` and integrate into `ai_cleanup`. Implement multi-column merge logic for OCR results. Improve context-aware name/description repair and price normalization. Test auto-categorized two-column menus. |
-| **Day 25 – Phase 3 pts 5–6a** | 🔥 **Confidence Heat-Map + UI Polish Pass** | Add visual confidence overlay (`/debug/blocks/<id>`) and Draft Editor threshold slider. Polish buttons/text, update README screenshots. |
-| **Day 26 – Phase 3 pt 6b** | 🏁 **Final QA + Docs + Tagging** | Full regression test (all flows from upload → publish), final README/docs, and tag `phase-3-complete`. |
+| **Day 25 – Phase 3 pt.5–6a** | 🔥 **Confidence Heat-Map + Multi-Price Extraction** | Add visual confidence overlay (`/debug/blocks/<id>`), add Draft Editor threshold slider, extract multi-size/multi-price variants (S/M/L, 10”/14”/18”), normalize all prices. |
+| **Day 26 – Phase 3 pt.6b** | 🏁 **Final QA + Docs + Tagging** | Full regression test (upload → rotate → preview → finalize → edit → publish), end-to-end cleanup, README finalization, and tag `phase-3-complete`. |
 
 ---
 
-✅ With Day 23 complete, the system now runs full “Rotate → Preview → AI Finalize → Edit” cycles.  
-Next milestone — **Day 24: Category Inference + AI Cleanup Rev 2**.
+## 🌟 Current Status  
+🚀 **Day 24 is complete.**  
+We now have a powerful pipeline:
+
+**Rotate → Segment → Category Infer → Two-Column Merge → AI Cleanup → Draft Editor**  
+
+The OCR engine is now smart, stable, and accurate — ready for Phase 3 pt.5.
+
