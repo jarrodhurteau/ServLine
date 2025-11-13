@@ -1,4 +1,4 @@
-# storage/ocr_pipeline.py
+# storage/ocr_pipeline.py 
 """
 ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference)
 
@@ -16,6 +16,16 @@ Phase 3 pt.2 (Day 23):
 - Category inference on text blocks, now delegated to storage/category_infer.py
 - Adds: category, category_confidence, rule_trace to text_blocks
 - Mirrors category & confidence to preview_blocks for overlay UI
+
+Phase 3 pt.4 (Day 24):
+- Two-column merge helper to pair left-column names with right-column prices
+  before category inference + AI cleanup.
+
+Phase 3 pt.4b:
+- Adaptive column splitting based on page width (helps tight gutters like
+  real-world pizza menus) + logging of column counts per page.
+- For very wide pages (>= 2400px) where split_columns() only finds 1 column,
+  force a simple left/right half split as a fallback.
 """
 
 from __future__ import annotations
@@ -54,6 +64,9 @@ _NO_VOWEL_LONG = re.compile(r"\b[b-df-hj-np-tv-z]{4,}\b", re.I)
 # Lightweight heading detector to boost confidence when a block looks like a header
 _HEADING_HINT = re.compile(r"^[A-Z][A-Z\s&/0-9\-]{2,}$")
 
+# Simple money-ish detector for two-column pairing
+_PRICE_RE = re.compile(r"\b\d{1,3}(?:\.\d{2})?\b")
+
 
 def _alpha_ratio(s: str) -> float:
     if not s:
@@ -87,10 +100,48 @@ def _token_is_garbage(tok: str) -> bool:
         return True
     if len(tok) > 28 and _alpha_ratio(tok) < 0.6:
         return True
-    if len(tok) <= 2 and not any(ch.isalnum() for ch in tok):
+    if len(tok) <= 2 and not any(ch.isalnum() for tok in [tok] for ch in tok):
         return True
     if _symbol_ratio(tok) > 0.35:
         return True
+    return False
+
+
+def _is_pricey_text(text: str) -> bool:
+    """
+    Heuristic to decide if a block is primarily a price column chunk.
+
+    Designed to catch things like:
+      "12.99", "$9.50", "9.99 12.99", "8" while
+    avoiding clobbering full item lines like:
+      "2 Large Pizzas 1 Topping 19.99"
+    which contain lots of letters.
+    """
+    if not text:
+        return False
+    text = text.strip()
+    if not text:
+        return False
+
+    digits = sum(c.isdigit() for c in text)
+    letters = sum(c.isalpha() for c in text)
+
+    if digits == 0:
+        return False
+
+    # Strong hints: explicit currency or clean price regex with few letters
+    if "$" in text:
+        # "$12.99" or "$ 12.99"
+        return True
+    if _PRICE_RE.search(text) and letters <= 4:
+        return True
+
+    # Mostly numeric with minimal letters: treat as price-y
+    if letters == 0 and 1 <= digits <= 6:
+        return True
+    if letters <= 2 and digits >= 2 and len(text) <= 10:
+        return True
+
     return False
 
 
@@ -122,6 +173,141 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
         return None
 
     return {"text": cleaned, "bbox": {"x": x, "y": y, "w": w, "h": h}, "conf": conf_raw}
+
+
+# -----------------------------
+# Two-column merge helper
+# -----------------------------
+
+def _center_y(tb: Dict[str, Any]) -> float:
+    bbox = tb.get("bbox") or {}
+    return float(bbox.get("y", 0) + (bbox.get("h", 0) or 0) / 2.0)
+
+
+def merge_two_column_rows(page_text_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Geometry-based pairing of item text blocks with price blocks.
+
+    Instead of relying on there being exactly 2 columns, we:
+      - Identify "pricey" blocks via _is_pricey_text(merged_text/text).
+      - For each price block, look LEFT for the nearest non-price block whose
+        vertical center is within ~1.2 * median block height and whose
+        horizontal gap isn't huge.
+      - When found, append the price text to that block's merged_text and
+        drop the price block from the final list.
+
+    This works even when split_columns() treats a panel as one column, as long
+    as prices appear as mostly-numeric chunks to the right of their items.
+    """
+    if not page_text_blocks:
+        return page_text_blocks
+
+    # Only consider blocks that actually have a bbox
+    with_bbox = [tb for tb in page_text_blocks if tb.get("bbox")]
+    if not with_bbox:
+        return page_text_blocks
+
+    heights = [tb["bbox"].get("h", 0) or 0 for tb in with_bbox]
+    heights = [h for h in heights if h > 0]
+    if heights:
+        median_h = ocr_utils.median([float(h) for h in heights])
+    else:
+        median_h = 20.0
+    vert_tol = max(5.0, 1.2 * float(median_h))
+
+    # Estimate page width from block extents
+    max_x = max(tb["bbox"]["x"] + tb["bbox"]["w"] for tb in with_bbox)
+    min_x = min(tb["bbox"]["x"] for tb in with_bbox)
+    page_width = max_x - min_x
+    # Don't allow pairing across the entire page; keep it local-ish.
+    max_horiz_gap = max(60.0, page_width * 0.45)
+
+    def _text_of(tb: Dict[str, Any]) -> str:
+        return (tb.get("merged_text") or tb.get("text") or "").strip()
+
+    # Split into price-ish and non-price blocks
+    price_blocks: List[Dict[str, Any]] = []
+    text_blocks: List[Dict[str, Any]] = []
+    for tb in with_bbox:
+        txt = _text_of(tb)
+        if not txt:
+            text_blocks.append(tb)
+            continue
+        if _is_pricey_text(txt):
+            price_blocks.append(tb)
+        else:
+            text_blocks.append(tb)
+
+    if not price_blocks or not text_blocks:
+        return page_text_blocks
+
+    consumed_ids: set[int] = set()
+
+    for pb in price_blocks:
+        if not pb.get("bbox"):
+            continue
+        txt_price = _text_of(pb)
+        if not txt_price:
+            continue
+
+        cy = _center_y(pb)
+        px_left = pb["bbox"]["x"]  # left edge of the price block
+
+        best_candidate = None
+        best_score: Optional[Tuple[float, float]] = None  # (dy, abs(dx_gap))
+
+        for tb in text_blocks:
+            if tb is pb or not tb.get("bbox"):
+                continue
+            txt_item = _text_of(tb)
+            if not txt_item:
+                continue
+            # Don't pair two price blocks together
+            if _is_pricey_text(txt_item):
+                continue
+
+            bbox = tb["bbox"]
+            item_right = bbox["x"] + bbox["w"]
+            dx_gap = px_left - item_right  # positive if price is right of item
+
+            if dx_gap < -10.0:
+                # Item is entirely to the right of this price; skip.
+                continue
+            if dx_gap > max_horiz_gap:
+                # Too far away horizontally to be a plausible row mate.
+                continue
+
+            dy = abs(_center_y(tb) - cy)
+            if dy > vert_tol:
+                continue
+
+            score = (dy, abs(dx_gap))
+            if best_candidate is None or score < best_score:
+                best_candidate = tb
+                best_score = score
+
+        if best_candidate is None:
+            continue
+
+        # Merge price text into the chosen item block
+        base_text = _text_of(best_candidate)
+        merged = (base_text + " " + txt_price).strip()
+        best_candidate["merged_text"] = merged
+
+        meta = best_candidate.setdefault("meta", {})
+        meta["two_column_merged"] = True
+        meta["two_column_partner_id"] = pb.get("id")
+
+        consumed_ids.add(id(pb))
+
+    # Build final list, dropping any price blocks that were merged
+    merged_blocks: List[Dict[str, Any]] = []
+    for tb in page_text_blocks:
+        if id(tb) in consumed_ids:
+            continue
+        merged_blocks.append(tb)
+
+    return merged_blocks
 
 
 # -----------------------------
@@ -330,9 +516,32 @@ def segment_document(
         except Exception:
             pass
 
-        # 🔹 High-clarity preprocessing and column split
+        # 🔹 High-clarity preprocessing and adaptive column split
         im_pre = ocr_utils.preprocess_page(im, do_deskew=True)
-        columns = ocr_utils.split_columns(im_pre, min_gap_px=40)
+
+        # Dynamic min_gap based on image width; helps real menus where
+        # gutters are relatively narrow but consistent.
+        width, height = im_pre.size
+        # Roughly ~0.4–1% of page width, clamped to a reasonable range.
+        min_gap_px = max(12, min(64, int(width * 0.0075)))
+
+        columns = ocr_utils.split_columns(im_pre, min_gap_px=min_gap_px)
+
+        # Option A: if page is very wide and we only found one column, force 2 columns.
+        if width >= 2400 and len(columns) == 1:
+            mid_x = width // 2
+            left_img = im_pre.crop((0, 0, mid_x, height))
+            right_img = im_pre.crop((mid_x, 0, width, height))
+            columns = [left_img, right_img]
+            print(
+                f"[Columns] Page {page_index}: width={width}px, "
+                f"min_gap_px={min_gap_px}, columns={len(columns)} (fallback forced 2-column split)"
+            )
+        else:
+            print(f"[Columns] Page {page_index}: width={width}px, min_gap_px={min_gap_px}, columns={len(columns)}")
+
+        # Collect text blocks for this page across all columns
+        page_text_blocks: List[Dict[str, Any]] = []
 
         for col_idx, col_img in enumerate(columns, start=1):
             data = _ocr_page(col_img)
@@ -355,24 +564,45 @@ def segment_document(
             # Phase-3: text-block segmentation
             tblocks = ocr_utils.group_text_blocks(lines)
 
-            # ---- Category inference (mutates tblocks in place via shared helper)
-            infer_categories_on_text_blocks(tblocks)
+            # Annotate page/column so we can merge across columns later
+            for tb in tblocks:
+                tb["page"] = page_index
+                tb["column"] = col_idx
 
-            all_text_blocks.extend(tblocks)
+            page_text_blocks.extend(tblocks)
 
-            # Compact preview records (xyxy coords), annotate page/column for overlay UI
-            pblocks = ocr_utils.blocks_for_preview(tblocks)
-            for pb in pblocks:
-                pb["page"] = page_index
-                pb["column"] = col_idx
-                # Mirror category info for overlay
-                pb["category"] = pb.get("category") or next(
-                    (tb.get("category") for tb in tblocks if tb.get("id") == pb.get("id")), None
+        # ----- Phase 3 pt.4: two-column merge on a per-page basis
+        page_text_blocks = merge_two_column_rows(page_text_blocks)
+
+        # ----- Category inference (mutates tblocks in place via shared helper)
+        infer_categories_on_text_blocks(page_text_blocks)
+
+        # Compact preview records (xyxy coords), annotate page/column for overlay UI
+        pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
+        for pb in pblocks:
+            pb["page"] = page_index
+            # Column may or may not already be present; look it up from text_blocks by id
+            if pb.get("column") is None:
+                col_from_tb = next(
+                    (tb.get("column") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
+                    None,
                 )
-                pb["category_confidence"] = pb.get("category_confidence") or next(
-                    (tb.get("category_confidence") for tb in tblocks if tb.get("id") == pb.get("id")), None
+                if col_from_tb is not None:
+                    pb["column"] = col_from_tb
+
+            # Mirror category info for overlay
+            if pb.get("category") is None:
+                pb["category"] = next(
+                    (tb.get("category") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
+                    None,
                 )
-            all_preview_blocks.extend(pblocks)
+            if pb.get("category_confidence") is None:
+                pb["category_confidence"] = next(
+                    (tb.get("category_confidence") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
+                    None,
+                )
+        all_text_blocks.extend(page_text_blocks)
+        all_preview_blocks.extend(pblocks)
 
         page_index += 1
 
@@ -388,7 +618,7 @@ def segment_document(
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+category_infer",
+            "mode": "high_clarity+segmentation+two_column_merge+category_infer",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }
