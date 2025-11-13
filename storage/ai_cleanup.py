@@ -6,6 +6,7 @@ import unicodedata
 
 from .drafts import get_draft_items, upsert_draft_items
 from . import drafts as _drafts_mod  # for ocr_utils price clamp
+from portal.storage import category_infer as _cat_infer  # NEW: Phase-3 category engine
 
 TAG = "[AI Cleaned]"
 
@@ -304,11 +305,47 @@ _BUCKETS = {
 }
 
 def classify_category(name: str, description: str|None = None) -> str:
+    """
+    Legacy keyword-based classifier (kept as a fallback when the Phase-3
+    category_infer helper can't decide).
+    """
     text = f"{name} {(description or '')}".lower()
     for cat, keys in _BUCKETS.items():
         if any(k in text for k in keys):
             return cat
     return "Uncategorized"
+
+
+def infer_item_category(name: str, description: str | None = None) -> Tuple[str, Optional[int], Optional[str]]:
+    """
+    Use the Phase-3 category_infer helper on a synthesized text_block built
+    from the item name/description, then fall back to the legacy buckets.
+
+    Returns: (category, category_confidence, rule_trace)
+    """
+    merged = f"{name or ''} {(description or '' )}".strip()
+    if not merged:
+        return "Uncategorized", None, None
+
+    tb = {
+        "id": "item",
+        "merged_text": merged,
+        "block_type": "item",
+    }
+    try:
+        _cat_infer.infer_categories_on_text_blocks([tb])
+        cat = tb.get("category")
+        conf = tb.get("category_confidence")
+        trace = tb.get("rule_trace")
+    except Exception:
+        cat, conf, trace = None, None, None
+
+    if not cat:
+        cat = classify_category(name, description)
+        conf = conf or None
+        trace = trace or None
+
+    return cat, conf if cat else None, trace
 
 # ---------- Confidence ----------
 def normalize_confidence(ocr_score: int|None, ai_score: int|None) -> int:
@@ -347,9 +384,13 @@ def apply_ai_cleanup(draft_id: int) -> int:
             if found is not None:
                 price_cents = int(found)
 
-        cat = it.get("category") or None
-        if not cat or cat == "Uncategorized":
-            cat = classify_category(name_clean, desc_clean)
+        # Category: respect existing, otherwise infer via Phase-3 helper + fallback
+        existing_cat = (it.get("category") or "").strip() or None
+        if not existing_cat or existing_cat == "Uncategorized":
+            cat, cat_conf, cat_trace = infer_item_category(name_clean, desc_clean)
+        else:
+            cat = existing_cat
+            cat_conf, cat_trace = None, None  # reserved for future use
 
         ocr_conf = it.get("confidence")
         ai_signal = 75 if (name_clean != name_raw or desc_clean != desc_raw) else None

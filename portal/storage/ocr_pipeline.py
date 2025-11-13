@@ -12,8 +12,8 @@ Phase 3 pt.1:
 - Text-block segmentation via ocr_utils.group_text_blocks()
 - Preview-friendly blocks (xyxy + merged_text + block_type) for debug overlay
 
-NEW in Phase 3 pt.2 (Day 23):
-- Category inference on text blocks (heuristics + optional ML fusion)
+Phase 3 pt.2 (Day 23):
+- Category inference on text blocks, now delegated to storage/category_infer.py
 - Adds: category, category_confidence, rule_trace to text_blocks
 - Mirrors category & confidence to preview_blocks for overlay UI
 """
@@ -28,6 +28,7 @@ import pytesseract
 from pytesseract import image_to_osd
 
 from . import ocr_utils
+from . import category_infer
 from .ocr_types import Block, Line, Word, BBox  # TypedDicts; Phase-2 compatibility
 
 # -----------------------------
@@ -49,106 +50,6 @@ _ALLOWED_CHARS = r"A-Za-z0-9\$\.\,\-\/&'\"°\(\):;#\+ "
 _ALLOWED_RE = re.compile(f"[^{_ALLOWED_CHARS}]+")
 _REPEAT3 = re.compile(r"(.)\1\1+")
 _NO_VOWEL_LONG = re.compile(r"\b[b-df-hj-np-tv-z]{4,}\b", re.I)
-
-# -----------------------------
-# Category Inference: Heuristic Rules
-# -----------------------------
-
-# Canonical label order matters for tie-breaking after ML fusion
-CANONICAL_CATEGORIES: Tuple[str, ...] = (
-    "Pizzas",
-    "Burgers",
-    "Wings",
-    "Subs",
-    "Sandwiches",
-    "Appetizers",
-    "Sides",
-    "Salads",
-    "Pasta",
-    "Calzones",
-    "Desserts",
-    "Beverages",
-    "Kids",
-    "Breakfast",
-    "Specials",
-    "Seafood",
-)
-
-_HEUR_PATTERNS: Dict[str, List[re.Pattern]] = {
-    "Pizzas": [
-        re.compile(r"\bpizza(s)?\b", re.I),
-        re.compile(r"\bpies?\b", re.I),
-        re.compile(r"\b(sicilian|neapolitan)\b", re.I),
-    ],
-    "Burgers": [
-        re.compile(r"\bburger(s)?\b", re.I),
-        re.compile(r"\bcheeseburger(s)?\b", re.I),
-        re.compile(r"\bpatty melt\b", re.I),
-    ],
-    "Wings": [
-        re.compile(r"\bwing(s)?\b", re.I),
-        re.compile(r"\bboneless\b", re.I),
-        re.compile(r"\b(inferno|buffalo|garlic[\-\s]?parm)\b", re.I),
-    ],
-    "Subs": [
-        re.compile(r"\bsub(s)?\b", re.I),
-        re.compile(r"\bhoagie(s)?\b", re.I),
-        re.compile(r"\bgrinder(s)?\b", re.I),
-    ],
-    "Sandwiches": [
-        re.compile(r"\bsandwich(es)?\b", re.I),
-        re.compile(r"\bclub\b", re.I),
-        re.compile(r"\bblt\b", re.I),
-    ],
-    "Appetizers": [
-        re.compile(r"\bapp(etizer)?s?\b", re.I),
-        re.compile(r"\bmozz(arella)? stick(s)?\b", re.I),
-        re.compile(r"\bfries\b", re.I),
-    ],
-    "Sides": [
-        re.compile(r"\bside(s)?\b", re.I),
-        re.compile(r"\bcoleslaw\b", re.I),
-        re.compile(r"\bmashed potatoes\b", re.I),
-    ],
-    "Salads": [
-        re.compile(r"\bsalad(s)?\b", re.I),
-        re.compile(r"\bcaesar\b", re.I),
-        re.compile(r"\bgarden\b", re.I),
-    ],
-    "Pasta": [
-        re.compile(r"\bpasta\b", re.I),
-        re.compile(r"\bspaghetti|penne|fettuccine\b", re.I),
-    ],
-    "Calzones": [
-        re.compile(r"\bcalzone(s)?\b", re.I),
-        re.compile(r"\bstromboli\b", re.I),
-    ],
-    "Desserts": [
-        re.compile(r"\bdessert(s)?\b", re.I),
-        re.compile(r"\bcheesecake|tiramisu|cannoli\b", re.I),
-    ],
-    "Beverages": [
-        re.compile(r"\b(beverage|drink)s?\b", re.I),
-        re.compile(r"\bsoda|pop|cola|pepsi|coke|sprite|iced tea\b", re.I),
-    ],
-    "Kids": [
-        re.compile(r"\bkids?\b", re.I),
-        re.compile(r"\bchild(ren)?\b", re.I),
-    ],
-    "Breakfast": [
-        re.compile(r"\bbreakfast\b", re.I),
-        re.compile(r"\bpancake(s)?|omelet(te)?\b", re.I),
-    ],
-    "Specials": [
-        re.compile(r"\bspecial(s)?\b", re.I),
-        re.compile(r"\bdaily\b", re.I),
-        re.compile(r"\bcombo(s)?\b", re.I),
-    ],
-    "Seafood": [
-        re.compile(r"\bsea ?food\b", re.I),
-        re.compile(r"\bshrimp|scallop(s)?|tilapia|salmon|cod\b", re.I),
-    ],
-}
 
 # Lightweight heading detector to boost confidence when a block looks like a header
 _HEADING_HINT = re.compile(r"^[A-Z][A-Z\s&/0-9\-]{2,}$")
@@ -224,170 +125,62 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
 
 
 # -----------------------------
-# Category Inference (rules + optional ML fusion)
+# Category inference via storage/category_infer
 # -----------------------------
-
-def _rule_score(text: str) -> Tuple[Optional[str], float, str]:
-    """
-    Return (label, score [0..1], rule_trace) using keyword/regex heuristics.
-    Heavier weight for heading-like blocks (ALL CAPS / short).
-    """
-    if not text:
-        return None, 0.0, ""
-    t = text.strip()
-    trace_bits: List[str] = []
-    scores: Dict[str, float] = {}
-    # Base match counts
-    for label, pats in _HEUR_PATTERNS.items():
-        s = 0.0
-        for p in pats:
-            if p.search(t):
-                s += 1.0
-        if s > 0:
-            scores[label] = s
-            trace_bits.append(f"{label}:{int(s)}")
-    if not scores:
-        return None, 0.0, "no_rule_hits"
-
-    # Normalize to [0,1] by max
-    mx = max(scores.values())
-    for k in list(scores.keys()):
-        scores[k] = scores[k] / mx
-
-    # Heading boost
-    heading_like = bool(_HEADING_HINT.match(t)) or (len(t) <= 28 and t.isupper())
-    if heading_like:
-        for k in scores.keys():
-            scores[k] = min(1.0, scores[k] * 0.85 + 0.15)  # gentle boost
-        trace_bits.append("heading_boost")
-
-    # Pick best by score; if tie, use canonical order
-    best_labels = [k for k, v in scores.items() if abs(v - max(scores.values())) < 1e-6]
-    best = None
-    if len(best_labels) == 1:
-        best = best_labels[0]
-    else:
-        for c in CANONICAL_CATEGORIES:
-            if c in best_labels:
-                best = c
-                break
-    score = scores.get(best, 0.0) if best else 0.0
-    return best, float(score), ";".join(trace_bits) if trace_bits else "rule_only"
-
-
-def _load_ml_model():
-    """
-    Try loading a sklearn vectorizer + classifier from storage/ml_models/category_clf.pkl.
-    Returns (vectorizer, clf) or (None, None).
-    """
-    try:
-        from joblib import load  # lazy import; ok if joblib is missing
-        model_path = os.path.join("storage", "ml_models", "category_clf.pkl")
-        if not os.path.exists(model_path):
-            return None, None
-        bundle = load(model_path)
-        # Expect a dict like {"vectorizer": <TfidfVectorizer>, "clf": <sklearn clf>, "labels": [..]}
-        vec = bundle.get("vectorizer")
-        clf = bundle.get("clf")
-        return vec, clf
-    except Exception:
-        return None, None
-
-
-def _ml_predict(vec, clf, text: str) -> Tuple[Optional[str], float]:
-    """
-    If vec/clf available, return (label, confidence_prob). Otherwise (None, 0.0).
-    """
-    try:
-        X = vec.transform([text])
-        proba = getattr(clf, "predict_proba", None)
-        if proba:
-            pr = clf.predict_proba(X)[0]
-            idx = int(pr.argmax())
-            label = clf.classes_[idx]
-            return str(label), float(pr[idx])
-        # fallback to decision function → softmax-like mapping
-        pred = clf.predict(X)[0]
-        return str(pred), 0.6  # neutral confidence if no proba
-    except Exception:
-        return None, 0.0
-
 
 def infer_categories_on_text_blocks(text_blocks: List[Dict[str, Any]]) -> None:
     """
-    Mutates each text_block dict, adding:
+    Mutate each text_block dict, adding:
       - category: str|None
-      - category_confidence: float|None
-      - rule_trace: str|None
-    Fusion:
-      - If ML present, choose between rule label and ML label by confidence;
-        ties resolved by canonical category order.
-      - If ML missing, keep rule-only result.
+      - category_confidence: int
+      - rule_trace: str (human-readable reason)
+
+    This is a thin wrapper around storage/category_infer.infer_category_for_text
+    so all category logic lives in one place.
     """
-    vec, clf = _load_ml_model()
-    ml_available = vec is not None and clf is not None
-
-    for tb in text_blocks:
+    for idx, tb in enumerate(text_blocks):
         merged = tb.get("merged_text") or tb.get("text") or ""
+        if not merged:
+            tb["category"] = None
+            tb["category_confidence"] = 0
+            tb["rule_trace"] = "empty_text"
+            continue
+
         block_type = (tb.get("block_type") or "").lower()
-        # Light gate: headings/section titles are far more likely to be categories
-        heading_hint = block_type in {"heading", "section", "title"} or _HEADING_HINT.match((merged or "").strip())
+        heading_like = (
+            block_type in {"heading", "section", "title"}
+            or bool(_HEADING_HINT.match(merged.strip()))
+        )
 
-        # Rule score first
-        r_label, r_score, r_trace = _rule_score(merged)
+        # Neighbor categories (if already assigned) – gives mild context.
+        neighbors: List[str] = []
+        if idx > 0:
+            prev_cat = text_blocks[idx - 1].get("category")
+            if prev_cat:
+                neighbors.append(prev_cat)
+        if idx + 1 < len(text_blocks):
+            next_cat = text_blocks[idx + 1].get("category")
+            if next_cat:
+                neighbors.append(next_cat)
 
-        # Modest boost if it looks like a heading and we have a rule hit
-        if heading_hint and r_score > 0:
-            r_score = min(1.0, r_score * 0.85 + 0.15)
-            r_trace = (r_trace + ";heading_hint").strip(";")
+        guess = category_infer.infer_category_for_text(
+            name=merged,
+            description=None,
+            price_cents=0,
+            neighbor_categories=neighbors,
+            fallback="Uncategorized",
+        )
 
-        # ML prediction if available
-        m_label, m_conf = (None, 0.0)
-        if ml_available and merged and _alpha_ratio(merged) >= 0.35:
-            m_label, m_conf = _ml_predict(vec, clf, merged)
+        # We treat fallback "Uncategorized" as "no strong category" at block level.
+        final_category = guess.category if guess.category and guess.category != "Uncategorized" else None
 
-        # Fusion: prefer higher confidence; if similar, prefer rule for headings; else canonical order
-        final_label, final_conf = r_label, r_score
-        trace = f"rule[{r_label}:{final_conf:.2f}|{r_trace}]"
+        reason = guess.reason or "heuristic match"
+        if heading_like:
+            reason = reason + "; heading_like"
 
-        if ml_available and m_label:
-            # If ML matches rule, take the higher confidence
-            if r_label == m_label:
-                if m_conf > final_conf:
-                    final_label, final_conf = m_label, m_conf
-                    trace = f"ml_eq_rule[{m_label}:{m_conf:.2f}];{trace}"
-            else:
-                # Different labels: compare confs with a small margin
-                margin = 0.07
-                if m_conf > final_conf + margin:
-                    final_label, final_conf = m_label, m_conf
-                    trace = f"ml_over_rule[{m_label}:{m_conf:.2f}] vs rule[{r_label}:{r_score:.2f}]"
-                elif final_conf > m_conf + margin:
-                    trace = f"rule_over_ml[{r_label}:{final_conf:.2f}] vs ml[{m_label}:{m_conf:.2f}]"
-                else:
-                    # Near tie: prefer rule if heading-like, else canonical order among the two
-                    if heading_hint and r_label:
-                        final_label, final_conf = r_label, final_conf
-                        trace = f"tie_heading_pref_rule;{trace}"
-                    else:
-                        pair = [lbl for lbl in [r_label, m_label] if lbl]
-                        chosen = None
-                        for c in CANONICAL_CATEGORIES:
-                            if c in pair:
-                                chosen = c
-                                break
-                        if chosen:
-                            if chosen == m_label:
-                                final_label, final_conf = m_label, m_conf
-                                trace = f"tie_canonical_pref_ml;{trace}"
-                            else:
-                                final_label, final_conf = r_label, final_conf
-                                trace = f"tie_canonical_pref_rule;{trace}"
-
-        # Assign results onto the block
-        tb["category"] = final_label
-        tb["category_confidence"] = float(final_conf) if final_label else None
-        tb["rule_trace"] = trace if final_label else (r_trace if r_trace else None)
+        tb["category"] = final_category
+        tb["category_confidence"] = int(guess.confidence)
+        tb["rule_trace"] = reason
 
 
 # -----------------------------
@@ -562,7 +355,7 @@ def segment_document(
             # Phase-3: text-block segmentation
             tblocks = ocr_utils.group_text_blocks(lines)
 
-            # ---- NEW: Category inference (mutates tblocks in place)
+            # ---- Category inference (mutates tblocks in place via shared helper)
             infer_categories_on_text_blocks(tblocks)
 
             all_text_blocks.extend(tblocks)
