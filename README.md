@@ -199,43 +199,157 @@ All flows stable: Upload → Rotate → Preview → AI Finalize → Edit.
 
 ---
 
-## 🚀 **Day 24 – Phase 3 pt.3–4: Category Infer + Two-Column Merge (MAJOR OCR BREAKTHROUGH)**
+## 🚀 Day 24 – Phase 3 pt.3–4: Category Infer + Two-Column Merge  
+Massive OCR breakthrough: category inference, geometry-based merging, S/M/L and 10/14/18” variants parsed correctly.  
+Menu accuracy jumped significantly.
 
-### ✔ What We Delivered
-- **Category inference engine wired into final pipeline**, after segmentation + cleanup  
-- **Integrated `category_infer.py` into `ai_cleanup` and ocr_pipeline → unified output**  
-- **Added `_debug/ocr_text` category overlay + sample category report**  
-- **Implemented *universal two-column price pairing* (Option-A geometry approach):**  
-  - Works even when the menu is detected as *single column*  
-  - No dependency on split_columns  
-  - Uses bounding box + alignment heuristics  
-  - Handles vertical text drift, skew, irregular spacing  
-- **Massively improved price merging accuracy** (Wings, subs, sandwiches, calzones, wraps)  
-- **Draft Editor reflects correct categories and prices**  
-- Full end-to-end tests passed on **two real pizza menus**
-
-### ⭐ Result
-Day 24 produced the **cleanest imports ServLine has ever done**, and Phase 3 is now more than halfway complete.
-
-✅ **Day 24 complete — Category Infer + Two-Column Merge fully working.**  
-**Tags:** `day-24-phase-3-pt-4`, `ocr-two-column-merge`, `category-infer-integrated`
+✅ **Day 24 complete.**
 
 ---
 
-## 🔭 Next Up — Phase 3 (Days 25 → 26)
+## 🚀 Day 25 – Phase 3 pt.5–7 (FINAL PHASE 3)
 
-| Day | Focus | Key Deliverables |
-|------|--------|----------------|
-| **Day 25 – Phase 3 pt.5–6a** | 🔥 **Confidence Heat-Map + Multi-Price Extraction** | Add visual confidence overlay (`/debug/blocks/<id>`), add Draft Editor threshold slider, extract multi-size/multi-price variants (S/M/L, 10”/14”/18”), normalize all prices. |
-| **Day 26 – Phase 3 pt.6b** | 🏁 **Final QA + Docs + Tagging** | Full regression test (upload → rotate → preview → finalize → edit → publish), end-to-end cleanup, README finalization, and tag `phase-3-complete`. |
+### ✔ **Phase 3 pt.5 — Confidence Heat-Map + Editor Slider**
+- Heat-map tinting per row  
+- Confidence badges in-name  
+- Confidence threshold slider  
+- Sidebar outline filtering aware of confidence  
+
+### ✔ **Phase 3 pt.6A — AI Cleanup Safe Mode**
+- Finalize-with-AI endpoint  
+- Live status pill  
+- Auto-refresh  
+- Safe normalization across all item fields  
+
+### ✔ **Phase 3 pt.6B — Smarter Text Shaping**
+- `_reshape_multi_item_name()`  
+- `_smooth_ingredients()`  
+- Better comma/ingredient handling  
+- Cleaner merged names/descriptions  
+
+### ⭐ **Phase 3 pt.7 — Item Quality Score (FINAL DELIVERABLE)**
+Delivered in the Day 25 live session:
+
+#### ✔ Item Quality Scoring (0–100)
+Based on:
+- OCR confidence  
+- Price validity  
+- Name length sanity  
+- Junk-symbol density  
+- Cleanup load  
+
+#### ✔ Quality badges in Draft Editor  
+`Quality: 80/100` shown inline  
+Green/Yellow/Red tinting  
+Always non-destructive  
+
+### ⭐ Result  
+**Phase 3 is officially COMPLETE.**  
+OCR v2 pipeline is stable, accurate, and production-ready.
+
+Tags:  
+`phase-3-complete`  
+`phase-3-pt-7-quality-score`
 
 ---
 
-## 🌟 Current Status  
-🚀 **Day 24 is complete.**  
-We now have a powerful pipeline:
+# 🌄 **NEXT UP – PHASE 4: Structured OCR (The Big One)**
 
-**Rotate → Segment → Category Infer → Two-Column Merge → AI Cleanup → Draft Editor**  
+Phase 4 is where ServLine evolves from “OCR + cleanup” → **true structured understanding**.
 
-The OCR engine is now smart, stable, and accurate — ready for Phase 3 pt.5.
+This is the phase that makes ServLine *commercial-grade*.
+
+---
+
+## 🚀 **Phase 4 – Structured OCR (Semantic Menu Engine)**
+
+### **🎯 Goal**  
+Transform messy PDF/JPG text into **perfectly structured, AI-ready menu JSON**, suitable for:
+- Voice ordering  
+- POS mapping  
+- Auto-category detection  
+- Auto-variants  
+- Price-logic  
+- Large restaurant onboarding at scale  
+
+---
+
+## 🔥 **Phase 4 Core Modules**
+
+### **1. Block→Item Semantic Grouping**  
+Smarter than geometry:  
+Use AI thinking + OCR metadata to understand:
+- What is a menu item  
+- What is a description  
+- What is a category  
+- What is a variant  
+- What is a combo  
+- What is a size mapping  
+
+This replaces guesswork with **semantic clustering**.
+
+---
+
+### **2. Description Reconstruction Engine**  
+Automatically:
+- Remove bullet symbols  
+- Merge wrapped lines  
+- Detect ingredient lists  
+- Normalize commas, slashes, & separators  
+- Fix unnatural line breaks
+
+---
+
+### **3. AI Variant Deduction**  
+Automatic extraction of:
+- Size families  
+- Flavor sets  
+- Sub-variant groups (e.g., “(Grilled/Fried) Chicken”)  
+- Combo upgrade logic  
+- Wing counts (“6pc / 12pc / 24pc”)  
+
+---
+
+### **4. Category Hierarchy Inference (v2)**  
+Category-level grouping powered by:
+- Block positions  
+- Font weight  
+- Geometry  
+- Keywords  
+- AI semantic reading  
+
+---
+
+### **5. Price Reasoning Engine**  
+Price clustering + corrections:
+- Detect misread decimals  
+- Detect swapped digits  
+- Detect outliers  
+- Match prices to sizes/variants  
+
+---
+
+### **6. Draft Editor Auto-Grouping Layer**  
+Finally tie the structured output into the UI:
+- Items auto-bucketed by category  
+- Variants grouped under one parent  
+- Clean S/M/L + 10/14/18 logic  
+- Description clean by default  
+- Zero junk  
+
+---
+
+## ⭐ **Phase 4 Result**  
+By the end of Phase 4:
+
+**You’ll be able to upload ANY menu and get perfectly structured menu JSON with almost zero manual fixes.**
+
+This is when ServLine becomes **ready for restaurant onboarding and real customer usage**.
+
+---
+
+# 🌟 Current Status  
+OCR v2 pipeline completed (Phase 3).  
+Draft Editor is powerful and stable.  
+We now begin **Phase 4: Structured OCR** — the biggest accuracy jump yet.
 
