@@ -1,6 +1,6 @@
 # storage/ocr_facade.py
 """
-OCR façade — Phase 1 (+ AI helper rev7)
+OCR façade — Phase 3 (+ AI helper rev7)
 Bridges the segmenter to higher-level app code.
 
 Public API:
@@ -18,23 +18,28 @@ from datetime import datetime
 
 import pytesseract
 
-# --- Make sure project root and portal/ are importable (helps runtime + Pylance) ---
-ROOT = Path(__file__).resolve().parents[1]  # repo root
+# --- Ensure project root + portal/ are importable (so storage + portal both work) ---
+ROOT = Path(__file__).resolve().parents[1]  # repo root: .../servline
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 if str(ROOT / "portal") not in sys.path:
     sys.path.append(str(ROOT / "portal"))
 
-# Phase 1 segmenter (lives under portal/storage/*)
+# Phase 3 segmenter (lives under portal/storage/*)
 from portal.storage.ocr_pipeline import segment_document  # type: ignore
 
 # Orientation + image helpers (lives under portal/storage/*)
 from portal.storage.ocr_utils import normalize_orientation  # type: ignore
 
 # AI parsing helper (lives alongside this file)
-from .ai_ocr_helper import analyze_ocr_text  # type: ignore
+try:
+    from .ai_ocr_helper import analyze_ocr_text  # type: ignore
+except Exception as e:
+    analyze_ocr_text = None  # type: ignore
+    print(f"[OCR] Warning: ai_ocr_helper import failed in ocr_facade: {e!r}")
 
-PIPELINE_VERSION = "phase-1-segmenter+ai-helper-rev7(orientation-normalizer)"
+
+PIPELINE_VERSION = "phase-3-segmenter+ai-helper-rev7(category+multi-price)"
 
 
 def _tesseract_cmd() -> str:
@@ -78,7 +83,7 @@ def health() -> Dict[str, Any]:
 
 def _auto_rotate_pdf_if_needed(pdf_path: str) -> str:
     """
-    Normalize page orientation deterministically using portal.storage.ocr_utils.normalize_orientation.
+    Normalize page orientation deterministically using storage.ocr_utils.normalize_orientation.
     If any page is adjusted, write a temporary upright PDF and return its path;
     otherwise return the original path.
     """
@@ -136,7 +141,19 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
     """
     Convert AI-helper items to the portal's categories schema:
     [
-      { "name": "Pizza", "items": [ { "name": ..., "description": ..., "sizes": [ {"label":"L","price":12.99}, ... ] } ] },
+      {
+        "name": "Pizza",
+        "items": [
+          {
+            "name": ...,
+            "description": ...,
+            "sizes": [
+              {"label":"L","price":12.99},
+              ...
+            ]
+          }
+        ]
+      },
       ...
     ]
     """
@@ -146,6 +163,7 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
         name = (it.get("name") or "").strip() or "Untitled"
         desc = it.get("description")
         variants = it.get("variants") or []
+
         # Build sizes from variants if present; otherwise seed from first price candidate (as "Base")
         sizes: List[Dict[str, Any]] = []
         if variants:
@@ -167,14 +185,25 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
                 if base > 0:
                     sizes.append({"label": "Base", "price": round(base, 2)})
 
-        cats.setdefault(cat, []).append({
-            "name": name,
-            "description": desc or None,
-            "sizes": sizes,  # may be []
-        })
+        cats.setdefault(cat, []).append(
+            {
+                "name": name,
+                "description": desc or None,
+                "sizes": sizes,  # may be []
+            }
+        )
 
     # materialize in stable order (Pizza, Specialty Pizzas, etc. first-ish)
-    preferred = ["Pizza", "Specialty Pizzas", "Burgers & Sandwiches", "Wings", "Salads", "Sides & Apps", "Beverages", "Uncategorized"]
+    preferred = [
+        "Pizza",
+        "Specialty Pizzas",
+        "Burgers & Sandwiches",
+        "Wings",
+        "Salads",
+        "Sides & Apps",
+        "Beverages",
+        "Uncategorized",
+    ]
     ordered_names = [c for c in preferred if c in cats] + [c for c in cats.keys() if c not in preferred]
 
     return [{"name": cname, "items": cats[cname]} for cname in ordered_names]
@@ -184,18 +213,22 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Segment PDF/image into structured layout, then run AI helper to produce draft items.
     Returns:
-      categories_dict: {
-        "categories": [ { "name": ..., "items": [ {"name":..., "description":..., "sizes":[...]}, ...] } ],
-        "extracted_at": "...Z",
-        "source": { "type": "upload", "file": "<basename>", "ocr_engine": "ocr_helper+tesseract" }
-      }
-      debug_payload: {
-        "version": PIPELINE_VERSION,
-        "layout": <segmenter output>,
-        "notes": [...],
-        "ai_preview": { "items": [...], "sections": [...] }
-      }
+        categories_dict: {
+            "categories": [ { "name": ..., "items": [ {"name":...., "description":...., "sizes":[...]}, ... ] },
+            "extracted_at": "...Z",
+            "source": { "type": "upload", "file": "<basename>", "ocr_engine": "ocr_helper+tesseract" }
+        }
+        debug_payload: {
+            "version": PIPELINE_VERSION,
+            "layout": <segmenter output>,
+            "notes": [...],
+            "ai_preview": { "items": [...], "sections": [...] }
+        }
     """
+    # Safety: ensure analyze_ocr_text imported correctly
+    if analyze_ocr_text is None:
+        raise RuntimeError("ai_ocr_helper is not available; cannot extract menu")
+
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(path)
@@ -203,7 +236,8 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Ensure upright orientation before segmentation (per-page normalize)
     upright_path = _auto_rotate_pdf_if_needed(str(p))
 
-    layout = segment_document(pdf_path=upright_path, pdf_bytes=None, dpi=300)
+    # Phase 3 segmenter: high-clarity + segmentation + categories + multi-price/variants
+    layout = segment_document(pdf_path=upright_path, pdf_bytes=None, dpi=400)
 
     # Clean up temporary upright file if created
     if upright_path != str(p):
@@ -214,17 +248,31 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     # ---- AI helper pass: lines → items ----
     raw_text = _layout_to_raw_text(layout)
-    ai_doc = analyze_ocr_text(raw_text, layout=layout, taxonomy=None, restaurant_profile=None)
+    ai_doc = analyze_ocr_text(
+        raw_text,
+        layout=layout,
+        taxonomy=None,
+        restaurant_profile=None,
+    )
     items = ai_doc.get("items", [])
     sections = ai_doc.get("sections", [])
 
     # Build categories payload expected by portal
     categories_list = _group_items_into_categories(items)
     categories: Dict[str, Any] = {
-        "categories": categories_list if categories_list else [
-            {"name": "Uncategorized", "items": [
-                {"name": "No items recognized", "description": "OCR returned no items.", "sizes": []}
-            ]}
+        "categories": categories_list
+        if categories_list
+        else [
+            {
+                "name": "Uncategorized",
+                "items": [
+                    {
+                        "name": "No items recognized",
+                        "description": "OCR returned no items.",
+                        "sizes": [],
+                    }
+                ],
+            }
         ],
         "extracted_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "source": {
@@ -239,9 +287,9 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "version": PIPELINE_VERSION,
         "layout": layout,
         "notes": [
-            "phase-1 segmentation",
+            "phase-3 segmentation (blocks + text_blocks + categories + multi-price variants)",
             "per-page orientation normalizer applied when needed",
-            "ai-helper (rev6) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds",
+            "ai-helper (rev7) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds",
         ],
         "ai_preview": {
             "items": items,

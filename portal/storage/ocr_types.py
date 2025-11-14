@@ -85,6 +85,33 @@ class OCRBlock(TypedDict):
 
 
 # ────────────────────────────────────────────────
+# 💵 Price candidates & variants (Phase 3 pt.6)
+# ────────────────────────────────────────────────
+
+class OCRPriceCandidate(TypedDict):
+    """
+    Raw price candidate detected in a line/block.
+
+    text:        Raw price string as seen in OCR (e.g., "12.99").
+    confidence:  0.0–1.0 confidence for this price extraction.
+    price_cents: Optional normalized integer cents if we parse text successfully.
+    """
+    text: str
+    confidence: float              # 0.0–1.0
+    price_cents: NotRequired[int]  # 1299, etc. when parsed
+
+
+class OCRVariant(TypedDict):
+    """
+    Represents a size/option variant with its own price.
+    Used in OCR preview items before they become DraftItems.
+    """
+    label: str                     # e.g. "Small", "Lg", '16"' etc.
+    price_cents: int               # normalized cents value
+    confidence: float              # 0.0–1.0 for this variant
+
+
+# ────────────────────────────────────────────────
 # 📦 High-level container for OCR job results
 # ────────────────────────────────────────────────
 
@@ -115,4 +142,6 @@ __all__ = [
     "OCRBlock",
     "OCRResult",
     "Segmented",
+    "OCRPriceCandidate",
+    "OCRVariant",
 ]

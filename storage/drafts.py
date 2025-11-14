@@ -223,17 +223,29 @@ def _clamp_price_cents(cents: Optional[int]) -> Optional[int]:
 def _pick_price_from_ai_or_text(ai_price_candidates: List[Dict[str, Any]], name: str, desc: Optional[str]) -> Optional[int]:
     """
     Choose a main price (in cents).
-    1) Prefer AI-provided candidates (value may be dollars as float).
+    1) Prefer AI/OCR-provided candidates:
+         - price_cents (direct cents, new OCR pipeline)
+         - value (dollar float, legacy AI helper)
     2) Else, extract from text (name + description) using OCR regex.
     """
-    # 1) AI candidates (often {'value': 12.99}):
+    # 1) AI/OCR candidates
     for c in ai_price_candidates or []:
+        # a) Direct cents from OCR pipeline / helpers
+        try:
+            if "price_cents" in c and c.get("price_cents") is not None:
+                cents_raw = c.get("price_cents")
+                cents = _clamp_price_cents(int(round(float(cents_raw))))
+                if cents is not None:
+                    return cents
+        except Exception:
+            pass
+
+        # b) Legacy AI helper style: {'value': 12.99}
         try:
             v = c.get("value")
             if v is None:
                 continue
-            cents = int(round(float(v) * 100))
-            cents = _clamp_price_cents(cents)
+            cents = _clamp_price_cents(int(round(float(v) * 100)))
             if cents is not None:
                 return cents
         except Exception:
@@ -519,10 +531,13 @@ def _flat_from_legacy_categories(draft_json: Dict[str, Any]) -> List[Dict[str, A
 
 def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    AI path: map ai_ocr_helper.analyze_ocr_text(...) → flat rows.
-    Hardening (Day 22):
+    AI path: map ai_ocr_helper / OCR pipeline preview items → flat rows.
+    Hardening (Day 22+25):
       - Garbage guard: drop lines that fail is_garbage_line (unless valid price present).
-      - Price normalization: prefer AI price candidates, else extract from text; clamp to sane range.
+      - Price normalization:
+          * Prefer variants[].price_cents when provided (multi-price aware).
+          * Else prefer AI/OCR price_candidates (value/price_cents).
+          * Else extract from text; clamp to sane range.
     """
     flat: List[Dict[str, Any]] = []
 
@@ -534,9 +549,30 @@ def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         desc_raw = (it.get("description") or None)
         cat = (it.get("category") or None)
         pcs = it.get("price_candidates") or []
+        variants = it.get("variants") or []
 
-        # Pick a main price (in cents) with clamps
-        cents_main = _pick_price_from_ai_or_text(pcs, name_raw, desc_raw)
+        # 1) Prefer variants (multi-price case) – choose a main/base price.
+        cents_main: Optional[int] = None
+        if isinstance(variants, list) and variants:
+            variant_prices: List[int] = []
+            for v in variants:
+                try:
+                    pc = v.get("price_cents")
+                except AttributeError:
+                    continue
+                if pc is None:
+                    continue
+                cents = _clamp_price_cents(int(round(float(pc))))
+                if cents is not None:
+                    variant_prices.append(cents)
+            if variant_prices:
+                # Heuristic: pick the lowest variant price as the "base" size.
+                cents_main = min(variant_prices)
+
+        # 2) If no usable variants, fall back to price_candidates / text.
+        if cents_main is None:
+            cents_main = _pick_price_from_ai_or_text(pcs, name_raw, desc_raw)
+
         price_hit = cents_main is not None
 
         # Garbage guard on the NAME (allow leniency if a valid price is present)
@@ -617,6 +653,7 @@ def create_draft_from_import(draft_json: Dict[str, Any], *, import_job_id: int) 
                 "guards": {
                     "dropped_by_is_garbage_line": True,
                     "price_clamp_range": [ocr_utils.PRICE_MIN, ocr_utils.PRICE_MAX],
+                    "variants_used_for_base_price": True,
                 }
             })
         except Exception:

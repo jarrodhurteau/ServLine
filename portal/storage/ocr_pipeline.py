@@ -26,6 +26,12 @@ Phase 3 pt.4b:
   real-world pizza menus) + logging of column counts per page.
 - For very wide pages (>= 2400px) where split_columns() only finds 1 column,
   force a simple left/right half split as a fallback.
+
+Phase 3 pt.6 (Day 25):
+- Multi-price / variant extraction at the text-block level:
+  - Detects price candidates in merged_text.
+  - Builds OCRPriceCandidate + OCRVariant lists.
+  - Attaches price_candidates + variants to text_blocks and mirrors onto preview_blocks.
 """
 
 from __future__ import annotations
@@ -39,7 +45,14 @@ from pytesseract import image_to_osd
 
 from . import ocr_utils
 from . import category_infer
-from .ocr_types import Block, Line, Word, BBox  # TypedDicts; Phase-2 compatibility
+from .ocr_types import (
+    Block,
+    Line,
+    Word,
+    BBox,
+    OCRPriceCandidate,
+    OCRVariant,
+)  # TypedDicts; Phase-2 + Phase-3 compatibility
 
 # -----------------------------
 # Tunable heuristics
@@ -143,6 +156,151 @@ def _is_pricey_text(text: str) -> bool:
         return True
 
     return False
+
+
+# -----------------------------
+# Price / variant extraction (Phase 3 pt.6)
+# -----------------------------
+
+def _parse_price_to_cents(raw: str) -> Optional[int]:
+    """Best-effort parse of a price-like string into integer cents."""
+    raw = raw.strip().replace("$", "")
+    if not raw:
+        return None
+    try:
+        if "." in raw:
+            dollars_str, cents_str = raw.split(".", 1)
+            dollars = int(re.sub(r"[^\d]", "", dollars_str) or "0")
+            cents = int(re.sub(r"[^\d]", "", cents_str)[:2] or "0")
+        else:
+            dollars = int(re.sub(r"[^\d]", "", raw) or "0")
+            cents = 0
+        return dollars * 100 + cents
+    except Exception:
+        return None
+
+
+def _find_price_candidates_with_positions(text: str) -> List[Tuple[OCRPriceCandidate, int]]:
+    """
+    Scan text for price-like tokens and return (candidate, start_index) tuples.
+
+    This powers both price_candidates and variant label extraction.
+    """
+    results: List[Tuple[OCRPriceCandidate, int]] = []
+    if not text:
+        return results
+
+    for m in _PRICE_RE.finditer(text):
+        raw = m.group(0)
+        cents = _parse_price_to_cents(raw)
+        # Default confidence for regex hit; may be refined later.
+        base_conf = 0.9
+        cand: OCRPriceCandidate = {"text": raw, "confidence": base_conf}
+        if cents is not None:
+            cand["price_cents"] = cents
+        results.append((cand, m.start()))
+    return results
+
+
+_CONNECTOR_TOKENS = {
+    "and",
+    "or",
+    "&",
+    "+",
+    "w/",
+    "w",
+    "with",
+    "for",
+}
+
+
+def _build_variants_from_text(
+    text: str,
+    priced: List[Tuple[OCRPriceCandidate, int]],
+) -> List[OCRVariant]:
+    """
+    Infer variant labels (e.g., 'Sm', 'Lg', '16"') from tokens immediately
+    preceding each price. Returns OCRVariant list; intended mostly for 2+ prices.
+    """
+    variants: List[OCRVariant] = []
+    if not text or not priced:
+        return variants
+
+    # Tokenize while preserving char positions
+    tokens: List[Tuple[str, int, int]] = []
+    for tm in re.finditer(r"\S+", text):
+        tok = tm.group(0)
+        tokens.append((tok, tm.start(), tm.end()))
+
+    for cand, price_start in priced:
+        # Collect tokens ending before the price
+        prior_tokens = [t for t in tokens if t[2] <= price_start]
+        label_parts: List[str] = []
+
+        for tok, ts, te in reversed(prior_tokens):
+            stripped = tok.strip(".,;:-")
+            if not stripped:
+                continue
+            low = stripped.lower()
+
+            # Skip if this token itself looks like a price
+            if _PRICE_RE.fullmatch(stripped):
+                continue
+            if low in _CONNECTOR_TOKENS:
+                continue
+
+            label_parts.append(stripped)
+            if len(label_parts) >= 2:
+                break
+
+        label = " ".join(reversed(label_parts)).strip()
+
+        price_cents = cand.get("price_cents")
+        if price_cents is None:
+            price_cents = _parse_price_to_cents(cand["text"])
+        if price_cents is None:
+            # If we truly can't parse, skip this as a variant; the raw candidate still exists.
+            continue
+
+        variants.append(
+            {
+                "label": label,
+                "price_cents": price_cents,
+                "confidence": float(cand["confidence"]),
+            }
+        )
+
+    # Only treat as variants if we actually got 2+ prices parsed
+    if len(variants) < 2:
+        return []
+    return variants
+
+
+def annotate_prices_and_variants_on_text_blocks(text_blocks: List[Dict[str, Any]]) -> None:
+    """
+    Mutate each text_block dict by adding:
+      - price_candidates: List[OCRPriceCandidate]
+      - variants: List[OCRVariant]  (only when we detect >= 2 good prices)
+
+    This runs AFTER two-column merge + category inference so merged_text has
+    both item + price bits.
+    """
+    for tb in text_blocks:
+        merged = tb.get("merged_text") or tb.get("text") or ""
+        if not merged:
+            continue
+
+        priced = _find_price_candidates_with_positions(merged)
+        if not priced:
+            continue
+
+        # Always attach raw price_candidates, even when no variants
+        tb["price_candidates"] = [c for (c, _pos) in priced]
+
+        # Try to build variants; only keep if we got a plausible list
+        variants = _build_variants_from_text(merged, priced)
+        if variants:
+            tb["variants"] = variants
 
 
 # -----------------------------
@@ -577,6 +735,9 @@ def segment_document(
         # ----- Category inference (mutates tblocks in place via shared helper)
         infer_categories_on_text_blocks(page_text_blocks)
 
+        # ----- Phase 3 pt.6: price + variant extraction on merged text blocks
+        annotate_prices_and_variants_on_text_blocks(page_text_blocks)
+
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for pb in pblocks:
@@ -601,6 +762,18 @@ def segment_document(
                     (tb.get("category_confidence") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
                     None,
                 )
+
+            # Mirror price/variant info for overlay + preview JSON
+            tb_for_pb = next(
+                (tb for tb in page_text_blocks if tb.get("id") == pb.get("id")),
+                None,
+            )
+            if tb_for_pb is not None:
+                if "price_candidates" in tb_for_pb:
+                    pb["price_candidates"] = tb_for_pb["price_candidates"]
+                if "variants" in tb_for_pb:
+                    pb["variants"] = tb_for_pb["variants"]
+
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
 
@@ -610,15 +783,15 @@ def segment_document(
         "pages": len(pages),
         "dpi": dpi,
         "blocks": all_blocks,                  # Phase-2 compatible
-        "text_blocks": all_text_blocks,        # Phase-3 TextBlock dicts (+category fields)
-        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records (+category fields)
+        "text_blocks": all_text_blocks,        # Phase-3 TextBlock dicts (+category fields, +prices/variants)
+        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records (+category, +prices/variants)
         "meta": {
             "source": source,
             "engine": "tesseract",
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+two_column_merge+category_infer",
+            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }
@@ -634,6 +807,13 @@ if __name__ == "__main__":
         "PreviewBlocks:", len(sample.get("preview_blocks", []))
     )
     # Quick glance at inferred categories
-    cats = [(tb.get("category"), tb.get("category_confidence"), (tb.get("merged_text") or "")[:40])
-            for tb in sample.get("text_blocks", [])]
-    print("Sample categories:", [c for c in cats if c[0]])
+    cats = [
+        (
+            tb.get("category"),
+            tb.get("category_confidence"),
+            (tb.get("merged_text") or "")[:40],
+            tb.get("variants"),
+        )
+        for tb in sample.get("text_blocks", [])
+    ]
+    print("Sample categories/variants:", [c for c in cats if c[0] or c[3]])

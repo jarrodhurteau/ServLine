@@ -42,6 +42,18 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from importlib.util import find_spec
 import pytesseract
 
+# Try to import the OCR library health function; fall back safely
+try:
+    from storage.ocr_facade import health as ocr_health_lib
+except Exception as import_err:
+    _OCR_IMPORT_ERR = repr(import_err)
+
+    def ocr_health_lib():
+        return {
+            "engine": "error",
+            "error": _OCR_IMPORT_ERR,
+        }
+
 # ✅ Try to import the contract validator (with safe fallback if file not added yet)
 try:
     from portal.contracts import validate_draft_payload  # type: ignore
@@ -130,13 +142,22 @@ try:
 except Exception:
     drafts_store = None  # guarded below
 
-# OCR engine (Day 21 revamp)
+# OCR engine (Day-21 revamp)
 try:
     from storage.ocr_facade import extract_menu_from_pdf as extract_items_from_path
     from storage.ocr_facade import health as ocr_health_lib
+    print("[APP] Loaded OCR facade OK")  # DEBUG
 except Exception as e:
+    print("[APP] OCR facade failed:", e)  # DEBUG
+
     extract_items_from_path = None
-    ocr_health_lib = lambda: {"engine": "error", "error": repr(e)}
+    _ocr_facade_error = repr(e)  # capture the message safely
+
+    def ocr_health_lib():
+        return {
+            "engine": "error",
+            "error": f"ocr_facade import failed: {_ocr_facade_error}",
+        }
 
 # AI OCR Heuristics (Day 20)
 try:
@@ -1045,15 +1066,19 @@ def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dic
         cat_name = (worker_obj.get("category") if isinstance(worker_obj, dict) else None) or "Uncategorized"
         items = [worker_obj] if isinstance(worker_obj, dict) else []
 
-    # Map items into our expected fields (name, description, sizes)
+    # Map items into our expected fields (name, description, sizes, variants passthrough)
     norm_items = []
     for it in items:
         if not isinstance(it, dict):
             continue
+
         nm = (it.get("name") or "").strip()
         if not nm:
             continue
+
         desc = (it.get("description") or "").strip()
+
+        # Normalize sizes → [{name, price}]
         sizes_in = it.get("sizes") or []
         sizes_out = []
         for s in sizes_in:
@@ -1066,11 +1091,27 @@ def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dic
                 sp = 0.0
             if sn or sp:
                 sizes_out.append({"name": sn, "price": round(sp, 2)})
-        norm_items.append({
+
+        # Base item payload
+        item_out = {
             "name": nm,
             "description": desc,
-            "sizes": sizes_out
-        })
+            "sizes": sizes_out,
+        }
+
+        # 🔹 NEW: passthrough variants if the worker provided them
+        variants = it.get("variants")
+        if variants:
+            item_out["variants"] = variants
+
+        # 🔹 Optional: keep confidence/category if present on worker item
+        if it.get("confidence") is not None:
+            item_out["confidence"] = it.get("confidence")
+        if it.get("category"):
+            item_out["category"] = it.get("category")
+
+        norm_items.append(item_out)
+
 
     categories = [{"name": cat_name, "items": norm_items}] if norm_items else [{"name": "Uncategorized", "items": []}]
     return {

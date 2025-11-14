@@ -6,11 +6,11 @@ import unicodedata
 
 from .drafts import get_draft_items, upsert_draft_items
 from . import drafts as _drafts_mod  # for ocr_utils price clamp
-from portal.storage import category_infer as _cat_infer  # NEW: Phase-3 category engine
+from portal.storage import category_infer as _cat_infer  # Phase-3 category engine
 
 TAG = "[AI Cleaned]"
 
-# ---------- Text cleaning (aggressive) ----------
+# ---------- Text cleaning (ultra-safe) ----------
 _WS_RX = re.compile(r"\s+")
 _DOT_LEADERS_RX = re.compile(r"\.{2,}\s*")      # "Garlic Knots .... 5.99"
 _TRAIL_PUNCT_RX = re.compile(r"[^\w)\]]+$")
@@ -18,13 +18,13 @@ _MULTI_PUNCT_RX = re.compile(r"[^\w\s$.,&()/+'-]{2,}")
 _HARD_JUNK_RX = re.compile(r"[|]{2,}")          # vertical bars etc.
 _NONALNUM_BURST_RX = re.compile(r"(?<=\w)[^\w\s]{1,}(?=\w)")  # junk glued inside words
 
-# Tokenizer that keeps letter/number runs and separators
+# Tokenizer that keeps letter/number runs and separators (currently unused, but kept for future use)
 _TOKEN_RX = re.compile(r"[A-Za-z]{1,3}|[A-Za-z]{4,}|[0-9]+|[^A-Za-z0-9]+")
 
-# "A B C" style token pattern
+# "A B C" style token pattern (currently unused, but kept for future use)
 _DESPACER_RX = re.compile(r"^(?:[A-Za-z]\s){2,}[A-Za-z]$")
 
-# OCR swaps
+# OCR swaps (currently unused in cleaners – we’re in ultra-safe mode)
 _OCR_FIXES = {
     " rn ": " m ",
     " ii ": " n ",
@@ -34,7 +34,7 @@ _OCR_FIXES = {
     "—": "-",
 }
 
-# Light menu vocab (extend as we see real data)
+# Light menu vocab (currently unused; reserved for future smarter mode)
 _VOCAB: tuple[str, ...] = tuple(sorted(set(map(str.lower, [
     "pizza","pepperoni","margherita","calzone","stromboli","slice","pie","wings",
     "burger","cheeseburger","sandwich","sub","hoagie","panini","wrap","gyro","philly",
@@ -53,71 +53,8 @@ def _normalize_spaces(s: str) -> str:
 def _unicode_norm(s: str) -> str:
     return unicodedata.normalize("NFKC", s or "")
 
-def _despacer_tokenwise(s: str) -> str:
-    def fix_token(tok: str) -> str:
-        t = tok.strip()
-        if _DESPACER_RX.match(t):
-            return t.replace(" ", "")
-        return tok
-    return " ".join(fix_token(t) for t in s.split())
-
-def _split_tokens(s: str) -> List[str]:
-    return _TOKEN_RX.findall(s or "")
-
-def _is_short_word(tok: str) -> bool:
-    return tok.isalpha() and len(tok) <= 2
-
-def _collapse_short_runs(tokens: List[str]) -> List[str]:
-    """
-    Join runs of many 1–2 letter words (allowing punctuation between) into a single word.
-    Example: ['B','e','n','d',' ','a',' ','B','O',' ','w','o',' ','O','D',' ','r','R',' ','A']
-             -> ['BendaBOwoODrRA']
-    """
-    out: List[str] = []
-    buf: List[str] = []
-    short_count = 0
-
-    def flush():
-        nonlocal buf, short_count
-        if short_count >= 3:
-            # join only the alphabetic pieces
-            joined = "".join(ch for ch in buf if ch.isalpha())
-            if joined:
-                out.append(joined)
-            else:
-                out.extend(buf)
-        else:
-            out.extend(buf)
-        buf = []
-        short_count = 0
-
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if _is_short_word(t):
-            buf.append(t)
-            short_count += 1
-        elif not t.isalnum():  # punctuation/separator — keep inside the buffer
-            buf.append(t)
-        else:
-            # ended a run
-            flush()
-            out.append(t)
-        i += 1
-    flush()
-    # remove separators that are now dangling at edges of words
-    cleaned: List[str] = []
-    for tok in out:
-        if not cleaned:
-            cleaned.append(tok)
-            continue
-        if not cleaned[-1].isalnum() and not tok.isalnum():
-            # skip duplicate separators
-            continue
-        cleaned.append(tok)
-    return cleaned
-
 def _collapse_runs(s: str) -> str:
+    # Collapse long "aaaaa" -> "aa"
     return re.sub(r"(.)\1{2,}", r"\1\1", s)
 
 def _cleanup_punct(s: str) -> str:
@@ -127,12 +64,6 @@ def _cleanup_punct(s: str) -> str:
     t = _HARD_JUNK_RX.sub(" ", t)
     t = _NONALNUM_BURST_RX.sub("", t)
     return _normalize_spaces(t)
-
-def _apply_ocr_swaps(s: str) -> str:
-    padded = f" {s} "
-    for k, v in _OCR_FIXES.items():
-        padded = padded.replace(k, v)
-    return _normalize_spaces(padded)
 
 def smart_title(s: str) -> str:
     if not s:
@@ -145,7 +76,7 @@ def smart_title(s: str) -> str:
             out.append(tok[:1].upper() + tok[1:].lower())
     return " ".join(out)
 
-# ---- Bigram fuzzy correction (no deps) ----
+# ---- (Fuzzy vocab helpers kept for future, not used now) ----
 def _bigrams(w: str) -> set[str]:
     w = f"^{w.lower()}$"
     return {w[i:i+2] for i in range(len(w)-1)} if len(w) >= 2 else {w}
@@ -181,57 +112,41 @@ def _correct_by_vocab(line: str) -> str:
     toks = line.split()
     return " ".join(_maybe_correct_token(t) for t in toks)
 
-def _maybe_word_soup(s: str) -> bool:
-    """Detects if text looks like broken OCR (lots of short tokens, mixed case, or symbols)."""
-    if not s:
-        return False
-    toks = re.findall(r"[A-Za-z]+", s)
-    if not toks:
-        return False
-    short = sum(1 for t in toks if len(t) <= 3)
-    ratio = short / max(1, len(toks))
-    # trigger aggressively if many short tokens or total < 5 tokens
-    if ratio > 0.4 or len(toks) <= 5:
-        return True
-    # also trigger if weird alternating case patterns like 'Bo OD rR'
-    if re.search(r"[a-z][A-Z]|[A-Z][a-z]", s):
-        return True
-    return False
+# ---------- Core cleaners (ULTRA SAFE) ----------
 
 def clean_item_name(s: str) -> str:
+    """
+    ULTRA SAFE:
+    - Do NOT join tokens
+    - Do NOT run fuzzy vocab fixes
+    - Only:
+      * Unicode-normalize
+      * Collapse extreme repeated chars
+      * Strip obviously junky punctuation
+      * Normalize spaces
+      * Title-case the result
+    """
     if not s:
         return ""
     t = _unicode_norm(s)
-
-    # Aggressively rebuild if it's "word soup"
-    if _maybe_word_soup(t):
-        tokens = _split_tokens(t)
-        tokens = _collapse_short_runs(tokens)
-        t = "".join(tokens)
-
-    # Also handle classic spaced-letters per-token
-    t = _despacer_tokenwise(t)
     t = _collapse_runs(t)
     t = _cleanup_punct(t)
-    t = _apply_ocr_swaps(t)
-    t = _correct_by_vocab(t)
     t = _TRAIL_PUNCT_RX.sub("", t).strip()
     t = smart_title(t)
     return t
 
 def clean_description(s: str) -> str:
+    """
+    ULTRA SAFE:
+    - Preserve structure as much as possible
+    - No joining / fancy guessing
+    - Just unicode-normalize, collapse crazy repeats, strip junk, normalize spaces.
+    """
     if not s:
         return ""
     t = _unicode_norm(s)
-    if _maybe_word_soup(t):
-        tokens = _split_tokens(t)
-        tokens = _collapse_short_runs(tokens)
-        t = "".join(tokens)
-    t = _despacer_tokenwise(t)
     t = _collapse_runs(t)
     t = _cleanup_punct(t)
-    t = _apply_ocr_swaps(t)
-    t = _correct_by_vocab(t)
     return _normalize_spaces(t)
 
 # ---------- Price helpers ----------
@@ -251,7 +166,7 @@ _PRICE_RX = re.compile(
     re.X,
 )
 
-def _to_cents(dollars: str|None, cents: str|None, compact: str|None, dotonly: str|None) -> int|None:
+def _to_cents(dollars: str | None, cents: str | None, compact: str | None, dotonly: str | None) -> int | None:
     try:
         if dotonly:
             return int(dotonly)
@@ -304,7 +219,7 @@ _BUCKETS = {
     "Desserts":   ["tiramisu", "cannoli", "brownie", "cheesecake", "cookie", "ice cream"],
 }
 
-def classify_category(name: str, description: str|None = None) -> str:
+def classify_category(name: str, description: str | None = None) -> str:
     """
     Legacy keyword-based classifier (kept as a fallback when the Phase-3
     category_infer helper can't decide).
@@ -315,11 +230,10 @@ def classify_category(name: str, description: str|None = None) -> str:
             return cat
     return "Uncategorized"
 
-
 def infer_item_category(name: str, description: str | None = None) -> Tuple[str, Optional[int], Optional[str]]:
     """
-    Use the Phase-3 category_infer helper on a synthesized text_block built
-    from the item name/description, then fall back to the legacy buckets.
+    Use Phase-3 category_infer.infer_category_for_text directly on a synthesized text,
+    then fall back to the legacy buckets.
 
     Returns: (category, category_confidence, rule_trace)
     """
@@ -327,28 +241,27 @@ def infer_item_category(name: str, description: str | None = None) -> Tuple[str,
     if not merged:
         return "Uncategorized", None, None
 
-    tb = {
-        "id": "item",
-        "merged_text": merged,
-        "block_type": "item",
-    }
     try:
-        _cat_infer.infer_categories_on_text_blocks([tb])
-        cat = tb.get("category")
-        conf = tb.get("category_confidence")
-        trace = tb.get("rule_trace")
+        guess = _cat_infer.infer_category_for_text(
+            name=merged,
+            description=None,
+            price_cents=0,
+            neighbor_categories=[],
+            fallback="Uncategorized",
+        )
+        cat = guess.category
+        conf = int(guess.confidence)
+        trace = guess.reason or "heuristic match"
     except Exception:
         cat, conf, trace = None, None, None
 
-    if not cat:
+    if not cat or cat == "Uncategorized":
         cat = classify_category(name, description)
-        conf = conf or None
-        trace = trace or None
-
+        # leave conf/trace as-is or None
     return cat, conf if cat else None, trace
 
 # ---------- Confidence ----------
-def normalize_confidence(ocr_score: int|None, ai_score: int|None) -> int:
+def normalize_confidence(ocr_score: int | None, ai_score: int | None) -> int:
     if ocr_score is None and ai_score is None:
         return 50
     if ocr_score is None:
@@ -359,8 +272,10 @@ def normalize_confidence(ocr_score: int|None, ai_score: int|None) -> int:
     return max(0, min(100, int(round(blended))))
 
 # ---------- Public entrypoint ----------
-def _maybe_prefix_tag(desc: str|None) -> str:
+def _maybe_prefix_tag(desc: str | None) -> str:
     base = (desc or "").strip()
+    if not base:
+        return TAG
     if not base.startswith(TAG):
         return f"{TAG} {base}".strip()
     return base
@@ -375,6 +290,7 @@ def apply_ai_cleanup(draft_id: int) -> int:
         name_raw = (it.get("name") or "").strip()
         desc_raw = (it.get("description") or "").strip()
 
+        # ULTRA SAFE clean – keep structure, just light polish
         name_clean = clean_item_name(name_raw)
         desc_clean = clean_description(desc_raw)
 
