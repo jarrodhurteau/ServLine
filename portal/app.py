@@ -220,6 +220,29 @@ def _cat_hue(value: Optional[str]) -> int:
 def jinja_cat_hue(value: Optional[str]) -> int:
     return _cat_hue(value)
 
+# ------------------------
+# Confidence → CSS class mapping
+# ------------------------
+@app.template_filter("confidence_class")
+def confidence_class(conf) -> str:
+    """
+    Map numeric confidence (0–100) to a CSS class.
+    """
+    try:
+        c = int(conf or 0)
+    except (TypeError, ValueError):
+        c = 0
+
+    if c >= 80:
+        return "conf-high"
+    elif c >= 50:
+        return "conf-med"
+    elif c > 0:
+        return "conf-low"
+    else:
+        return "conf-unknown"
+
+
 @app.context_processor
 def inject_globals():
     """Provide `now` and `show_admin` to all templates."""

@@ -5,9 +5,10 @@
 <div class="draft-editor-page">
   <style>
     /* ===== Confidence Heat-Map & Provenance ===== */
-    #items-body tr.conf-high-row { background: linear-gradient(to right, rgba(40, 167, 69, 0.10), transparent 30%); }
-    #items-body tr.conf-med-row  { background: linear-gradient(to right, rgba(255, 193, 7, 0.10),  transparent 30%); }
-    #items-body tr.conf-low-row  { background: linear-gradient(to right, rgba(220, 53, 69, 0.10),  transparent 30%); }
+    #items-body tr.conf-row.conf-high    { background: linear-gradient(to right, rgba(40, 167, 69, 0.10),  transparent 30%); }
+    #items-body tr.conf-row.conf-med     { background: linear-gradient(to right, rgba(255, 193, 7, 0.10),   transparent 30%); }
+    #items-body tr.conf-row.conf-low     { background: linear-gradient(to right, rgba(220, 53, 69, 0.10),   transparent 30%); }
+    #items-body tr.conf-row.conf-unknown { background: none; }
 
     .prov-pin {
       display:inline-flex; align-items:center; justify-content:center;
@@ -73,6 +74,20 @@
     .pill-green { background:#dcfce7; color:#065f46; }
     .pill-red   { background:#fee2e2; color:#991b1b; }
     .pill-purple{ background:#ede9fe; color:#5b21b6; }
+
+    /* Confidence threshold slider */
+    .confidence-filter {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin-left:16px;
+      color:var(--muted);
+      font-size:.85rem;
+      white-space:nowrap;
+    }
+    .confidence-filter input[type="range"] {
+      width:140px;
+    }
   </style>
 
   <div class="layout">
@@ -112,7 +127,7 @@
       </div>
 
       {% if draft.source_job_id %}
-        <hr style="border-color:#1f2a44; margin:12px 0;">
+        <hr style="border-color:#1f2a44; margin:12px 0%;">
         <a class="btn" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Back to Import Detail</a>
       {% endif %}
     </aside>
@@ -201,10 +216,21 @@
       <div class="toolbar-sticky">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
         </div>
+
+        <!-- Confidence threshold slider -->
+        <div class="confidence-filter">
+          <span>Min confidence:</span>
+          <input type="range"
+                 id="confidence-threshold"
+                 min="0" max="100" step="5" />
+          <span id="confidence-threshold-value">0%</span>
+        </div>
+
         <div class="spacer"></div>
         <button id="add-row-btn" class="btn">Add Item</button>
         <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
@@ -225,7 +251,8 @@
           </thead>
           <tbody id="items-body">
             {% for it in items %}
-            <tr data-id="{{ it.id }}"
+            <tr class="conf-row {% if it.confidence is not none %}{{ it.confidence|confidence_class }}{% else %}conf-unknown{% endif %}"
+                data-id="{{ it.id }}"
                 data-cat="{{ (it.category or '')|e }}"
                 data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
               <td><input type="checkbox" class="row-select" /></td>
@@ -322,9 +349,26 @@
     const lastSaved = $("#last-saved");
     const exportVisibleBtn = $("#export-visible-btn");
     const provTip = $("#prov-tip");
+    const confSlider = $("#confidence-threshold");
+    const confValue = $("#confidence-threshold-value");
+
+    const CONF_LS_KEY = 'draft_conf_threshold_v1';
 
     let dirty = false;
     let deletedIds = [];
+
+    // Initialize confidence slider from localStorage
+    if (confSlider && confValue) {
+      let initial = 0;
+      try {
+        const stored = window.localStorage && window.localStorage.getItem(CONF_LS_KEY);
+        if (stored !== null && !Number.isNaN(Number(stored))) {
+          initial = Number(stored);
+        }
+      } catch (_) {}
+      confSlider.value = String(initial);
+      confValue.textContent = initial + '%';
+    }
 
     /* Clean & Refine sequence */
     const refineForm = document.getElementById('refine-form');
@@ -359,17 +403,29 @@
 
     function applyConfidenceTint(){
       $$("#items-body tr").forEach(tr=>{
-        tr.classList.remove("conf-high-row","conf-med-row","conf-low-row");
-        const raw = tr.getAttribute("data-confidence"); if (!raw) return;
-        const c = Number(raw); if (Number.isNaN(c)) return;
-        if (c >= 80) tr.classList.add("conf-high-row");
-        else if (c >= 60) tr.classList.add("conf-med-row");
-        else tr.classList.add("conf-low-row");
+        tr.classList.remove("conf-high","conf-med","conf-low","conf-unknown","conf-row");
+        const raw = tr.getAttribute("data-confidence");
+        tr.classList.add("conf-row");
+        if (!raw) {
+          tr.classList.add("conf-unknown");
+          return;
+        }
+        const c = Number(raw);
+        if (Number.isNaN(c)) {
+          tr.classList.add("conf-unknown");
+          return;
+        }
+        if (c >= 80) tr.classList.add("conf-high");
+        else if (c >= 50) tr.classList.add("conf-med");
+        else if (c > 0) tr.classList.add("conf-low");
+        else tr.classList.add("conf-unknown");
       });
     }
 
     function collectRowsFiltered(){
       const q = search.value.trim().toLowerCase();
+      const threshold = confSlider ? Number(confSlider.value || 0) : 0;
+
       $$("#items-body tr").forEach(tr=>{
         const name=$(".name", tr)?.value?.toLowerCase()||"";
         const desc=$(".description", tr)?.value?.toLowerCase()||"";
@@ -379,7 +435,12 @@
         const passItem = tr.dataset.filterItem ? (normalizeBaseName($(".name", tr)?.value||"") === tr.dataset.filterItem) : true;
 
         const hit = (!q || name.includes(q) || desc.includes(q) || cat.includes(q));
-        tr.style.display = (passCat && passItem && hit) ? "" : "none";
+
+        const confRaw = tr.getAttribute("data-confidence") || "";
+        const confNum = confRaw === "" ? null : Number(confRaw);
+        const passConf = (confNum === null) ? true : (confNum >= threshold);
+
+        tr.style.display = (passCat && passItem && hit && passConf) ? "" : "none";
       });
     }
 
@@ -554,10 +615,22 @@
 
     $("#search").addEventListener("input", collectRowsFiltered);
 
+    if (confSlider && confValue) {
+      confSlider.addEventListener("input", () => {
+        const v = Number(confSlider.value || 0);
+        confValue.textContent = v + '%';
+        try {
+          window.localStorage && window.localStorage.setItem(CONF_LS_KEY, String(v));
+        } catch (_) {}
+        collectRowsFiltered();
+      });
+    }
+
     // row ops
     let rowSeq=1; function newTempId(){ return "tmp-"+(rowSeq++); }
     function addRow(prefill={}){
       const tr=document.createElement("tr");
+      tr.className = "conf-row";
       tr.setAttribute("data-id", newTempId());
       tr.setAttribute("data-cat", (prefill.category||""));
       tr.setAttribute("data-confidence", prefill.confidence!=null? String(prefill.confidence):"");
