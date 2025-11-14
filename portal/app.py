@@ -264,6 +264,100 @@ def confidence_class(conf) -> str:
         return "conf-unknown"
 
 
+def score_item_quality(item: Dict[str, Any]) -> Tuple[int, bool]:
+    """
+    Compute a 0–100 quality score for a cleaned draft item and whether it's low-confidence.
+
+    Inputs (post-AI-cleanup fields, if present):
+      - item["confidence"]: OCR/parse confidence (0–100)
+      - item["price_cents"]: int cents (0 if missing/invalid)
+      - item["category"]: string (may be 'Uncategorized')
+      - item["name"]: cleaned name
+      - item["description"]: cleaned description
+
+    Returns:
+      (quality_score, is_low_confidence)
+    """
+    name = (item.get("name") or "").strip()
+    desc = (item.get("description") or "").strip()
+    category = (item.get("category") or "").strip() or "Uncategorized"
+
+    # Confidence as integer baseline
+    conf_raw = item.get("confidence")
+    try:
+        conf = int(conf_raw) if conf_raw is not None else 0
+    except Exception:
+        conf = 0
+
+    # Price in cents
+    price_raw = item.get("price_cents")
+    try:
+        price_cents = int(price_raw) if price_raw is not None else 0
+    except Exception:
+        price_cents = 0
+
+    # Start from OCR confidence (already 0–100)
+    score = conf
+
+    # --- Price validity ---
+    if price_cents <= 0:
+        # Missing/zero price is a strong negative
+        score -= 15
+    else:
+        # Very low price (likely sides) is a small nudge
+        if price_cents < 300:      # <$3
+            score -= 3
+        # Very high price (probably parse issue)
+        if price_cents > 6000:     # >$60
+            score -= 8
+
+    # --- Category quality ---
+    if category.lower() in {"uncategorized", "other", "misc"}:
+        score -= 10
+    else:
+        score += 3
+
+    # --- Name length sanity ---
+    nlen = len(name)
+    if nlen == 0:
+        score -= 25
+    elif nlen < 6:
+        score -= 10
+    elif nlen > 120:
+        score -= 15
+    elif nlen > 80:
+        score -= 10
+
+    # --- Junk-symbol density (proxy for OCR/cleanup difficulty) ---
+    if nlen:
+        clean_chars = sum(
+            1 for c in name
+            if (c.isalnum() or c.isspace() or c in "&()/+'-.$")
+        )
+        junk_ratio = 1.0 - (clean_chars / max(nlen, 1))
+        if junk_ratio > 0.45:
+            score -= 25
+        elif junk_ratio > 0.30:
+            score -= 15
+        elif junk_ratio > 0.20:
+            score -= 8
+    else:
+        junk_ratio = 0.0  # not used directly, kept for clarity
+
+    # --- Description sanity (tiny nudge) ---
+    if not desc and nlen > 40:
+        score -= 3
+
+    # Clamp to [0, 100]
+    if score < 0:
+        score = 0
+    if score > 100:
+        score = 100
+
+    low_conf = score < 65
+    return score, low_conf
+
+
 @app.context_processor
 def inject_globals():
     """Provide `now` and `show_admin` to all templates."""
@@ -402,6 +496,7 @@ def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id:
         (int(restaurant_id), name)
     )
     return int(cur.lastrowid)
+
 # ------------------------
 # Small helpers for Day 13 flow
 # ------------------------
@@ -430,7 +525,6 @@ def _price_to_cents(v) -> int:
         return int(round(float(s) * 100))
     except Exception:
         return 0
-
 def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row) -> int:
     """(Legacy) Pick an existing active menu for the job's restaurant, else create one."""
     rest_id = job_row["restaurant_id"]
@@ -1052,6 +1146,7 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
         "categories": categories,
     }
     return draft_dict, debug_payload
+
 # ---------- NEW: wrap ocr_worker result into draft schema ----------
 def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dict) -> dict:
     """
@@ -1111,7 +1206,6 @@ def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dic
             item_out["category"] = it.get("category")
 
         norm_items.append(item_out)
-
 
     categories = [{"name": cat_name, "items": norm_items}] if norm_items else [{"name": "Uncategorized", "items": []}]
     return {
@@ -1370,6 +1464,7 @@ def dev_upload_form():
       </body>
     </html>
     """
+
 # ------------------------
 # **NEW** Import landing page + HTML POST handler
 # ------------------------
@@ -1439,8 +1534,6 @@ def import_upload():
         flash(f"Server error while saving upload: {e}", "error")
 
     return redirect(url_for("import_page"))
-
-
 # ------------------------
 # Imports pages
 # ------------------------
@@ -1537,6 +1630,7 @@ def _load_debug_for_draft(draft_id: int) -> Dict[str, Any]:
     if not isinstance(dbg, dict):
         return {}
     return dbg
+
 @app.get("/drafts/<int:draft_id>/blocks")
 @login_required
 def drafts_blocks(draft_id: int):
@@ -1679,6 +1773,7 @@ def imports_delete_job(job_id):
         conn.commit()
     flash(f"Job #{job_id} moved to deleted.", "success")
     return redirect(url_for("imports"))
+
 # ------------------------
 # Serving uploads (secure; block .trash)
 # ------------------------
@@ -2112,6 +2207,107 @@ def publish_draft(job_id: int):
 # ======================================================================
 # Drafts (DB-first): List + Editor + Save + Submit
 # ======================================================================
+
+QUALITY_LOW_THRESHOLD = 65  # items below this are considered "low confidence"
+
+def _compute_item_quality(it: dict) -> tuple[int, bool]:
+    """
+    Compute a 0–100 quality score for a draft item based on:
+      - OCR confidence (0–100)
+      - Valid price vs missing/zero
+      - Category presence/quality
+      - Name length sanity
+      - Junk-symbol density in the name
+
+    Returns (score, is_low_confidence).
+    """
+    name = (it.get("name") or "").strip()
+    desc = (it.get("description") or "").strip()
+    cat = (it.get("category") or "").strip()
+    price_cents = it.get("price_cents")
+    try:
+        conf = int(it.get("confidence")) if it.get("confidence") is not None else None
+    except Exception:
+        conf = None
+
+    # ---------- Base score ----------
+    score = 100
+
+    # --- Confidence component ---
+    if conf is None:
+        score -= 10
+    else:
+        if conf < 30:
+            score -= 35
+        elif conf < 50:
+            score -= 25
+        elif conf < 70:
+            score -= 15
+        elif conf < 85:
+            score -= 5
+        # 85+ → no penalty
+
+    # --- Price component ---
+    if price_cents is None:
+        # Try to infer from loose fields if present
+        from_price = 0
+        for key in ("price", "price_text"):
+            if it.get(key) is not None:
+                try:
+                    from_price = int(round(float(str(it[key]).replace("$", "").strip()) * 100))
+                    break
+                except Exception:
+                    continue
+        price_cents = from_price
+
+    if not price_cents or price_cents <= 0:
+        score -= 20
+
+    # --- Category component ---
+    if not cat:
+        score -= 15
+    else:
+        cl = cat.lower()
+        if cl in ("uncategorized", "misc", "other"):
+            score -= 8
+
+    # --- Name length sanity ---
+    nlen = len(name)
+    if nlen == 0:
+        score -= 40
+    elif nlen < 3:
+        score -= 25
+    elif nlen < 8:
+        score -= 5
+    elif nlen > 120:
+        score -= 30
+    elif nlen > 80:
+        score -= 15
+
+    # --- Junk-symbol density in name ---
+    if name:
+        bad_chars = 0
+        for ch in name:
+            if not (ch.isalnum() or ch.isspace() or ch in "$.,&()/+'-"):
+                bad_chars += 1
+        junk_ratio = bad_chars / max(len(name), 1)
+        if junk_ratio > 0.40:
+            score -= 25
+        elif junk_ratio > 0.25:
+            score -= 15
+        elif junk_ratio > 0.15:
+            score -= 5
+
+    # Clamp
+    if score < 0:
+        score = 0
+    if score > 100:
+        score = 100
+
+    is_low = score < QUALITY_LOW_THRESHOLD
+    return int(score), bool(is_low)
+
+
 @app.get("/drafts")
 @login_required
 def drafts_list():
@@ -2137,6 +2333,19 @@ def draft_editor(draft_id: int):
 
     items = drafts_store.get_draft_items(draft_id) or []
 
+    # ---- NEW: compute per-item quality + low-confidence flag ----
+    low_conf_items = []
+    for it in items:
+        try:
+            score, is_low = _compute_item_quality(it)
+        except Exception:
+            # Extremely defensive: if anything blows up, fall back to neutral score.
+            score, is_low = 70, False
+        it["quality"] = score
+        it["low_confidence"] = bool(is_low)
+        if is_low:
+            low_conf_items.append(it)
+
     categories = sorted({
         (it.get("category") or "").strip()
         for it in items
@@ -2154,6 +2363,8 @@ def draft_editor(draft_id: int):
         items=items,
         categories=categories,
         restaurants=restaurants,
+        low_conf_items=low_conf_items,                 # NEW: bucket for top-of-page section
+        quality_threshold=QUALITY_LOW_THRESHOLD,       # NEW: expose threshold to template
     )
 
 # --- NEW: Draft status probe for polling ---
@@ -2210,7 +2421,6 @@ def cleanup_draft(draft_id: int):
             flash(f"AI cleanup failed: {e}", "error")
             return redirect(url_for("draft_editor", draft_id=int(draft_id)))
         return jsonify({"ok": False, "error": str(e), "status": "editing"}), 500
-
 
 @app.post("/drafts/<int:draft_id>/save")
 @login_required
@@ -2884,6 +3094,7 @@ except Exception:
     from routes.core import core_bp  # fallback if relative import fails
 
 app.register_blueprint(core_bp)
+
 # ------------------------
 # Run
 # ------------------------

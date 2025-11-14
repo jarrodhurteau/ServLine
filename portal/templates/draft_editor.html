@@ -88,6 +88,123 @@
     .confidence-filter input[type="range"] {
       width:140px;
     }
+
+    /* ===== Low Confidence Bucket (Phase 3 pt.7) ===== */
+    .low-conf-panel {
+      margin-bottom: 1.25rem;
+      padding: 0.75rem 1rem;
+      border-radius: 0.8rem;
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      background: linear-gradient(to right,
+        rgba(248, 113, 113, 0.13),
+        rgba(15, 23, 42, 0.9)
+      );
+    }
+    .low-conf-header {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+    }
+    .low-conf-header-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #fecaca;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+    }
+    .low-conf-sub {
+      font-size: 0.8rem;
+      color: #e5e7eb;
+      opacity: 0.8;
+    }
+    .low-conf-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.75rem;
+    }
+    .low-conf-list li {
+      font-size: 0.82rem;
+      color: #f9fafb;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+    }
+    .low-conf-list .lc-name {
+      font-weight: 600;
+    }
+    .low-conf-list .lc-cat {
+      font-size: 0.75rem;
+      padding: 0.05rem 0.4rem;
+      border-radius: 999px;
+      background: rgba(30, 64, 175, 0.2);
+      color: #bfdbfe;
+    }
+    .low-conf-list .lc-score {
+      font-size: 0.75rem;
+      opacity: 0.8;
+    }
+
+    .pill-low {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      background: rgba(248, 113, 113, 0.16);
+      border: 1px solid rgba(248, 113, 113, 0.8);
+      color: #fecaca;
+      white-space: nowrap;
+    }
+    .pill-low-mini {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      background: rgba(248, 113, 113, 0.18);
+      border: 1px solid rgba(248, 113, 113, 0.7);
+      color: #fecaca;
+      white-space: nowrap;
+    }
+
+    /* Subtle marker on low-confidence rows */
+    #items-body tr.conf-row.is-low {
+      box-shadow: inset 2px 0 0 rgba(248, 113, 113, 0.8);
+    }
+    #items-body tr.conf-row.is-low:hover {
+      box-shadow:
+        inset 2px 0 0 rgba(248, 113, 113, 0.9),
+        0 0 0 1px rgba(248, 113, 113, 0.4);
+    }
+
+    .quality-meta {
+      font-size: 0.72rem;
+      color: #9ca3af;
+      margin-top: 0.15rem;
+    }
+
+    .name-cell .name-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
   </style>
 
   <div class="layout">
@@ -236,6 +353,33 @@
         <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
       </div>
 
+      {# === Low Confidence Bucket (Phase 3 pt.7) === #}
+      {% set q_thresh = quality_threshold|default(65) %}
+      {% if low_conf_items is defined and low_conf_items %}
+      <section class="low-conf-panel">
+        <div class="low-conf-header">
+          <span class="low-conf-header-title">Low Confidence Items</span>
+          <span class="low-conf-sub">
+            {{ low_conf_items|length }} item{{ low_conf_items|length != 1 and 's' or '' }}
+            scored &lt; {{ q_thresh }}/100. Review these first.
+          </span>
+        </div>
+        <ul class="low-conf-list">
+          {% for it in low_conf_items %}
+          <li>
+            <span class="lc-name">{{ it.name or "Untitled" }}</span>
+            {% if it.category %}
+              <span class="lc-cat">{{ it.category }}</span>
+            {% endif %}
+            {% if it.quality is not none %}
+              <span class="lc-score">{{ it.quality }}/100</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
       <div class="table-wrap">
         <table class="editor" id="items-table">
           <thead>
@@ -251,26 +395,36 @@
           </thead>
           <tbody id="items-body">
             {% for it in items %}
-            <tr class="conf-row {% if it.confidence is not none %}{{ it.confidence|confidence_class }}{% else %}conf-unknown{% endif %}"
+            <tr class="conf-row {% if it.confidence is not none %}{{ it.confidence|confidence_class }}{% else %}conf-unknown{% endif %}{% if it.low_confidence %} is-low{% endif %}"
                 data-id="{{ it.id }}"
                 data-cat="{{ (it.category or '')|e }}"
                 data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
               <td><input type="checkbox" class="row-select" /></td>
               <td>
                 <div class="name-cell">
-                  <textarea rows="1"
-                            class="cell-textarea name-text name name-input js-autosize prewrap text-wrap"
-                            data-autosize
-                            {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
-                  {% if it.confidence is not none %}
-                    {% set conf = it.confidence|int %}
-                    {% if conf >= 80 %}
-                      <span class="conf-badge conf-high">{{ conf }}%</span>
-                    {% elif conf >= 60 %}
-                      <span class="conf-badge conf-med">{{ conf }}%</span>
-                    {% else %}
-                      <span class="conf-badge conf-low">{{ conf }}%</span>
+                  <div class="name-main">
+                    <textarea rows="1"
+                              class="cell-textarea name-text name name-input js-autosize prewrap text-wrap"
+                              data-autosize
+                              {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
+                    {% if it.confidence is not none %}
+                      {% set conf = it.confidence|int %}
+                      {% if conf >= 80 %}
+                        <span class="conf-badge conf-high">{{ conf }}%</span>
+                      {% elif conf >= 60 %}
+                        <span class="conf-badge conf-med">{{ conf }}%</span>
+                      {% else %}
+                        <span class="conf-badge conf-low">{{ conf }}%</span>
+                      {% endif %}
                     {% endif %}
+                    {% if it.low_confidence %}
+                      <span class="pill-low-mini">⚠ Low</span>
+                    {% endif %}
+                  </div>
+                  {% if it.quality is not none %}
+                    <div class="quality-meta">
+                      Quality: {{ it.quality }}/100
+                    </div>
                   {% endif %}
                   <span class="prov-pin"
                         title="Source & confidence"
@@ -638,9 +792,12 @@
         <td><input type="checkbox" class="row-select" /></td>
         <td>
           <div class="name-cell">
-            <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
-              .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
-            ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
+            <div class="name-main">
+              <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
+                .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
+              ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
+              ${prefill.low_confidence ? `<span class="pill-low-mini">⚠ Low</span>` : ``}
+            </div>
             <span class="prov-pin"
                   title="Source & confidence"
                   data-prov-name="${(prefill.name||'').replace(/"/g,'&quot;')}"
