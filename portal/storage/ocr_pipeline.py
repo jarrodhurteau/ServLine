@@ -1,6 +1,6 @@
 # storage/ocr_pipeline.py 
 """
-ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference)
+ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1
 
 Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
@@ -32,6 +32,12 @@ Phase 3 pt.6 (Day 25):
   - Detects price candidates in merged_text.
   - Builds OCRPriceCandidate + OCRVariant lists.
   - Attaches price_candidates + variants to text_blocks and mirrors onto preview_blocks.
+
+Phase 4 pt.1 (Day 26):
+- Semantic Block Understanding (block classifier + noise collapse + heading detection):
+  - Classify each text block into role: heading / item_name / description / price / meta / noise
+  - Drop high-garbage "noise" blocks while preserving prices and headings
+  - Expose role + is_heading flags for downstream category + UI layers.
 """
 
 from __future__ import annotations
@@ -79,6 +85,18 @@ _HEADING_HINT = re.compile(r"^[A-Z][A-Z\s&/0-9\-]{2,}$")
 
 # Simple money-ish detector for two-column pairing
 _PRICE_RE = re.compile(r"\b\d{1,3}(?:\.\d{2})?\b")
+
+# Simple "meta/address" hints (storefront fluff, hours, etc.)
+_META_HINTS = [
+    "phone", "tel", "fax", "address", "street", "st.", "ave", "avenue",
+    "blvd", "boulevard", "rd.", "road", "ct.", "court", "ln", "lane",
+    "hours", "open", "monday", "tuesday", "wednesday", "thursday",
+    "friday", "saturday", "sunday", "sun-thu", "fri-sat",
+    "delivery", "deliveries", "pickup", "take-out", "take out", "carry out",
+    "free delivery", "dine in", "eat in",
+    "plus tax", "tax not included", "no substitutions",
+    "visa", "mastercard", "american express", "discover",
+]
 
 
 def _alpha_ratio(s: str) -> float:
@@ -469,6 +487,146 @@ def merge_two_column_rows(page_text_blocks: List[Dict[str, Any]]) -> List[Dict[s
 
 
 # -----------------------------
+# Phase 4 pt.1 — Block classification + noise collapse
+# -----------------------------
+
+def _block_garbage_ratio(tb: Dict[str, Any]) -> float:
+    """
+    Estimate how garbage-like a block is based on line-level heuristics.
+    Uses ocr_utils.is_garbage_line(line, price_hit).
+    """
+    lines = tb.get("lines") or []
+    if not lines:
+        text = (tb.get("merged_text") or tb.get("text") or "").strip()
+        if not text:
+            return 1.0
+        return 0.0
+
+    total = 0
+    garbage = 0
+    for ln in lines:
+        t = (ln.get("text") or "").strip()
+        if not t:
+            continue
+        total += 1
+        price_hit = bool(ocr_utils.find_price_candidates(t))
+        if ocr_utils.is_garbage_line(t, price_hit):
+            garbage += 1
+    if total == 0:
+        return 0.0
+    return garbage / float(total)
+
+
+def _classify_block_role(
+    tb: Dict[str, Any],
+    prev_role: Optional[str] = None,
+    next_role: Optional[str] = None,
+) -> str:
+    """
+    Classify a text block into a semantic role:
+    - heading
+    - item_name
+    - description
+    - price
+    - meta
+    - noise
+    - item (fallback catch-all)
+    """
+    text = (tb.get("merged_text") or tb.get("text") or "").strip()
+    if not text:
+        return "noise"
+
+    lower = text.lower()
+    digits = sum(c.isdigit() for c in text)
+    letters = sum(c.isalpha() for c in text)
+    pricey = _is_pricey_text(text)
+    garbage_ratio = _block_garbage_ratio(tb)
+
+    # Hard drop: almost all garbage and not a price
+    if garbage_ratio >= 0.85 and not pricey:
+        return "noise"
+
+    # Meta / address / hours / payment noise
+    if any(h in lower for h in _META_HINTS):
+        return "meta"
+
+    # Strong price column
+    if pricey and letters <= 5:
+        return "price"
+
+    # Heading candidates: short, mostly uppercase, or strong regex match
+    line_count = len(tb.get("lines") or []) or (text.count("\n") + 1)
+    if line_count <= 3 and len(text) <= 48:
+        if _HEADING_HINT.match(text):
+            return "heading"
+        if letters:
+            uppers = sum(1 for c in text if c.isupper())
+            if uppers / float(letters) >= 0.65:
+                return "heading"
+
+    # Description: sentence-ish, multiple words, mostly lower/mixed-case, not price-y
+    tokens = text.replace("\n", " ").split()
+    token_count = len(tokens)
+    if token_count >= 5 and digits <= 3 and letters:
+        lowers = sum(1 for c in text if c.islower())
+        if lowers / float(letters) >= 0.4 and not pricey:
+            return "description"
+
+    # Short-ish lines with a few digits → likely item names with sizes/counts
+    if token_count <= 11 and digits <= 4:
+        return "item_name"
+
+    # Neighbor-based nudge: if we just saw a heading, bias toward item_name
+    if prev_role == "heading" and token_count <= 14:
+        return "item_name"
+
+    # Fallback generic item
+    return "item"
+
+
+def classify_and_collapse_text_blocks(
+    text_blocks: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Phase 4 pt.1 helper:
+
+    - Assign tb["role"] to each text_block
+    - Assign tb["is_heading"] / tb["is_noise"] booleans
+    - Drop blocks whose role == "noise" to collapse visual garbage
+
+    Returns a new list with noise blocks removed.
+    """
+    if not text_blocks:
+        return text_blocks
+
+    roles: List[Optional[str]] = [None] * len(text_blocks)
+
+    # First pass: coarse classification without neighbor context
+    for idx, tb in enumerate(text_blocks):
+        roles[idx] = _classify_block_role(tb, None, None)
+
+    # Second pass: refine with neighbors (mostly for heading-adjacent items)
+    refined: List[Dict[str, Any]] = []
+    for idx, tb in enumerate(text_blocks):
+        prev_role = roles[idx - 1] if idx > 0 else None
+        next_role = roles[idx + 1] if idx + 1 < len(text_blocks) else None
+        role = _classify_block_role(tb, prev_role=prev_role, next_role=next_role)
+        roles[idx] = role
+
+        tb["role"] = role
+        tb["is_heading"] = role == "heading"
+        tb["is_noise"] = role == "noise"
+
+        if role == "noise":
+            # Collapse: drop from final text_blocks
+            continue
+
+        refined.append(tb)
+
+    return refined
+
+
+# -----------------------------
 # Category inference via storage/category_infer
 # -----------------------------
 
@@ -491,8 +649,10 @@ def infer_categories_on_text_blocks(text_blocks: List[Dict[str, Any]]) -> None:
             continue
 
         block_type = (tb.get("block_type") or "").lower()
+        role = (tb.get("role") or "").lower()
         heading_like = (
-            block_type in {"heading", "section", "title"}
+            role == "heading"
+            or block_type in {"heading", "header", "section", "title"}
             or bool(_HEADING_HINT.match(merged.strip()))
         )
 
@@ -653,7 +813,7 @@ def segment_document(
         source = "bytes"
 
     all_blocks: List[Block] = []                 # Phase-2 block groups (legacy)
-    all_text_blocks: List[Dict[str, Any]] = []   # Phase-3 raw text blocks ({bbox{x,y,w,h}, lines, merged_text, block_type})
+    all_text_blocks: List[Dict[str, Any]] = []   # Phase-3+ text blocks ({bbox{x,y,w,h}, lines, merged_text, block_type, role, ...})
     all_preview_blocks: List[Dict[str, Any]] = []  # Phase-3 preview blocks ({bbox[x1..], merged_text, block_type, lines[], page, column, category, category_confidence})
 
     page_index = 1
@@ -732,6 +892,9 @@ def segment_document(
         # ----- Phase 3 pt.4: two-column merge on a per-page basis
         page_text_blocks = merge_two_column_rows(page_text_blocks)
 
+        # ----- Phase 4 pt.1: classify blocks + collapse obvious noise
+        page_text_blocks = classify_and_collapse_text_blocks(page_text_blocks)
+
         # ----- Category inference (mutates tblocks in place via shared helper)
         infer_categories_on_text_blocks(page_text_blocks)
 
@@ -763,7 +926,7 @@ def segment_document(
                     None,
                 )
 
-            # Mirror price/variant info for overlay + preview JSON
+            # Mirror price/variant info + roles for overlay + preview JSON
             tb_for_pb = next(
                 (tb for tb in page_text_blocks if tb.get("id") == pb.get("id")),
                 None,
@@ -773,6 +936,12 @@ def segment_document(
                     pb["price_candidates"] = tb_for_pb["price_candidates"]
                 if "variants" in tb_for_pb:
                     pb["variants"] = tb_for_pb["variants"]
+                if "role" in tb_for_pb:
+                    pb["role"] = tb_for_pb["role"]
+                if "is_heading" in tb_for_pb:
+                    pb["is_heading"] = tb_for_pb["is_heading"]
+                if "is_noise" in tb_for_pb:
+                    pb["is_noise"] = tb_for_pb["is_noise"]
 
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
@@ -783,15 +952,15 @@ def segment_document(
         "pages": len(pages),
         "dpi": dpi,
         "blocks": all_blocks,                  # Phase-2 compatible
-        "text_blocks": all_text_blocks,        # Phase-3 TextBlock dicts (+category fields, +prices/variants)
-        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records (+category, +prices/variants)
+        "text_blocks": all_text_blocks,        # Phase-3+ TextBlock dicts (+category fields, +prices/variants, +roles)
+        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records (+category, +prices/variants, +roles)
         "meta": {
             "source": source,
             "engine": "tesseract",
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants",
+            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants+block_roles",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }
@@ -806,14 +975,15 @@ if __name__ == "__main__":
         "TextBlocks:", len(sample.get("text_blocks", [])),
         "PreviewBlocks:", len(sample.get("preview_blocks", []))
     )
-    # Quick glance at inferred categories
+    # Quick glance at inferred categories / roles / variants
     cats = [
         (
             tb.get("category"),
             tb.get("category_confidence"),
+            tb.get("role"),
             (tb.get("merged_text") or "")[:40],
             tb.get("variants"),
         )
         for tb in sample.get("text_blocks", [])
     ]
-    print("Sample categories/variants:", [c for c in cats if c[0] or c[3]])
+    print("Sample categories/roles/variants:", [c for c in cats if c[0] or c[2] or c[4]])
