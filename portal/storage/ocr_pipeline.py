@@ -1,6 +1,6 @@
 # storage/ocr_pipeline.py 
 """
-ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1
+ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1–2
 
 Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
@@ -38,6 +38,13 @@ Phase 4 pt.1 (Day 26):
   - Classify each text block into role: heading / item_name / description / price / meta / noise
   - Drop high-garbage "noise" blocks while preserving prices and headings
   - Expose role + is_heading flags for downstream category + UI layers.
+
+Phase 4 pt.2 (Day 26):
+- Multi-line Description Reconstruction:
+  - Clean bullets / leading junk characters
+  - Join broken lines within a block into smoother sentences
+  - Fix common hyphenated line splits ("CHICK-\nEN" → "CHICKEN")
+  - Normalize whitespace so AI cleanup sees a cleaner text stream.
 """
 
 from __future__ import annotations
@@ -627,6 +634,96 @@ def classify_and_collapse_text_blocks(
 
 
 # -----------------------------
+# Phase 4 pt.2 — Multi-line reconstruction
+# -----------------------------
+
+_BULLET_LEADER_RX = re.compile(r"^\s*[\u2022\u2023\u25E6\u2043\*\-]+[\s\u00A0]*")
+_NUM_LEADER_RX = re.compile(r"^\s*\d+\s*[\.\)]\s*")
+
+
+def _rebuild_multiline_text(raw: str) -> str:
+    """
+    Normalize multi-line text from a single TextBlock:
+
+    - Strip blank lines
+    - Remove basic bullet / numeric leaders
+    - Merge lines with spaces
+    - If previous chunk ends with '-', glue next line with no space
+    - Collapse extra whitespace
+    """
+    if not raw:
+        return ""
+
+    # Split to logical lines
+    lines = [ln.strip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln]  # drop empties
+    if not lines:
+        return ""
+
+    cleaned_lines: List[str] = []
+    for ln in lines:
+        # Strip bullets like "•", "*", "-" at the start
+        ln2 = _BULLET_LEADER_RX.sub("", ln)
+        # Strip simple "1." / "2)" leaders
+        ln2 = _NUM_LEADER_RX.sub("", ln2)
+        ln2 = ln2.strip()
+        if ln2:
+            cleaned_lines.append(ln2)
+
+    if not cleaned_lines:
+        return ""
+
+    # Rebuild with hyphen-aware joining
+    text = cleaned_lines[0]
+    for ln in cleaned_lines[1:]:
+        if text.endswith("-"):
+            # Glue directly: "CHICK-\nEN" → "CHICKEN"
+            text = text[:-1] + ln.lstrip()
+        else:
+            text = f"{text} {ln}"
+
+    # Clean up whitespace artifacts
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text
+
+
+def reconstruct_multiline_descriptions_on_text_blocks(
+    text_blocks: List[Dict[str, Any]]
+) -> None:
+    """
+    Phase 4 pt.2 helper:
+
+    For each text block:
+      - If role in {description, item, item_name, heading, meta}, normalize its
+        merged_text to remove bullets and join lines into smoother text.
+      - Price-only blocks are left alone so we don't destroy alignment hints.
+
+    Mutates text_blocks in place (no return).
+    """
+    if not text_blocks:
+        return
+
+    for tb in text_blocks:
+        merged = tb.get("merged_text") or tb.get("text") or ""
+        if not merged:
+            continue
+
+        role = (tb.get("role") or "").lower()
+        if role in {"price", "noise"}:
+            # Price blocks remain as-is; noise blocks should already be filtered out.
+            continue
+
+        rebuilt = _rebuild_multiline_text(merged)
+        if not rebuilt:
+            # If our reconstruction somehow eats everything, keep the original.
+            continue
+
+        tb["merged_text"] = rebuilt
+        meta = tb.setdefault("meta", {})
+        meta["multiline_reconstructed"] = True
+
+
+# -----------------------------
 # Category inference via storage/category_infer
 # -----------------------------
 
@@ -895,6 +992,9 @@ def segment_document(
         # ----- Phase 4 pt.1: classify blocks + collapse obvious noise
         page_text_blocks = classify_and_collapse_text_blocks(page_text_blocks)
 
+        # ----- Phase 4 pt.2: reconstruct multi-line descriptions within each block
+        reconstruct_multiline_descriptions_on_text_blocks(page_text_blocks)
+
         # ----- Category inference (mutates tblocks in place via shared helper)
         infer_categories_on_text_blocks(page_text_blocks)
 
@@ -942,6 +1042,8 @@ def segment_document(
                     pb["is_heading"] = tb_for_pb["is_heading"]
                 if "is_noise" in tb_for_pb:
                     pb["is_noise"] = tb_for_pb["is_noise"]
+                if tb_for_pb.get("meta") and tb_for_pb["meta"].get("multiline_reconstructed"):
+                    pb.setdefault("meta", {})["multiline_reconstructed"] = True
 
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
@@ -960,7 +1062,7 @@ def segment_document(
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants+block_roles",
+            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants+block_roles+multiline_reconstruct",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }

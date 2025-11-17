@@ -253,17 +253,63 @@ Tags:
 
 ---
 
-# 🌄 **NEXT UP – PHASE 4: Structured OCR (The Big One)**
+## 🚀 Day 26 – Phase 4 pts.1–2: AI Cleanup Pipeline Stack
+
+Day 26 officially begins **Phase 4 (Structured OCR)** by wiring a three-stage AI cleanup pipeline into the OCR flow and aligning confidence handling with it.
+
+### ✔ Pt.1 — Raw → Cleanup Stage
+- Defined the **“cleanup” pass** as the first AI-aware post-processing layer:
+  - Works from the OCR preview JSON.
+  - Normalizes whitespace and punctuation in a **ultra-safe** way (no hallucinated words).
+  - Preserves original names and descriptions wherever possible.
+  - Applies menu-aware smoothing for ingredient-style descriptions.
+  - Ensures prices are carried forward correctly into `price_cents` (and filled in when obvious).
+  - Respects existing categories but can use the Phase 3 `category_infer` engine as a fallback.
+- Output is stored as a standard draft:
+  - `status: "editing"`  
+  - Cleaned `name`/`description`/`price_cents`/`category` and a high but realistic `confidence`.
+
+### ✔ Pt.2 — Cleanup → Refine Stage (“Clean & Refine”)
+- Added a second pass that runs after cleanup to **refine** the text:
+  - Normalizes casing and spacing for names and descriptions.
+  - Performs gentle symbol and junk removal (especially from noisy scanned text).
+  - Keeps the content grounded in OCR truth (no invented ingredients or prices).
+  - Applies very light vocabulary-aware tweaks to ingredient-style descriptions only.
+- Refined items are tagged for auditability:
+  - Descriptions get a `[AI Cleaned]` marker prefix to show which rows were touched by the AI.
+  - Confidence is recomputed using both OCR score and an AI “signal”:
+    - Slightly lowers confidence when significant edits are made.
+    - Keeps or nudges confidence upward for structurally solid items (good price + good category + sane length).
+- Verified end-to-end behavior by:
+  - Running the CLI pipeline (`python -m portal.storage.ocr_pipeline`) on the pizza menu.
+  - Importing and stepping through **Raw → Cleanup → Clean & Refine**.
+  - Confirming categories, prices, and confidences stay stable while text becomes more readable.
+
+### ⭐ Result
+Day 26 delivers a **layered AI cleanup stack**:
+
+1. **Raw OCR preview** – noisy but fully faithful.  
+2. **Cleanup** – structure-safe normalization with prices/categories aligned.  
+3. **Refine** – optional polishing pass with explicit `[AI Cleaned]` tagging and blended confidence.
+
+This stack is the foundation for the rest of Phase 4, which will build semantic block understanding, multi-line reconstruction, variants, and full structured output on top of this stable core.
+
+✅ **Day 26 complete — Phase 4 officially started with a robust AI cleanup pipeline (Raw → Cleanup → Refine).**
+
+---
+
+# 🌄 Phase 4 – Structured OCR (Semantic Menu Engine)
 
 Phase 4 is where ServLine evolves from “OCR + cleanup” → **true structured understanding**.
+
+The Day 26 work established the **cleanup stack (Raw → Cleanup → Refine)**.  
+The remaining Phase 4 days (Day 26 pt.3 and Days 27–32) will layer on semantic grouping, multi-line reconstruction, variants, and price reasoning.
 
 This is the phase that makes ServLine *commercial-grade*.
 
 ---
 
-## 🚀 **Phase 4 – Structured OCR (Semantic Menu Engine)**
-
-### **🎯 Goal**  
+## 🎯 Phase 4 Goal  
 Transform messy PDF/JPG text into **perfectly structured, AI-ready menu JSON**, suitable for:
 - Voice ordering  
 - POS mapping  
@@ -274,82 +320,89 @@ Transform messy PDF/JPG text into **perfectly structured, AI-ready menu JSON**, 
 
 ---
 
-## 🔥 **Phase 4 Core Modules**
+## 🔥 Phase 4 Core Modules (Roadmap)
 
-### **1. Block→Item Semantic Grouping**  
-Smarter than geometry:  
-Use AI thinking + OCR metadata to understand:
-- What is a menu item  
-- What is a description  
-- What is a category  
-- What is a variant  
-- What is a combo  
-- What is a size mapping  
+### **1. Semantic Block→Item Grouping**  
+Build on the Raw → Cleanup → Refine stack with **semantic grouping**:
+
+- Understand what is:
+  - a menu item  
+  - a description  
+  - a category/section heading  
+  - a variant/size line  
+  - a combo or “served with” line  
+- Use:
+  - OCR metadata (roles, blocks, positions)  
+  - AI hints (keywords, shapes, price patterns)  
+  - Geometry (columns, ordering)  
 
 This replaces guesswork with **semantic clustering**.
 
 ---
 
-### **2. Description Reconstruction Engine**  
+### **2. Multi-Line Description Reconstruction**  
 Automatically:
-- Remove bullet symbols  
-- Merge wrapped lines  
-- Detect ingredient lists  
-- Normalize commas, slashes, & separators  
-- Fix unnatural line breaks
+
+- Merge artificially-wrapped lines that belong to the same description.  
+- Remove bullet symbols and repeated junk.  
+- Normalize separators (commas, “/”, “with”, etc.).  
+- Detect and clean ingredient lists.  
+- Fix “hard breaks” in the middle of phrases caused by scan artifacts.
 
 ---
 
-### **3. AI Variant Deduction**  
+### **3. AI Variant & Size Deduction**  
 Automatic extraction of:
-- Size families  
-- Flavor sets  
-- Sub-variant groups (e.g., “(Grilled/Fried) Chicken”)  
-- Combo upgrade logic  
-- Wing counts (“6pc / 12pc / 24pc”)  
+
+- Size families (S/M/L, 10/14/18", etc.).  
+- Flavor sets (e.g., “BBQ / Buffalo / Garlic Parm”).  
+- Sub-variant groups (e.g., “Grilled / Crispy Chicken”).  
+- Combo options and upcharge lines.  
+- Wing counts (“6pc / 12pc / 24pc”).
+
+Variants will be represented as structured children under a single parent item.
 
 ---
 
-### **4. Category Hierarchy Inference (v2)**  
+### **4. Category Hierarchy v2**  
 Category-level grouping powered by:
-- Block positions  
-- Font weight  
-- Geometry  
-- Keywords  
-- AI semantic reading  
+
+- Block positions, column breaks.  
+- Font weight / role hints (heading vs item).  
+- Geometry and indentation.  
+- Keywords and AI semantic reading.  
+
+Result: a clean **category → items → variants** tree that mirrors the original menu.
 
 ---
 
-### **5. Price Reasoning Engine**  
+### **5. Price Integrity Engine**  
 Price clustering + corrections:
-- Detect misread decimals  
-- Detect swapped digits  
-- Detect outliers  
-- Match prices to sizes/variants  
+
+- Detect misread decimals and obviously wrong prices.  
+- Spot swapped digits (e.g., 7950 instead of 7.95).  
+- Cluster prices to infer typical ranges per category.  
+- Match prices to sizes/variants correctly.  
+
+This engine will run after Refine to ensure final menu prices are structurally sane.
 
 ---
 
-### **6. Draft Editor Auto-Grouping Layer**  
-Finally tie the structured output into the UI:
-- Items auto-bucketed by category  
-- Variants grouped under one parent  
-- Clean S/M/L + 10/14/18 logic  
-- Description clean by default  
-- Zero junk  
+### **6. Draft Editor Auto-Grouping Integration**  
+Tie structured output into the UI:
+
+- Items auto-bucketed by category.  
+- Variants grouped under a single parent row.  
+- Clean S/M/L + 10/14/18 logic surfaced clearly.  
+- Descriptions mostly “ready” by default.  
+- Low-confidence or ambiguous fragments bubbled to the top for quick human review.
 
 ---
 
-## ⭐ **Phase 4 Result**  
-By the end of Phase 4:
+## ⭐ Phase 4 End-State  
 
-**You’ll be able to upload ANY menu and get perfectly structured menu JSON with almost zero manual fixes.**
+By the end of Phase 4 (Days 26–32):
 
-This is when ServLine becomes **ready for restaurant onboarding and real customer usage**.
+**You’ll be able to upload almost any restaurant menu and get a high-quality, structured menu JSON with minimal manual fixes.**
 
----
-
-# 🌟 Current Status  
-OCR v2 pipeline completed (Phase 3).  
-Draft Editor is powerful and stable.  
-We now begin **Phase 4: Structured OCR** — the biggest accuracy jump yet.
-
+At that point, ServLine’s OCR stack is ready for **real restaurant onboarding and production voice ordering.**
