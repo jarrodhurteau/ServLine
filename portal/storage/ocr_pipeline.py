@@ -1,6 +1,6 @@
 # storage/ocr_pipeline.py 
 """
-ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1–2
+ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1–3
 
 Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
@@ -45,6 +45,13 @@ Phase 4 pt.2 (Day 26):
   - Join broken lines within a block into smoother sentences
   - Fix common hyphenated line splits ("CHICK-\nEN" → "CHICKEN")
   - Normalize whitespace so AI cleanup sees a cleaner text stream.
+
+Phase 4 pt.3 (Day 27):
+- Variant & Size Intelligence:
+  - Analyze OCRVariant labels for size/count/wing-count patterns and flavor/style tokens.
+  - Normalize sizes (e.g. 10"/10 in → "10in", 6 pc → "6pc").
+  - Classify variants by kind: size | flavor | style | other.
+  - Assign group keys so downstream can easily cluster variant families.
 """
 
 from __future__ import annotations
@@ -58,6 +65,7 @@ from pytesseract import image_to_osd
 
 from . import ocr_utils
 from . import category_infer
+from . import variant_engine
 from .ocr_types import (
     Block,
     Line,
@@ -998,8 +1006,11 @@ def segment_document(
         # ----- Category inference (mutates tblocks in place via shared helper)
         infer_categories_on_text_blocks(page_text_blocks)
 
-        # ----- Phase 3 pt.6: price + variant extraction on merged text blocks
+        # ----- Phase 3 pt.6: price + base variant extraction on merged text blocks
         annotate_prices_and_variants_on_text_blocks(page_text_blocks)
+
+        # ----- Phase 4 pt.3: enrich variants with size/flavor intelligence
+        variant_engine.enrich_variants_on_text_blocks(page_text_blocks)
 
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
@@ -1062,7 +1073,8 @@ def segment_document(
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+two_column_merge+category_infer+multi_price_variants+block_roles+multiline_reconstruct",
+            "mode": "high_clarity+segmentation+two_column_merge+category_infer+"
+                    "multi_price_variants+block_roles+multiline_reconstruct+variant_enrich",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }

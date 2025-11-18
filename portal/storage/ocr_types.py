@@ -1,7 +1,7 @@
 """
-ServLine OCR Types — Phase 3 (Segmentation + Category Inference)
+ServLine OCR Types — Phase 4 (Semantic Blocks, Variants, Category Hierarchy)
 Defines TypedDicts for bbox, words, lines, blocks, and segmented text blocks with
-optional category metadata for overlay/debug UI.
+optional category and variant metadata for overlay/debug UI and downstream pipeline.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class Block(TypedDict):
 
 
 # ────────────────────────────────────────────────
-# 🧠 TextBlock and OCRBlock for Phase 3 segmentation
+# 🧠 TextBlock and OCRBlock for Phase 3/4 segmentation
 # ────────────────────────────────────────────────
 
 class TextBlock(TypedDict):
@@ -67,6 +67,9 @@ class TextBlock(TypedDict):
     category: NotRequired[Optional[str]]   # canonical label or None
     category_confidence: NotRequired[Optional[float]]  # 0.0–1.0 or None
     rule_trace: NotRequired[Optional[str]] # explanation string (rules/ML fusion)
+    # NEW in Phase 4 pt.4: richer hierarchy support
+    subcategory: NotRequired[Optional[str]]           # nested subcategory label, if any
+    section_path: NotRequired[List[str]]             # e.g. ["PIZZA", "Specialty Pizzas"]
 
 
 class OCRBlock(TypedDict):
@@ -82,10 +85,13 @@ class OCRBlock(TypedDict):
     category: NotRequired[Optional[str]]
     category_confidence: NotRequired[Optional[float]]
     rule_trace: NotRequired[Optional[str]]
+    # NEW in Phase 4 pt.4: hierarchy debug info
+    subcategory: NotRequired[Optional[str]]
+    section_path: NotRequired[List[str]]
 
 
 # ────────────────────────────────────────────────
-# 💵 Price candidates & variants (Phase 3 pt.6)
+# 💵 Price candidates & variants (Phase 3 pt.6 + Phase 4 pt.3)
 # ────────────────────────────────────────────────
 
 class OCRPriceCandidate(TypedDict):
@@ -110,6 +116,11 @@ class OCRVariant(TypedDict):
     price_cents: int               # normalized cents value
     confidence: float              # 0.0–1.0 for this variant
 
+    # NEW in Phase 4 pt.3 — richer variant intelligence (all optional, BC-safe):
+    kind: NotRequired[str]                 # "size" | "flavor" | "style" | "other"
+    normalized_size: NotRequired[str]      # e.g. "10in", "14in", "6pc", "12pc"
+    group_key: NotRequired[str]            # family key for clustering variants for an item
+
 
 # ────────────────────────────────────────────────
 # 📦 High-level container for OCR job results
@@ -131,7 +142,7 @@ class OCRResult(TypedDict):
 # 📘 Segmented wrapper (legacy compatibility)
 # ────────────────────────────────────────────────
 
-Segmented = Dict[str, object]  # {"pages": int, "dpi": int, "blocks": List[Block], "meta": {...}}
+Segmented = Dict[str, object]  # {"pages": int, "dpi": int, "blocks": List[Block], "meta": {...}]
 
 __all__ = [
     "BBox",

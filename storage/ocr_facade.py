@@ -39,7 +39,7 @@ except Exception as e:
     print(f"[OCR] Warning: ai_ocr_helper import failed in ocr_facade: {e!r}")
 
 
-PIPELINE_VERSION = "phase-3-segmenter+ai-helper-rev7(category+multi-price)"
+PIPELINE_VERSION = "phase-4-segmenter(block_roles+multiline)+ai-helper-rev9"
 
 
 def _tesseract_cmd() -> str:
@@ -164,15 +164,25 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
         desc = it.get("description")
         variants = it.get("variants") or []
 
-        # Build sizes from variants if present; otherwise seed from first price candidate (as "Base")
+               # Build sizes from variants if present; otherwise seed from first price candidate (as "Base")
         sizes: List[Dict[str, Any]] = []
         if variants:
             for v in variants:
                 lbl = str(v.get("label") or "Var").strip()
+
+                # Support both old-style {"price": 12.99} and new-style {"price_cents": 1299}
+                raw_price = v.get("price", None)
+                if raw_price is None and v.get("price_cents") is not None:
+                    try:
+                        raw_price = float(v.get("price_cents")) / 100.0
+                    except Exception:
+                        raw_price = 0.0
+
                 try:
-                    pr = float(v.get("price") or 0.0)
+                    pr = float(raw_price or 0.0)
                 except Exception:
                     pr = 0.0
+
                 if pr > 0:
                     sizes.append({"label": lbl, "price": round(pr, 2)})
         else:
@@ -287,14 +297,15 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "version": PIPELINE_VERSION,
         "layout": layout,
         "notes": [
-            "phase-3 segmentation (blocks + text_blocks + categories + multi-price variants)",
+            "phase-4 segmentation: blocks + text_blocks + categories + multi-price variants + block roles + multiline reconstruction",
             "per-page orientation normalizer applied when needed",
-            "ai-helper (rev7) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds",
+            "ai-helper (rev9) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds, multi-item splitter",
         ],
         "ai_preview": {
             "items": items,
             "sections": sections,
         },
     }
+
 
     return categories, debug_payload
