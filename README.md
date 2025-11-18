@@ -1,6 +1,6 @@
 # ServLine  
 The ServLine project is a portal + API + AI brain system for restaurant call handling.  
-This repo follows a phased build plan (Day 1 → onward), with Git commits marking each milestone.  
+This repo follows a phased build plan (Day 1 → onward), with Git commits marking each milestone.
 
 ---
 
@@ -37,14 +37,17 @@ storage/  # SQLite database + OCR pipeline + seed + schema
   schema.sql  
   seed_dev.sql  
   drafts.py  
-  ocr_pipeline.py (Phase 3 pipeline)  
+  ocr_pipeline.py  
   ocr_utils.py  
   ocr_types.py  
   ocr_facade.py  
-uploads/  # User-uploaded menu files (+ .trash for recycle bin)  
+  ai_ocr_helper.py  
+  ai_cleanup.py  
+  semantic_engine.py                   # Phase 4 pt.3  
+uploads/  
 .gitignore  
-.vscode/  # VS Code tasks (auto-run infra, stop infra)  
-README.md  # This file  
+.vscode/  
+README.md  
 
 ---
 
@@ -52,357 +55,218 @@ README.md  # This file
 
 ### 🚀 Day 1 – Portal Skeleton  
 Basic Flask portal online with `/health`, VS Code infra tasks, and ngrok auto-start.  
-✅ **Day 1 complete — project skeleton live.**
+✅ **Day 1 complete.**
 
 ---
 
 ### 🚀 Day 2 – Restaurants & Menus  
-Added DB tables (restaurants, menus, menu_items), list pages, and `/api/...` routes.  
-✅ **Day 2 complete — restaurants/menus data model + UI in place.**
+DB tables, UI pages, full REST endpoints.  
+✅ **Day 2 complete.**
 
 ---
 
 ### 🚀 Day 3 – Menu Items + UI  
-Item listing + form with price-in-cents accuracy.  
-✅ **Day 3 complete — items editable via portal.**
+Item listing + editing + price-cents accuracy.  
+✅ **Day 3 complete.**
 
 ---
 
 ### 🚀 Day 4 – Git + POS Handshake  
-Version control, POS order scaffolding, event hooks.  
-✅ **Day 4 complete — Git + POS scaffolding done.**
+POS scaffolding + Git integration.  
+✅ **Day 4 complete.**
 
 ---
 
 ### 🚀 Day 5 – Router & Ordering Logic  
-Voice router with upsell events and per-shop order logs.  
-✅ **Day 5 complete — call-flow router working.**
+Voice routing with upsell events and call logs.  
+✅ **Day 5 complete.**
 
 ---
 
 ### 🚀 Day 6 – Auth System  
-Login/logout, session-based admin, navbar gating.  
-✅ **Day 6 complete — authentication + admin scoping live.**
+Login/logout, session-based admin.  
+✅ **Day 6 complete.**
 
 ---
 
 ### 🚀 Day 7 – OCR Raw Capture  
-Tesseract + PDF fallback, raw OCR to `storage/drafts/raw`, sweep logic.  
-✅ **Day 7 complete — raw OCR capture pipeline exists.**
+Full OCR pipeline with Tesseract + Poppler.  
+Raw OCR stored in `storage/drafts/raw`.  
+✅ **Day 7 complete.**
 
 ---
 
 ### 🚀 Day 8 – Uploads & Recycle Bin  
-Uploads listing, move-to-bin + restore, artifact sweep, secure serve.  
-✅ **Day 8 complete — uploads + recycle bin functional.**
+File uploads, delete/restore, secure serve.  
+✅ **Day 8 complete.**
 
 ---
 
-### 🚀 Day 9 – Draft Review (Editing Flow Prep)  
-Draft Review page, imports cleanup, job status sync, error pages.  
-✅ **Day 9 complete — draft review + cleanup live.**
+### 🚀 Day 9 – Draft Review  
+Draft Review page, improved cleanup, job sync.  
+✅ **Day 9 complete.**
 
 ---
 
 ### 🚀 Day 10 – Portal Polish (1)  
-Unified button styles, consistent forms, balanced layouts, styled error pages.  
-✅ **Day 10 complete — portal polished + consistent.**
+Global styling updates, layout balance, error pages.  
+✅ **Day 10 complete.**
 
 ---
 
 ### 🚀 Day 11 – Portal Polish (2)  
-Global UI standardization, improved toolbars, aligned tables + empty-states.  
-✅ **Day 11 complete — fully consistent + bug-fixed portal.**
+Toolbar updates, alignment fixes, empty states.  
+✅ **Day 11 complete.**
 
 ---
 
 ### 🚀 Day 12 – Drafts (DB-Backed Editor)  
-New tables + `/drafts` list, full editor with search/add/duplicate/delete, auto-price formatting.  
-✅ **Day 12 complete — DB-backed draft editing live.**
+Draft editor with search/add/delete/duplicate.  
+Auto price formatting.  
+✅ **Day 12 complete.**
 
 ---
 
-### 🚀 Day 13 – OCR Online → Draft → Approve  
-Full OCR integration (Tesseract + Poppler), import → draft → approve workflow, CSV/JSON/XLSX export.  
-✅ **Day 13 complete — upload → OCR → draft → approve works end-to-end.**
+### 🚀 Day 13 – OCR → Draft → Approve  
+Full import → OCR → draft → approve workflow.  
+Exports (CSV/JSON/XLSX) fixed.  
+✅ **Day 13 complete.**
 
 ---
 
-### 🚀 Day 14 – Draft Editor Revamp + Smarter OCR  
-Safer rendering, debug utilities, improved OCR parsing (columns, headings, merges, cleanup).  
-✅ **Day 14 complete — smarter OCR + stable Draft Editor.**
+### 🚀 Day 14 – Draft Editor Revamp  
+Safer rendering, debug tools, improved OCR parsing (columns/headings/merges).  
+✅ **Day 14 complete.**
 
 ---
 
 ### 🚀 Day 15 – Failed App Split Attempt  
-Modularization attempt caused routing issues → rolled back.  
-❌ **Day 15 failed — reset to Day 14.**
+Attempt reverted.  
+❌ **Reset to Day 14.**
 
 ---
 
-### 🚀 Day 16 – Infra & PDF OCR Success  
-`run_infra`/`stop_infra` scripts with PIDs, verified Tesseract + Poppler paths, PDF OCR passing.  
-✅ **Day 16 complete — infra stable + PDF OCR functional.**
+### 🚀 Day 16 – Infra & PDF OCR  
+Infra stable, PDF OCR fully passing.  
+✅ **Day 16 complete.**
 
 ---
 
-### 🚀 Day 17 – OCR Helper Deep Fixes  
-v12 OCR helper: smarter category/header logic, price/desc merging, duplicate cleanup, richer debug JSON.  
-✅ **Day 17 complete — OCR helper hardened and clean.**
+### 🚀 Day 17 – OCR Helper Refinements  
+Category/header logic, multi-price merging, duplicate cleanup, rich debug JSON.  
+✅ **Day 17 complete.**
 
 ---
 
-### 🚀 Day 18 – Stability, OCR Env & Exports  
-Fixed OCR/Poppler environment, confirmed pandas/scikit-learn, repaired all exports.  
-✅ **Day 18 complete — OCR + Draft Editor + Exports stable.**
+### 🚀 Day 18 – Stability & Exports  
+OCR environment, draft editor, and all export formats stabilized.  
+✅ **Day 18 complete.**
 
 ---
 
 ### 🚀 Day 19 – UI/UX Polish + OCR Precision  
-- Auto-wrapping textareas  
+- Auto-resizing textareas  
 - Category chips with deterministic hues  
-- OCR preprocessing boost (CLAHE, denoise, unsharp, psm tuning, spell fixer)  
+- OCR preprocessing boost (CLAHE, denoise, unsharp)  
 - `_safe_render` protection  
-- Contract validator for draft export  
-- AI OCR flag scaffold  
+- Draft contract validator  
+- AI OCR scaffolding  
 
-✅ **Day 19 complete — platform unified + OCR optimized.**
+✅ **Day 19 complete.**
 
 ---
 
-### 🚀 Day 20 – AI Heuristics Phase A + Editor Integration  
-AI Preview + Commit endpoints  
-“Finalize with AI Cleanup” integrated directly into editor with auto-refresh  
-Baseline AI cleanup working end-to-end  
-
-✅ **Day 20 complete — AI cleanup Phase A operational.**
+### 🚀 Day 20 – AI Cleanup Phase A  
+AI Preview + Commit (safe mode)  
+In-editor “Finalize with AI Cleanup” fully working.  
+Baseline AI cleanup reliable.  
+✅ **Day 20 complete.**
 
 ---
 
 ### 🚀 Day 21 – OCR System Rebuild  
-New modular pipeline, engine selector, legacy isolation, clean file tree.  
-✅ **Day 21 complete — OCR rebuild framework in place.**
+Modular pipeline, engine selector, clean file tree.  
+✅ **Day 21 complete.**
 
 ---
 
 ### 🚀 Day 22 – Phase 2 Wrap-Up  
-Draft Editor polish, AI cleanup loop, status parity, export fixes, live pill refresh, outline rebuild.  
-✅ **Day 22 complete — Phase 2 fully delivered.**
+Editor polish, AI cleanup loop, exports unified, outline rebuilt.  
+✅ **Day 22 complete.**
 
 ---
 
-### 🚀 Day 23 – Phase 3 pts 1–2  
-Rotation preview, status poller, AI finalize redirect, editor integration.  
-All flows stable: Upload → Rotate → Preview → AI Finalize → Edit.  
-
-✅ **Day 23 complete — Phase 3 (1–2) online.**
+### 🚀 Day 23 – Phase 3 pts.1–2  
+Rotation preview, status poller, AI finalize redirect, stable end-to-end flow.  
+✅ **Day 23 complete.**
 
 ---
 
-## 🚀 Day 24 – Phase 3 pt.3–4: Category Infer + Two-Column Merge  
-Massive OCR breakthrough: category inference, geometry-based merging, S/M/L and 10/14/18” variants parsed correctly.  
-Menu accuracy jumped significantly.
-
+### 🚀 Day 24 – Phase 3 pt.3–4  
+Category inference + two-column merge + variants.  
+Significant accuracy jump.  
 ✅ **Day 24 complete.**
 
 ---
 
-## 🚀 Day 25 – Phase 3 pt.5–7 (FINAL PHASE 3)
+### 🚀 Day 25 – Phase 3 Final (pts.5–7)  
+- Confidence heat-map  
+- Safe AI cleanup  
+- Text shaping  
+- Item quality scoring  
 
-### ✔ **Phase 3 pt.5 — Confidence Heat-Map + Editor Slider**
-- Heat-map tinting per row  
-- Confidence badges in-name  
-- Confidence threshold slider  
-- Sidebar outline filtering aware of confidence  
-
-### ✔ **Phase 3 pt.6A — AI Cleanup Safe Mode**
-- Finalize-with-AI endpoint  
-- Live status pill  
-- Auto-refresh  
-- Safe normalization across all item fields  
-
-### ✔ **Phase 3 pt.6B — Smarter Text Shaping**
-- `_reshape_multi_item_name()`  
-- `_smooth_ingredients()`  
-- Better comma/ingredient handling  
-- Cleaner merged names/descriptions  
-
-### ⭐ **Phase 3 pt.7 — Item Quality Score (FINAL DELIVERABLE)**
-Delivered in the Day 25 live session:
-
-#### ✔ Item Quality Scoring (0–100)
-Based on:
-- OCR confidence  
-- Price validity  
-- Name length sanity  
-- Junk-symbol density  
-- Cleanup load  
-
-#### ✔ Quality badges in Draft Editor  
-`Quality: 80/100` shown inline  
-Green/Yellow/Red tinting  
-Always non-destructive  
-
-### ⭐ Result  
-**Phase 3 is officially COMPLETE.**  
-OCR v2 pipeline is stable, accurate, and production-ready.
-
-Tags:  
-`phase-3-complete`  
-`phase-3-pt-7-quality-score`
+⭐ **Phase 3 complete.**
 
 ---
 
-## 🚀 Day 26 – Phase 4 pts.1–2: AI Cleanup Pipeline Stack
-
-Day 26 officially begins **Phase 4 (Structured OCR)** by wiring a three-stage AI cleanup pipeline into the OCR flow and aligning confidence handling with it.
-
-### ✔ Pt.1 — Raw → Cleanup Stage
-- Defined the **“cleanup” pass** as the first AI-aware post-processing layer:
-  - Works from the OCR preview JSON.
-  - Normalizes whitespace and punctuation in a **ultra-safe** way (no hallucinated words).
-  - Preserves original names and descriptions wherever possible.
-  - Applies menu-aware smoothing for ingredient-style descriptions.
-  - Ensures prices are carried forward correctly into `price_cents` (and filled in when obvious).
-  - Respects existing categories but can use the Phase 3 `category_infer` engine as a fallback.
-- Output is stored as a standard draft:
-  - `status: "editing"`  
-  - Cleaned `name`/`description`/`price_cents`/`category` and a high but realistic `confidence`.
-
-### ✔ Pt.2 — Cleanup → Refine Stage (“Clean & Refine”)
-- Added a second pass that runs after cleanup to **refine** the text:
-  - Normalizes casing and spacing for names and descriptions.
-  - Performs gentle symbol and junk removal (especially from noisy scanned text).
-  - Keeps the content grounded in OCR truth (no invented ingredients or prices).
-  - Applies very light vocabulary-aware tweaks to ingredient-style descriptions only.
-- Refined items are tagged for auditability:
-  - Descriptions get a `[AI Cleaned]` marker prefix to show which rows were touched by the AI.
-  - Confidence is recomputed using both OCR score and an AI “signal”:
-    - Slightly lowers confidence when significant edits are made.
-    - Keeps or nudges confidence upward for structurally solid items (good price + good category + sane length).
-- Verified end-to-end behavior by:
-  - Running the CLI pipeline (`python -m portal.storage.ocr_pipeline`) on the pizza menu.
-  - Importing and stepping through **Raw → Cleanup → Clean & Refine**.
-  - Confirming categories, prices, and confidences stay stable while text becomes more readable.
-
-### ⭐ Result
-Day 26 delivers a **layered AI cleanup stack**:
-
-1. **Raw OCR preview** – noisy but fully faithful.  
-2. **Cleanup** – structure-safe normalization with prices/categories aligned.  
-3. **Refine** – optional polishing pass with explicit `[AI Cleaned]` tagging and blended confidence.
-
-This stack is the foundation for the rest of Phase 4, which will build semantic block understanding, multi-line reconstruction, variants, and full structured output on top of this stable core.
-
-✅ **Day 26 complete — Phase 4 officially started with a robust AI cleanup pipeline (Raw → Cleanup → Refine).**
+## 🚀 Day 26 – Phase 4 pts.1–2  
+**Raw → Cleanup → Refine** pipeline introduced.  
+Safe normalization, light refinement, confidence blending.  
+Foundation for Semantic OCR.  
+✅ **Day 26 complete.**
 
 ---
 
-# 🌄 Phase 4 – Structured OCR (Semantic Menu Engine)
+## 🚀 Day 27 – Phase 4 pts.3–4 (TODAY)
 
-Phase 4 is where ServLine evolves from “OCR + cleanup” → **true structured understanding**.
+### ✔ Phase 4 pt.3 — Semantic Block Understanding  
+- Added `semantic_engine.py`  
+- Groups OCR lines into semantic roles: headings, items, descriptions, prices, variants  
+- Geometry-aware block clustering  
+- Stable across multiple menus
 
-The Day 26 work established the **cleanup stack (Raw → Cleanup → Refine)**.  
-The remaining Phase 4 days (Day 26 pt.3 and Days 27–32) will layer on semantic grouping, multi-line reconstruction, variants, and price reasoning.
+### ✔ Phase 4 pt.4 — Multi-Line Description Reconstruction  
+- Auto-merges wrapped description lines  
+- Removes bullet symbols, OCR noise, stray hyphens  
+- Reconstructs ingredient-style descriptions cleanly  
+- Runs before variant inference  
+- Verified end-to-end in Finalize with AI Cleanup flow
 
-This is the phase that makes ServLine *commercial-grade*.
-
----
-
-## 🎯 Phase 4 Goal  
-Transform messy PDF/JPG text into **perfectly structured, AI-ready menu JSON**, suitable for:
-- Voice ordering  
-- POS mapping  
-- Auto-category detection  
-- Auto-variants  
-- Price-logic  
-- Large restaurant onboarding at scale  
+⭐ **Day 27 complete — semantic structuring + description reconstruction now operational.**
 
 ---
 
-## 🔥 Phase 4 Core Modules (Roadmap)
+# 🌄 Phase 4 – Remaining Roadmap
 
-### **1. Semantic Block→Item Grouping**  
-Build on the Raw → Cleanup → Refine stack with **semantic grouping**:
+### Day 28 – Variant & Size Intelligence  
+S/M/L, 10/14/18", flavor sets, wing counts, upcharges.
 
-- Understand what is:
-  - a menu item  
-  - a description  
-  - a category/section heading  
-  - a variant/size line  
-  - a combo or “served with” line  
-- Use:
-  - OCR metadata (roles, blocks, positions)  
-  - AI hints (keywords, shapes, price patterns)  
-  - Geometry (columns, ordering)  
+### Day 29 – Category Hierarchy v2  
+Smart semantic category grouping.
 
-This replaces guesswork with **semantic clustering**.
+### Day 30 – Price Integrity Engine  
+Price clustering + correction + validation.
 
----
+### Day 31 – Structured Draft Output  
+Full category → item → variants structure.
 
-### **2. Multi-Line Description Reconstruction**  
-Automatically:
-
-- Merge artificially-wrapped lines that belong to the same description.  
-- Remove bullet symbols and repeated junk.  
-- Normalize separators (commas, “/”, “with”, etc.).  
-- Detect and clean ingredient lists.  
-- Fix “hard breaks” in the middle of phrases caused by scan artifacts.
+### Day 32 – Superimport Mode  
+Upload → structured menu → POS-ready output.
 
 ---
 
-### **3. AI Variant & Size Deduction**  
-Automatic extraction of:
+# ⭐ Next Steps  
+You will start **Day 28 – Phase 4 pt.5: Variant Intelligence**  
+when you say:
 
-- Size families (S/M/L, 10/14/18", etc.).  
-- Flavor sets (e.g., “BBQ / Buffalo / Garlic Parm”).  
-- Sub-variant groups (e.g., “Grilled / Crispy Chicken”).  
-- Combo options and upcharge lines.  
-- Wing counts (“6pc / 12pc / 24pc”).
-
-Variants will be represented as structured children under a single parent item.
-
----
-
-### **4. Category Hierarchy v2**  
-Category-level grouping powered by:
-
-- Block positions, column breaks.  
-- Font weight / role hints (heading vs item).  
-- Geometry and indentation.  
-- Keywords and AI semantic reading.  
-
-Result: a clean **category → items → variants** tree that mirrors the original menu.
-
----
-
-### **5. Price Integrity Engine**  
-Price clustering + corrections:
-
-- Detect misread decimals and obviously wrong prices.  
-- Spot swapped digits (e.g., 7950 instead of 7.95).  
-- Cluster prices to infer typical ranges per category.  
-- Match prices to sizes/variants correctly.  
-
-This engine will run after Refine to ensure final menu prices are structurally sane.
-
----
-
-### **6. Draft Editor Auto-Grouping Integration**  
-Tie structured output into the UI:
-
-- Items auto-bucketed by category.  
-- Variants grouped under a single parent row.  
-- Clean S/M/L + 10/14/18 logic surfaced clearly.  
-- Descriptions mostly “ready” by default.  
-- Low-confidence or ambiguous fragments bubbled to the top for quick human review.
-
----
-
-## ⭐ Phase 4 End-State  
-
-By the end of Phase 4 (Days 26–32):
-
-**You’ll be able to upload almost any restaurant menu and get a high-quality, structured menu JSON with minimal manual fixes.**
-
-At that point, ServLine’s OCR stack is ready for **real restaurant onboarding and production voice ordering.**
+> **ready for day 28**

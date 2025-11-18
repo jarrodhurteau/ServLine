@@ -1,6 +1,6 @@
 # storage/ai_ocr_helper.py
 """
-AI OCR Helper — Day20/21 → Phase 2 pt.4  (rev9)
+AI OCR Helper — Day20/21 → Phase 2 pt.4  (rev10 + Phase 4 pt.3–4 hooks)
 
 Cleans noisy OCR lines into sane menu items.
 
@@ -42,12 +42,21 @@ rev9 changes:
 - **Multi-item splitter**: explode a single OCR line containing two-or-more
   dot-leader segments (NAME .... PRICE NAME .... PRICE …) into separate
   pseudo-lines before normal parsing.
+
+rev10 / Phase 4 pt.3–4:
+- Post-pass variant normalization + category hierarchy injection:
+  - Normalize AI variants into stable size/flavor groups.
+  - Infer subcategories (e.g., “Gourmet Pizza”, “Cold Subs”) per category.
 """
 
 from __future__ import annotations
 import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+
+# --- Variant & Category Hierarchy — Phase 4 pt.3–4 ---
+from portal.storage.variant_engine import classify_raw_variant, normalize_variant_group
+from .category_hierarchy import infer_category_hierarchy
 
 # ---------- light header normalizer ----------
 _SECTION_FIXES = {
@@ -66,7 +75,20 @@ _SECTION_FIXES = {
     "specialty pizzas": "Specialty Pizzas",
     "burgers & sandwiches": "Burgers & Sandwiches",
 }
-_HEADER_WORDS = {"pizza","pizzas","specialty","wings","salads","beverages","drinks","burgers","sandwiches","subs","sides","apps"}
+_HEADER_WORDS = {
+    "pizza",
+    "pizzas",
+    "specialty",
+    "wings",
+    "salads",
+    "beverages",
+    "drinks",
+    "burgers",
+    "sandwiches",
+    "subs",
+    "sides",
+    "apps",
+}
 
 def _normalize_header(s: str) -> str:
     s = (s or "").strip()
@@ -402,7 +424,12 @@ def _split_line_into_chunks(line: str) -> List[str]:
     return chunks or [line]
 
 # ---------- main API ----------
-def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Optional[Any] = None, restaurant_profile: Optional[Any] = None) -> Dict[str, Any]:
+def analyze_ocr_text(
+    raw_text: str,
+    layout: Optional[Any] = None,
+    taxonomy: Optional[Any] = None,
+    restaurant_profile: Optional[Any] = None,
+) -> Dict[str, Any]:
     lines = [l.rstrip() for l in (raw_text or "").splitlines()]
     blocks: List[Dict[str, Any]] = []
     cur = {"id": str(uuid.uuid4()), "header_text": None, "lines": []}
@@ -452,7 +479,9 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             chunk_strip = (chunk or "").strip()
 
             # drop obvious header fragments that slipped as lines
-            if re.fullmatch(r"[:;,\-–—•·]*[A-Z]{2,}[\w &]*", chunk) and any(h in chunk.lower() for h in _HEADER_WORDS):
+            if re.fullmatch(r"[:;,\-–—•·]*[A-Z]{2,}[\w &]*", chunk) and any(
+                h in chunk.lower() for h in _HEADER_WORDS
+            ):
                 header = _normalize_header(chunk)
                 fallback_cat = header
                 carry_item = None
@@ -465,8 +494,6 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                 continue
 
             # 0) ORPHAN PRICE-ONLY LINE
-            # If a chunk is just a price (e.g., "12.99" or "$12.99") and we already have an item without prices,
-            # attach it to the most recent item.
             if _PRICE_FULL_RX.fullmatch(chunk_strip or ""):
                 pr_list = _best_price_candidates(chunk_strip)
                 if pr_list and items:
@@ -476,10 +503,12 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                         base = round(pr_list[0], 2)
                         if not any(round(p.get("value", 0), 2) == base for p in pcs):
                             pcs.append({"type": "orphan_attach", "value": base})
-                            # category-aware clamp
                             pcs = _clamp_by_category(pcs, tgt.get("category") or fallback_cat)
                             tgt["price_candidates"] = pcs
-                            tgt["confidence"] = max(float(tgt.get("confidence") or 0.6), _price_conf_bump(pcs))
+                            tgt["confidence"] = max(
+                                float(tgt.get("confidence") or 0.6),
+                                _price_conf_bump(pcs),
+                            )
                         carry_item = None
                         i += 1
                         continue
@@ -499,26 +528,35 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                     name_core, desc = _basic_clean(left2), _basic_clean(right2)
 
                 cat = _guess_category(name_core, desc, fallback_cat)
-                price_candidates = [{"type": "leaders", "value": round(pr, 2)}] if (_PRICE_MIN <= pr <= _PRICE_MAX) else []
+                price_candidates = (
+                    [{"type": "leaders", "value": round(pr, 2)}]
+                    if (_PRICE_MIN <= pr <= _PRICE_MAX)
+                    else []
+                )
                 variants = [{"label": lbl, "price": round(pv, 2)} for (lbl, pv) in sizes] if sizes else []
 
-                # gate junky names
                 if not _passes_name_gate(name_core, bool(price_candidates or variants)):
                     i += 1
                     continue
 
-                # cat-aware clamp
                 price_candidates = _clamp_by_category(price_candidates, cat)
 
-                items.append({
-                    "name": name_core,
-                    "description": (desc or None),
-                    "category": cat,
-                    "price_candidates": price_candidates or ([{"type": "base", "value": round(pr, 2)}] if (_PRICE_MIN <= pr <= _PRICE_MAX) else []),
-                    "confidence": _price_conf_bump(price_candidates) if price_candidates else 0.75,
-                    "variants": variants,
-                    "provenance": {"block_id": b["id"], "matched_rule": "dot_leader"},
-                })
+                items.append(
+                    {
+                        "name": name_core,
+                        "description": (desc or None),
+                        "category": cat,
+                        "price_candidates": price_candidates
+                        or (
+                            [{"type": "base", "value": round(pr, 2)}]
+                            if (_PRICE_MIN <= pr <= _PRICE_MAX)
+                            else []
+                        ),
+                        "confidence": _price_conf_bump(price_candidates) if price_candidates else 0.75,
+                        "variants": variants,
+                        "provenance": {"block_id": b["id"], "matched_rule": "dot_leader"},
+                    }
+                )
                 carry_item = None
                 i += 1
                 continue
@@ -528,19 +566,22 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             sizes_here, name_after_sizes = _parse_size_pairs(chunk)
             has_sizes = len(sizes_here) >= 1
 
-            # Build base name (strip prices; also remove size-pairs text if we parsed any)
             name_core_src = name_after_sizes if has_sizes else chunk
             name_core = _strip_inline_prices(name_core_src)
-            # remove embedded header words within name
-            name_core = re.sub(r"\b(SALADS|WINGS|BEVERAGES|PIZZAS?)\b", "", name_core, flags=re.I)
+            name_core = re.sub(
+                r"\b(SALADS|WINGS|BEVERAGES|PIZZAS?)\b", "", name_core, flags=re.I
+            )
             name_core = _basic_clean(name_core)
 
             if prices or has_sizes:
                 carry_item = None
                 base_price = prices[0] if prices else (sizes_here[0][1] if has_sizes else 0.0)
-                variants = [{"label": "Alt", "price": round(prices[1],2)}] if (len(prices) > 1 and prices[1] >= max(_PRICE_MIN, base_price*0.5)) else []
+                variants = (
+                    [{"label": "Alt", "price": round(prices[1], 2)}]
+                    if (len(prices) > 1 and prices[1] >= max(_PRICE_MIN, base_price * 0.5))
+                    else []
+                )
                 if has_sizes:
-                    # prefer explicit sizes over generic Alt
                     variants = [{"label": lbl, "price": round(val, 2)} for (lbl, val) in sizes_here]
 
                 desc = ""
@@ -550,44 +591,47 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
 
                 tail_words = name_core.split(None, 1)
                 if len(tail_words) >= 2 and _looks_ingredients(tail_words[1]):
-                    name_core, desc = _basic_clean(tail_words[0]), _basic_clean((desc + " " + tail_words[1]).strip())
+                    name_core, desc = _basic_clean(tail_words[0]), _basic_clean(
+                        (desc + " " + tail_words[1]).strip()
+                    )
 
                 cat = _guess_category(name_core, desc, fallback_cat)
 
-                # gate junky names
                 if not _passes_name_gate(name_core, True):
                     i += 1
                     continue
 
                 rule = "inline_sizes" if has_sizes else "inline_price"
                 price_candidates = (
-                    [{"type": "base", "value": round(p,2)} for p in prices] if prices
-                    else [{"type": "sizepair", "value": round(sizes_here[0][1],2)}]
+                    [{"type": "base", "value": round(p, 2)} for p in prices]
+                    if prices
+                    else [{"type": "sizepair", "value": round(sizes_here[0][1], 2)}]
                 )
-                # cat-aware clamp
                 price_candidates = _clamp_by_category(price_candidates, cat)
                 conf = _price_conf_bump(price_candidates)
 
-                items.append({
-                    "name": name_core or "Untitled",
-                    "description": (desc or None),
-                    "category": cat,
-                    "price_candidates": price_candidates,
-                    "confidence": conf,
-                    "variants": variants,
-                    "provenance": {"block_id": b["id"], "matched_rule": rule},
-                })
+                items.append(
+                    {
+                        "name": name_core or "Untitled",
+                        "description": (desc or None),
+                        "category": cat,
+                        "price_candidates": price_candidates,
+                        "confidence": conf,
+                        "variants": variants,
+                        "provenance": {"block_id": b["id"], "matched_rule": rule},
+                    }
+                )
                 i += 1
                 continue
 
             # 3) No inline price: maybe next chunk is a price-only / size-pair line
-            # Decide whether this chunk is a likely name (vs. ingredient)
             if not _looks_ingredients(name_core):
-                # peek next
-                nxt = raw_chunks[i+1][1] if (i+1) < len(raw_chunks) else ""
+                nxt = raw_chunks[i + 1][1] if (i + 1) < len(raw_chunks) else ""
                 nxt_sizes, _ = _parse_size_pairs(nxt)
                 nxt_prices = _best_price_candidates(nxt)
-                nxt_is_price_only = (bool(nxt_prices) and _PRICE_FULL_RX.fullmatch((nxt or "").strip()) is not None)
+                nxt_is_price_only = bool(nxt_prices) and _PRICE_FULL_RX.fullmatch(
+                    (nxt or "").strip()
+                ) is not None
 
                 if nxt_is_price_only or nxt_sizes:
                     desc = ""
@@ -597,7 +641,9 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                     cat = _guess_category(name_core, desc, fallback_cat)
 
                     if nxt_sizes:
-                        variants = [{"label": lbl, "price": round(val, 2)} for (lbl, val) in nxt_sizes]
+                        variants = [
+                            {"label": lbl, "price": round(val, 2)} for (lbl, val) in nxt_sizes
+                        ]
                         pc = [{"type": "sizepair", "value": round(nxt_sizes[0][1], 2)}]
                         rule = "nextline_sizepair"
                     else:
@@ -605,23 +651,24 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
                         pc = [{"type": "nextline", "value": round(nxt_prices[0], 2)}]
                         rule = "nextline_price"
 
-                    # name gate
                     if not _passes_name_gate(name_core, True):
                         i += 2
                         continue
 
                     pc = _clamp_by_category(pc, cat)
 
-                    items.append({
-                        "name": name_core or "Untitled",
-                        "description": (desc or None),
-                        "category": cat,
-                        "price_candidates": pc,
-                        "confidence": _price_conf_bump(pc),
-                        "variants": variants,
-                        "provenance": {"block_id": b["id"], "matched_rule": rule},
-                    })
-                    i += 2  # consume next chunk too
+                    items.append(
+                        {
+                            "name": name_core or "Untitled",
+                            "description": (desc or None),
+                            "category": cat,
+                            "price_candidates": pc,
+                            "confidence": _price_conf_bump(pc),
+                            "variants": variants,
+                            "provenance": {"block_id": b["id"], "matched_rule": rule},
+                        }
+                    )
+                    i += 2
                     carry_item = None
                     continue
 
@@ -631,14 +678,14 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             if carry_item and _looks_ingredients(chunk):
                 prev = carry_item.get("description") or ""
                 new_desc = (prev + " " + chunk).strip() if prev else chunk
-                carry_item["description"] = re.sub(r"\s{2,}", " ", new_desc).strip(", -")
+                carry_item["description"] = re.sub(
+                    r"\s{2,}", " ", new_desc
+                ).strip(", -")
             else:
-                # gate bare names a bit more strictly since no price yet
                 if not _passes_name_gate(name_core, False):
                     i += 1
                     continue
                 cat = _guess_category(name_core, "", fallback_cat)
-                # extra guard: don't create items from obvious non-item counters
                 if _is_drop_line(name_core):
                     i += 1
                     continue
@@ -657,21 +704,20 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             i += 1
 
     # --- NOISE SCRUB / STITCHERS ---
-    _NONWORD_RUN = re.compile(r"\b(?![aeiouyAEIOUY])([A-Za-z]){3,}\b")  # 3+ letter no-vowel junk
-    _REPEAT_CHARS = re.compile(r"(.)\1\1+")  # any char repeated 3+ times
-    _NOISE_TOKENS = {"ee","ie","e","nics","ncs","ees"}  # frequent stray OCR syllables
+    _NONWORD_RUN = re.compile(r"\b(?![aeiouyAEIOUY])([A-Za-z]){3,}\b")
+    _REPEAT_CHARS = re.compile(r"(.)\1\1+")
+    _NOISE_TOKENS = {"ee", "ie", "e", "nics", "ncs", "ees"}
     _TOK_SPLIT = re.compile(r"[,\s/;]+")
 
     def _scrub_noise(text: str) -> str:
         if not text:
             return text
-        t = _REPEAT_CHARS.sub(r"\1\1", text)           # compress loooong repeats → "loo"
-        t = _NONWORD_RUN.sub("", t)                     # drop vowel-less junk tokens
+        t = _REPEAT_CHARS.sub(r"\1\1", text)
+        t = _NONWORD_RUN.sub("", t)
         t = re.sub(r"\s{2,}", " ", t).strip(" ,.-")
         return t
 
     def _title_token(tok: str) -> str:
-        # Keep "BBQ" upper; otherwise Title Case
         return tok if tok.upper() == "BBQ" else tok.capitalize()
 
     def _clean_desc(desc: Optional[str]) -> Optional[str]:
@@ -687,7 +733,6 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
             tl = t.lower().strip(".,-:()")
             if not tl or tl in _NOISE_TOKENS:
                 continue
-            # drop isolated small integers (e.g., "2") unless clearly a price (we already moved prices out)
             if tl.isdigit() and len(tl) <= 2:
                 continue
             if tl not in seen:
@@ -699,74 +744,130 @@ def analyze_ocr_text(raw_text: str, layout: Optional[Any] = None, taxonomy: Opti
 
     # -------- POST-PASS REPAIRS --------
     def _starts_with_word(s: Optional[str], w: str) -> bool:
-        return bool(s) and s.strip().lower().startswith(w.lower()+" ")
+        return bool(s) and s.strip().lower().startswith(w.lower() + " ")
 
     repaired: List[Dict[str, Any]] = []
     for it in items:
         name = (it.get("name") or "").strip()
         desc = (it.get("description") or "") or ""
 
-        # Drop junk header-ish residue (e.g., ": ANDWICHE")
-        headerish = re.fullmatch(r"[:;,\-–—•·\s]*[A-Z &]{2,}$", name or "")
-        looks_like_header_word = any(w in (name or "").lower() for w in
-                                     ["salad","salads","wings","beverage","beverages","pizza","pizzas","andwich","topping","toppings"])
+        headerish = re.fullmatch(
+            r"[:;,\-–—•·\s]*[A-Z &]{2,}$", name or ""
+        )
+        looks_like_header_word = any(
+            w in (name or "").lower()
+            for w in [
+                "salad",
+                "salads",
+                "wings",
+                "beverage",
+                "beverages",
+                "pizza",
+                "pizzas",
+                "andwich",
+                "topping",
+                "toppings",
+            ]
+        )
         if headerish or (looks_like_header_word and not re.search(r"[a-z]", name or "")):
             continue
 
-        # Stitch split two-word names
-        if name.lower() in {"soft","garden","greek","buffalo","bbq","meat","bell","chicken"}:
+        if name.lower() in {
+            "soft",
+            "garden",
+            "greek",
+            "buffalo",
+            "bbq",
+            "meat",
+            "bell",
+            "chicken",
+        }:
             first = desc.split()[0] if desc else ""
             if first and first[0].isalpha() and first[0].isupper():
-                if first.lower() in {"drink","salad","chicken","lovers","peppers"}:
+                if first.lower() in {
+                    "drink",
+                    "salad",
+                    "chicken",
+                    "lovers",
+                    "peppers",
+                }:
                     name = f"{name} {first}".strip()
-                    desc = desc[len(first):].lstrip(" ,.-")
+                    desc = desc[len(first) :].lstrip(" ,.-")
 
-        # Specific combos normalizer
         name = re.sub(r"\bBbq\b", "BBQ", name)
-        name = re.sub(r"\b(Buffalo Chicken|BBQ Chicken)\b", lambda m: m.group(1).title().replace("Bbg","BBQ"), name)
+        name = re.sub(
+            r"\b(Buffalo Chicken|BBQ Chicken)\b",
+            lambda m: m.group(1).title().replace("Bbg", "BBQ"),
+            name,
+        )
 
-        # “Meat Lovers”
         if name.lower() == "meat" and _starts_with_word(desc, "lovers"):
             name = "Meat Lovers"
-            desc = desc[len("lovers"):].lstrip(" ,.-")
+            desc = desc[len("lovers") :].lstrip(" ,.-")
 
-        # “Bell Peppers” and strip accidental salad tails
         if name.lower() == "bell" and _starts_with_word(desc, "peppers"):
             name = "Bell Peppers"
-            desc = desc[len("peppers"):].lstrip(" ,.-")
-        if name.lower() in {"bell peppers","meat lovers","buffalo chicken","bbq chicken"}:
-            desc = re.sub(r"\b(garden|greek)\s+salad\b", "", desc, flags=re.I).strip(" ,.-")
+            desc = desc[len("peppers") :].lstrip(" ,.-")
+        if name.lower() in {
+            "bell peppers",
+            "meat lovers",
+            "buffalo chicken",
+            "bbq chicken",
+        }:
+            desc = re.sub(
+                r"\b(garden|greek)\s+salad\b", "", desc, flags=re.I
+            ).strip(" ,.-")
 
-        # Scrub + normalize description tokens
         desc = _clean_desc(desc)
 
-        # finalize
         it["name"] = _basic_clean(name)
         it["description"] = desc
         it["category"] = (_normalize_header(it.get("category") or "Uncategorized")).title()
-        # If we have variants but no price_candidates (rare), seed one from first variant
         if (not it.get("price_candidates")) and it.get("variants"):
             v0 = it["variants"][0]
-            it["price_candidates"] = [{"type": "variant_seed", "value": round(float(v0.get("price", 0)) or 0, 2)}]
+            it["price_candidates"] = [
+                {
+                    "type": "variant_seed",
+                    "value": round(float(v0.get("price", 0)) or 0, 2),
+                }
+            ]
 
-        # final cat-aware clamp for candidates
         if it.get("price_candidates"):
-            it["price_candidates"] = _clamp_by_category(list(it["price_candidates"]), it.get("category") or "")
+            it["price_candidates"] = _clamp_by_category(
+                list(it["price_candidates"]), it.get("category") or ""
+            )
 
         repaired.append(it)
     items = repaired
+
+    # --- Phase 4 pt.3–4: Variant normalization + Category Hierarchy ---
+    # Normalize any AI variants into stable size/flavor/style groups
+    for it in items:
+        raw_v = it.get("variants") or []
+        if not raw_v:
+            continue
+        norm_v = normalize_variant_group(raw_v)
+        it["variants"] = norm_v
+
+    # Infer per-category subcategories (e.g., Gourmet Pizza, Cold Subs)
+    hierarchy_map = infer_category_hierarchy(items)
+    for it in items:
+        name = it.get("name") or ""
+        meta = hierarchy_map.get(name)
+        if meta and meta.get("subcategory"):
+            it["subcategory"] = meta["subcategory"]
 
     # Final tidy: enforce canonical category names
     for it in items:
         low = (it["category"] or "").lower()
         it["category"] = {
-            "pizza":"Pizza",
-            "specialty pizzas":"Specialty Pizzas",
-            "wings":"Wings",
-            "salads":"Salads",
-            "beverages":"Beverages",
-            "burgers & sandwiches":"Burgers & Sandwiches",
-            "sides & apps":"Sides & Apps",
+            "pizza": "Pizza",
+            "specialty pizzas": "Specialty Pizzas",
+            "wings": "Wings",
+            "salads": "Salads",
+            "beverages": "Beverages",
+            "burgers & sandwiches": "Burgers & Sandwiches",
+            "sides & apps": "Sides & Apps",
         }.get(low, _normalize_header(it["category"] or "Uncategorized"))
 
     doc = {
