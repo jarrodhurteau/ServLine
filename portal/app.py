@@ -2916,6 +2916,53 @@ def imports_ai_preview(job_id: int):
         "preview": doc
     }), 200
 
+def _build_price_text(ai_item: dict) -> Optional[str]:
+    """
+    Build a human-readable price_text from AI preview data.
+
+    Priority:
+      1) Use variants with explicit price_cents, e.g. "S: $9.95 / L: $13.99"
+      2) Fallback to distinct price_candidates, e.g. "$9.95 / $13.99 / $19.95"
+    """
+    pcs = ai_item.get("price_candidates") or []
+    variants = ai_item.get("variants") or []
+    parts: List[str] = []
+
+    # Prefer variants if they have explicit prices
+    for v in variants:
+        price_cents = v.get("price_cents")
+        if price_cents is None:
+            continue
+        try:
+            price_cents = int(price_cents)
+        except Exception:
+            continue
+        label = (v.get("label") or "").strip()
+        dollars = price_cents / 100.0
+        if label:
+            parts.append(f"{label}: ${dollars:0.2f}")
+        else:
+            parts.append(f"${dollars:0.2f}")
+
+    # Fallback: use price_candidates if we didn't get anything from variants
+    if not parts:
+        seen = set()
+        for pc in pcs:
+            val = pc.get("value")
+            if val is None:
+                continue
+            try:
+                dollars = float(val)
+            except Exception:
+                continue
+            key = round(dollars, 2)
+            if key in seen:
+                continue
+            seen.add(key)
+            parts.append(f"${dollars:0.2f}")
+
+    return " / ".join(parts) if parts else None
+
 # ------------------------
 # AI Heuristics → Commit into Draft (with redirect-friendly behavior)
 # ------------------------
@@ -3016,16 +3063,23 @@ def imports_ai_commit(job_id: int):
         cat = (it.get("category") or "") or None
         conf = it.get("confidence")
         pcs = it.get("price_candidates") or []
+
+        # Primary price: keep existing behavior (first price_candidate)
         price_cents = 0
         if pcs:
             try:
                 price_cents = _to_cents(pcs[0].get("value"))
             except Exception:
                 price_cents = 0
+
+        # NEW: carry all variant/size info into price_text for the Draft Editor
+        price_text = _build_price_text(it)
+
         new_items.append({
             "name": name,
             "description": desc.strip() or None,
             "price_cents": int(price_cents),
+            "price_text": price_text,  # <-- NEW
             "category": cat,
             "position": None,
             "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf
