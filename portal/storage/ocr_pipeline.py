@@ -52,6 +52,17 @@ Phase 4 pt.3 (Day 27):
   - Normalize sizes (e.g. 10"/10 in → "10in", 6 pc → "6pc").
   - Classify variants by kind: size | flavor | style | other.
   - Assign group keys so downstream can easily cluster variant families.
+
+Phase 4 pt.4 (Day 27, downstream):
+- Category Hierarchy v1 (storage/category_hierarchy.py):
+  - Item-level inference of subcategories (e.g., "Calzones", "Subs & Grinders").
+  - Runs after text-block segmentation when converting blocks → items.
+
+Phase 4 pt.5–6 (Day 28, downstream):
+- Price Integrity Engine + Draft-friendly variants:
+  - Analyze item prices per category + variant family.
+  - Auto-correct obvious decimal-shift prices when safe (e.g., 3475 → 34.75).
+  - Attach price_flags and corrected_price_cents into preview JSON and draft items.
 """
 
 from __future__ import annotations
@@ -1074,7 +1085,7 @@ def segment_document(
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
             "mode": "high_clarity+segmentation+two_column_merge+category_infer+"
-                    "multi_price_variants+block_roles+multiline_reconstruct+variant_enrich",
+                    "multi_price_variants+block_roles+multiline_reconstruct+variant_enrich+category_hierarchy+price_integrity",
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }

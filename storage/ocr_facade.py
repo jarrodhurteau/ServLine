@@ -44,39 +44,65 @@ PIPELINE_VERSION = "phase-4-segmenter(block_roles+multiline)+ai-helper-rev9"
 
 def _tesseract_cmd() -> str:
     """Locate the tesseract executable on disk."""
+    # Prefer whatever pytesseract already thinks it should use
     cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
     if cmd:
         return cmd
+
+    # PATH
     which = shutil.which("tesseract") or shutil.which("tesseract.exe") or ""
     if which:
         return which
+
+    # Common Windows install paths
     for p in (
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
     ):
         if Path(p).exists():
             return p
+
     return ""
 
 
 def health() -> Dict[str, Any]:
-    """Return OCR engine + environment health info."""
-    try:
-        ver = str(pytesseract.get_tesseract_version())
-    except Exception:
-        ver = None
-    poppler = os.getenv("POPPLER_PATH") or ""
+    """
+    Return OCR engine + environment health info.
+
+    IMPORTANT: we now drive both `cmd` and `version` off the same resolved
+    executable, so /ocr/health.tesseract and ocr_lib_health.tesseract stay
+    in sync instead of disagreeing.
+    """
+    # Single source of truth for the executable
+    cmd = _tesseract_cmd()
+    version: Optional[str] = None
+
+    if cmd:
+        try:
+            # Ensure pytesseract uses the same executable we report
+            pytesseract.pytesseract.tesseract_cmd = cmd
+        except Exception:
+            # Even if this fails, we still surface cmd + found_on_disk
+            pass
+
+        try:
+            version = str(pytesseract.get_tesseract_version())
+        except Exception:
+            version = None
+
+    poppler_path = os.getenv("POPPLER_PATH") or ""
+
     return {
         "engine": "servline-ocr",
         "pipeline_version": PIPELINE_VERSION,
         "tesseract": {
-            "cmd": _tesseract_cmd(),
-            "version": ver,
-            "found_on_disk": bool(_tesseract_cmd()),
+            "cmd": cmd,
+            "version": version,
+            "found_on_disk": bool(cmd and Path(cmd).exists()),
         },
         "poppler": {
-            "path_env": poppler,
-            "present": bool(poppler and Path(poppler).exists()),
+            "path_env": poppler_path,
+            "present": bool(poppler_path and Path(poppler_path).exists()),
         },
     }
 
@@ -164,7 +190,7 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
         desc = it.get("description")
         variants = it.get("variants") or []
 
-               # Build sizes from variants if present; otherwise seed from first price candidate (as "Base")
+        # Build sizes from variants if present; otherwise seed from first price candidate (as "Base")
         sizes: List[Dict[str, Any]] = []
         if variants:
             for v in variants:
@@ -306,6 +332,5 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             "sections": sections,
         },
     }
-
 
     return categories, debug_payload
