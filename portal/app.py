@@ -2472,15 +2472,39 @@ def draft_editor(draft_id: int):
             "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
         ).fetchall()
 
+    # ---- NEW: Phase 4 pt.8 structured grouping ----
+    category_tree = {}
+    flat_groups = {}
+
+    for it in items:
+        cat = (it.get("category") or "Uncategorized").strip()
+        sub = (it.get("subcategory") or "").strip()  # may be empty if not inferred
+
+        # fallback: no subcategories → treat everything as "" group
+        if cat not in category_tree:
+            category_tree[cat] = {}
+
+        if not sub:
+            sub = ""  # root-level bucket for this category
+
+        category_tree[cat].setdefault(sub, []).append(it)
+
+        # also populate flat (non-nested) grouping
+        flat_groups.setdefault(cat, []).append(it)
     return _safe_render(
         "draft_editor.html",
         draft=draft,
         items=items,
         categories=categories,
         restaurants=restaurants,
-        low_conf_items=low_conf_items,                 # NEW: bucket for top-of-page section
-        quality_threshold=QUALITY_LOW_THRESHOLD,       # NEW: expose threshold to template
+        low_conf_items=low_conf_items,
+        quality_threshold=QUALITY_LOW_THRESHOLD,
+
+        # NEW pt.8 context
+        category_tree=category_tree,
+        flat_groups=flat_groups,
     )
+
 
 # --- NEW: Draft status probe for polling ---
 @app.get("/drafts/<int:draft_id>/status")

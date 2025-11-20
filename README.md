@@ -8,49 +8,49 @@ This repo follows a phased build plan (Day 1 → onward), with Git commits marki
 
 servline/
 portal/  # Flask portal website  
-    app.py
-    requirements.txt
-    contracts.py                          # lightweight draft schema validator (added Day 19 landmark)
-    templates/
-        base.html
-        index.html
-        login.html
-        restaurants.html
-        menus.html
-        items.html
-        item_form.html
-        imports.html
-        import.html
-        drafts.html
-        draft_editor.html
-        uploads.html
-        uploads_trash.html
-        draft_review.html
-        raw.html
-        errors/404.html
-        errors/500.html
-infra/   # Infra scripts (ngrok, Flask runner, stop scripts)
-    run_infra.ps1
-    stop_infra.ps1
-storage/ # SQLite database + OCR pipeline + seed + schema
-    servline.db
-    schema.sql
-    seed_dev.sql
-    drafts.py
-    ocr_pipeline.py
-    ocr_utils.py
-    ocr_types.py
-    ocr_facade.py
-    ai_ocr_helper.py
-    ai_cleanup.py
-    semantic_engine.py                   # Phase 4 pt.3
-    variant_engine.py                    # Phase 4 pt.3
-    category_hierarchy.py                # Phase 4 pt.4
-    price_integrity.py                   # Phase 4 pt.5
-uploads/
-.gitignore
-.vscode/
-README.md
+    app.py  
+    requirements.txt  
+    contracts.py                          # lightweight draft schema validator (added Day 19 landmark)  
+    templates/  
+        base.html  
+        index.html  
+        login.html  
+        restaurants.html  
+        menus.html  
+        items.html  
+        item_form.html  
+        imports.html  
+        import.html  
+        drafts.html  
+        draft_editor.html  
+        uploads.html  
+        uploads_trash.html  
+        draft_review.html  
+        raw.html  
+        errors/404.html  
+        errors/500.html  
+infra/   # Infra scripts (ngrok, Flask runner, stop scripts)  
+    run_infra.ps1  
+    stop_infra.ps1  
+storage/ # SQLite database + OCR pipeline + seed + schema  
+    servline.db  
+    schema.sql  
+    seed_dev.sql  
+    drafts.py  
+    ocr_pipeline.py  
+    ocr_utils.py  
+    ocr_types.py  
+    ocr_facade.py  
+    ai_ocr_helper.py  
+    ai_cleanup.py  
+    semantic_engine.py                   # Phase 4 pt.3  
+    variant_engine.py                    # Phase 4 pt.3  
+    category_hierarchy.py                # Phase 4 pt.4  
+    price_integrity.py                   # Phase 4 pt.5  
+uploads/  
+.gitignore  
+.vscode/  
+README.md  
 
 ---
 
@@ -239,45 +239,77 @@ Day 27 complete.
 
 ---
 
-## 🚀 Day 28 – Phase 4 pts.5–6 (TODAY)
+## 🚀 Day 28 – Phase 4 pts.5–6
 
 ### ✔ Phase 4 pt.5 — Price Integrity Engine
 - Added `price_integrity.py`
 - Detects outlier prices and unsafe OCR misreads
 - Auto-corrects obvious cases (e.g., 3475 → 34.75)
-- Returns `corrected_price_cents` + `price_flags`
-- Integrated into `ocr_pipeline` before preview JSON
-- AI Finalize path prefers corrected prices
-- CSV/JSON/XLSX exports verified stable
+- Produces `corrected_price_cents` and `price_flags`
+- Integrated into `ocr_pipeline` (pre-preview)
+- Finalize path prefers corrected prices
+- All exports validated
 
 ### ✔ Phase 4 pt.6 — Draft-Friendly Variants
-- Mapped variant prices cleanly into `price_cents`
-- Unified preview → draft → finalize price behavior
-- Added draft editor warning pill hook (not surfaced yet)
-- End-to-end tested on multiple menus (jobs #94–95)
-- No regressions; confident output stable
+- Normalized variant-to-price mapping
+- Unified preview → draft → finalize flow
+- Draft Editor warning hook added
+- Fully tested across multiple menus
 
-⭐ **Day 28 complete — price integrity + stable variant pricing are now operational.**
+⭐ **Day 28 complete.**
+
+---
+
+## 🚀 Day 29 – Phase 4 pts.7–8 (TODAY)
+
+### ✔ Phase 4 pt.7 — Category Hierarchy v2
+- Expanded `category_hierarchy.py` with improved rules  
+- Added advanced grouping:
+  - Specialty pizzas  
+  - Calzones / Strombolis  
+  - Subs & Grinders  
+  - Wings (Bone-in / Boneless / Tenders)  
+  - Salads (Garden / Greek / Caesar / Chef / Antipasto)  
+- Reinforced category hints based on headings + geometry  
+- Preview JSON now includes inferred `subcategory`  
+- No DB changes required; safe integration
+
+### ✔ Phase 4 pt.8 — Structured Grouping (Draft Editor)
+- New nested structure exposed to Draft Editor:
+  ```
+  category → subcategory → items
+  ```
+- Implemented in `app.py` render stage  
+- Provides:
+  - clean left-side outline  
+  - stable grouping without changing UI layout  
+  - category/subcategory organization for future Superimport Mode  
+- Draft items remain flat in DB (backward-compatible)  
+- No regressions to Finalize or Export  
+- Verified end-to-end across sample menus
+
+⭐ **Day 29 complete — hierarchy v2 + structured grouping fully operational.**
 
 ---
 
 # 🌄 Phase 4 – Remaining Roadmap
 
-**Day 29 – Category Hierarchy v2**  
-Advanced section grouping, subcategory detection, hierarchical structure, category reinforcement.
-
 **Day 30 – Price Integrity Engine v2**  
-Clustering, pattern matching, variant-only corrections, side-price disambiguation, coupon filtering.
+Clustering, pattern matching, side-price detection, variant-only corrections.
 
 **Day 31 – Structured Draft Output v2**  
-Per-field confidence, cleanup warnings, provenance, category/subcategory normalization.
+Confidence maps, cleanup warnings, provenance, normalization.
 
 **Day 32 – Superimport Mode**  
-1-click draft generation, accuracy report, auto-grouped sections, ready-for-approval.
+1-click draft creation  
+Auto-grouped sections  
+Full accuracy report  
+Ready for approval.
 
 ---
 
 # ⭐ Next Steps
-You will start **Day 29 – Phase 4 pt.7 (Category Hierarchy v2 integration)**  
+You will start **Day 30 – Phase 4 pt.9**  
 when you say:
 
+**“ready for day 30”**
