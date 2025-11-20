@@ -38,6 +38,8 @@ except Exception as e:
     analyze_ocr_text = None  # type: ignore
     print(f"[OCR] Warning: ai_ocr_helper import failed in ocr_facade: {e!r}")
 
+# Category Hierarchy v2 (Phase 4 pt.7–8)
+from .category_hierarchy import build_grouped_hierarchy
 
 PIPELINE_VERSION = "phase-4-segmenter(block_roles+multiline)+ai-helper-rev9"
 
@@ -293,6 +295,12 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     items = ai_doc.get("items", [])
     sections = ai_doc.get("sections", [])
 
+    # Phase 4 pt.7–8: Category Hierarchy v2 (grouping)
+    hierarchy = build_grouped_hierarchy(
+        items,
+        blocks=layout.get("text_blocks")  # safe if missing / None
+    )
+
     # Build categories payload expected by portal
     categories_list = _group_items_into_categories(items)
     categories: Dict[str, Any] = {
@@ -326,11 +334,14 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             "phase-4 segmentation: blocks + text_blocks + categories + multi-price variants + block roles + multiline reconstruction",
             "per-page orientation normalizer applied when needed",
             "ai-helper (rev9) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds, multi-item splitter",
+            "category hierarchy v2: canonical categories + grouped subcategories",
         ],
         "ai_preview": {
             "items": items,
             "sections": sections,
+            "hierarchy": hierarchy,  # 👈 NEW
         },
     }
+
 
     return categories, debug_payload

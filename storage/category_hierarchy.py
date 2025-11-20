@@ -1,14 +1,47 @@
 # storage/category_hierarchy.py
 """
-Lightweight Category Hierarchy Inference — Phase 4 pt.4
+Category Hierarchy v2 — Phase 4 pt.7–8
 
-Given a flat list of AI-cleaned items, infer a simple hierarchy with
-optional subcategory labels. The goal is NOT to be perfect; it’s to give
-downstream UIs a hint for grouping (e.g., Calzones vs Strombolis vs Subs)
-without re-parsing text everywhere.
+Given a flat list of AI-cleaned items, infer a more stable category
+hierarchy with optional subcategory labels and lightweight grouping.
+
+Goals:
+- Normalize noisy OCR category labels into a smaller set of canonical
+  categories (e.g., "Pizzas", "Our Pizza", "NY Style Pizza" → "Pizza").
+- Infer useful subcategories ("Specialty Pizza", "Calzones", "Grinders").
+- Provide a grouped structure that downstream code can use for:
+    category → subcategory → [items]
+- Keep backward-compatible helper for ai_ocr_helper, which currently only
+  cares about subcategory hints per item.
 
 Public API
 ----------
+    build_grouped_hierarchy(items, blocks=None) -> Dict[str, Any]
+
+Returns a dict shaped like:
+
+    {
+        "groups": {
+            "Pizza": {
+                "Specialty Pizzas": [item, ...],
+                None: [item, ...],
+            },
+            "Wings": {
+                None: [item, ...],
+            },
+            ...
+        },
+        "category_order": ["Pizza", "Wings", ...],
+        "subcategory_order": {
+            "Pizza": ["Specialty Pizzas", None],
+            "Wings": [None],
+        },
+    }
+
+This is the v2 structure that ocr_pipeline will use before price integrity.
+
+Legacy helper (kept for compatibility)
+--------------------------------------
     infer_category_hierarchy(items) -> Dict[str, Dict[str, str]]
 
 Returns a mapping keyed by item name (best-effort; not guaranteed unique):
@@ -21,14 +54,19 @@ Returns a mapping keyed by item name (best-effort; not guaranteed unique):
         ...
     }
 
-`ai_ocr_helper.analyze_ocr_text` uses only the "subcategory" hint, and
-adds it directly to each item as `item["subcategory"]` when present.
+`ai_ocr_helper.analyze_ocr_text` can continue to use this to look up
+per-item subcategory hints and apply them directly to items.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import re
+
+
+# ---------------------------------------------------------------------------
+# Normalization helpers
+# ---------------------------------------------------------------------------
 
 
 def _norm(s: Optional[str]) -> str:
@@ -41,6 +79,82 @@ def _lower(s: Optional[str]) -> str:
 
 def _has_word(text_low: str, *words: str) -> bool:
     return any(w in text_low for w in words)
+
+
+def _slugify(text: str) -> str:
+    """
+    Simple slug for potential future anchors (POS exports).
+    Not used heavily yet; kept as a v2 scaffold.
+    """
+    text = _lower(text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return re.sub(r"-+", "-", text).strip("-")
+
+
+# Canonical category aliases. Keys are canonical labels that we want to
+# stabilize on; values are lists of substrings that indicate that label.
+_CANONICAL_CATEGORY_ALIASES: Dict[str, List[str]] = {
+    "Pizza": [
+        "pizza", "pizzas", "ny style pizza", "new york style pizza",
+        "gourmet pizza", "specialty pizza", "sicilian pizza",
+    ],
+    "Calzones & Strombolis": [
+        "calzone", "calzones", "stromboli", "strombolis",
+    ],
+    "Wings": [
+        "wings", "chicken wings", "boneless wings", "bone-in wings",
+    ],
+    "Burgers & Sandwiches": [
+        "burger", "burgers", "sandwich", "sandwiches", "club sandwich",
+        "panini", "wraps", "wrap", "subs", "sub", "grinder", "grinders",
+        "hoagie", "hoagies", "philly",
+    ],
+    "Salads": [
+        "salad", "salads",
+    ],
+    "Pastas": [
+        "pasta", "pastas", "pasta dinners", "italian dinners", "dinners",
+    ],
+    "Appetizers & Sides": [
+        "appetizer", "appetizers", "starters", "sides", "side orders",
+        "finger foods",
+    ],
+    "Beverages": [
+        "beverage", "beverages", "drinks", "drink", "soda", "soft drinks",
+    ],
+    "Desserts": [
+        "dessert", "desserts", "sweet treats",
+    ],
+}
+
+
+def _collapse_category_name(raw_cat: Optional[str]) -> str:
+    """
+    Collapse various noisy/duplicated headings into a canonical
+    top-level category. If nothing matches, return a cleaned version
+    or 'Uncategorized'.
+    """
+    raw = _norm(raw_cat)
+    low = _lower(raw)
+
+    if not low:
+        return "Uncategorized"
+
+    for canonical, hints in _CANONICAL_CATEGORY_ALIASES.items():
+        for h in hints:
+            if h in low:
+                return canonical
+
+    # Fallback: title-case the raw string but avoid shouty ALL CAPS
+    if len(raw) > 2:
+        return raw.title()
+
+    return "Uncategorized"
+
+
+# ---------------------------------------------------------------------------
+# Subcategory inference (semantic) — largely reused from v1
+# ---------------------------------------------------------------------------
 
 
 def _infer_pizza_subcat(name: str, desc: str) -> Optional[str]:
@@ -187,6 +301,130 @@ def _infer_subcategory_for_item(item: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Geometry / heading scaffold (for future extension)
+# ---------------------------------------------------------------------------
+
+
+def _apply_geometric_headings(
+    items: List[Dict[str, Any]],
+    blocks: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """
+    Placeholder for Phase 4 geometric rules.
+
+    In a later pass, this will:
+    - Use OCR block coordinates and heading roles (e.g. from debug/blocks)
+      to assign stronger category/subcategory hints.
+    - Track section breaks via vertical gaps.
+    - Promote obvious big-font headings to category or subcategory labels.
+
+    For now, this is a no-op and serves as a clear hook for future logic.
+    """
+    if not blocks:
+        return
+
+    # TODO (Phase 4 later step):
+    #  - walk blocks in reading order
+    #  - maintain "current category heading" + "current subheading"
+    #  - attach hints to items that fall within the visual region
+    return
+
+
+# ---------------------------------------------------------------------------
+# v2: grouped hierarchy builder
+# ---------------------------------------------------------------------------
+
+
+def _classify_item_category_and_subcat(
+    item: Dict[str, Any]
+) -> Tuple[str, Optional[str], List[str]]:
+    """
+    Decide on a canonical category + best subcategory for an item.
+
+    Returns:
+        (canonical_category, subcategory, flags)
+    """
+    flags: List[str] = []
+
+    raw_cat = item.get("category") or ""
+    canonical = _collapse_category_name(raw_cat)
+    if not raw_cat:
+        flags.append("missing_category")
+    elif canonical != _norm(raw_cat):
+        flags.append("category_collapsed")
+
+    # Respect existing subcategory if present; otherwise infer
+    sub = _norm(item.get("subcategory"))
+    if not sub:
+        inferred = _infer_subcategory_for_item(item)
+        if inferred:
+            sub = inferred
+            flags.append("subcategory_inferred")
+
+    return canonical, (sub or None), flags
+
+
+def build_grouped_hierarchy(
+    items: List[Dict[str, Any]],
+    blocks: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Primary v2 entrypoint.
+
+    Given a list of AI-cleaned items (optionally plus OCR blocks), produce
+    a grouped structure:
+
+        category → subcategory → [items]
+
+    Side effects:
+    - Attaches `hierarchy_flags` to items that needed normalization.
+    - Leaves item order intact within each group (input order is preserved).
+    """
+    # Hook for future geometric refinement (no-op for now)
+    _apply_geometric_headings(items, blocks=blocks)
+
+    groups: Dict[str, Dict[Optional[str], List[Dict[str, Any]]]] = {}
+    category_order: List[str] = []
+    subcategory_order: Dict[str, List[Optional[str]]] = {}
+
+    for it in items:
+        name = _norm(it.get("name"))
+        if not name:
+            continue
+
+        canon_cat, subcat, flags = _classify_item_category_and_subcat(it)
+
+        if flags:
+            existing = it.get("hierarchy_flags") or []
+            # ensure list
+            if not isinstance(existing, list):
+                existing = [str(existing)]
+            it["hierarchy_flags"] = list({*existing, *flags})
+
+        if canon_cat not in groups:
+            groups[canon_cat] = {}
+            category_order.append(canon_cat)
+            subcategory_order[canon_cat] = []
+
+        if subcat not in groups[canon_cat]:
+            groups[canon_cat][subcat] = []
+            subcategory_order[canon_cat].append(subcat)
+
+        groups[canon_cat][subcat].append(it)
+
+    return {
+        "groups": groups,
+        "category_order": category_order,
+        "subcategory_order": subcategory_order,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legacy helper for ai_ocr_helper (kept for compatibility)
+# ---------------------------------------------------------------------------
+
+
 def infer_category_hierarchy(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
     """
     Inspect a list of AI-cleaned items and infer a lightweight hierarchy.
@@ -194,22 +432,26 @@ def infer_category_hierarchy(items: List[Dict[str, Any]]) -> Dict[str, Dict[str,
     Returns:
         mapping[name] -> {"category": <top_level>, "subcategory": <label>}
     Only items with a non-empty inferred subcategory are included.
+
+    This now delegates to the v2 grouping logic to ensure that category
+    collapsing rules stay in sync.
     """
     hierarchy: Dict[str, Dict[str, str]] = {}
 
-    for it in items:
-        name = _norm(it.get("name"))
-        if not name:
-            continue
+    grouped = build_grouped_hierarchy(items)
+    groups: Dict[str, Dict[Optional[str], List[Dict[str, Any]]]] = grouped["groups"]
 
-        sub = _infer_subcategory_for_item(it)
-        if not sub:
-            continue
-
-        cat = _norm(it.get("category") or "Uncategorized")
-        hierarchy[name] = {
-            "category": cat,
-            "subcategory": sub,
-        }
+    for cat, submap in groups.items():
+        for subcat, items_list in submap.items():
+            if not subcat:
+                continue  # legacy helper only reports explicit subcategories
+            for it in items_list:
+                name = _norm(it.get("name"))
+                if not name:
+                    continue
+                hierarchy[name] = {
+                    "category": cat,
+                    "subcategory": subcat,
+                }
 
     return hierarchy

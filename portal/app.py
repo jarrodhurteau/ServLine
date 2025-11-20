@@ -1084,68 +1084,183 @@ def _text_to_draft(text: str, job_id: int, src_file: str, engine_label: str) -> 
         "categories": categories or [{"name": "Uncategorized", "items": []}],
     }
 
-# ----- Day 14: helper-backed draft builder -----
+# ----- Day 14: helper-backed draft builder (facade-aware) -----
 def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     """
-    Use storage/ocr_helper.extract_items_from_path to build a draft JSON.
+    Use storage/ocr_facade.extract_menu_from_pdf to build a draft JSON.
 
-    NOTE (Day 17): extract_items_from_path may return either:
-      • dict[str, list[items]]  -> just categories
-      • (dict[str, list[items]], debug: dict) -> categories + debug payload
+    New façade shape (preferred):
+
+      extract_items_from_path(path) ->
+
+        • (categories_dict, debug_payload)  OR
+        • categories_dict
+
+      where categories_dict looks like:
+        {
+          "categories": [
+            {
+              "name": "Pizza",
+              "items": [
+                {
+                  "name": "...",
+                  "description": "...",
+                  "sizes": [
+                    {"label": "L", "price": 12.99},
+                    {"label": "XL", "price_cents": 1899},
+                    ...
+                  ],
+                  "confidence": 92,
+                },
+                ...
+              ]
+            },
+            ...
+          ],
+          "extracted_at": "...Z",
+          "source": { "type": "upload", "file": "...", "ocr_engine": "ocr_helper+tesseract" }
+        }
+
+    For backward compatibility, we still support the old shape:
+      • dict[str, list[items]]  (category_name -> items)
     """
     if extract_items_from_path is None:
-        raise RuntimeError("ocr_helper not available")
+        raise RuntimeError("ocr_facade not available")
 
     debug_payload = None
     cats_raw = extract_items_from_path(str(saved_file_path)) or {}
 
+    # Unpack (categories_dict, debug_payload) vs just categories_dict
     if isinstance(cats_raw, tuple) and len(cats_raw) == 2:
-        cats, debug_payload = cats_raw
+        cats_dict, debug_payload = cats_raw
     else:
-        cats, debug_payload = cats_raw, None
+        cats_dict, debug_payload = cats_raw, None
 
-    categories = []
-    for cat_name, items in (cats or {}).items():
-        out_items = []
-        for it in items or []:
-            name = (it.get("name") or "").strip()
-            desc = (it.get("description") or "").strip()
-            price = it.get("price")
-            if isinstance(price, str):
-                try:
-                    price_val = float(price.replace("$", "").strip())
-                except Exception:
+    categories: List[Dict[str, Any]] = []
+    source_meta: Dict[str, Any] = {}
+    extracted_at: Optional[str] = None
+
+    # -------- New façade shape: {"categories": [...], "source": {...}, "extracted_at": "..."} --------
+    if isinstance(cats_dict, dict) and "categories" in cats_dict:
+        extracted_at = cats_dict.get("extracted_at")
+        source_meta = (cats_dict.get("source") or {}) if isinstance(cats_dict.get("source"), dict) else {}
+
+        for cat_obj in (cats_dict.get("categories") or []):
+            if not isinstance(cat_obj, dict):
+                continue
+            cat_name = (cat_obj.get("name") or "Uncategorized").strip() or "Uncategorized"
+
+            out_items: List[Dict[str, Any]] = []
+            for it in (cat_obj.get("items") or []):
+                if not isinstance(it, dict):
+                    continue
+
+                name = (it.get("name") or "").strip() or "Untitled"
+                desc = (it.get("description") or "").strip()
+
+                # Normalize sizes: support {"label"/"name", "price"} or {"price_cents"}
+                sizes_out: List[Dict[str, Any]] = []
+                for s in (it.get("sizes") or []):
+                    if not isinstance(s, dict):
+                        continue
+                    label = (s.get("label") or s.get("name") or "").strip()
+
+                    raw_price = s.get("price", None)
+                    if raw_price is None and s.get("price_cents") is not None:
+                        try:
+                            raw_price = float(s.get("price_cents"))
+                            raw_price = raw_price / 100.0
+                        except Exception:
+                            raw_price = 0.0
+                    try:
+                        pr = float(raw_price or 0.0)
+                    except Exception:
+                        pr = 0.0
+
+                    if pr > 0:
+                        sizes_out.append({"name": label, "price": round(pr, 2)})
+
+                out_items.append(
+                    {
+                        "name": name,
+                        "description": desc,
+                        "sizes": sizes_out,
+                        "category": cat_name,
+                        "confidence": it.get("confidence"),
+                    }
+                )
+
+            if out_items:
+                categories.append({"name": cat_name, "items": out_items})
+
+    # -------- Backward compat: old dict[category_name] -> [items...] shape --------
+    elif isinstance(cats_dict, dict):
+        for cat_name, items in (cats_dict or {}).items():
+            out_items: List[Dict[str, Any]] = []
+            for it in (items or []):
+                if not isinstance(it, dict):
+                    continue
+                name = (it.get("name") or "").strip()
+                desc = (it.get("description") or "").strip()
+                price = it.get("price")
+
+                if isinstance(price, str):
+                    try:
+                        price_val = float(price.replace("$", "").strip())
+                    except Exception:
+                        price_val = 0.0
+                elif isinstance(price, (int, float)):
+                    # historical behavior: ints were sometimes cents
+                    price_val = float(price) / 100.0 if isinstance(price, int) and price >= 100 else float(price)
+                else:
                     price_val = 0.0
-            elif isinstance(price, (int, float)):
-                price_val = float(price) / 100.0 if isinstance(price, int) and price >= 100 else float(price)
-            else:
-                price_val = 0.0
-            sizes = [{"name": "One Size", "price": round(float(price_val), 2)}] if price_val else []
 
-            out_items.append({
-                "name": name or "Untitled",
-                "description": desc,
-                "sizes": sizes,
-                "category": cat_name,
-                "confidence": it.get("confidence"),
-                "raw": it.get("raw"),
-            })
-        if out_items:
-            categories.append({"name": cat_name, "items": out_items})
+                sizes = [{"name": "One Size", "price": round(float(price_val), 2)}] if price_val else []
 
+                out_items.append(
+                    {
+                        "name": name or "Untitled",
+                        "description": desc,
+                        "sizes": sizes,
+                        "category": cat_name,
+                        "confidence": it.get("confidence"),
+                        "raw": it.get("raw"),
+                    }
+                )
+            if out_items:
+                categories.append({"name": cat_name, "items": out_items})
+
+    # -------- Fallback if everything came back empty --------
     if not categories:
-        categories = [{"name": "Uncategorized", "items": [
-            {"name": "No items recognized", "description": "OCR returned no items.", "sizes": []}
-        ]}]
+        categories = [
+            {
+                "name": "Uncategorized",
+                "items": [
+                    {
+                        "name": "No items recognized",
+                        "description": "OCR returned no items.",
+                        "sizes": [],
+                    }
+                ],
+            }
+        ]
 
-    engine = "ocr_helper+tesseract"
+    # Source + engine metadata (prefer façade's own source block if present)
+    engine = (source_meta.get("ocr_engine") if isinstance(source_meta, dict) else None) or "ocr_helper+tesseract"
+    source = {
+        "type": (source_meta.get("type") if isinstance(source_meta, dict) else None) or "upload",
+        "file": (source_meta.get("file") if isinstance(source_meta, dict) else None) or saved_file_path.name,
+        "ocr_engine": engine,
+    }
+
     draft_dict = {
         "job_id": job_id,
-        "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine},
-        "extracted_at": _now_iso(),
+        "source": source,
+        "extracted_at": extracted_at or _now_iso(),
         "categories": categories,
     }
     return draft_dict, debug_payload
+
 
 # ---------- NEW: wrap ocr_worker result into draft schema ----------
 def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dict) -> dict:
