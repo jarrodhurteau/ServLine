@@ -1,6 +1,6 @@
 # storage/category_hierarchy.py
 """
-Category Hierarchy v2 — Phase 4 pt.7–8
+Category Hierarchy v2 — Phase 4 pt.7–10
 
 Given a flat list of AI-cleaned items, infer a more stable category
 hierarchy with optional subcategory labels and lightweight grouping.
@@ -9,6 +9,11 @@ Goals:
 - Normalize noisy OCR category labels into a smaller set of canonical
   categories (e.g., "Pizzas", "Our Pizza", "NY Style Pizza" → "Pizza").
 - Infer useful subcategories ("Specialty Pizza", "Calzones", "Grinders").
+- Attach stable category/subcategory *paths* per item for downstream use:
+    - item["category_path"]      → ["Pizza"]
+    - item["subcategory_path"]   → ["Specialty Pizzas"]
+    - item["category_slug"]      → "pizza"
+    - item["subcategory_slug"]   → "specialty-pizzas"
 - Provide a grouped structure that downstream code can use for:
     category → subcategory → [items]
 - Keep backward-compatible helper for ai_ocr_helper, which currently only
@@ -38,7 +43,8 @@ Returns a dict shaped like:
         },
     }
 
-This is the v2 structure that ocr_pipeline will use before price integrity.
+This is the v2 structure that ocr_pipeline / Finalize JSON will use
+before the structured output layer.
 
 Legacy helper (kept for compatibility)
 --------------------------------------
@@ -83,8 +89,7 @@ def _has_word(text_low: str, *words: str) -> bool:
 
 def _slugify(text: str) -> str:
     """
-    Simple slug for potential future anchors (POS exports).
-    Not used heavily yet; kept as a v2 scaffold.
+    Simple slug for potential future anchors (POS exports, URLs).
     """
     text = _lower(text)
     text = re.sub(r"[^a-z0-9]+", "-", text)
@@ -323,16 +328,11 @@ def _apply_geometric_headings(
     """
     if not blocks:
         return
-
-    # TODO (Phase 4 later step):
-    #  - walk blocks in reading order
-    #  - maintain "current category heading" + "current subheading"
-    #  - attach hints to items that fall within the visual region
     return
 
 
 # ---------------------------------------------------------------------------
-# v2: grouped hierarchy builder
+# v2: grouped hierarchy builder + per-item normalization
 # ---------------------------------------------------------------------------
 
 
@@ -344,6 +344,11 @@ def _classify_item_category_and_subcat(
 
     Returns:
         (canonical_category, subcategory, flags)
+
+    Flags can include:
+      - "missing_category"
+      - "category_collapsed"
+      - "subcategory_inferred"
     """
     flags: List[str] = []
 
@@ -377,7 +382,14 @@ def build_grouped_hierarchy(
 
         category → subcategory → [items]
 
-    Side effects:
+    Side effects (Phase 4 pt.10):
+    - Normalizes each item's category/subcategory in-place:
+        * item["category"]           → canonical category
+        * item["subcategory"]        → best-effort inferred subcategory (optional)
+        * item["category_path"]      → [] or [canonical]
+        * item["subcategory_path"]   → [] or [subcategory]
+        * item["category_slug"]      → slug of canonical
+        * item["subcategory_slug"]   → slug of subcategory (if any)
     - Attaches `hierarchy_flags` to items that needed normalization.
     - Leaves item order intact within each group (input order is preserved).
     """
@@ -395,13 +407,35 @@ def build_grouped_hierarchy(
 
         canon_cat, subcat, flags = _classify_item_category_and_subcat(it)
 
+        # ---- Per-item normalization (paths + slugs) ----
+        # Overwrite raw category with canonical label so downstream sees a stable family.
+        it["category"] = canon_cat
+        if subcat:
+            it["subcategory"] = subcat
+
+        # Category path: empty for truly Uncategorized, otherwise single-level.
+        if canon_cat and canon_cat != "Uncategorized":
+            it["category_path"] = [canon_cat]
+            it["category_slug"] = _slugify(canon_cat)
+        else:
+            it["category_path"] = []
+            # leave slug absent for Uncategorized
+
+        # Subcategory path: optional, sits under the canonical category.
+        if subcat:
+            it["subcategory_path"] = [subcat]
+            it["subcategory_slug"] = _slugify(subcat)
+        else:
+            it["subcategory_path"] = []
+
+        # Attach any hierarchy flags (dedup with existing list if present).
         if flags:
             existing = it.get("hierarchy_flags") or []
-            # ensure list
             if not isinstance(existing, list):
                 existing = [str(existing)]
             it["hierarchy_flags"] = list({*existing, *flags})
 
+        # ---- Grouping structure ----
         if canon_cat not in groups:
             groups[canon_cat] = {}
             category_order.append(canon_cat)
@@ -431,10 +465,12 @@ def infer_category_hierarchy(items: List[Dict[str, Any]]) -> Dict[str, Dict[str,
 
     Returns:
         mapping[name] -> {"category": <top_level>, "subcategory": <label>}
+
     Only items with a non-empty inferred subcategory are included.
 
     This now delegates to the v2 grouping logic to ensure that category
-    collapsing rules stay in sync.
+    collapsing rules stay in sync, and also benefits from per-item
+    normalization (category/subcategory paths & slugs).
     """
     hierarchy: Dict[str, Dict[str, str]] = {}
 

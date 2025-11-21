@@ -6,47 +6,47 @@ This repo follows a phased build plan (Day 1 → onward), with Git commits marki
 
 ## 📁 Folder Structure
 
-servline/
+servline/  
 portal/  # Flask portal website  
-    app.py  
-    requirements.txt  
-    contracts.py                          # lightweight draft schema validator (added Day 19 landmark)  
-    templates/  
-        base.html  
-        index.html  
-        login.html  
-        restaurants.html  
-        menus.html  
-        items.html  
-        item_form.html  
-        imports.html  
-        import.html  
-        drafts.html  
-        draft_editor.html  
-        uploads.html  
-        uploads_trash.html  
-        draft_review.html  
-        raw.html  
-        errors/404.html  
-        errors/500.html  
+  app.py  
+  requirements.txt  
+  contracts.py                          # lightweight draft schema validator (added Day 19 landmark)  
+  templates/  
+    base.html  
+    index.html  
+    login.html  
+    restaurants.html  
+    menus.html  
+    items.html  
+    item_form.html  
+    imports.html  
+    import.html  
+    drafts.html  
+    draft_editor.html  
+    uploads.html  
+    uploads_trash.html  
+    draft_review.html  
+    raw.html  
+    errors/404.html  
+    errors/500.html  
 infra/   # Infra scripts (ngrok, Flask runner, stop scripts)  
-    run_infra.ps1  
-    stop_infra.ps1  
+  run_infra.ps1  
+  stop_infra.ps1  
 storage/ # SQLite database + OCR pipeline + seed + schema  
-    servline.db  
-    schema.sql  
-    seed_dev.sql  
-    drafts.py  
-    ocr_pipeline.py  
-    ocr_utils.py  
-    ocr_types.py  
-    ocr_facade.py  
-    ai_ocr_helper.py  
-    ai_cleanup.py  
-    semantic_engine.py                   # Phase 4 pt.3  
-    variant_engine.py                    # Phase 4 pt.3  
-    category_hierarchy.py                # Phase 4 pt.4  
-    price_integrity.py                   # Phase 4 pt.5  
+  servline.db  
+  schema.sql  
+  seed_dev.sql  
+  drafts.py  
+  ocr_pipeline.py  
+  ocr_utils.py  
+  ocr_types.py  
+  ocr_facade.py  
+  ai_ocr_helper.py  
+  ai_cleanup.py  
+  semantic_engine.py                   # Phase 4 pt.3  
+  variant_engine.py                    # Phase 4 pt.3  
+  category_hierarchy.py                # Phase 4 pt.4  
+  price_integrity.py                   # Phase 4 pt.5–10  
 uploads/  
 .gitignore  
 .vscode/  
@@ -251,16 +251,16 @@ Day 27 complete.
 - All exports validated
 
 ### ✔ Phase 4 pt.6 — Draft-Friendly Variants
-- Normalized variant-to-price mapping
-- Unified preview → draft → finalize flow
-- Draft Editor warning hook added
-- Fully tested across multiple menus
+- Normalized variant-to-price mapping  
+- Unified preview → draft → finalize flow  
+- Draft Editor warning hook added  
+- Fully tested across multiple menus  
 
 ⭐ **Day 28 complete.**
 
 ---
 
-## 🚀 Day 29 – Phase 4 pts.7–8 (TODAY)
+## 🚀 Day 29 – Phase 4 pts.7–8
 
 ### ✔ Phase 4 pt.7 — Category Hierarchy v2
 - Expanded `category_hierarchy.py` with improved rules  
@@ -272,7 +272,7 @@ Day 27 complete.
   - Salads (Garden / Greek / Caesar / Chef / Antipasto)  
 - Reinforced category hints based on headings + geometry  
 - Preview JSON now includes inferred `subcategory`  
-- No DB changes required; safe integration
+- No DB changes required; safe integration  
 
 ### ✔ Phase 4 pt.8 — Structured Grouping (Draft Editor)
 - New nested structure exposed to Draft Editor:
@@ -286,21 +286,42 @@ Day 27 complete.
   - category/subcategory organization for future Superimport Mode  
 - Draft items remain flat in DB (backward-compatible)  
 - No regressions to Finalize or Export  
-- Verified end-to-end across sample menus
+- Verified end-to-end across sample menus  
 
-⭐ **Day 29 complete — hierarchy v2 + structured grouping fully operational.**
+⭐ **Day 29 complete.**
+
+---
+
+## 🚀 Day 30 – Phase 4 pts.9–10
+
+### ✔ Phase 4 pt.9 — Price Integrity Engine v2
+- Added multi-price clustering  
+- Added side-price detection  
+- Built coupon/odd-line suppression  
+- Added group median / IQR stats  
+- Added `price_role`, `price_flags`, `price_meta`  
+- Decimal error detection with optional auto-correct  
+- End-to-end verified in preview → finalize → cleanup
+
+### ✔ Phase 4 pt.10 — Category/Subcategory Normalization Pass
+- Normalized category names (case-safe, plurals collapsed)  
+- Introduced `category_path`, `subcategory_path`, and slugs  
+- Unified “Sandwiches” and “Subs” into stable groups  
+- Added inferred subcategory structure  
+- Prepared hierarchy for Phase 4 pt.11 output layer  
+- Verified stable across all sample menus  
+- No regressions to draft editor or exports  
+
+⭐ **Day 30 complete — price engine v2 + normalized hierarchy locked in.**
 
 ---
 
 # 🌄 Phase 4 – Remaining Roadmap
 
-**Day 30 – Price Integrity Engine v2**  
-Clustering, pattern matching, side-price detection, variant-only corrections.
-
-**Day 31 – Structured Draft Output v2**  
+**Day 31 – Phase 4 pt.11** – Structured Draft Output v2  
 Confidence maps, cleanup warnings, provenance, normalization.
 
-**Day 32 – Superimport Mode**  
+**Day 32 – Phase 4 pt.12** – Superimport Mode  
 1-click draft creation  
 Auto-grouped sections  
 Full accuracy report  
@@ -309,7 +330,7 @@ Ready for approval.
 ---
 
 # ⭐ Next Steps
-You will start **Day 30 – Phase 4 pt.9**  
+You will start **Day 31 – Phase 4 pt.11**  
 when you say:
 
-**“ready for day 30”**
+**“ready for day 31”**
