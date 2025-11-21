@@ -3,23 +3,36 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 import statistics
+import re
 
 Number = int  # we treat prices as cents
 
 
+# ---------------------------------------------------------------------------
+# Public entrypoint
+# ---------------------------------------------------------------------------
+
 def analyze_prices(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Analyze prices for a list of preview items and attach:
+    Analyze prices for a list of preview/draft items and attach:
+
       - corrected_price_cents (int) when we can safely fix a mis-scaled price
       - price_flags: list of {severity, reason, details} dictionaries
+      - price_role: optional lightweight role tag:
+          * "primary" (default)
+          * "side"    (add-ons, extras, toppings)
+          * "coupon"  (deals / combos / BOGO / specials)
+      - price_meta.group_median_cents / group_iqr_cents
 
-    This function is designed to be called from ocr_pipeline AFTER:
+    This function is designed to be called from ocr_pipeline/downstream AFTER:
       - base category inference
       - variant_engine classification (so `variants` & `group_key` exist)
 
-    It is intentionally conservative: it only auto-fixes prices when there is
-    very strong evidence (e.g., obvious decimal shift inside a tight group).
-    Otherwise, it will attach a warning flag instead of changing the value.
+    V2 adds:
+      - side-price detection (add-ons, toppings, extras)
+      - coupon/odd-line detection (deals, combos, BOGO, "2 for" lines)
+      - more conservative group stats based on primary items only
+      - outlier detection + decimal-shift correction in a category/variant band
     """
     if not items:
         return items
@@ -34,9 +47,20 @@ def analyze_prices(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         groups.setdefault(group_key, []).append(item)
 
-        # Ensure we have a list to append flags to later.
-        if "price_flags" not in item:
-            item["price_flags"] = []
+        # Ensure we have structural fields to append into later.
+        item.setdefault("price_flags", [])
+        item.setdefault("price_meta", {})
+
+        # Light role classification (side / coupon / primary)
+        # We keep this cheap and textual.
+        role = item.get("price_role")
+        if not role:
+            if _is_coupon_or_deal_item(item):
+                item["price_role"] = "coupon"
+            elif _is_side_price_item(item):
+                item["price_role"] = "side"
+            else:
+                item["price_role"] = "primary"
 
     # Process each group independently.
     for group_key, group_items in groups.items():
@@ -81,6 +105,82 @@ def _extract_price_family_key(item: Dict[str, Any]) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Side-price & coupon detection (textual, conservative)
+# ---------------------------------------------------------------------------
+
+_SIDE_HINTS = [
+    "add ", "extra ", "side of", "side:", "topping", "toppings",
+    "each topping", "per topping", "extra cheese", "add cheese",
+    "add bacon", "add pepperoni", "extra sauce", "cup of sauce",
+    "ranch", "blue cheese", "bleu cheese", "dressing", "jalapeños",
+    "peppers", "mushrooms", "onions", "olive", "olives",
+    "garlic knots", "breadsticks", "fries", "chips",
+]
+
+_COUPON_HINTS = [
+    "coupon", "special", "specials", "deal", "family deal", "family special",
+    "combo", "combos", "meal deal", "value meal",
+    "2 for", "two for", "3 for", "three for",
+    "buy 1", "buy one", "get 1", "get one", "bogo",
+    "any 2", "any two", "pick any", "choose any",
+    "only", "for only", "just",
+]
+
+
+def _text_from_item(item: Dict[str, Any]) -> str:
+    name = (item.get("name") or "").strip()
+    desc = (item.get("description") or "").strip()
+    if desc:
+        return f"{name} {desc}".strip()
+    return name
+
+
+def _is_side_price_item(item: Dict[str, Any]) -> bool:
+    """
+    Identify obvious add-ons / extras / per-topping lines.
+
+    We keep this conservative to avoid mis-tagging real entrees.
+    """
+    txt = _text_from_item(item).lower()
+    if not txt:
+        return False
+
+    # Short lines with a strong side/add-on hint.
+    if len(txt) <= 64:
+        for hint in _SIDE_HINTS:
+            if hint in txt:
+                return True
+
+    # Categories that scream "side/extra".
+    cat = (item.get("category") or "").lower()
+    if cat in {"toppings", "extras", "sides", "dressings"}:
+        return True
+
+    return False
+
+
+def _is_coupon_or_deal_item(item: Dict[str, Any]) -> bool:
+    """
+    Detect menu lines that look like coupons / bundled deals / BOGO / combos.
+    These should not anchor the main price bands.
+    """
+    txt = _text_from_item(item).lower()
+    if not txt:
+        return False
+
+    # If it mentions "any" + quantity + deal language, treat as coupon-ish.
+    for hint in _COUPON_HINTS:
+        if hint in txt:
+            return True
+
+    # Very long, descriptive lines with multiple "and/+" often indicate combos.
+    if len(txt) > 80 and (" and " in txt or " + " in txt):
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Core group analysis
 # ---------------------------------------------------------------------------
 
@@ -88,25 +188,43 @@ def _analyze_group(items: List[Dict[str, Any]]) -> None:
     """
     Analyze a single (category, family) group of items whose prices should be
     broadly comparable. Mutates items in-place.
+
+    V2 behavior:
+      - Compute stats primarily from "primary" items (not sides/coupons).
+      - Attach group median/IQR into price_meta for all items.
+      - Retain existing decimal-shift correction + outlier detection.
     """
-    # Collect non-zero prices to estimate a typical range.
+    if not items:
+        return
+
+    primary_items = [
+        it for it in items
+        if (it.get("price_role") or "primary") == "primary"
+    ]
+    # Fallback: if somehow no primaries, use the whole group.
+    basis_items = primary_items or items
+
     prices: List[Number] = [
         it.get("price_cents", 0)
-        for it in items
+        for it in basis_items
         if isinstance(it.get("price_cents"), int) and it.get("price_cents", 0) > 0
     ]
 
+    # If we don't have enough signal, we still flag zeros but skip heavy stats.
     if len(prices) < 3:
-        # Not enough data to form a strong opinion; still flag zeros.
         for it in items:
+            _attach_group_meta(it, None, None)
             _flag_zero_price_if_needed(it, None)
+            _flag_side_or_coupon(it)
         return
 
     # Basic stats: median is robust for skewed menus.
     median_price = statistics.median(prices)
     if median_price <= 0:
         for it in items:
+            _attach_group_meta(it, None, None)
             _flag_zero_price_if_needed(it, None)
+            _flag_side_or_coupon(it)
         return
 
     # Also compute a rough "typical band" (25th–75th percentile).
@@ -115,9 +233,53 @@ def _analyze_group(items: List[Dict[str, Any]]) -> None:
     q3 = statistics.median(prices_sorted[len(prices_sorted) // 2 :])
     iqr = max(q3 - q1, 1)  # avoid division by zero
 
+    # Attach common group meta and run per-item checks.
     for it in items:
+        _attach_group_meta(it, median_price, iqr)
         _flag_zero_price_if_needed(it, median_price)
-        _check_and_fix_price(it, median_price, iqr)
+        _flag_side_or_coupon(it)
+
+        # We still want to catch insane numbers on sides/coupons,
+        # but primary lines are the main concern.
+        _check_and_fix_price(
+            it,
+            median_price=median_price,
+            iqr=iqr,
+        )
+
+
+def _attach_group_meta(item: Dict[str, Any], median_price: Optional[Number], iqr: Optional[Number]) -> None:
+    meta: Dict[str, Any] = item.setdefault("price_meta", {})
+    if median_price is not None:
+        meta["group_median_cents"] = int(median_price)
+    if iqr is not None:
+        meta["group_iqr_cents"] = int(iqr)
+
+
+def _flag_side_or_coupon(item: Dict[str, Any]) -> None:
+    role = item.get("price_role") or "primary"
+    flags: List[Dict[str, Any]] = item.setdefault("price_flags", [])
+    if role == "side":
+        # Mostly informational; downstream UI can choose how prominently to show.
+        flags.append(
+            {
+                "severity": "info",
+                "reason": "side_price_candidate",
+                "details": {
+                    "hint": "Likely add-on / extra / topping line",
+                },
+            }
+        )
+    elif role == "coupon":
+        flags.append(
+            {
+                "severity": "info",
+                "reason": "coupon_or_deal_line",
+                "details": {
+                    "hint": "Likely coupon / combo / deal line; do not treat as base item price",
+                },
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +311,9 @@ def _check_and_fix_price(item: Dict[str, Any], median_price: Number, iqr: Number
     Decide whether this item's price is suspicious, and if so:
       - try decimal-shift corrections
       - either auto-fix (corrected_price_cents) or attach a warning
+
+    We apply this to all roles, but the stats come from primary items, so
+    sides/coupons are judged relative to the main band.
     """
     price = item.get("price_cents")
     if not isinstance(price, int) or price <= 0:
