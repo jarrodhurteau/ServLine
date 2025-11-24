@@ -1,7 +1,12 @@
 """
-ServLine OCR Types — Phase 4 (Semantic Blocks, Variants, Category Hierarchy)
-Defines TypedDicts for bbox, words, lines, blocks, and segmented text blocks with
+ServLine OCR Types — Phase 4 (Semantic Blocks, Variants, Category Hierarchy, Structured Output)
+Defines TypedDicts for bbox, words, lines, blocks, segmented text blocks with
 optional category and variant metadata for overlay/debug UI and downstream pipeline.
+
+Phase 4 pt.11–12 additions:
+- Structured item/section/menu payload types shared across Preview → Draft → Finalize → Export.
+- Rich metadata: confidence maps, cleanup flags, provenance.
+- Normalized ordering + section path/slug/position + auto_group hooks for Superimport.
 """
 
 from __future__ import annotations
@@ -123,6 +128,112 @@ class OCRVariant(TypedDict):
 
 
 # ────────────────────────────────────────────────
+# 🎯 Structured Draft Output v2 (Phase 4 pt.11)
+# Shared across Preview → Draft → Finalize → Export
+# ────────────────────────────────────────────────
+
+class ItemConfidence(TypedDict):
+    """
+    Fine-grained confidence map for a structured menu item.
+    All fields are optional, 0–100 integer scores.
+    """
+    overall: NotRequired[int]
+    name: NotRequired[int]
+    description: NotRequired[int]
+    category: NotRequired[int]
+    price: NotRequired[int]
+    variants: NotRequired[int]
+
+
+class ItemProvenance(TypedDict):
+    """
+    Provenance info for downstream debugging/traceability.
+    All fields optional and BC-safe.
+    """
+    block_id: NotRequired[Optional[str]]       # primary OCR block id, if known
+    page_index: NotRequired[Optional[int]]     # 0-based or 1-based page index (pipeline-defined)
+    rule_trace: NotRequired[Optional[str]]     # winning rule/ML trace at item level
+    source: NotRequired[Optional[str]]         # "ocr", "ai_cleanup", "manual", etc.
+    extra: NotRequired[Dict[str, object]]      # any additional debug metadata
+
+
+class PreviewItem(TypedDict):
+    """
+    Unified normalized menu item structure used in:
+    - OCR Preview JSON
+    - Draft creation payloads
+    - Finalized export (Phase 4+)
+
+    Earlier phases may omit some optional fields; new ones are BC-safe.
+    """
+    # Core normalized item fields
+    name: str
+    description: Optional[str]
+    category: str                   # normalized category label (e.g., "Pizza")
+    subcategory: Optional[str]      # optional subcategory label
+    section_path: List[str]         # e.g. ["PIZZA", "Specialty Pizzas"]
+    price_cents: int                # primary/anchor price (0 if variants-only)
+    variants: List[OCRVariant]      # variant list (can be empty)
+    confidence: int                 # 0–100 normalized item-level confidence
+
+    # Legacy / preview-only fields (kept BC-safe)
+    price_candidates: NotRequired[List[OCRPriceCandidate]]
+
+    # Rich metadata layer (Phase 4 pt.11)
+    confidence_map: NotRequired[ItemConfidence]   # per-field confidence map
+    provenance: NotRequired[ItemProvenance]       # where this item came from
+    cleanup_flags: NotRequired[List[str]]         # e.g. ["name_ocr_fix", "desc_merged"]
+    warnings: NotRequired[List[str]]              # non-fatal issues for UI badges
+
+    # Ordering + Superimport prep (Phase 4 pt.12)
+    section_slug: NotRequired[str]                # slugified from section_path
+    section_position: NotRequired[int]            # section ordering index
+    item_position: NotRequired[int]               # stable item ordering within section
+    auto_group_id: NotRequired[str]               # hook for auto-grouped sections/items
+
+
+# Alias for clarity in downstream code: StructuredItem == PreviewItem
+StructuredItem = PreviewItem
+
+
+class StructuredSection(TypedDict):
+    """
+    Represents a logical menu section (category/subcategory group) in the normalized output.
+    Used for both Preview UI grouping and Superimport preparation.
+    """
+    path: List[str]                        # ["PIZZA"], ["PIZZA", "Specialty Pizzas"]
+    slug: str                              # "pizza", "pizza-specialty-pizzas"
+    position: int                          # ordering index for sections
+    items: List[StructuredItem]            # items belonging to this section
+
+    # Optional hooks for future phases (BC-safe)
+    auto_group_id: NotRequired[str]        # section-level group key, if used
+    meta: NotRequired[Dict[str, object]]   # arbitrary section metadata
+
+
+class StructuredMenuPayload(TypedDict):
+    """
+    Top-level normalized payload shared across:
+    - OCR preview endpoints
+    - Draft creation (Phase 4 pt.12 Superimport prep)
+    - Finalized export
+
+    Existing endpoints can continue to return flat item lists; this wrapper is
+    introduced in a BC-safe way and can be adopted incrementally.
+    """
+    sections: List[StructuredSection]
+
+    # Optional high-level metadata (BC-safe)
+    meta: NotRequired[Dict[str, object]]
+
+    # Draft/finalize context (populated when applicable)
+    draft_id: NotRequired[int]
+    restaurant_id: NotRequired[Optional[int]]
+    title: NotRequired[Optional[str]]
+    source_job_id: NotRequired[Optional[int]]
+
+
+# ────────────────────────────────────────────────
 # 📦 High-level container for OCR job results
 # ────────────────────────────────────────────────
 
@@ -144,6 +255,7 @@ class OCRResult(TypedDict):
 
 Segmented = Dict[str, object]  # {"pages": int, "dpi": int, "blocks": List[Block], "meta": {...}]
 
+
 __all__ = [
     "BBox",
     "Word",
@@ -155,4 +267,11 @@ __all__ = [
     "Segmented",
     "OCRPriceCandidate",
     "OCRVariant",
+    # Structured Draft Output v2 / Superimport prep
+    "ItemConfidence",
+    "ItemProvenance",
+    "PreviewItem",
+    "StructuredItem",
+    "StructuredSection",
+    "StructuredMenuPayload",
 ]

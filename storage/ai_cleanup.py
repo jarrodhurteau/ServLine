@@ -1,4 +1,20 @@
 # servline/storage/ai_cleanup.py
+"""
+AI Cleanup for Draft Items — Phase 3 + Phase 4 Structured Output v2
+
+Responsibilities:
+- Normalize item names & descriptions (soft cleanup; preserve as much as possible).
+- Opportunistically recover prices from text when missing.
+- Infer/solidify categories using the shared category_infer engine.
+- Blend OCR confidence with AI "cleanup" confidence into a single score.
+
+New in Phase 4 pt.11:
+- Core cleanup logic extracted into `normalize_draft_items(items)` so the same
+  normalization is used for:
+    * DB-side cleanup (apply_ai_cleanup)
+    * In-memory structured export (Finalized menu JSON, Superimport prep).
+"""
+
 from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import re
@@ -6,7 +22,7 @@ import unicodedata
 
 from .drafts import get_draft_items, upsert_draft_items
 from . import drafts as _drafts_mod
-from portal.storage import category_infer as _cat_infer  # Phase-3 category engine
+from . import category_infer as _cat_infer  # Phase-3 category engine
 
 TAG = "[AI Cleaned]"
 
@@ -18,15 +34,19 @@ _MULTI_PUNCT_RX = re.compile(r"[^\w\s$.,&()/+'-]{2,}")
 _HARD_JUNK_RX = re.compile(r"[|]{2,}")
 _NONALNUM_BURST_RX = re.compile(r"(?<=\w)[^\w\s]{1,}(?=\w)")
 
+
 # Helpers
 def _normalize_spaces(s: str) -> str:
     return _WS_RX.sub(" ", s or "").strip()
 
+
 def _unicode_norm(s: str) -> str:
     return unicodedata.normalize("NFKC", s or "")
 
+
 def _collapse_runs(s: str) -> str:
     return re.sub(r"(.)\1{2,}", r"\1\1", s)
+
 
 def _cleanup_punct(s: str) -> str:
     t = s
@@ -35,6 +55,7 @@ def _cleanup_punct(s: str) -> str:
     t = _HARD_JUNK_RX.sub(" ", t)
     t = _NONALNUM_BURST_RX.sub("", t)
     return _normalize_spaces(t)
+
 
 def smart_title(s: str) -> str:
     if not s:
@@ -46,6 +67,7 @@ def smart_title(s: str) -> str:
         else:
             out.append(tok[:1].upper() + tok[1:].lower())
     return " ".join(out)
+
 
 # ---------- Ingredient smoothing ----------
 def _smooth_ingredients(desc: str) -> str:
@@ -138,6 +160,7 @@ _PRICE_RX = re.compile(
     re.X,
 )
 
+
 def _to_cents(dollars, cents, compact, dotonly):
     try:
         if dotonly:
@@ -154,13 +177,20 @@ def _to_cents(dollars, cents, compact, dotonly):
         return None
     return None
 
-def extract_price_candidates(text: str) -> list[int]:
-    hits = []
+
+def extract_price_candidates(text: str) -> List[int]:
+    hits: List[int] = []
     for m in _PRICE_RX.finditer(text or ""):
-        cents = _to_cents(m.group("dollars"), m.group("cents"), m.group("compact"), m.group("dotonly"))
+        cents = _to_cents(
+            m.group("dollars"),
+            m.group("cents"),
+            m.group("compact"),
+            m.group("dotonly"),
+        )
         if cents is not None:
             hits.append(int(cents))
     return hits
+
 
 def _clamp_price(cents: Optional[int]) -> Optional[int]:
     if cents is None:
@@ -168,6 +198,7 @@ def _clamp_price(cents: Optional[int]) -> Optional[int]:
     if cents < _drafts_mod.ocr_utils.PRICE_MIN or cents > _drafts_mod.ocr_utils.PRICE_MAX:
         return None
     return int(cents)
+
 
 def _pick_price(name: str, desc: Optional[str]) -> Optional[int]:
     text = f"{name} {(desc or '')}".strip()
@@ -192,12 +223,14 @@ _BUCKETS = {
     "Desserts":   ["tiramisu", "cannoli", "brownie", "cheesecake", "cookie", "ice cream"],
 }
 
+
 def classify_category(name: str, description: str | None = None) -> str:
     text = f"{name} {(description or '')}".lower()
     for cat, keys in _BUCKETS.items():
         if any(k in text for k in keys):
             return cat
     return "Uncategorized"
+
 
 def infer_item_category(name: str, description: str | None = None):
     merged = f"{name or ''} {(description or '' )}".strip()
@@ -260,13 +293,21 @@ def _decide_description(desc_raw: str, desc_clean: str, salvage_ratio: float) ->
     return desc_clean
 
 
-# ---------- Public entrypoint ----------
-def apply_ai_cleanup(draft_id: int) -> int:
-    items = get_draft_items(int(draft_id))
-    if not items:
-        return 0
+# ---------- Core normalizer (Phase 4 structured output v2) ----------
+def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Pure function: take raw draft items and return normalized/cleaned items.
 
-    updated = []
+    Used by:
+      - apply_ai_cleanup(draft_id) for DB writes
+      - Finalize/export paths to ensure the exported structured JSON matches
+        what we would store in the draft.
+    """
+    if not items:
+        return []
+
+    updated: List[Dict[str, Any]] = []
+
     for it in items:
         name_raw = (it.get("name") or "").strip()
         desc_raw = (it.get("description") or "").strip()
@@ -291,7 +332,7 @@ def apply_ai_cleanup(draft_id: int) -> int:
             cat, cat_conf, cat_trace = infer_item_category(name_clean, desc_clean)
         else:
             cat = existing_cat
-            cat_conf, cat_trace = None, None
+            cat_conf, cat_trace = None, None  # reserved for future meta
 
         # Confidence
         ocr_conf = it.get("confidence")
@@ -306,19 +347,40 @@ def apply_ai_cleanup(draft_id: int) -> int:
                 ai_signal -= 5
 
         norm_conf = normalize_confidence(
-            int(ocr_conf) if isinstance(ocr_conf, int) or (isinstance(ocr_conf, str) and str(ocr_conf).isdigit()) else None,
+            int(ocr_conf)
+            if isinstance(ocr_conf, int)
+            or (isinstance(ocr_conf, str) and str(ocr_conf).isdigit())
+            else None,
             ai_signal,
         )
 
-        updated.append({
-            "id": it["id"],
-            "name": name_clean or name_raw,
-            "description": desc_final,
-            "price_cents": price_cents,
-            "category": cat,
-            "position": it.get("position"),
-            "confidence": norm_conf,
-        })
+        updated.append(
+            {
+                "id": it["id"],
+                "name": name_clean or name_raw,
+                "description": desc_final,
+                "price_cents": price_cents,
+                "category": cat,
+                "position": it.get("position"),
+                "confidence": norm_conf,
+            }
+        )
 
+    return updated
+
+
+# ---------- Public entrypoint ----------
+def apply_ai_cleanup(draft_id: int) -> int:
+    """
+    DB-backed cleanup: load items for a draft, normalize them, and persist.
+
+    Returns:
+        Number of rows upserted (updated + inserted).
+    """
+    items = get_draft_items(int(draft_id))
+    if not items:
+        return 0
+
+    updated = normalize_draft_items(items)
     res = upsert_draft_items(int(draft_id), updated)
     return len(res.get("updated_ids", [])) + len(res.get("inserted_ids", []))

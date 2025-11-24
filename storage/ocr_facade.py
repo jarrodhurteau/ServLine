@@ -1,11 +1,32 @@
 # storage/ocr_facade.py
 """
-OCR façade — Phase 3 (+ AI helper rev7)
+OCR façade — Phase 3 + Phase 4 (Structured Output v2 + Superimport Prep)
 Bridges the segmenter to higher-level app code.
 
 Public API:
 - extract_menu_from_pdf(path) -> (categories_dict, debug_payload)
 - health() -> engine + versions
+
+`categories_dict` is a structured menu payload (StructuredMenuPayload-like):
+{
+  "categories": [
+    {
+      "name": "Pizza",
+      "items": [
+        {"name": "...", "description": "...", "sizes": [{"label": "Lg", "price": 12.99}, ...]},
+        ...
+      ],
+    },
+    ...
+  ],
+  "extracted_at": "...Z",
+  "source": {...},
+  "meta": {
+    "pipeline_version": "...",
+    "superimport_prep": true,
+    "hierarchy_preview": {...}
+  }
+}
 """
 
 from __future__ import annotations
@@ -25,7 +46,7 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "portal") not in sys.path:
     sys.path.append(str(ROOT / "portal"))
 
-# Phase 3 segmenter (lives under portal/storage/*)
+# Phase 3/4 segmenter (lives under portal/storage/*)
 from portal.storage.ocr_pipeline import segment_document  # type: ignore
 
 # Orientation + image helpers (lives under portal/storage/*)
@@ -34,14 +55,20 @@ from portal.storage.ocr_utils import normalize_orientation  # type: ignore
 # AI parsing helper (lives alongside this file)
 try:
     from .ai_ocr_helper import analyze_ocr_text  # type: ignore
-except Exception as e:
+except Exception as e:  # pragma: no cover - soft failure; surfaced in extract_menu_from_pdf
     analyze_ocr_text = None  # type: ignore
     print(f"[OCR] Warning: ai_ocr_helper import failed in ocr_facade: {e!r}")
 
 # Category Hierarchy v2 (Phase 4 pt.7–8)
 from .category_hierarchy import build_grouped_hierarchy
 
-PIPELINE_VERSION = "phase-4-segmenter(block_roles+multiline)+ai-helper-rev9"
+# Structured menu payload types (Phase 4 pt.11)
+try:
+    from .ocr_types import StructuredMenuPayload  # type: ignore
+except Exception:  # pragma: no cover - typing-only; at runtime we fall back to Dict[str, Any]
+    StructuredMenuPayload = Dict[str, Any]  # type: ignore
+
+PIPELINE_VERSION = "phase-4-structured_v2+superimport_prep+ai-helper-rev9"
 
 
 def _tesseract_cmd() -> str:
@@ -184,10 +211,19 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
       },
       ...
     ]
+
+    Phase 4 note:
+    - Prefer canonical_category if present (post-normalization), else fallback
+      to item.category, then "Uncategorized".
     """
     cats: Dict[str, List[Dict[str, Any]]] = {}
     for it in items:
-        cat = it.get("category") or "Uncategorized"
+        cat = (
+            it.get("canonical_category")
+            or it.get("category")
+            or "Uncategorized"
+        )
+
         name = (it.get("name") or "").strip() or "Untitled"
         desc = it.get("description")
         variants = it.get("variants") or []
@@ -214,6 +250,7 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
                 if pr > 0:
                     sizes.append({"label": lbl, "price": round(pr, 2)})
         else:
+            # Legacy fallback: first price_candidate.value (if AI helper exposes it)
             pcs = it.get("price_candidates") or []
             if pcs:
                 try:
@@ -251,16 +288,24 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Segment PDF/image into structured layout, then run AI helper to produce draft items.
     Returns:
-        categories_dict: {
+        categories_dict (StructuredMenuPayload-like): {
             "categories": [ { "name": ..., "items": [ {"name":...., "description":...., "sizes":[...]}, ... ] },
             "extracted_at": "...Z",
-            "source": { "type": "upload", "file": "<basename>", "ocr_engine": "ocr_helper+tesseract" }
+            "source": { "type": "upload", "file": "<basename>", "ocr_engine": "ocr_helper+tesseract" },
+            "meta": {
+                "pipeline_version": PIPELINE_VERSION,
+                "superimport_prep": True,
+                "hierarchy_preview": <grouped hierarchy tree or None>,
+            },
         }
         debug_payload: {
             "version": PIPELINE_VERSION,
             "layout": <segmenter output>,
+            "preview_blocks": [...],
+            "text_blocks": [...],
+            "blocks": [...],
             "notes": [...],
-            "ai_preview": { "items": [...], "sections": [...] }
+            "ai_preview": { "items": [...], "sections": [...], "hierarchy": {...} }
         }
     """
     # Safety: ensure analyze_ocr_text imported correctly
@@ -274,7 +319,7 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Ensure upright orientation before segmentation (per-page normalize)
     upright_path = _auto_rotate_pdf_if_needed(str(p))
 
-    # Phase 3 segmenter: high-clarity + segmentation + categories + multi-price/variants
+    # Phase 3/4 segmenter: high-clarity + segmentation + categories + multi-price/variants
     layout = segment_document(pdf_path=upright_path, pdf_bytes=None, dpi=400)
 
     # Clean up temporary upright file if created
@@ -292,21 +337,24 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         taxonomy=None,
         restaurant_profile=None,
     )
-    items = ai_doc.get("items", [])
-    sections = ai_doc.get("sections", [])
+    items = ai_doc.get("items", []) or []
+    sections = ai_doc.get("sections", []) or []
 
     # Phase 4 pt.7–8: Category Hierarchy v2 (grouping)
     hierarchy = build_grouped_hierarchy(
         items,
-        blocks=layout.get("text_blocks")  # safe if missing / None
+        blocks=layout.get("text_blocks"),  # safe if missing / None
     )
 
     # Build categories payload expected by portal
     categories_list = _group_items_into_categories(items)
-    categories: Dict[str, Any] = {
-        "categories": categories_list
-        if categories_list
-        else [
+
+    extracted_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    if categories_list:
+        payload_categories = categories_list
+    else:
+        payload_categories = [
             {
                 "name": "Uncategorized",
                 "items": [
@@ -317,31 +365,49 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                     }
                 ],
             }
-        ],
-        "extracted_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        ]
+
+    categories: Dict[str, Any] = {
+        "categories": payload_categories,
+        "extracted_at": extracted_at,
         "source": {
             "type": "upload",
             "file": p.name,
             "ocr_engine": "ocr_helper+tesseract",
         },
+        # Phase 4 pt.11–12: structured output meta + superimport prep hooks
+        "meta": {
+            "pipeline_version": PIPELINE_VERSION,
+            "superimport_prep": True,
+            # Lightweight, normalized section tree for downstream phases
+            "hierarchy_preview": hierarchy,
+        },
     }
+
+    # ---- NEW: expose preview/text blocks at top-level for overlays ----
+    preview_blocks = layout.get("preview_blocks") or []
+    text_blocks = layout.get("text_blocks") or layout.get("blocks") or []
 
     # Rich debug / preview blob for UI
     debug_payload: Dict[str, Any] = {
         "version": PIPELINE_VERSION,
         "layout": layout,
+        # These three are what /drafts/<id>/blocks and /debug/blocks expect:
+        "preview_blocks": preview_blocks,
+        "text_blocks": text_blocks,
+        "blocks": text_blocks,
         "notes": [
             "phase-4 segmentation: blocks + text_blocks + categories + multi-price variants + block roles + multiline reconstruction",
             "per-page orientation normalizer applied when needed",
             "ai-helper (rev9) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds, multi-item splitter",
             "category hierarchy v2: canonical categories + grouped subcategories",
+            "structured output v2 + superimport prep: hierarchy_preview + stable categories payload",
         ],
         "ai_preview": {
             "items": items,
             "sections": sections,
-            "hierarchy": hierarchy,  # 👈 NEW
+            "hierarchy": hierarchy,
         },
     }
-
 
     return categories, debug_payload

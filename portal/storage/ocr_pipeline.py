@@ -1,6 +1,6 @@
-# storage/ocr_pipeline.py 
+# storage/ocr_pipeline.py
 """
-ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1–3
+ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 pt.1–6
 
 Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
@@ -58,11 +58,15 @@ Phase 4 pt.4 (Day 27, downstream):
   - Item-level inference of subcategories (e.g., "Calzones", "Subs & Grinders").
   - Runs after text-block segmentation when converting blocks → items.
 
-Phase 4 pt.5–6 (Day 28, downstream):
+Phase 4 pt.5–6 (Day 28/30, downstream):
 - Price Integrity Engine + Draft-friendly variants:
   - Analyze item prices per category + variant family.
   - Auto-correct obvious decimal-shift prices when safe (e.g., 3475 → 34.75).
   - Attach price_flags and corrected_price_cents into preview JSON and draft items.
+
+Phase 4 pt.11–12 (prep):
+- Preview blocks carry full hierarchy + category/variant/role metadata, ready
+  for Structured Draft Output v2 and Superimport prep.
 """
 
 from __future__ import annotations
@@ -70,6 +74,7 @@ import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+
 from PIL import Image
 import pytesseract
 from pytesseract import image_to_osd
@@ -84,7 +89,12 @@ from .ocr_types import (
     BBox,
     OCRPriceCandidate,
     OCRVariant,
-)  # TypedDicts; Phase-2 + Phase-3 compatibility
+    TextBlock,
+    OCRBlock,
+    PreviewItem,
+    StructuredSection,
+    StructuredMenuPayload,
+)  # TypedDicts; Phase-2 + Phase-3/4 compatibility
 
 # -----------------------------
 # Tunable heuristics
@@ -917,7 +927,7 @@ def segment_document(
     pdf_bytes: Optional[bytes] = None,
     dpi: int = DEFAULT_DPI,
 ) -> Dict[str, Any]:
-    """Render a PDF or image file, run high-clarity OCR, and return blocks + Phase-3 text blocks."""
+    """Render a PDF or image file, run high-clarity OCR, and return blocks + Phase-3/4 text blocks."""
     if not pdf_path and not pdf_bytes:
         raise ValueError("Either pdf_path or pdf_bytes must be provided.")
 
@@ -928,9 +938,9 @@ def segment_document(
         pages = ocr_utils.pdf_to_images_from_bytes(pdf_bytes, dpi=dpi)
         source = "bytes"
 
-    all_blocks: List[Block] = []                 # Phase-2 block groups (legacy)
-    all_text_blocks: List[Dict[str, Any]] = []   # Phase-3+ text blocks ({bbox{x,y,w,h}, lines, merged_text, block_type, role, ...})
-    all_preview_blocks: List[Dict[str, Any]] = []  # Phase-3 preview blocks ({bbox[x1..], merged_text, block_type, lines[], page, column, category, category_confidence})
+    all_blocks: List[Block] = []                   # Phase-2 block groups (legacy)
+    all_text_blocks: List[Dict[str, Any]] = []     # Phase-3+ text blocks ({bbox{x,y,w,h}, lines, merged_text, block_type, role, ...})
+    all_preview_blocks: List[OCRBlock] = []        # Phase-3/4 preview blocks (OCRBlock TypedDict)
 
     page_index = 1
 
@@ -1027,6 +1037,7 @@ def segment_document(
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for pb in pblocks:
             pb["page"] = page_index
+
             # Column may or may not already be present; look it up from text_blocks by id
             if pb.get("column") is None:
                 col_from_tb = next(
@@ -1036,24 +1047,27 @@ def segment_document(
                 if col_from_tb is not None:
                     pb["column"] = col_from_tb
 
-            # Mirror category info for overlay
-            if pb.get("category") is None:
-                pb["category"] = next(
-                    (tb.get("category") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
-                    None,
-                )
-            if pb.get("category_confidence") is None:
-                pb["category_confidence"] = next(
-                    (tb.get("category_confidence") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
-                    None,
-                )
-
-            # Mirror price/variant info + roles for overlay + preview JSON
             tb_for_pb = next(
                 (tb for tb in page_text_blocks if tb.get("id") == pb.get("id")),
                 None,
             )
+
+            # Mirror category / hierarchy / inference info for overlay
             if tb_for_pb is not None:
+                if pb.get("category") is None and "category" in tb_for_pb:
+                    pb["category"] = tb_for_pb.get("category")
+                if pb.get("category_confidence") is None and "category_confidence" in tb_for_pb:
+                    pb["category_confidence"] = tb_for_pb.get("category_confidence")
+                if "rule_trace" in tb_for_pb and pb.get("rule_trace") is None:
+                    pb["rule_trace"] = tb_for_pb.get("rule_trace")
+
+                # Hierarchy: subcategory + section_path
+                if "subcategory" in tb_for_pb and pb.get("subcategory") is None:
+                    pb["subcategory"] = tb_for_pb.get("subcategory")
+                if "section_path" in tb_for_pb and pb.get("section_path") is None:
+                    pb["section_path"] = tb_for_pb.get("section_path")
+
+                # Mirror price/variant info + roles for overlay + preview JSON
                 if "price_candidates" in tb_for_pb:
                     pb["price_candidates"] = tb_for_pb["price_candidates"]
                 if "variants" in tb_for_pb:
@@ -1077,15 +1091,19 @@ def segment_document(
         "dpi": dpi,
         "blocks": all_blocks,                  # Phase-2 compatible
         "text_blocks": all_text_blocks,        # Phase-3+ TextBlock dicts (+category fields, +prices/variants, +roles)
-        "preview_blocks": all_preview_blocks,  # Phase-3 compact overlay records (+category, +prices/variants, +roles)
+        "preview_blocks": all_preview_blocks,  # Phase-3/4 compact overlay records (+category, +hierarchy, +prices/variants, +roles)
         "meta": {
             "source": source,
             "engine": "tesseract",
             "version": str(pytesseract.get_tesseract_version()),
             "config": OCR_CONFIG,
             "conf_floor": LOW_CONF_DROP,
-            "mode": "high_clarity+segmentation+two_column_merge+category_infer+"
-                    "multi_price_variants+block_roles+multiline_reconstruct+variant_enrich+category_hierarchy+price_integrity",
+            "mode": (
+                "high_clarity+segmentation+two_column_merge+"
+                "category_infer+multi_price_variants+block_roles+"
+                "multiline_reconstruct+variant_enrich+category_hierarchy+"
+                "price_integrity_prep+structured_v2_prep"
+            ),
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
         },
     }

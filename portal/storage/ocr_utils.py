@@ -9,6 +9,10 @@ ServLine OCR Utils — helpers for PDF→image, preprocessing, and env checks.
 
 ⚠️ New in Phase 2 pt.3 (orientation hardening):
 - Deterministic orientation normalize: EXIF transpose → Tesseract OSD → probe 0/90/180/270
+
+⚠️ Phase 4 pt.11–12:
+- Propagate category/hierarchy metadata into OCRBlock preview structures for
+  consistent structured output across Preview → Draft → Finalize.
 """
 
 from __future__ import annotations
@@ -41,12 +45,12 @@ try:
 except Exception:  # pragma: no cover
     NDArray = Any  # type: ignore
 
-# Phase 3 types
+# Phase 3/4 types
 try:
-    from .ocr_types import BBox, Line, TextBlock  # TypedDicts
+    from .ocr_types import BBox, Line, TextBlock, OCRBlock  # TypedDicts
 except Exception:
     # Soft fallback if local import style differs during IDE refactors
-    from storage.ocr_types import BBox, Line, TextBlock  # type: ignore
+    from storage.ocr_types import BBox, Line, TextBlock, OCRBlock  # type: ignore
 
 
 # =============================
@@ -573,12 +577,21 @@ def group_text_blocks(
     return out
 
 
-def blocks_for_preview(blocks: List[TextBlock]) -> List[Dict[str, object]]:
+def blocks_for_preview(blocks: List[TextBlock]) -> List[OCRBlock]:
     """
-    Convert TextBlock list to compact preview-friendly dicts:
-    { "bbox":[x1,y1,x2,y2], "merged_text": "...", "block_type": "...", "lines":[{text,bbox,confidence}] }
+    Convert TextBlock list to compact preview-friendly OCRBlock dicts:
+
+    {
+      "bbox": [x1,y1,x2,y2],
+      "merged_text": "...",
+      "block_type": "...",
+      "lines": [{text,bbox,confidence}],
+      # Optional mirrored hierarchy/inference fields when present on TextBlock:
+      # "id", "category", "category_confidence", "rule_trace",
+      # "subcategory", "section_path"
+    }
     """
-    preview: List[Dict[str, object]] = []
+    preview: List[OCRBlock] = []
     for b in blocks:
         x1, y1, x2, y2 = bbox_to_x1y1x2y2(b["bbox"])
         p_lines: List[Dict[str, object]] = []
@@ -587,15 +600,33 @@ def blocks_for_preview(blocks: List[TextBlock]) -> List[Dict[str, object]]:
             p_lines.append({
                 "text": ln.get("text", ""),
                 "bbox": [lb["x"], lb["y"], lb["x"] + lb["w"], lb["y"] + lb["h"]],
-                "confidence": float(  # Line may not carry explicit conf; derive avg from words if present
+                # Line may not carry explicit conf; derive avg from words if present
+                "confidence": float(
                     (sum(w.get("conf", 0.0) for w in (ln.get("words") or [])) / max(1, len(ln.get("words") or [])))
                     if ln.get("words") else 0.0
                 ),
             })
-        preview.append({
+
+        block_payload: OCRBlock = {
             "bbox": [x1, y1, x2, y2],
             "merged_text": b.get("merged_text", ""),
             "block_type": b.get("block_type"),
             "lines": p_lines,
-        })
+        }
+
+        # Mirror optional TextBlock metadata into OCRBlock for overlays/debugging.
+        if "id" in b:
+            block_payload["id"] = b["id"]  # type: ignore[assignment]
+        if "category" in b:
+            block_payload["category"] = b.get("category")  # type: ignore[assignment]
+        if "category_confidence" in b:
+            block_payload["category_confidence"] = b.get("category_confidence")  # type: ignore[assignment]
+        if "rule_trace" in b:
+            block_payload["rule_trace"] = b.get("rule_trace")  # type: ignore[assignment]
+        if "subcategory" in b:
+            block_payload["subcategory"] = b.get("subcategory")  # type: ignore[assignment]
+        if "section_path" in b:
+            block_payload["section_path"] = b.get("section_path")  # type: ignore[assignment]
+
+        preview.append(block_payload)
     return preview
