@@ -31,7 +31,14 @@ Public API:
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Any, Tuple, List, Optional
+from typing import (
+    Dict,
+    Any,
+    Tuple,
+    List,
+    Optional,
+)
+from typing import TypedDict
 import os
 import shutil
 import sys
@@ -62,11 +69,27 @@ except Exception as e:  # pragma: no cover - soft failure; surfaced in extract_m
 # Category Hierarchy v2 (Phase 4 pt.7–8)
 from .category_hierarchy import build_grouped_hierarchy
 
-# Structured menu payload types (Phase 4 pt.11)
-try:
+# Structured menu payload types (Phase 4 pt.11–12)
+try:  # pragma: no cover - typing/shape only
     from .ocr_types import StructuredMenuPayload  # type: ignore
-except Exception:  # pragma: no cover - typing-only; at runtime we fall back to Dict[str, Any]
-    StructuredMenuPayload = Dict[str, Any]  # type: ignore
+except Exception:
+    class StructuredMenuPayload(TypedDict):
+        """
+        Minimal structured menu payload used by ocr_facade.
+
+        Designed to stay compatible with storage.ocr_types.StructuredMenuPayload:
+        {
+          "categories": [...],
+          "extracted_at": "...Z",
+          "source": {...},
+          "meta": {...},
+        }
+        """
+        categories: List[Dict[str, Any]]
+        extracted_at: str
+        source: Dict[str, Any]
+        meta: Dict[str, Any]
+
 
 PIPELINE_VERSION = "phase-4-structured_v2+superimport_prep+ai-helper-rev9"
 
@@ -284,7 +307,78 @@ def _group_items_into_categories(items: List[Dict[str, Any]]) -> List[Dict[str, 
     return [{"name": cname, "items": cats[cname]} for cname in ordered_names]
 
 
-def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _build_superimport_items(structured: StructuredMenuPayload) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    Given a StructuredMenuPayload-like dict, produce:
+
+    - items: a flat list of "draft-like" items:
+      {
+        "name": str,
+        "description": Optional[str],
+        "category": str,
+        "price_cents": int,
+        "position": int,
+        "variants": Optional[List[{"label": str, "price_cents": int}]],
+      }
+
+    - stats: simple counts for meta/debug (categories, items, variants, zero_price_items).
+    """
+    flat: List[Dict[str, Any]] = []
+    stats: Dict[str, int] = {
+        "categories": 0,
+        "items": 0,
+        "variants": 0,
+        "zero_price_items": 0,
+    }
+
+    categories = structured["categories"]
+    stats["categories"] = len(categories)
+
+    position = 0
+    for cat in categories:
+        cat_name = (cat.get("name") or "Uncategorized").strip() or "Uncategorized"
+        for item in cat.get("items", []) or []:
+            stats["items"] += 1
+            name = (item.get("name") or "").strip() or "Untitled"
+            desc = item.get("description")
+
+            sizes = item.get("sizes") or []
+            variants: List[Dict[str, Any]] = []
+            base_price_cents = 0
+
+            for sz in sizes:
+                label = str(sz.get("label") or "Base").strip() or "Base"
+                raw_price = sz.get("price", 0.0)
+                try:
+                    price = float(raw_price or 0.0)
+                except Exception:
+                    price = 0.0
+                cents = int(round(price * 100))
+                variants.append({"label": label, "price_cents": cents})
+                if cents > 0 and (base_price_cents == 0 or cents < base_price_cents):
+                    base_price_cents = cents
+
+            if base_price_cents == 0:
+                stats["zero_price_items"] += 1
+
+            stats["variants"] += len(variants)
+
+            flat.append(
+                {
+                    "name": name,
+                    "description": desc,
+                    "category": cat_name,
+                    "price_cents": base_price_cents,
+                    "position": position,
+                    "variants": variants or None,
+                }
+            )
+            position += 1
+
+    return flat, stats
+
+
+def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, Any]]:
     """
     Segment PDF/image into structured layout, then run AI helper to produce draft items.
     Returns:
@@ -367,7 +461,7 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             }
         ]
 
-    categories: Dict[str, Any] = {
+    categories: StructuredMenuPayload = {
         "categories": payload_categories,
         "extracted_at": extracted_at,
         "source": {
@@ -382,6 +476,13 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             # Lightweight, normalized section tree for downstream phases
             "hierarchy_preview": hierarchy,
         },
+    }
+
+    # Phase 4 pt.12: build superimport bundle (flat draft-like items + stats)
+    super_items, super_stats = _build_superimport_items(categories)
+    categories["meta"]["superimport"] = {
+        "items": super_items,
+        "stats": super_stats,
     }
 
     # ---- NEW: expose preview/text blocks at top-level for overlays ----
@@ -402,11 +503,16 @@ def extract_menu_from_pdf(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             "ai-helper (rev9) applied: dot leaders, next-line prices, size pairs, wide-gap splits, price bounds, multi-item splitter",
             "category hierarchy v2: canonical categories + grouped subcategories",
             "structured output v2 + superimport prep: hierarchy_preview + stable categories payload",
+            "superimport bundle attached: flat items + stats for downstream importers",
         ],
         "ai_preview": {
             "items": items,
             "sections": sections,
             "hierarchy": hierarchy,
+        },
+        "superimport": {
+            "items": super_items,
+            "stats": super_stats,
         },
     }
 
