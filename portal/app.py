@@ -3278,6 +3278,35 @@ def __routes():
 def __boom():
     raise RuntimeError("Intentional test error")
 
+@app.get("/__ocrtxt/<int:job_id>")
+def __ocrtxt(job_id: int):
+    """
+    Debug: return AI helper items + structured categories + superimport bundle
+    for the given import job.
+    """
+    from storage.ocr_facade import extract_menu_from_pdf
+    from storage.drafts import find_draft_by_source_job
+
+    draft = find_draft_by_source_job(job_id)
+    if not draft:
+        return jsonify({"ok": False, "error": "draft not found"}), 404
+
+    # Original upload path
+    path = draft.get("source_file_path")
+    if not path:
+        return jsonify({"ok": False, "error": "no source_file_path"}), 400
+
+    structured, debug = extract_menu_from_pdf(path)
+
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "structured": structured,
+        "superimport": debug.get("superimport"),
+        "ai_items": debug.get("ai_preview", {}).get("items"),
+        "hierarchy": debug.get("ai_preview", {}).get("hierarchy"),
+    })
+
 # ------------------------
 # Blueprint registration (core)
 # ------------------------

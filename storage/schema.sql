@@ -89,18 +89,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS uidx_drafts_source_job
   WHERE source_job_id IS NOT NULL;
 
 -- Draft Items
-CREATE TABLE IF NOT EXISTS draft_items (
+CREATE TABLE IF NOT EXISTS drafts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  draft_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  description TEXT,
-  price_cents INTEGER NOT NULL DEFAULT 0,
-  category TEXT,
-  position INTEGER,                              -- display sort (NULLs last)
-  confidence INTEGER,                            -- NEW (Day 14): OCR confidence (nullable)
+  restaurant_id INTEGER,
+  title TEXT NOT NULL DEFAULT 'Untitled Draft',
+  status TEXT NOT NULL DEFAULT 'editing',       -- editing|submitted|approved|rejected|archived
+  source_job_id INTEGER,                        -- provenance link to import_jobs.id
+  source TEXT,                                  -- JSON blob (file + ocr_engine)
+  source_file_path TEXT,                        -- NEW: original uploaded file path for debug OCR
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
+  FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL,
+  FOREIGN KEY (source_job_id) REFERENCES import_jobs(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_draft_items_draft ON draft_items(draft_id);

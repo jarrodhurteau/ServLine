@@ -47,6 +47,7 @@ storage/ # SQLite database + OCR pipeline + seed + schema
   variant_engine.py                    # Phase 4 pt.3  
   category_hierarchy.py                # Phase 4 pt.4  
   price_integrity.py                   # Phase 4 pt.5–10  
+  import_jobs.py                       # Import job lookup helper (Day 31)  
 uploads/  
 .gitignore  
 .vscode/  
@@ -276,14 +277,11 @@ Day 27 complete.
 
 ### ✔ Phase 4 pt.8 — Structured Grouping (Draft Editor)
 - New nested structure exposed to Draft Editor:
-  ```
-  category → subcategory → items
-  ```
 - Implemented in `app.py` render stage  
 - Provides:
-  - clean left-side outline  
-  - stable grouping without changing UI layout  
-  - category/subcategory organization for future Superimport Mode  
+- clean left-side outline  
+- stable grouping without changing UI layout  
+- category/subcategory organization for future Superimport Mode  
 - Draft items remain flat in DB (backward-compatible)  
 - No regressions to Finalize or Export  
 - Verified end-to-end across sample menus  
@@ -316,10 +314,31 @@ Day 27 complete.
 
 ---
 
-# 🌄 Phase 4 – Remaining Roadmap
+## 🚀 Day 31 – Phase 4 pt.11
 
-**Day 31 – Phase 4 pt.11** – Structured Draft Output v2  
-Confidence maps, cleanup warnings, provenance, normalization.
+### ✔ Phase 4 pt.11 — Structured Draft Output v2
+
+- Upgraded `storage/ocr_facade.py` to emit a `StructuredMenuPayload` with:
+- `categories` tree
+- `meta.hierarchy_preview`
+- `meta.superimport` (flat draft-like items + stats)
+- Centralized upload path resolution (`UPLOAD_FOLDER`) inside `ocr_facade` to
+prevent missing-file 500s in `/__ocrtxt/<job_id>`.
+- Added `storage/import_jobs.py` helper and wired `storage/drafts.py` to
+safely link drafts back to their import jobs + OCR debug sidecars.
+- Verified `_ocrtxt` now returns:
+- `ai_items`
+- `structured` (categories payload)
+- `hierarchy` / `hierarchy_preview`
+- `superimport` bundle used for downstream draft creation.
+- End-to-end confirmed: upload → `/__ocrtxt/<id>` → structured JSON +
+superimport items with stable source metadata.
+
+⭐ **Day 31 complete — structured OCR output + superimport bridge locked in.**
+
+---
+
+# 🌄 Phase 4 – Remaining Roadmap
 
 **Day 32 – Phase 4 pt.12** – Superimport Mode  
 1-click draft creation  
@@ -330,7 +349,7 @@ Ready for approval.
 ---
 
 # ⭐ Next Steps
-You will start **Day 31 – Phase 4 pt.11**  
+You will start **Day 32 – Phase 4 pt.12**  
 when you say:
 
-**“ready for day 31”**
+**“ready for day 32”**
