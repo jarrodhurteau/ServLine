@@ -255,6 +255,81 @@ def _to_cents(p: Any) -> int:
         return 0
 
 
+def _normalize_item_for_db(raw: Any) -> Optional[Dict[str, Any]]:
+    """
+    Defensive normalizer for draft_items payloads.
+
+    Ensures:
+      - name: non-empty string (required; rows without a name are dropped)
+      - description: always a string (may be empty)
+      - price_cents: int, never negative (bad / NaN -> 0)
+      - category: normalized to a trimmed string or None
+      - position: optional int or None
+      - confidence: optional int in [0, 100] or None (accepts 0–1 floats as %)
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    # Name (required)
+    name_raw = raw.get("name")
+    name = str(name_raw).strip() if name_raw is not None else ""
+    if not name:
+        return None  # Finalize / editor will silently drop nameless rows
+
+    # Description (optional, always string)
+    desc_raw = raw.get("description")
+    description = "" if desc_raw is None else str(desc_raw).strip()
+
+    # Price cents (never negative; we do NOT re-interpret dollars here)
+    price_raw = raw.get("price_cents")
+    try:
+        price_cents = int(price_raw)
+    except Exception:
+        price_cents = 0
+    if price_cents < 0:
+        price_cents = 0
+
+    # Category (normalized string or None)
+    cat_raw = raw.get("category")
+    if cat_raw is None:
+        category: Optional[str] = None
+    else:
+        cat_str = str(cat_raw).strip()
+        category = cat_str or None
+
+    # Position: optional int
+    position = _coerce_opt_int(raw.get("position"))
+
+    # Confidence: optional int (0–100), accept 0–1 float as %
+    conf_raw = raw.get("confidence")
+    if conf_raw is None or str(conf_raw).strip() == "":
+        confidence: Optional[int] = None
+    else:
+        try:
+            cf = float(conf_raw)
+            # Allow 0–1 as fractional confidence → convert to percentage
+            if 0.0 <= cf <= 1.0:
+                cf = cf * 100.0
+            confidence = int(round(cf))
+        except Exception:
+            confidence = None
+
+        if confidence is not None:
+            if confidence < 0:
+                confidence = 0
+            elif confidence > 100:
+                confidence = 100
+
+    return {
+        "name": name,
+        "description": description,
+        "price_cents": price_cents,
+        "category": category,
+        "position": position,
+        "confidence": confidence,
+    }
+
+
 def _clamp_price_cents(cents: Optional[int]) -> Optional[int]:
     """Clamp into sane menu range (default Day-22 guard: $1.00–$99.99)."""
     if cents is None:
@@ -262,6 +337,7 @@ def _clamp_price_cents(cents: Optional[int]) -> Optional[int]:
     if cents < ocr_utils.PRICE_MIN or cents > ocr_utils.PRICE_MAX:
         return None
     return int(cents)
+
 
 
 def _pick_price_from_ai_or_text(
@@ -552,14 +628,17 @@ def _insert_items_bulk(
     with db_connect() as conn:
         cur = conn.cursor()
         for it in items:
-            name = (it.get("name") or "").strip()
-            if not name:
+            norm = _normalize_item_for_db(it)
+            if not norm:
+                # Skip rows with no valid name or totally malformed payloads
                 continue
-            desc = (it.get("description") or "").strip()
-            price_cents = _coerce_int(it.get("price_cents"), 0)
-            category = it.get("category") or None
-            position = _coerce_opt_int(it.get("position"))
-            confidence = _coerce_opt_int(it.get("confidence"))
+
+            name = norm["name"]
+            desc = norm["description"]
+            price_cents = norm["price_cents"]
+            category = norm["category"]
+            position = norm["position"]
+            confidence = norm["confidence"]
 
             cur.execute(
                 """
@@ -607,6 +686,10 @@ def upsert_draft_items(
     with db_connect() as conn:
         cur = conn.cursor()
         for it in items:
+            # Defensive: non-dicts are ignored
+            if not isinstance(it, dict):
+                continue
+
             raw_id = it.get("id")
             has_int_id = False
             try:
@@ -618,16 +701,17 @@ def upsert_draft_items(
             except Exception:
                 item_id = None
 
-            name = (it.get("name") or "").strip()
-            if not name:
-                # skip blanks
+            norm = _normalize_item_for_db(it)
+            if not norm:
+                # Skip nameless or completely invalid rows
                 continue
 
-            desc = (it.get("description") or "").strip()
-            price_cents = _coerce_int(it.get("price_cents"), 0)
-            category = it.get("category") or None
-            position = _coerce_opt_int(it.get("position"))
-            confidence = _coerce_opt_int(it.get("confidence"))
+            name = norm["name"]
+            desc = norm["description"]
+            price_cents = norm["price_cents"]
+            category = norm["category"]
+            position = norm["position"]
+            confidence = norm["confidence"]
 
             if has_int_id:
                 cur.execute(

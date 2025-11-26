@@ -211,9 +211,16 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         position = it.get("position")
         confidence = it.get("confidence")
 
+        item_id = it.get("id")
+        if item_id is None:
+            # For safety: skip rows without a primary key when doing DB-backed cleanup.
+            # (Export paths that want to normalize anonymous items can ignore this and
+            #  call the text cleaners directly.)
+            continue
+
         updated.append(
             {
-                "id": it["id"],
+                "id": item_id,
                 "name": name_clean or name_raw,
                 "description": desc_final,
                 "price_cents": price_cents,
@@ -224,6 +231,7 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
 
     return updated
+
 
 
 # ---------- Public entrypoint ----------
