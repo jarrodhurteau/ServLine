@@ -1,16 +1,24 @@
 # servline/storage/ai_cleanup.py
 """
-AI Cleanup for Draft Items — Phase 3 + Phase 4 Structured Output v2
+AI Cleanup for Draft Items — Day 32 (Text-only Safe Mode)
 
-Responsibilities:
+Responsibilities (current scope):
 - Normalize item names & descriptions (soft cleanup; preserve as much as possible).
-- Opportunistically recover prices from text when missing.
-- Infer/solidify categories using the shared category_infer engine.
-- Blend OCR confidence with AI "cleanup" confidence into a single score.
+- Leave prices, categories, and OCR metadata exactly as produced by the OCR pipeline.
 
-New in Phase 4 pt.11:
-- Core cleanup logic extracted into `normalize_draft_items(items)` so the same
-  normalization is used for:
+Notes:
+- Earlier versions tried to:
+    * recover prices from text
+    * infer/override categories via category_infer
+    * blend OCR + AI confidence
+  That logic is now considered legacy and has been removed for safety.
+
+- From Day 32 onward, this module is a *text surgeon only*:
+    * It may change `name` and `description`.
+    * It must NOT change `price_cents`, `category`, or any other structured fields.
+
+The core cleanup logic lives in `normalize_draft_items(items)` so the same
+normalization is used for:
     * DB-side cleanup (apply_ai_cleanup)
     * In-memory structured export (Finalized menu JSON, Superimport prep).
 """
@@ -21,8 +29,6 @@ import re
 import unicodedata
 
 from .drafts import get_draft_items, upsert_draft_items
-from . import drafts as _drafts_mod
-from . import category_infer as _cat_infer  # Phase-3 category engine
 
 TAG = "[AI Cleaned]"
 
@@ -104,7 +110,7 @@ def _smooth_ingredients(desc: str) -> str:
     return t
 
 
-# ---------- Name cleanup (unchanged ultra-safe) ----------
+# ---------- Name cleanup (ultra-safe) ----------
 def clean_item_name(s: str) -> str:
     if not s:
         return ""
@@ -143,131 +149,6 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
     return t, salvage_ratio
 
 
-# ---------- Price extraction ----------
-_PRICE_RX = re.compile(
-    r"""
-    (?<!\d)
-    (?:\$?\s*)
-    (?:
-        (?P<dollars>\d{1,3})(?:\.(?P<cents>\d{1,2}))?
-        |
-        (?P<compact>\d{3,4})
-        |
-        \.(?P<dotonly>\d{2})
-    )
-    (?!\d)
-    """,
-    re.X,
-)
-
-
-def _to_cents(dollars, cents, compact, dotonly):
-    try:
-        if dotonly:
-            return int(dotonly)
-        if compact:
-            if len(compact) in (3, 4):
-                return int(compact)
-            return None
-        if dollars is not None:
-            d = int(dollars)
-            c = int((cents or "0").ljust(2, "0")[:2])
-            return d * 100 + c
-    except Exception:
-        return None
-    return None
-
-
-def extract_price_candidates(text: str) -> List[int]:
-    hits: List[int] = []
-    for m in _PRICE_RX.finditer(text or ""):
-        cents = _to_cents(
-            m.group("dollars"),
-            m.group("cents"),
-            m.group("compact"),
-            m.group("dotonly"),
-        )
-        if cents is not None:
-            hits.append(int(cents))
-    return hits
-
-
-def _clamp_price(cents: Optional[int]) -> Optional[int]:
-    if cents is None:
-        return None
-    if cents < _drafts_mod.ocr_utils.PRICE_MIN or cents > _drafts_mod.ocr_utils.PRICE_MAX:
-        return None
-    return int(cents)
-
-
-def _pick_price(name: str, desc: Optional[str]) -> Optional[int]:
-    text = f"{name} {(desc or '')}".strip()
-    hits = extract_price_candidates(text)
-    for c in reversed(hits):
-        ok = _clamp_price(int(c))
-        if ok is not None:
-            return ok
-    return None
-
-
-# ---------- Category inference ----------
-_BUCKETS = {
-    "Pizza":      ["pizza", "margherita", "calzone", "stromboli", "slice", "pie"],
-    "Wings":      ["wing", "buffalo", "boneless"],
-    "Burgers":    ["burger", "cheeseburger"],
-    "Sandwiches": ["sandwich", "sub", "hoagie", "panini", "wrap", "gyro", "philly"],
-    "Pasta":      ["pasta", "spaghetti", "alfredo", "ziti", "lasagna", "ravioli", "penne"],
-    "Salads":     ["salad", "caesar", "greek", "garden"],
-    "Sides":      ["fries", "rings", "sticks", "garlic knots", "coleslaw", "side"],
-    "Beverages":  ["soda", "pop", "pepsi", "coke", "tea", "lemonade", "coffee", "water"],
-    "Desserts":   ["tiramisu", "cannoli", "brownie", "cheesecake", "cookie", "ice cream"],
-}
-
-
-def classify_category(name: str, description: str | None = None) -> str:
-    text = f"{name} {(description or '')}".lower()
-    for cat, keys in _BUCKETS.items():
-        if any(k in text for k in keys):
-            return cat
-    return "Uncategorized"
-
-
-def infer_item_category(name: str, description: str | None = None):
-    merged = f"{name or ''} {(description or '' )}".strip()
-    if not merged:
-        return "Uncategorized", None, None
-
-    try:
-        guess = _cat_infer.infer_category_for_text(
-            name=merged,
-            description=None,
-            price_cents=0,
-            neighbor_categories=[],
-            fallback="Uncategorized",
-        )
-        cat = guess.category
-        conf = int(guess.confidence)
-        trace = guess.reason or "heuristic match"
-    except Exception:
-        cat, conf, trace = None, None, None
-
-    if not cat or cat == "Uncategorized":
-        cat = classify_category(name, description)
-    return cat, conf, trace
-
-
-# ---------- Confidence blending ----------
-def normalize_confidence(ocr_score: int | None, ai_score: int | None) -> int:
-    if ocr_score is None and ai_score is None:
-        return 50
-    if ocr_score is None:
-        return max(0, min(100, int(round(ai_score or 0))))
-    if ai_score is None:
-        return max(0, min(100, int(round(ocr_score or 0))))
-    blended = 0.4 * (ocr_score or 0) + 0.6 * (ai_score or 0)
-    return max(0, min(100, int(round(blended))))
-
-
 # ---------- Description tag decision logic ----------
 def _decide_description(desc_raw: str, desc_clean: str, salvage_ratio: float) -> str:
     """
@@ -293,10 +174,15 @@ def _decide_description(desc_raw: str, desc_clean: str, salvage_ratio: float) ->
     return desc_clean
 
 
-# ---------- Core normalizer (Phase 4 structured output v2) ----------
+# ---------- Core normalizer (Day 32 text-only mode) ----------
 def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Pure function: take raw draft items and return normalized/cleaned items.
+
+    IMPORTANT:
+      - Only `name` and `description` are modified.
+      - `price_cents`, `category`, `position`, and `confidence` are preserved
+        exactly as they came from the OCR/draft pipeline.
 
     Used by:
       - apply_ai_cleanup(draft_id) for DB writes
@@ -319,40 +205,11 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         desc_clean, salvage_ratio = clean_description_soft(desc_raw)
         desc_final = _decide_description(desc_raw, desc_clean, salvage_ratio)
 
-        # Price fix
-        price_cents = int(it.get("price_cents") or 0)
-        if price_cents <= 0:
-            found = _pick_price(name_raw, desc_raw)
-            if found is not None:
-                price_cents = int(found)
-
-        # Category
-        existing_cat = (it.get("category") or "").strip() or None
-        if not existing_cat or existing_cat == "Uncategorized":
-            cat, cat_conf, cat_trace = infer_item_category(name_clean, desc_clean)
-        else:
-            cat = existing_cat
-            cat_conf, cat_trace = None, None  # reserved for future meta
-
-        # Confidence
-        ocr_conf = it.get("confidence")
-        changed = (name_clean != name_raw) or (desc_clean != desc_raw)
-        ai_signal = None
-
-        if changed:
-            ai_signal = 80  # softer default
-            if price_cents <= 0:
-                ai_signal -= 10
-            if len(name_clean) > 60:
-                ai_signal -= 5
-
-        norm_conf = normalize_confidence(
-            int(ocr_conf)
-            if isinstance(ocr_conf, int)
-            or (isinstance(ocr_conf, str) and str(ocr_conf).isdigit())
-            else None,
-            ai_signal,
-        )
+        # Preserve structured fields exactly
+        price_cents = it.get("price_cents")
+        category = it.get("category")
+        position = it.get("position")
+        confidence = it.get("confidence")
 
         updated.append(
             {
@@ -360,9 +217,9 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "name": name_clean or name_raw,
                 "description": desc_final,
                 "price_cents": price_cents,
-                "category": cat,
-                "position": it.get("position"),
-                "confidence": norm_conf,
+                "category": category,
+                "position": position,
+                "confidence": confidence,
             }
         )
 
@@ -376,6 +233,11 @@ def apply_ai_cleanup(draft_id: int) -> int:
 
     Returns:
         Number of rows upserted (updated + inserted).
+
+    Behavior:
+        - Only `name` and `description` may change.
+        - All other fields (price_cents, category, position, confidence, etc.)
+          are passed through unchanged.
     """
     items = get_draft_items(int(draft_id))
     if not items:

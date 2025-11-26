@@ -270,13 +270,16 @@ def _pick_price_from_ai_or_text(
     desc: Optional[str],
 ) -> Optional[int]:
     """
-    Choose a main price (in cents).
-    1) Prefer AI/OCR-provided candidates:
-         - price_cents (direct cents, new OCR pipeline)
-         - value (dollar float, legacy AI helper)
-    2) Else, extract from text (name + description) using OCR regex.
+    Choose a main price (in cents) from price_candidates and/or text.
+    New canonical rule:
+      - Gather all candidate prices from ai_price_candidates (value/price_cents).
+      - Clamp each to sane range.
+      - Pick the lowest remaining as canonical price.
+      - If none, extract from text (name + description) using OCR regex.
     """
-    # 1) AI/OCR candidates
+    candidate_prices: List[int] = []
+
+    # 1) AI/OCR candidates: price_cents or value (dollar float)
     for c in ai_price_candidates or []:
         # a) Direct cents from OCR pipeline / helpers
         try:
@@ -284,7 +287,7 @@ def _pick_price_from_ai_or_text(
                 cents_raw = c.get("price_cents")
                 cents = _clamp_price_cents(int(round(float(cents_raw))))
                 if cents is not None:
-                    return cents
+                    candidate_prices.append(cents)
         except Exception:
             pass
 
@@ -295,9 +298,12 @@ def _pick_price_from_ai_or_text(
                 continue
             cents = _clamp_price_cents(int(round(float(v) * 100)))
             if cents is not None:
-                return cents
+                candidate_prices.append(cents)
         except Exception:
             continue
+
+    if candidate_prices:
+        return min(candidate_prices)
 
     # 2) Text extraction (supports 8.99 / $12 / 899 etc.)
     text = f"{name} {(desc or '')}".strip()
@@ -307,6 +313,73 @@ def _pick_price_from_ai_or_text(
         if cents is not None:
             return cents
     return None
+
+
+def _canonical_price_cents_for_preview_item(it: Dict[str, Any]) -> Optional[int]:
+    """
+    Canonical price chooser for new OCR preview items.
+
+    Rule:
+      - Gather all prices from:
+          * variants[*].price_cents
+          * price_candidates[*].price_cents or .value (float dollars)
+      - Clamp each via _clamp_price_cents.
+      - Take the lowest remaining as the canonical price.
+      - If nothing survives, fall back to text extraction on name+description.
+    """
+    name_raw = (it.get("name") or "").strip()
+    desc_raw = it.get("description") or None
+    variants = it.get("variants") or []
+    pcs = it.get("price_candidates") or []
+
+    candidate_prices: List[int] = []
+
+    # Variant prices: already in cents
+    if isinstance(variants, list):
+        for v in variants:
+            try:
+                pc = v.get("price_cents")
+            except AttributeError:
+                continue
+            if pc is None:
+                continue
+            try:
+                cents = _clamp_price_cents(int(round(float(pc))))
+            except Exception:
+                continue
+            if cents is not None:
+                candidate_prices.append(cents)
+
+    # price_candidates: can be cents or dollars
+    if isinstance(pcs, list):
+        for c in pcs:
+            # direct cents
+            try:
+                if "price_cents" in c and c.get("price_cents") is not None:
+                    cents_raw = c.get("price_cents")
+                    cents = _clamp_price_cents(int(round(float(cents_raw))))
+                    if cents is not None:
+                        candidate_prices.append(cents)
+                        continue
+            except Exception:
+                pass
+
+            # dollar float "value"
+            try:
+                v = c.get("value")
+                if v is None:
+                    continue
+                cents = _clamp_price_cents(int(round(float(v) * 100)))
+                if cents is not None:
+                    candidate_prices.append(cents)
+            except Exception:
+                continue
+
+    if candidate_prices:
+        return min(candidate_prices)
+
+    # Fallback: text-based extraction
+    return _pick_price_from_ai_or_text(pcs, name_raw, desc_raw)
 
 
 # ------------------------------------------------------------
@@ -726,12 +799,19 @@ def _flat_from_legacy_categories(
 def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     AI path: map ai_ocr_helper / OCR pipeline preview items → flat rows.
-    Hardening (Day 22+25):
-      - Garbage guard: drop lines that fail is_garbage_line (unless valid price present).
-      - Price normalization:
-          * Prefer variants[].price_cents when provided (multi-price aware).
-          * Else prefer AI/OCR price_candidates (value/price_cents).
-          * Else extract from text; clamp to sane range.
+
+    New Day-32 behavior:
+      - Canonical price:
+            * Prefer variants[*].price_cents + price_candidates[*].(price_cents|value)
+              -> clamp all, choose lowest as main price.
+            * If none survives, fall back to text extraction via OCR regex.
+      - Category:
+            * If subcategory present → use as category column.
+            * Else fall back to top-level category.
+      - Confidence:
+            * Map float 0–1 to 0–100; tolerate integer % as-is.
+      - Garbage guard:
+            * Drop items whose NAME fails is_garbage_line unless a valid price was found.
     """
     flat: List[Dict[str, Any]] = []
 
@@ -741,32 +821,14 @@ def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
 
         desc_raw = it.get("description") or None
-        cat = it.get("category") or None
-        pcs = it.get("price_candidates") or []
-        variants = it.get("variants") or []
 
-        # 1) Prefer variants (multi-price case) – choose a main/base price.
-        cents_main: Optional[int] = None
-        if isinstance(variants, list) and variants:
-            variant_prices: List[int] = []
-            for v in variants:
-                try:
-                    pc = v.get("price_cents")
-                except AttributeError:
-                    continue
-                if pc is None:
-                    continue
-                cents = _clamp_price_cents(int(round(float(pc))))
-                if cents is not None:
-                    variant_prices.append(cents)
-            if variant_prices:
-                # Heuristic: pick the lowest variant price as the "base" size.
-                cents_main = min(variant_prices)
+        # Category: favor subcategory when present
+        subcat = (it.get("subcategory") or "").strip() or None
+        cat_top = (it.get("category") or "").strip() or None
+        cat = subcat or cat_top
 
-        # 2) If no usable variants, fall back to price_candidates / text.
-        if cents_main is None:
-            cents_main = _pick_price_from_ai_or_text(pcs, name_raw, desc_raw)
-
+        # Canonical price
+        cents_main = _canonical_price_cents_for_preview_item(it)
         price_hit = cents_main is not None
 
         # Garbage guard on the NAME (allow leniency if a valid price is present)
@@ -857,9 +919,7 @@ def create_draft_from_import(
                     "bridge": "ai",
                     "import_job_id": import_job_id,
                     "ai_items_count": len(ai_items or []),
-                    "ai_sample": (
-                        ai_items[:20] if isinstance(ai_items, list) else None
-                    ),
+                    "items": ai_items,  # full OCR preview payload for Phase 5+
                     "source_meta": draft_json.get("source") or {},
                     "guards": {
                         "dropped_by_is_garbage_line": True,
@@ -867,7 +927,7 @@ def create_draft_from_import(
                             ocr_utils.PRICE_MIN,
                             ocr_utils.PRICE_MAX,
                         ],
-                        "variants_used_for_base_price": True,
+                        "canonical_price_rule": "min(variants + price_candidates) or first text hit",
                     },
                 },
             )
