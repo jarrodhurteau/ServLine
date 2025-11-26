@@ -188,6 +188,32 @@ def _normalize_ingredients(desc: str) -> str:
     return _normalize_spaces(t)
 
 
+def _normalize_w_with(desc: str) -> str:
+    """
+    Normalize common "w/" shorthand to "with" in descriptions.
+
+    We only handle safe patterns:
+      - "w/" -> "with "
+      - "w." / "w," followed by space -> "with "
+      - standalone "w" as a word -> "with"
+
+    We intentionally DO NOT try to rewrite fused forms like "Wings" or "Wow" to avoid
+    corrupting real words.
+    """
+    t = desc or ""
+    if not t:
+        return t
+
+    # "w/" => "with "
+    t = re.sub(r"\bw\/\s*", "with ", t, flags=re.IGNORECASE)
+    # "w." or "w," followed by space
+    t = re.sub(r"\bw[\.,]\s+", "with ", t, flags=re.IGNORECASE)
+    # standalone "w" as a word
+    t = re.sub(r"\bw\b", "with", t, flags=re.IGNORECASE)
+
+    return _normalize_spaces(t)
+
+
 def _smooth_connectors(desc: str) -> str:
     """
     Day 34 – Pt.6: Connector & phrase smoothing.
@@ -196,10 +222,20 @@ def _smooth_connectors(desc: str) -> str:
       - Remove stray/dangling 'and/or/&/with/on the/for the' tails at the very end.
       - Normalize duplicated connectors and messy list punctuation.
       - Keep lists readable without changing meaning.
+
+    Special guard:
+      - If the line clearly contains 'on the side' / 'the side' style phrases,
+        we skip aggressive trimming to preserve that idiom.
     """
     t = desc or ""
     if not t:
         return t
+
+    lower = t.lower()
+
+    # Guard: preserve "on the side" / "the side" style phrases (including slight OCR warps).
+    if re.search(r"\b(on\s+the\s+side|on\s+side|the\s+side|the\s+sid\b|on\s+the\s+sid\b)", lower):
+        return _normalize_spaces(t)
 
     # Normalize "and/or" style patterns into a single connector (no hallucination).
     t = re.sub(r"\band\s*/\s*or\b", "or", t, flags=re.IGNORECASE)
@@ -243,9 +279,10 @@ def _smooth_ingredients(desc: str) -> str:
     - Trim trailing single-letter junk tokens (except size abbreviations).
     - Run token-soup cleanup v2.
 
-    Day 34 extends this with:
-      - _normalize_ingredients (deep ingredient normalization).
-      - _smooth_connectors (connector & phrase smoothing).
+    Day 34 extends this with additional passes in clean_description_soft:
+      - _normalize_w_with          (safe "w/" -> "with" normalization)
+      - _normalize_ingredients     (deep ingredient normalization)
+      - _smooth_connectors         (connector & phrase smoothing)
     """
     t = desc or ""
     if not t:
@@ -296,7 +333,40 @@ def clean_item_name(s: str) -> str:
     return t
 
 
-# ---------- Long-name rescue (Pt.3) ----------
+# ---------- Long-name rescue (Pt.3 + connector rebalance) ----------
+
+def _rebalance_head_tail_connectors(head: str, tail: str) -> Tuple[str, str]:
+    """
+    If the head (name) ends with a connector like 'with' or 'and', move that token
+    into the beginning of the tail (description fragment).
+
+    Example:
+      head = "Calzones Stuffed With"
+      tail = "ricotta and mozzarella"
+    becomes:
+      head = "Calzones Stuffed"
+      tail = "With ricotta and mozzarella"
+    """
+    if not head:
+        return head, tail
+
+    tokens = head.split()
+    if not tokens:
+        return head, tail
+
+    last = tokens[-1]
+    if last.lower() in {"with", "and", "or", "on", "in"}:
+        tokens = tokens[:-1]
+        new_head = " ".join(tokens).strip()
+        moved = last
+        if tail:
+            new_tail = f"{moved} {tail}".strip()
+        else:
+            new_tail = moved
+        return new_head, new_tail
+
+    return head, tail
+
 
 def _looks_like_long_name(name: str) -> bool:
     if not name:
@@ -337,7 +407,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
         head = name[:idx].strip(" -–—:·•")
         tail = name[idx + len(sep) :].strip()
         if len(head.split()) >= 2 and len(tail.split()) >= 3:
-            return head, tail
+            return _rebalance_head_tail_connectors(head, tail)
 
     # 2) Comma-based split
     idx = name.find(", ")
@@ -345,7 +415,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
         head = name[:idx].strip(", ")
         tail = name[idx + 2 :].strip()
         if len(head.split()) >= 2 and len(tail.split()) >= 3:
-            return head, tail
+            return _rebalance_head_tail_connectors(head, tail)
 
     # 3) Token-based split (fallback for double-sandwich style lines)
     tokens = name.split()
@@ -355,7 +425,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
         tail_tokens = tokens[len(head_tokens) :]
         head = " ".join(head_tokens)
         tail = " ".join(tail_tokens)
-        return head, tail
+        return _rebalance_head_tail_connectors(head, tail)
 
     # No good split found
     return name, ""
@@ -370,13 +440,18 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
     salvage_ratio = portion of tokens preserved.
     Used to decide whether to prefix [AI Cleaned] or not.
 
-    Pipeline (Day 34):
+    Pipeline (Day 34 + micro-passes):
       - Unicode + run collapse
       - Punctuation cleanup
       - Space normalization
       - _smooth_ingredients            (Day 33 base)
+      - _normalize_w_with              (safe "w/" -> "with" normalization)
       - _normalize_ingredients         (Pt.5 — deep normalization)
       - _smooth_connectors             (Pt.6 — connector & phrase smoothing)
+
+    Future (ingredient-list mode):
+      - Optional pass to remove connectors like 'with', 'and' inside pure
+        ingredient lists to render cold lists only.
     """
     if not s:
         return "", 0.0
@@ -391,6 +466,7 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
 
     # Day 33–34 description refinement pipeline
     t = _smooth_ingredients(t)
+    t = _normalize_w_with(t)
     t = _normalize_ingredients(t)
     t = _smooth_connectors(t)
 
