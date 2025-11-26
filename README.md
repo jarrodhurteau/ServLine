@@ -245,166 +245,82 @@ Day 27 complete.
 ### ✔ Phase 4 pt.5 — Price Integrity Engine
 - Added `price_integrity.py`
 - Detects outlier prices and unsafe OCR misreads
-- Auto-corrects obvious cases (e.g., 3475 → 34.75)
-- Produces `corrected_price_cents` and `price_flags`
-- Integrated into `ocr_pipeline` (pre-preview)
-- Finalize path prefers corrected prices
+- Auto-corrects obvious cases
+- Produces `corrected_price_cents` + flags
+- Integrated into `ocr_pipeline`
+- Finalize uses corrected prices
 - All exports validated
 
 ### ✔ Phase 4 pt.6 — Draft-Friendly Variants
-- Normalized variant-to-price mapping  
+- Normalized variant/price mapping  
 - Unified preview → draft → finalize flow  
-- Draft Editor warning hook added  
-- Fully tested across multiple menus  
+- Editor warnings  
+- Fully tested  
 
 ⭐ **Day 28 complete.**
 
 ---
 
 ## 🚀 Day 29 – Phase 4 pts.7–8
-
-### ✔ Phase 4 pt.7 — Category Hierarchy v2
-- Expanded `category_hierarchy.py` with improved rules  
-- Added advanced grouping:
-  - Specialty pizzas  
-  - Calzones / Strombolis  
-  - Subs & Grinders  
-  - Wings (Bone-in / Boneless / Tenders)  
-  - Salads (Garden / Greek / Caesar / Chef / Antipasto)  
-- Reinforced category hints based on headings + geometry  
-- Preview JSON now includes inferred `subcategory`  
-- No DB changes required; safe integration  
-
-### ✔ Phase 4 pt.8 — Structured Grouping (Draft Editor)
-- New nested structure exposed to Draft Editor:
-- Implemented in `app.py` render stage  
-- Provides:
-  - clean left-side outline  
-  - stable grouping without changing UI layout  
-  - category/subcategory organization for future Superimport Mode  
-- Draft items remain flat in DB (backward-compatible)  
-- No regressions to Finalize or Export  
-- Verified end-to-end across sample menus  
-
-⭐ **Day 29 complete.**
+✔ Category Hierarchy v2  
+✔ Structured grouping in Draft Editor  
+⭐ Day 29 complete.
 
 ---
 
 ## 🚀 Day 30 – Phase 4 pts.9–10
-
-### ✔ Phase 4 pt.9 — Price Integrity Engine v2
-- Added multi-price clustering  
-- Added side-price detection  
-- Built coupon/odd-line suppression  
-- Added group median / IQR stats  
-- Added `price_role`, `price_flags`, `price_meta`  
-- Decimal error detection with optional auto-correct  
-- End-to-end verified in preview → finalize → cleanup
-
-### ✔ Phase 4 pt.10 — Category/Subcategory Normalization Pass
-- Normalized category names (case-safe, plurals collapsed)  
-- Introduced `category_path`, `subcategory_path`, and slugs  
-- Unified “Sandwiches” and “Subs” into stable groups  
-- Added inferred subcategory structure  
-- Prepared hierarchy for Phase 4 pt.11 output layer  
-- Verified stable across all sample menus  
-- No regressions to draft editor or exports  
-
-⭐ **Day 30 complete — price engine v2 + normalized hierarchy locked in.**
+✔ Price Integrity Engine v2  
+✔ Category/subcategory normalization  
+⭐ Day 30 complete.
 
 ---
 
 ## 🚀 Day 31 – Phase 4 pt.11
-
-### ✔ Phase 4 pt.11 — Structured Draft Output v2
-
-- Upgraded `storage/ocr_facade.py` to emit a `StructuredMenuPayload` with:
-  - `categories` tree
-  - `meta.hierarchy_preview`
-  - `meta.superimport` (flat draft-like items + stats)
-- Centralized upload path resolution (`UPLOAD_FOLDER`) inside `ocr_facade` to
-  prevent missing-file 500s in `/__ocrtxt/<job_id>`.
-- Added `storage/import_jobs.py` helper and wired `storage/drafts.py` to
-  safely link drafts back to their import jobs + OCR debug sidecars.
-- Verified `_ocrtxt` now returns:
-  - `ai_items`
-  - `structured` (categories payload)
-  - `hierarchy` / `hierarchy_preview`
-  - `superimport` bundle used for downstream draft creation.
-- End-to-end confirmed: upload → `/__ocrtxt/<id>` → structured JSON +
-  superimport items with stable source metadata.
-
-⭐ **Day 31 complete — structured OCR output + superimport bridge locked in.**
+Structured Draft Output v2  
+Hierarchy preview  
+Superimport bundle  
+OCR debug stability  
+⭐ Day 31 complete.
 
 ---
 
 ## 🚀 Day 32 – Phase 5 pts.1–2
+✔ Finalize safety fixes  
+✔ Unified draft bridge  
+✔ Text-only AI cleanup  
+⭐ Day 32 complete.
 
-### ✔ Pre–Phase 5 sanity fixes (Finalize safety)
+---
 
-- Removed legacy Finalize path that re-ran old `ai_ocr_helper` logic.  
-- Ensured the **draft in the DB is the single source of truth** for all structured fields.  
-- Wired the pipeline so all Phase 4 outputs (categories, variants, price integrity, hierarchy)  
-  flow into draft creation and are preserved end-to-end into Finalize/exports.
+## 🚀 **Day 33 – Phase 5 pts.3–4**
 
-### ✔ Phase 5 pt.1 — Draft Bridge Hardening
+### ✔ **Phase 5 pt.3 — Long-Name Rescue & Garbage Tuning**
+- Detect overlong OCR names containing multiple items  
+- Split names cleanly; move trailing fragments into description  
+- Garbage-line detection tuned so real food items never get dropped  
+- Prices, variants, and categories preserved exactly  
 
-- Updated `storage/drafts.py` AI bridge to:
-  - Use a canonical price picker that:
-    - gathers `variants[*].price_cents` and `price_candidates[*].(price_cents|value)`,
-    - clamps them to a safe menu range,
-    - and chooses the **lowest sane** candidate as `price_cents`.
-  - Prefer `subcategory` as the stored `category` when present, falling back to top-level category.  
-  - Apply conservative `is_garbage_line` filtering on **names**, while preserving any row that has a valid price hit.
-- Verified AI Preview → Draft:
-  - Item counts match.
-  - Prices and categories line up with preview data.
-  - No spurious 0-priced or out-of-range rows.
+### ✔ **Phase 5 pt.4 — Description Cleanup v2**
+- Ingredient smoothing (better comma spacing, trimmed junk tails)  
+- Token-soup reduction (removes `\, }, Ew, Wm, Ss` etc.)  
+- Normalizes punctuation without overcorrecting  
+- Salvage-ratio tagging (`[AI Cleaned]`) only when needed  
+- Verified end-to-end on pizza_real import (Preview → Draft → Finalize → Export)
 
-### ✔ Phase 5 pt.2 — Finalize/Export Alignment (Text-Only Cleanup)
-
-- Refactored `servline/storage/ai_cleanup.py` into strict **text-only “surgeon” mode**:
-  - Only `name` and `description` may change.
-  - `price_cents`, `category`, `position`, `confidence`, and IDs are **never** touched.
-- Finalize endpoint now:
-  - Loads rows from the draft,
-  - runs `normalize_draft_items(...)` to clean names/descriptions,
-  - and emits structured JSON that matches the draft rows field-for-field for all structured data.
-- Re-validated on the sample pizza menu:
-  - Item counts match AI Preview.
-  - Prices and categories stay identical to preview/draft (no hidden overrides).
-  - Long, messy OCR lines are preserved for now (scheduled for later Phase 5 cleanup), but they are at least **stable and honest**.
-
-⭐ **Day 32 complete — Phase 5 safety base locked in (single source of truth + safe Finalize/exports).**
+⭐ **Day 33 complete — text structure is now stable and readable, with no risk to prices or categories.**
 
 ---
 
 # 🌄 Phase 5 – Remaining Roadmap (Text & Semantics)
 
-Phase 5 focuses on turning the now-stable OCR output into clean, human-ready items without breaking the structured data guarantees we’ve just locked in.
-
-Planned highlights (subject to refinement as we go):
-
-- **Phase 5 pt.3–4 — Long-Name & Multi-Item Splitting**
-  - Detect “run-on” lines that contain multiple menu items smashed together.
-  - Split them into separate items while preserving prices and categories.
-  - Keep a clear mapping back to original OCR blocks for debug.
-
-- **Phase 5 pt.5–6 — Description Smoothing & Ingredient Normalization**
-  - Make ingredient lists readable (fix weird commas, stray symbols, dangling “and/&”).  
-  - Normalize casing and punctuation without losing important tokens.  
-  - Introduce low-confidence description flags instead of hard deletes.
-
-- **Phase 5 pt.7–8 — Variant & Size-Aware Text Cleanup**
-  - Keep size/variant information in the right place (name vs description).  
-  - Ensure sizes and variants stay aligned with the Phase 4 variant engine and price integrity rules.
-
-(Exact numbering will be finalized as we schedule each Day.)
+- Phase 5 pt.5–6 — deeper ingredient normalization  
+- Phase 5 pt.7–8 — variant/size-aware text cleanup  
+- Prep for Phase 6 (structured CSV/JSON import)
 
 ---
 
 # ⭐ Next Steps
-You will start **Day 33 – Phase 5 pt.3–4**  
+You will start **Day 34 – Phase 5 (next pts.)**  
 when you say:
 
-**“ready for day 33”**
+**“ready for day 34”**
