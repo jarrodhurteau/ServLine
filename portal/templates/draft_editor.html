@@ -205,6 +205,36 @@
       gap: 6px;
       flex-wrap: wrap;
     }
+
+    /* === Phase 5: Readability & wrapping === */
+    .name-cell {
+      max-width: 100%;
+    }
+    .cell-textarea {
+      width: 100%;
+      min-height: 2.1rem;
+      max-height: 8rem;
+      resize: vertical;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .table-wrap {
+      margin-top: 0.5rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      overflow: auto;
+      max-height: calc(100vh - 260px);
+      background: rgba(15, 23, 42, 0.92);
+    }
+    #items-table {
+      width: 100%;
+      table-layout: fixed;
+    }
+    #items-table th,
+    #items-table td {
+      vertical-align: top;
+    }
   </style>
 
   <div class="layout">
@@ -545,7 +575,14 @@
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
-    function dollarsToCents(val){ if (val==null) return 0; let s=String(val).trim().replace(/[$,]/g,""); if (!s) return 0; const n=Number(s); return Number.isNaN(n)?0:Math.round(n*100); }
+    function dollarsToCents(val){
+      if (val==null) return 0;
+      let s=String(val).trim().replace(/[$,]/g,"");
+      if (!s) return 0;
+      const n=Number(s);
+      if (!Number.isFinite(n)) return 0;
+      return Math.round(n*100);
+    }
 
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
@@ -594,7 +631,11 @@
     }
 
     const sizeRx = /(.*)\s*\(([^)]+)\)\s*$/;
-    function normalizeBaseName(name){ const m = name.match(sizeRx); const base = (m ? m[1] : name).trim(); return base.toLowerCase(); }
+    function normalizeBaseName(name){
+      const m = name.match(sizeRx);
+      const base = (m ? m[1] : name).trim();
+      return base.toLowerCase();
+    }
 
     function gatherData(){
       const data = {};
@@ -611,14 +652,38 @@
         data[cat] ||= {};
         data[cat][base] ||= { rows: [], sizes: [] };
         data[cat][base].rows.push(rowId);
-        if (sizeLabel){ data[cat][base].sizes.push({ label: sizeLabel, rowId, price }); }
+        if (sizeLabel){
+          data[cat][base].sizes.push({ label: sizeLabel, rowId, price });
+        }
       });
       return data;
     }
 
-    function clearAllFilters(){ $$("#items-body tr").forEach(tr=>{ delete tr.dataset.filterCat; delete tr.dataset.filterItem; }); }
-    function setFilterByCategory(cat){ clearAllFilters(); if (cat==="__ALL__"){ collectRowsFiltered(); return; } $$("#items-body tr").forEach(tr=>{ tr.dataset.filterCat = cat.toLowerCase(); }); collectRowsFiltered(); }
-    function setFilterByItem(cat, baseNorm){ clearAllFilters(); $$("#items-body tr").forEach(tr=>{ tr.dataset.filterCat = cat.toLowerCase(); tr.dataset.filterItem = baseNorm; }); collectRowsFiltered(); }
+    function clearAllFilters(){
+      $$("#items-body tr").forEach(tr=>{
+        delete tr.dataset.filterCat;
+        delete tr.dataset.filterItem;
+      });
+    }
+    function setFilterByCategory(cat){
+      clearAllFilters();
+      if (cat==="__ALL__"){
+        collectRowsFiltered();
+        return;
+      }
+      $$("#items-body tr").forEach(tr=>{
+        tr.dataset.filterCat = cat.toLowerCase();
+      });
+      collectRowsFiltered();
+    }
+    function setFilterByItem(cat, baseNorm){
+      clearAllFilters();
+      $$("#items-body tr").forEach(tr=>{
+        tr.dataset.filterCat = cat.toLowerCase();
+        tr.dataset.filterItem = baseNorm;
+      });
+      collectRowsFiltered();
+    }
 
     function focusRow(rowId){
       const tr = document.querySelector(`#items-body tr[data-id="${CSS.escape(rowId)}"]`);
@@ -632,7 +697,8 @@
       const data = gatherData();
       const cats = Object.keys(data).sort((a,b)=>{
         const au = a === "(Uncategorized)", bu = b === "(Uncategorized)";
-        if (au && !bu) return 1; if (!au && bu) return -1;
+        if (au && !bu) return 1;
+        if (!au && bu) return -1;
         return a.localeCompare(b);
       });
 
@@ -688,7 +754,10 @@
               pill.className = "size-pill";
               pill.textContent = `${s.label}: ${s.price.toFixed(2)}`;
               pill.title = "Jump to row";
-              pill.addEventListener("click", (ev)=>{ ev.stopPropagation(); focusRow(s.rowId); });
+              pill.addEventListener("click", (ev)=>{
+                ev.stopPropagation();
+                focusRow(s.rowId);
+              });
               sizesDiv.appendChild(pill);
             });
             liItem.appendChild(sizesDiv);
@@ -706,22 +775,67 @@
     function collectPayload(){
       const items = [];
       let errors = [];
+
       $$("#items-body tr").forEach(tr=>{
         if (tr.style.display === "none") return;
+
         const idAttr=tr.getAttribute("data-id");
         const id = idAttr && /^\d+$/.test(idAttr) ? Number(idAttr) : (idAttr||null);
-        const name=$(".name", tr).value.trim();
-        const description=$(".description", tr).value.trim();
-        const priceStr=$(".price", tr).value.trim();
-        const category=$(".category", tr).value.trim();
-        const posStr=$(".position", tr).value.trim();
+
+        const nameEl = $(".name", tr);
+        const descEl = $(".description", tr);
+        const priceEl = $(".price", tr);
+        const catEl = $(".category", tr);
+        const posEl = $(".position", tr);
+
+        const name = (nameEl && nameEl.value || "").trim();
+        const description = (descEl && descEl.value || "").trim();
+        const priceStr = (priceEl && priceEl.value || "").trim();
+        const category = (catEl && catEl.value || "").trim();
+        const posStr = (posEl && posEl.value || "").trim();
         const confStr=tr.getAttribute("data-confidence");
-        if (!name){ errors.push("Name is required for all items."); tr.classList.add("row-error"); } else { tr.classList.remove("row-error"); }
-        const price_cents=dollarsToCents(priceStr);
-        let position=null; if (posStr!==""){ const p=Number(posStr); if (Number.isNaN(p) || !Number.isInteger(p)){ errors.push("Position must be an integer."); } else { position=p; } }
+
+        // Phase 5 safety: completely blank rows are ignored instead of causing errors
+        const allBlank = !name && !description && !priceStr && !category && !posStr;
+        if (allBlank) {
+          tr.classList.remove("row-error");
+          return;
+        }
+
+        if (!name){
+          errors.push("Name is required for all non-empty items.");
+          tr.classList.add("row-error");
+        } else {
+          tr.classList.remove("row-error");
+        }
+
+        let price_cents = dollarsToCents(priceStr);
+        if (!Number.isFinite(price_cents) || price_cents < 0) {
+          price_cents = 0;
+        }
+
+        let position=null;
+        if (posStr!==""){
+          const p=Number(posStr);
+          if (Number.isNaN(p) || !Number.isInteger(p)){
+            errors.push("Position must be an integer.");
+          } else {
+            position=p;
+          }
+        }
         const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
-        items.push({ id, name, description, price_cents, category: category||null, position, confidence });
+
+        items.push({
+          id,
+          name,
+          description,
+          price_cents,
+          category: category || null,
+          position,
+          confidence
+        });
       });
+
       const title = $("#draft-title").value.trim();
       return { title, items, errors };
     }
@@ -729,10 +843,14 @@
     async function saveNow(){
       if (!isEditable) return;
       const { title, items, errors } = collectPayload();
-      if (errors.length){ showError(errors[0]); return; }
+      if (errors.length){
+        showError(errors[0]);
+        return;
+      }
       try{
         const res = await fetch(`/drafts/${draftId}/save`, {
-          method:"POST", headers:{ "Content-Type":"application/json" },
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({ title, items, deleted_item_ids: deletedIds })
         });
         const data = await res.json();
@@ -741,24 +859,40 @@
         $$("#items-body tr").forEach(tr=>{
           const idAttr=tr.getAttribute("data-id");
           if (!idAttr || !/^\d+$/.test(idAttr)){
-            const newId = data.inserted_ids?.[insIdx++]; if (newId) tr.setAttribute("data-id", String(newId));
+            const newId = data.inserted_ids?.[insIdx++];
+            if (newId) tr.setAttribute("data-id", String(newId));
           }
         });
         lastSaved.textContent = data.saved_at || new Date().toISOString();
-        setDirty(false); deletedIds=[];
+        setDirty(false);
+        deletedIds=[];
         showSuccess("Saved");
         rebuildOutline();
-      } catch(e){ showError(String(e)); }
+      } catch(e){
+        showError(String(e));
+      }
     }
 
     if (isEditable){
-      itemsBody.addEventListener("input", ()=>{ setDirty(true); applyConfidenceTint(); });
+      itemsBody.addEventListener("input", ()=>{
+        setDirty(true);
+        applyConfidenceTint();
+      });
       titleInput.addEventListener("input", ()=>setDirty(true));
-      saveBtn.addEventListener("click", (e)=>{ e.preventDefault(); saveNow(); });
+      saveBtn.addEventListener("click", (e)=>{
+        e.preventDefault();
+        saveNow();
+      });
       document.addEventListener("keydown", (e)=>{
         const mod = e.metaKey || e.ctrlKey;
-        if (mod && e.key === "s"){ e.preventDefault(); saveNow(); }
-        else if (e.key === "Delete"){ e.preventDefault(); deleteSelected(); }
+        if (mod && e.key === "s"){
+          e.preventDefault();
+          saveNow();
+        }
+        else if (e.key === "Delete"){
+          e.preventDefault();
+          deleteSelected();
+        }
       });
     }
 
@@ -776,7 +910,9 @@
     }
 
     // row ops
-    let rowSeq=1; function newTempId(){ return "tmp-"+(rowSeq++); }
+    let rowSeq=1;
+    function newTempId(){ return "tmp-"+(rowSeq++); }
+
     function addRow(prefill={}){
       const tr=document.createElement("tr");
       tr.className = "conf-row";
@@ -813,56 +949,131 @@
       itemsBody.prepend(tr);
       const taDesc=$(".desc-text", tr); if (taDesc){ autosize(taDesc); taDesc.addEventListener('input',()=>autosize(taDesc)); }
       const taName=$(".name-text", tr); if (taName){ autosize(taName); taName.addEventListener('input',()=>autosize(taName)); }
-      setDirty(true); rebuildOutline(); applyConfidenceTint(); wireRowProvPins(tr);
+      setDirty(true);
+      rebuildOutline();
+      applyConfidenceTint();
+      wireRowProvPins(tr);
       return tr;
     }
 
-    $("#add-row-btn").addEventListener("click",(e)=>{ e.preventDefault(); const tr=addRow({position:0}); $(".name", tr)?.focus(); });
+    $("#add-row-btn").addEventListener("click",(e)=>{
+      e.preventDefault();
+      const tr=addRow({position:0});
+      $(".name", tr)?.focus();
+    });
 
     itemsBody.addEventListener("click",(e)=>{
-      const btn=e.target.closest("button"); if(!btn) return;
-      const tr=e.target.closest("tr"); if(!tr) return;
+      const btn=e.target.closest("button");
+      if(!btn) return;
+      const tr=e.target.closest("tr");
+      if(!tr) return;
       if (btn.classList.contains("duplicate-btn")){
-        const clone=tr.cloneNode(true); clone.setAttribute("data-id", newTempId());
-        const nameEl=$(".name", clone); if(nameEl) nameEl.value=(nameEl.value||"")+" (copy)";
+        const clone=tr.cloneNode(true);
+        clone.setAttribute("data-id", newTempId());
+        const nameEl=$(".name", clone);
+        if(nameEl) nameEl.value=(nameEl.value||"")+" (copy)";
         itemsBody.insertBefore(clone, tr.nextSibling);
         const ta=$(".desc-text", clone); if(ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
         const taN=$(".name-text", clone); if(taN){ autosize(taN); taN.addEventListener('input',()=>autosize(taN)); }
-        setDirty(true); showToast("Duplicated"); rebuildOutline(); applyConfidenceTint(); wireRowProvPins(clone);
+        setDirty(true);
+        showToast("Duplicated");
+        rebuildOutline();
+        applyConfidenceTint();
+        wireRowProvPins(clone);
       } else if (btn.classList.contains("btn-danger")){
-        queueDelete(tr); tr.remove(); setDirty(true); showToast("Deleted"); rebuildOutline(); applyConfidenceTint();
+        queueDelete(tr);
+        tr.remove();
+        setDirty(true);
+        showToast("Deleted");
+        rebuildOutline();
+        applyConfidenceTint();
       }
     });
 
-    function queueDelete(tr){ const idAttr=tr.getAttribute("data-id"); if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr)); }
+    function queueDelete(tr){
+      const idAttr=tr.getAttribute("data-id");
+      if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr));
+    }
 
-    selectAll?.addEventListener("change", ()=>{ const checked=selectAll.checked; $$(".row-select").forEach(cb=>cb.checked=checked); });
+    selectAll?.addEventListener("change", ()=>{
+      const checked=selectAll.checked;
+      $$(".row-select").forEach(cb=>cb.checked=checked);
+    });
+
     $("#delete-selected-btn").addEventListener("click", (e)=>{
       e.preventDefault();
       const selected=$$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr"));
       if (!selected.length) return;
-      selected.forEach(tr=>{ queueDelete(tr); tr.remove(); });
-      setDirty(true); showToast(`Deleted ${selected.length} item(s)`); 
-      rebuildOutline(); applyConfidenceTint();
+      selected.forEach(tr=>{
+        queueDelete(tr);
+        tr.remove();
+      });
+      setDirty(true);
+      showToast(`Deleted ${selected.length} item(s)`);
+      rebuildOutline();
+      applyConfidenceTint();
     });
 
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;
-      if (el && el.classList.contains("price")){ const cents=dollarsToCents(el.value); el.value=(cents/100).toFixed(2); }
-      if (el && el.classList.contains("category")){ const tr=el.closest("tr"); if (tr) tr.setAttribute("data-cat", el.value || ""); rebuildOutline(); }
-      if (el && el.classList.contains("name")){ rebuildOutline(); }
+      if (el && el.classList.contains("price")){
+        let cents=dollarsToCents(el.value);
+        if (!Number.isFinite(cents) || cents < 0) cents = 0;
+        el.value=(cents/100).toFixed(2);
+      }
+      if (el && el.classList.contains("category")){
+        const tr=el.closest("tr");
+        if (tr) tr.setAttribute("data-cat", el.value || "");
+        rebuildOutline();
+      }
+      if (el && el.classList.contains("name")){
+        rebuildOutline();
+      }
     }, true);
 
-    window.addEventListener("beforeunload",(e)=>{ if (dirty && isEditable){ e.preventDefault(); e.returnValue=""; } });
+    window.addEventListener("beforeunload",(e)=>{
+      if (dirty && isEditable){
+        e.preventDefault();
+        e.returnValue="";
+      }
+    });
 
     // Heartbeat
     let pingTimer=null;
-    function startHeartbeat(){ if (!isEditable) return; stopHeartbeat(); pingTimer=setInterval(async ()=>{ if (document.hidden) return; try{ const res=await fetch(`/drafts/${draftId}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({autosave_ping:true})}); if (res.ok){ const data=await res.json(); if (data && data.saved_at && lastSaved) lastSaved.textContent=data.saved_at; } }catch(_){ } },30000); }
-    function stopHeartbeat(){ if(pingTimer){ clearInterval(pingTimer); pingTimer=null; } }
-    document.addEventListener("visibilitychange", ()=>{ if (document.hidden) stopHeartbeat(); else startHeartbeat(); });
+    function startHeartbeat(){
+      if (!isEditable) return;
+      stopHeartbeat();
+      pingTimer=setInterval(async ()=>{
+        if (document.hidden) return;
+        try{
+          const res=await fetch(`/drafts/${draftId}/save`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({autosave_ping:true})
+          });
+          if (res.ok){
+            const data=await res.json();
+            if (data && data.saved_at && lastSaved) lastSaved.textContent=data.saved_at;
+          }
+        }catch(_){}
+      },30000);
+    }
+    function stopHeartbeat(){
+      if(pingTimer){
+        clearInterval(pingTimer);
+        pingTimer=null;
+      }
+    }
+    document.addEventListener("visibilitychange", ()=>{
+      if (document.hidden) stopHeartbeat();
+      else startHeartbeat();
+    });
     startHeartbeat();
 
-    function toCsvCell(v){ const s=(v??"").toString(); return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s; }
+    function toCsvCell(v){
+      const s=(v??"").toString();
+      return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s;
+    }
     function visibleRowsToCsv(){
       const rows=$$("#items-body tr").filter(tr=>tr.style.display!=="none");
       const headers=["id","name","description","price_cents","category","position","confidence"];
@@ -876,12 +1087,35 @@
         const category=$(".category", tr)?.value??"";
         const position=$(".position", tr)?.value??"";
         const conf=tr.getAttribute("data-confidence")||"";
-        out.push([toCsvCell(idAttr),toCsvCell(name),toCsvCell(desc),toCsvCell(String(cents)),toCsvCell(category),toCsvCell(position),toCsvCell(conf)].join(","));
+        out.push([
+          toCsvCell(idAttr),
+          toCsvCell(name),
+          toCsvCell(desc),
+          toCsvCell(String(cents)),
+          toCsvCell(category),
+          toCsvCell(position),
+          toCsvCell(conf)
+        ].join(","));
       }
       return out.join("\n");
     }
-    function downloadFile(filename, content, mime){ var m=mime||'text/csv;charset=utf-8'; var blob=new Blob(["\uFEFF",content],{type:m}); var url=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
-    exportVisibleBtn?.addEventListener("click", ()=>{ const csv=visibleRowsToCsv(); downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8'); showToast("Exported visible rows"); });
+    function downloadFile(filename, content, mime){
+      var m=mime||'text/csv;charset=utf-8';
+      var blob=new Blob(["\uFEFF",content],{type:m});
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement("a");
+      a.href=url;
+      a.download=filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+    exportVisibleBtn?.addEventListener("click", ()=>{
+      const csv=visibleRowsToCsv();
+      downloadFile('draft_{{ draft.id }}_visible.csv', csv, 'text/csv;charset=utf-8');
+      showToast("Exported visible rows");
+    });
 
     // Provenance tooltip
     function renderProvTip({name, cat, conf, pos}){
@@ -908,7 +1142,12 @@
         </div>
       `;
     }
-    function escapeHtml(s){ return (s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+    function escapeHtml(s){
+      return (s||"")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;");
+    }
 
     function wireRowProvPins(scope){
       (scope? $$(".prov-pin", scope) : $$(".prov-pin")).forEach(pin=>{
@@ -924,7 +1163,9 @@
           positionProvTip(e);
         });
         pin.addEventListener("mousemove", positionProvTip);
-        pin.addEventListener("mouseleave", ()=>{ provTip.style.display = "none"; });
+        pin.addEventListener("mouseleave", ()=>{
+          provTip.style.display = "none";
+        });
       });
     }
     function positionProvTip(evt){
