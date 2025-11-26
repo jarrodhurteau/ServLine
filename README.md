@@ -29,9 +29,11 @@ portal/  # Flask portal website
     raw.html  
     errors/404.html  
     errors/500.html  
+
 infra/   # Infra scripts (ngrok, Flask runner, stop scripts)  
   run_infra.ps1  
   stop_infra.ps1  
+
 storage/ # SQLite database + OCR pipeline + seed + schema  
   servline.db  
   schema.sql  
@@ -48,6 +50,7 @@ storage/ # SQLite database + OCR pipeline + seed + schema
   category_hierarchy.py                # Phase 4 pt.4  
   price_integrity.py                   # Phase 4 pt.5–10  
   import_jobs.py                       # Import job lookup helper (Day 31)  
+
 uploads/  
 .gitignore  
 .vscode/  
@@ -292,15 +295,15 @@ OCR debug stability
 
 ---
 
-## 🚀 **Day 33 – Phase 5 pts.3–4**
+## 🚀 Day 33 – Phase 5 pts.3–4
 
-### ✔ **Phase 5 pt.3 — Long-Name Rescue & Garbage Tuning**
+### ✔ Phase 5 pt.3 — Long-Name Rescue & Garbage Tuning
 - Detect overlong OCR names containing multiple items  
 - Split names cleanly; move trailing fragments into description  
 - Garbage-line detection tuned so real food items never get dropped  
 - Prices, variants, and categories preserved exactly  
 
-### ✔ **Phase 5 pt.4 — Description Cleanup v2**
+### ✔ Phase 5 pt.4 — Description Cleanup v2
 - Ingredient smoothing (better comma spacing, trimmed junk tails)  
 - Token-soup reduction (removes `\, }, Ew, Wm, Ss` etc.)  
 - Normalizes punctuation without overcorrecting  
@@ -311,16 +314,36 @@ OCR debug stability
 
 ---
 
+## 🚀 Day 34 – Phase 5 pts.5–6
+
+### ✔ Phase 5 pt.5 — Deep Ingredient Normalization
+- Detects chopped or half-OCR’d ingredient fragments  
+- Normalizes commas, spacing, and capitalization  
+- Removes stray symbol noise (`°, }, \\, &&`)  
+- Salvage-ratio driven cleanup — evaluates whether content is real or junk  
+- Zero hallucinations — only original OCR tokens are preserved  
+
+### ✔ Phase 5 pt.6 — Connector & Phrase Smoothing
+- Removes dangling connectors (`with`, `and`, `or`, `&`) at phrase tails  
+- Preserves important idioms like “the side”  
+- Converts scattered tokens into readable ingredient lists  
+- Smart rescues for `on the side` and sauce phrases  
+- Names and descriptions now reliably hold correct structural meaning  
+
+⭐ **Day 34 complete — ingredient cleanup is now intelligent, safe, and readable.**
+
+---
+
 # 🌄 Phase 5 – Remaining Roadmap (Text & Semantics)
 
-- Phase 5 pt.5–6 — deeper ingredient normalization  
-- Phase 5 pt.7–8 — variant/size-aware text cleanup  
-- Prep for Phase 6 (structured CSV/JSON import)
+- Phase 5 pt.7 — Ingredient List Normalization Mode (toggleable list-style descriptions)  
+- Phase 5 pt.8 — Size / Variant-aware text cleanup  
+- Prep for Phase 6 (Structured CSV / JSON import)
 
 ---
 
 # ⭐ Next Steps
-You will start **Day 34 – Phase 5 (next pts.)**  
+You will start **Day 35 – Phase 5 pt.7**  
 when you say:
 
-**“ready for day 34”**
+**“ready for day 35”**
