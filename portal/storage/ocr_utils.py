@@ -346,6 +346,47 @@ NON_ALNUM_RATIO_MAX = 0.50
 PRICE_MIN = 100
 PRICE_MAX = 9999
 
+# Common menu-y words to bias lines away from being considered garbage.
+# This is intentionally lightweight — not a full vocabulary, just obvious tells.
+_MENU_HINT_WORDS = {
+    "pizza",
+    "pizzas",
+    "calzone",
+    "calzones",
+    "sub",
+    "subs",
+    "sandwich",
+    "sandwiches",
+    "wrap",
+    "wraps",
+    "salad",
+    "salads",
+    "wing",
+    "wings",
+    "burger",
+    "burgers",
+    "fries",
+    "pasta",
+    "spaghetti",
+    "lasagna",
+    "garlic",
+    "bread",
+    "sticks",
+    "cheese",
+    "cheesy",
+    "tenders",
+    "nuggets",
+    "combo",
+    "special",
+    "specials",
+    "appetizer",
+    "appetizers",
+    "side",
+    "sides",
+    "dessert",
+    "desserts",
+}
+
 
 def clean_text(s: str) -> str:
     s = s.strip()
@@ -419,15 +460,80 @@ def find_price_candidates(text: str) -> List[int]:
     return vals
 
 
+def _looks_like_menu_line(text: str, price_hit: bool) -> bool:
+    """
+    Heuristic to decide if a line is *probably* a real menu line, so that we
+    bias against discarding it as garbage.
+
+    Signals:
+    - Contains common menu keywords ("pizza", "salad", "wings", etc.).
+    - Has at least one space, at least one alpha char, and reasonable length.
+    - If there's a price hit and any alpha, treat it as menu-ish unless it is
+      obviously symbol noise.
+    """
+    t = text.lower()
+    if not t:
+        return False
+
+    has_alpha = any(c.isalpha() for c in t)
+    has_space = " " in t
+    length = len(t)
+
+    # Keyword hint: strong signal this is real menu text.
+    for kw in _MENU_HINT_WORDS:
+        if kw in t:
+            return True
+
+    # Price + some letters is almost always a menu item or variant line.
+    if price_hit and has_alpha and length >= 8:
+        return True
+
+    # Generic "looks like text" heuristic: has space, letters, and isn't tiny.
+    if has_alpha and has_space and length >= 15:
+        return True
+
+    return False
+
+
 def is_garbage_line(text: str, price_hit: bool) -> bool:
+    """
+    Decide whether a raw OCR line is garbage.
+
+    Day 33 tuning:
+    - More forgiving for lines that *look* like real menu text.
+    - Extra leniency when a valid price is present (price_hit=True).
+    - Still aggressive on pure symbol gibberish and obviously invalid text.
+    """
     t = clean_text(text)
     if not t or len(t) < 2:
         return True
+
     vr = vowel_ratio(t)
     mcr = max_consonant_run(t)
     nar = non_alnum_ratio(t)
+
+    # If it looks like a plausible menu line, heavily bias toward *keeping* it.
+    if _looks_like_menu_line(t, price_hit):
+        # Only treat as garbage if it's extreme symbol noise.
+        if nar > 0.85 and vr < 0.10:
+            return True
+        if mcr > MAX_CONSONANT_RUN + 4:
+            return True
+        # Otherwise, keep it.
+        return False
+
+    # For lines with a price, relax thresholds slightly to avoid burning
+    # multi-item or variant lines that happen to look a bit noisy.
     if price_hit:
-        return (vr < (VOWEL_RATIO_MIN * 0.6)) or (mcr > MAX_CONSONANT_RUN + 2) or (nar > NON_ALNUM_RATIO_MAX * 1.25)
+        if vr < (VOWEL_RATIO_MIN * 0.6):
+            return True
+        if mcr > MAX_CONSONANT_RUN + 2:
+            return True
+        if nar > NON_ALNUM_RATIO_MAX * 1.25:
+            return True
+        return False
+
+    # Non-price lines: use original stricter guards.
     if vr < VOWEL_RATIO_MIN:
         return True
     if mcr > MAX_CONSONANT_RUN:
@@ -509,124 +615,3 @@ def _merge_lines_text(lines: List[Line]) -> str:
         if t:
             out.append(t)
     return "\n".join(out)
-
-
-def _guess_block_type(lines: List[Line]) -> Optional[str]:
-    """Light heuristic: all-caps short → header; many digits → price; else item."""
-    merged = _merge_lines_text(lines)
-    m = merged.replace("\n", " ").strip()
-    if not m:
-        return None
-    if m.isupper() and len(m) <= 40:
-        return "header"
-    digits = sum(ch.isdigit() for ch in m)
-    if digits >= max(4, len(m) // 3):
-        return "price"
-    return "item"
-
-
-def group_text_blocks(
-    lines: List[Line],
-    *,
-    align_tol_px: int = 14,
-    vert_overlap_px: int = 8,
-    horiz_gap_px: int = 24,
-) -> List[TextBlock]:
-    """
-    Cluster OCR lines into logical text blocks using simple geometric cues:
-    - vertical overlap + (small horizontal gap OR rough left/right alignment)
-    - merge bbox and maintain line order
-
-    Returns a list of TextBlock dicts: {bbox:{x,y,w,h}, lines:[...], merged_text:str, block_type?:str}
-    """
-    if not lines:
-        return []
-
-    # Sort stable top→bottom, then left→right
-    sorted_lines = sorted(lines, key=lambda l: (l["bbox"]["y"], l["bbox"]["x"]))
-
-    # Each block stores: xyxy bbox and line list; we convert back to {x,y,w,h} later.
-    blocks_xy: List[Tuple[Tuple[int, int, int, int], List[Line]]] = []
-
-    for ln in sorted_lines:
-        lb = bbox_to_x1y1x2y2(ln["bbox"])
-        placed = False
-        for i, (bb, lst) in enumerate(blocks_xy):
-            v_overlap = _vert_overlap_xy(bb, lb)
-            h_gap = _horiz_gap_xy(bb, lb)
-            if v_overlap >= vert_overlap_px and (h_gap <= horiz_gap_px or _rough_align_xy(bb, lb, align_tol_px)):
-                # append to this block
-                lst.append(ln)
-                blocks_xy[i] = (_expand_xyxy(bb, lb), lst)
-                placed = True
-                break
-        if not placed:
-            blocks_xy.append((lb, [ln]))
-
-    out: List[TextBlock] = []
-    for bb, lst in blocks_xy:
-        lst.sort(key=lambda l: (l["bbox"]["y"], l["bbox"]["x"]))
-        merged = _merge_lines_text(lst)
-        btype = _guess_block_type(lst)
-        out.append({
-            "bbox": _xyxy_to_bbox(*bb),
-            "lines": lst,
-            "merged_text": merged,
-            "block_type": btype,  # optional
-        })
-    return out
-
-
-def blocks_for_preview(blocks: List[TextBlock]) -> List[OCRBlock]:
-    """
-    Convert TextBlock list to compact preview-friendly OCRBlock dicts:
-
-    {
-      "bbox": [x1,y1,x2,y2],
-      "merged_text": "...",
-      "block_type": "...",
-      "lines": [{text,bbox,confidence}],
-      # Optional mirrored hierarchy/inference fields when present on TextBlock:
-      # "id", "category", "category_confidence", "rule_trace",
-      # "subcategory", "section_path"
-    }
-    """
-    preview: List[OCRBlock] = []
-    for b in blocks:
-        x1, y1, x2, y2 = bbox_to_x1y1x2y2(b["bbox"])
-        p_lines: List[Dict[str, object]] = []
-        for ln in b["lines"]:
-            lb = ln["bbox"]
-            p_lines.append({
-                "text": ln.get("text", ""),
-                "bbox": [lb["x"], lb["y"], lb["x"] + lb["w"], lb["y"] + lb["h"]],
-                # Line may not carry explicit conf; derive avg from words if present
-                "confidence": float(
-                    (sum(w.get("conf", 0.0) for w in (ln.get("words") or [])) / max(1, len(ln.get("words") or [])))
-                    if ln.get("words") else 0.0
-                ),
-            })
-
-        block_payload: OCRBlock = {
-            "bbox": [x1, y1, x2, y2],
-            "merged_text": b.get("merged_text", ""),
-            "block_type": b.get("block_type"),
-            "lines": p_lines,
-        }
-
-        # Mirror optional TextBlock metadata into OCRBlock for overlays/debugging.
-        if "id" in b:
-            block_payload["id"] = b["id"]  # type: ignore[assignment]
-        if "category" in b:
-            block_payload["category"] = b.get("category")  # type: ignore[assignment]
-        if "category_confidence" in b:
-            block_payload["category_confidence"] = b.get("category_confidence")  # type: ignore[assignment]
-        if "rule_trace" in b:
-            block_payload["rule_trace"] = b.get("rule_trace")  # type: ignore[assignment]
-        if "subcategory" in b:
-            block_payload["subcategory"] = b.get("subcategory")  # type: ignore[assignment]
-        if "section_path" in b:
-            block_payload["section_path"] = b.get("section_path")  # type: ignore[assignment]
-
-        preview.append(block_payload)
-    return preview
