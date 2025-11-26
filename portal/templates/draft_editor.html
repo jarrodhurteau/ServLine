@@ -302,23 +302,18 @@
               <button class="btn btn-secondary" title="Join split lines, merge descriptions, and polish OCR noise.">✨ Clean & Refine</button>
             </form>
 
-            <!-- Finalize with AI Cleanup (form → redirect + status pill) -->
-            {% if draft.source_job_id %}
-              <form id="finalize-ai-form"
-                    action="{{ url_for('imports_ai_commit', job_id=draft.source_job_id) }}?redirect=1"
-                    method="post"
-                    style="display:inline-flex; align-items:center; gap:8px;">
-                <button class="btn btn-secondary" id="finalize-ai-btn"
-                        title="Finalize with AI cleanup — merge and polish items">
-                  ✨ Finalize with AI Cleanup
-                </button>
-                <span id="finalize-status" class="pill pill-gray" style="display:none;">Idle</span>
-              </form>
-            {% else %}
-              <button class="btn btn-secondary" title="No import job linked to this draft" disabled>
+            <!-- Finalize with AI Cleanup (now uses /drafts/<id>/cleanup and always available for this draft) -->
+            <form id="finalize-ai-form"
+                  action="{{ url_for('cleanup_draft', draft_id=draft.id) }}?redirect=1"
+                  method="post"
+                  style="display:inline-flex; align-items:center; gap:8px;">
+              <button class="btn btn-secondary" id="finalize-ai-btn"
+                      title="Finalize with AI cleanup — apply full AI cleanup pipeline to this draft">
                 ✨ Finalize with AI Cleanup
               </button>
-            {% endif %}
+              <span id="finalize-status" class="pill pill-gray" style="display:none;">Idle</span>
+            </form>
+
 
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
           </div>
