@@ -1,10 +1,12 @@
 # servline/storage/ai_cleanup.py
 """
-AI Cleanup for Draft Items — Day 33 (Text-only Safe Mode + Long-Name Rescue)
+AI Cleanup for Draft Items — Day 34
+(Text-only Safe Mode + Long-Name Rescue + Deep Ingredient Smoothing)
 
 Responsibilities (current scope):
 - Normalize item names & descriptions (soft cleanup; preserve as much as possible).
 - Rescue overly-long names by moving trailing detail into the description when appropriate.
+- Perform deep ingredient normalization and connector/phrase smoothing on descriptions.
 - Leave prices, categories, and OCR metadata exactly as produced by the OCR pipeline.
 
 Notes:
@@ -145,7 +147,106 @@ def _strip_token_soup(t: str) -> str:
     return " ".join(kept)
 
 
+def _normalize_ingredients(desc: str) -> str:
+    """
+    Day 34 – Pt.5: Deep ingredient normalization.
+
+    Focus:
+      - Drop symbol-only tokens that slipped through earlier cleanup.
+      - Light capitalization smoothing for ALL-CAPS blocks.
+      - Preserve real words and abbreviations, do not invent new text.
+    """
+    t = desc or ""
+    if not t:
+        return t
+
+    # Drop pure-symbol tokens like "***", "•", "—,", etc.
+    tokens = t.split()
+    kept: List[str] = []
+    for tok in tokens:
+        core = tok.strip(",.;:/!?)(").strip()
+        if not core:
+            # Pure punctuation / empty after stripping
+            continue
+        # Keep anything that has at least one alphanumeric char
+        if re.search(r"[A-Za-z0-9]", core):
+            kept.append(tok)
+    t = " ".join(kept)
+
+    # Light capitalization normalization for obvious ALL-CAPS blocks.
+    letters = [ch for ch in t if ch.isalpha()]
+    if letters:
+        upper_ratio = sum(1 for ch in letters if ch.isupper()) / len(letters)
+        if upper_ratio > 0.8 and len(letters) >= 10:
+            lower = t.lower().strip()
+            if lower:
+                if len(lower) == 1:
+                    t = lower.upper()
+                else:
+                    t = lower[0].upper() + lower[1:]
+
+    return _normalize_spaces(t)
+
+
+def _smooth_connectors(desc: str) -> str:
+    """
+    Day 34 – Pt.6: Connector & phrase smoothing.
+
+    Focus:
+      - Remove stray/dangling 'and/or/&/with/on the/for the' tails at the very end.
+      - Normalize duplicated connectors and messy list punctuation.
+      - Keep lists readable without changing meaning.
+    """
+    t = desc or ""
+    if not t:
+        return t
+
+    # Normalize "and/or" style patterns into a single connector (no hallucination).
+    t = re.sub(r"\band\s*/\s*or\b", "or", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bor\s*/\s*and\b", "or", t, flags=re.IGNORECASE)
+
+    # Collapse duplicated connectors: "and and", "and or", "or and", "& and", etc.
+    t = re.sub(
+        r"\b(and|or|&)\s+(and|or|&)\b",
+        r"\1",
+        t,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove extra comma before connectors: "pepperoni, and sausage" -> "pepperoni and sausage"
+    t = re.sub(
+        r",\s+(and|or|&)\b",
+        r" \1",
+        t,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove dangling tail connectors at the *absolute* end, ignoring punctuation.
+    # Examples we want to trim:
+    #   "Served with" -> "Served"
+    #   "with and" -> "with"
+    tail_pattern = re.compile(
+        r"(?:\b(with|and|or|&|on the|for the)\b)[\s\.,;:!]*$",
+        flags=re.IGNORECASE,
+    )
+    t = tail_pattern.sub("", t).rstrip()
+
+    return _normalize_spaces(t)
+
+
 def _smooth_ingredients(desc: str) -> str:
+    """
+    Description smoothing v2 (Day 33 baseline):
+
+    - Normalize comma spacing.
+    - Trim simple dangling connectors (with/and/or/on/in).
+    - Trim trailing single-letter junk tokens (except size abbreviations).
+    - Run token-soup cleanup v2.
+
+    Day 34 extends this with:
+      - _normalize_ingredients (deep ingredient normalization).
+      - _smooth_connectors (connector & phrase smoothing).
+    """
     t = desc or ""
     if not t:
         return t
@@ -156,7 +257,7 @@ def _smooth_ingredients(desc: str) -> str:
 
     t = _normalize_spaces(t)
 
-    # Trim dangling connectors
+    # Trim simple dangling connectors
     lower = t.lower()
     for conn in (" with", " and", " or", " on", " in"):
         if lower.endswith(conn):
@@ -260,7 +361,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
     return name, ""
 
 
-# ---------- Description cleanup (SOFT MODE, v2) ----------
+# ---------- Description cleanup (SOFT MODE, v3 — Day 34) ----------
 
 def clean_description_soft(s: str) -> Tuple[str, float]:
     """
@@ -268,6 +369,14 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
 
     salvage_ratio = portion of tokens preserved.
     Used to decide whether to prefix [AI Cleaned] or not.
+
+    Pipeline (Day 34):
+      - Unicode + run collapse
+      - Punctuation cleanup
+      - Space normalization
+      - _smooth_ingredients            (Day 33 base)
+      - _normalize_ingredients         (Pt.5 — deep normalization)
+      - _smooth_connectors             (Pt.6 — connector & phrase smoothing)
     """
     if not s:
         return "", 0.0
@@ -279,7 +388,11 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
     t = _collapse_runs(t)
     t = _cleanup_punct(t)
     t = _normalize_spaces(t)
-    t = _smooth_ingredients(t)  # now includes token-soup filtering v2
+
+    # Day 33–34 description refinement pipeline
+    t = _smooth_ingredients(t)
+    t = _normalize_ingredients(t)
+    t = _smooth_connectors(t)
 
     cleaned_tokens = t.split()
     # Count how many cleaned tokens still appear in the raw description
@@ -316,7 +429,7 @@ def _decide_description(desc_raw: str, desc_clean: str, salvage_ratio: float) ->
     return desc_clean
 
 
-# ---------- Core normalizer (Day 33 text-only mode) ----------
+# ---------- Core normalizer (Day 34 text-only mode) ----------
 
 def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -355,7 +468,7 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             x for x in (desc_raw, name_tail) if x
         ).strip()
 
-        # Step 4: soft-clean description text (token-soup + punctuation)
+        # Step 4: soft-clean description text (token-soup + punctuation + Day 34 smoothing)
         desc_clean, salvage_ratio = clean_description_soft(combined_desc_raw)
         desc_final = _decide_description(combined_desc_raw, desc_clean, salvage_ratio)
 
