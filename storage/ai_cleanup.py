@@ -68,7 +68,7 @@ _DESC_SHORT_WHITELIST = {
 }
 
 # Ingredient-list mode toggle (Day 35 – Pt.7–8)
-INGREDIENT_LIST_MODE = True
+INGREDIENT_LIST_MODE = False
 
 # Size/portion words that should NOT become standalone "ingredients"
 SIZE_WORDS = {
@@ -745,5 +745,7 @@ def apply_ai_cleanup(draft_id: int) -> int:
         return 0
 
     updated = normalize_draft_items(items)
+    from .quality_guard import print_report
+    print_report(updated)
     res = upsert_draft_items(int(draft_id), updated)
     return len(res.get("updated_ids", [])) + len(res.get("inserted_ids", []))
