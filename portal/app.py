@@ -3118,6 +3118,9 @@ def imports_ai_commit(job_id: int):
 
     NOW prefers the user-rotated working image if present.
     """
+    from storage.ai_cleanup import apply_ai_cleanup
+
+
     # detect redirect vs JSON (matches fix-descriptions pattern)
     ct = (request.headers.get("Content-Type") or "").lower()
     is_form_post = ct.startswith("application/x-www-form-urlencoded") or ct.startswith("multipart/form-data")
@@ -3245,29 +3248,116 @@ def imports_ai_commit(job_id: int):
             return jsonify({"ok": False, "error": f"Failed to clear existing items: {e}"}), 500
 
     ins = drafts_store.upsert_draft_items(draft_id, new_items)
-    # Nudge updated_at so the draft bubbles in /drafts
+
+    # Run AI cleanup on the freshly-committed draft
     try:
-        drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"))
+        updated = apply_ai_cleanup(int(draft_id))
+    except Exception as e:
+        # If cleanup blows up, fall back but don't kill the whole request
+        updated = 0
+        app.logger.exception("AI cleanup during imports_ai_commit failed: %s", e)
+
+    # Nudge updated_at + status
+    try:
+        drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"), status="finalized")
+    except TypeError:
+        # older save_draft_metadata without status kwarg
+        try:
+            drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"))
+        except Exception:
+            pass
     except Exception:
         pass
 
+    inserted_count = len(ins.get("inserted_ids", []))
+    updated_count  = len(ins.get("updated_ids", []))
+
     if wants_redirect:
-        flash(f"AI commit complete — {len(ins.get('inserted_ids', []))} item(s) inserted.", "success")
+        flash(
+            f"Finalize complete — {inserted_count} item(s) inserted, {int(updated)} cleaned.",
+            "success",
+        )
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
     return jsonify({
         "ok": True,
         "job_id": job_id,
         "draft_id": draft_id,
-        "inserted_count": len(ins.get("inserted_ids", [])),
-        "updated_count": len(ins.get("updated_ids", [])),
+        "inserted_count": inserted_count,
+        "updated_count": updated_count,
+        "cleaned_count": int(updated),
+        "status": "finalized",
     }), 200
+
+
+@app.post("/imports/<int:job_id>/ai/finalize")
+@login_required
+def imports_ai_finalize(job_id: int):
+    """
+    One-click "Finalize with AI Cleanup" flow for an import job.
+
+    Steps:
+      1) Reuse /imports/<job_id>/ai/commit to regenerate draft items from the
+         latest AI heuristics (variants, price_text, etc.).
+      2) Run apply_ai_cleanup() on the resulting draft.
+      3) Mark draft as finalized and redirect into the Draft Editor.
+
+    This uses the same AI pipeline as imports_ai_commit and the same cleanup
+    pipeline as /drafts/<draft_id>/cleanup.
+    """
+    from storage.ai_cleanup import apply_ai_cleanup
+    _require_drafts_storage()
+
+    # --- Step 1: run AI commit (side effects only; ignore its Response) ---
+    try:
+        # This will:
+        #   - OCR the upload (preferring rotated working copy)
+        #   - run analyze_ocr_text()
+        #   - replace draft_items for this job
+        imports_ai_commit(job_id)  # noqa: F821 - calling view function directly
+    except Exception as e:
+        flash(f"AI commit failed: {e}", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    # --- Step 2: locate draft for this job ---
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        flash("No draft available for this job after AI commit.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    # Flip status to processing while cleanup runs
+    try:
+        drafts_store.save_draft_metadata(int(draft_id), status="processing")
+    except Exception:
+        pass
+
+    # --- Step 3: run AI cleanup on the draft ---
+    try:
+        updated = apply_ai_cleanup(int(draft_id))
+        try:
+            drafts_store.save_draft_metadata(int(draft_id), status="finalized")
+        except Exception:
+            pass
+
+        flash(f"AI finalize complete — {int(updated)} item(s) cleaned.", "success")
+        return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+
+    except Exception as e:
+        # On failure, roll status back to editing so UI doesn't get stuck
+        try:
+            drafts_store.save_draft_metadata(int(draft_id), status="editing")
+        except Exception:
+            pass
+        flash(f"AI finalize failed: {e}", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
 
 # ------------------------
 # Diagnostics
 # ------------------------
 @app.get("/__ping")
 def __ping():
+
     return jsonify({"ok": True, "time": _now_iso()})
 
 @app.get("/__routes")

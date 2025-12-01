@@ -339,7 +339,6 @@ def _clamp_price_cents(cents: Optional[int]) -> Optional[int]:
     return int(cents)
 
 
-
 def _pick_price_from_ai_or_text(
     ai_price_candidates: List[Dict[str, Any]],
     name: str,
@@ -1036,6 +1035,92 @@ def create_draft_from_import(
         )
     except Exception:
         pass
+    return {"id": draft_id, "draft_id": draft_id}
+
+
+# ------------------------------------------------------------
+# Structured import → Drafts
+# ------------------------------------------------------------
+def create_draft_from_structured_items(
+    title: str,
+    restaurant_id: Optional[int],
+    items: Iterable[Dict[str, Any]],
+    *,
+    source_type: str = "structured_csv",
+    source_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Create a new draft from structured CSV/JSON items, bypassing OCR.
+
+    Assumptions about each item dict (from storage.structured_import):
+      - name: required, non-empty
+      - description: optional string
+      - category: optional
+      - subcategory: optional (we prefer this as DB category when present)
+      - price_cents: optional integer cents
+      - size_name, tags, sku, pos_code: currently ignored at DB level (Phase 6+)
+
+    We:
+      - Prefer subcategory over category for the DB 'category' column.
+      - Default price_cents to 0 when absent, but NEVER invent prices.
+      - Default confidence to 100 for structured imports (high trust).
+      - Store a small 'source' JSON blob indicating that this is a structured import.
+    """
+    # Persist a small source blob so we can future-debug where this draft came from.
+    src_payload = {
+        "kind": "structured_import",
+        "source_type": source_type,
+        "meta": source_meta or {},
+    }
+    source_blob = json.dumps(src_payload, ensure_ascii=False)
+
+    draft_id = _insert_draft(
+        title=title,
+        restaurant_id=restaurant_id,
+        status="editing",
+        source=source_blob,
+        source_job_id=None,
+        source_file_path=None,
+    )
+
+    flat_items: List[Dict[str, Any]] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+
+        name = (raw.get("name") or "").strip()
+        if not name:
+            continue
+
+        description = (raw.get("description") or "").strip()
+        subcat = (raw.get("subcategory") or "").strip() or None
+        cat = (raw.get("category") or "").strip() or None
+        category = subcat or cat
+
+        price_cents_raw = raw.get("price_cents")
+        try:
+            price_cents = int(price_cents_raw) if price_cents_raw is not None else 0
+        except Exception:
+            price_cents = 0
+        if price_cents < 0:
+            price_cents = 0
+
+        confidence = raw.get("confidence")
+        if confidence is None:
+            confidence = 100  # structured import: assume high confidence
+
+        flat_items.append(
+            {
+                "name": name,
+                "description": description,
+                "price_cents": price_cents,
+                "category": category,
+                "position": None,
+                "confidence": confidence,
+            }
+        )
+
+    _insert_items_bulk(draft_id, flat_items)
     return {"id": draft_id, "draft_id": draft_id}
 
 
