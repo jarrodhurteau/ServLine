@@ -1,12 +1,13 @@
 # servline/storage/ai_cleanup.py
 """
-AI Cleanup for Draft Items — Day 34
-(Text-only Safe Mode + Long-Name Rescue + Deep Ingredient Smoothing)
+AI Cleanup for Draft Items — Day 35
+(Text-only Safe Mode + Long-Name Rescue + Deep Ingredient Smoothing + Ingredient-List Mode)
 
 Responsibilities (current scope):
 - Normalize item names & descriptions (soft cleanup; preserve as much as possible).
 - Rescue overly-long names by moving trailing detail into the description when appropriate.
 - Perform deep ingredient normalization and connector/phrase smoothing on descriptions.
+- Convert description-style text into clean ingredient lists where safe.
 - Leave prices, categories, and OCR metadata exactly as produced by the OCR pipeline.
 
 Notes:
@@ -65,6 +66,53 @@ _DESC_SHORT_WHITELIST = {
     "and",
     "or",
 }
+
+# Ingredient-list mode toggle (Day 35 – Pt.7–8)
+INGREDIENT_LIST_MODE = True
+
+# Size/portion words that should NOT become standalone "ingredients"
+SIZE_WORDS = {
+    "small",
+    "sm",
+    "medium",
+    "md",
+    "large",
+    "lg",
+    "jumbo",
+    "xl",
+    "extra large",
+    "x-large",
+    "personal",
+    "family",
+    "whole",
+    "half",
+    "slice",
+    "by the slice",
+    "single",
+    "double",
+    "triple",
+}
+
+# Safe plural → singular mapping (very conservative)
+_PLURAL_SINGULAR_MAP: Dict[str, str] = {
+    "tomatoes": "tomato",
+    "potatoes": "potato",
+    "jalapenos": "jalapeno",
+}
+
+# Phrases we want to keep intact, even when splitting on "and"/"or"
+_INGR_PHRASE_WHITELIST: List[str] = [
+    "mac and cheese",
+    "fish and chips",
+    "salt and pepper",
+    "biscuits and gravy",
+    "peanut butter and jelly",
+    "cookies and cream",
+    "chips and salsa",
+    "ham and cheese",
+    "steak and eggs",
+    "eggs and bacon",
+]
 
 
 # Helpers
@@ -320,6 +368,107 @@ def _smooth_ingredients(desc: str) -> str:
     return t
 
 
+def _normalize_ingredient_list(desc: str) -> str:
+    """
+    Day 35 – Pt.7–8: Ingredient list normalization + size-word stripping.
+
+    Convert description-like text into a comma-separated ingredient list, when safe:
+      - Strip filler connectors (with/and/or, served with, topped with, etc.).
+      - Keep known phrases like "mac and cheese" intact.
+      - Drop obvious size words ("small", "large", "12 inch").
+      - No hallucinations: only rearrange / remove, never invent new tokens.
+
+    If the text looks like a serving instruction ("on the side" etc.),
+    we return it unchanged to preserve previous safety guarantees.
+    """
+    t = desc or ""
+    if not t:
+        return t
+
+    lower = t.lower()
+
+    # Preserve key service instructions exactly.
+    if re.search(r"\b(on\s+the\s+side|on\s+side|the\s+side)\b", lower):
+        return _normalize_spaces(t)
+
+    # Replace whitelisted phrases with placeholders so we don't split them on "and"
+    phrase_placeholders: Dict[str, str] = {}
+    working = t
+    for phrase in _INGR_PHRASE_WHITELIST:
+        pattern = re.compile(re.escape(phrase), flags=re.IGNORECASE)
+        if pattern.search(working):
+            placeholder = phrase.upper().replace(" ", "_")
+            working = pattern.sub(placeholder, working)
+            phrase_placeholders[placeholder] = phrase
+
+    # Normalize separator words into commas
+    working = re.sub(
+        r"\b(served with|served w\/|topped with|comes with|made with|includes)\b",
+        ",",
+        working,
+        flags=re.IGNORECASE,
+    )
+    working = re.sub(r"\b(and|or|with)\b", ",", working, flags=re.IGNORECASE)
+    working = re.sub(r"&", ",", working)
+
+    # Collapse multiple commas
+    working = re.sub(r",\s*,+", ",", working)
+    parts = [p.strip(" ,;") for p in working.split(",")]
+
+    ingredients: List[str] = []
+    seen_lower: set[str] = set()
+
+    for part in parts:
+        if not part:
+            continue
+
+        core = part.strip()
+        core_lower = core.lower()
+
+        # Skip pure filler / obvious junk
+        if core_lower in {"served", "choice of", "choice", "your choice"}:
+            continue
+
+        # Drop pure size entries
+        if core_lower in SIZE_WORDS:
+            continue
+        if re.match(r"^\d{1,2}\s*(oz|ounce|ounces|inch|in\.|\"|'')$", core_lower):
+            continue
+        if re.match(r"^\d{1,2}\"$", core_lower):
+            continue
+
+        # Light plural → singular mapping on final word (very conservative)
+        words = core.split()
+        if not words:
+            continue
+        last = words[-1].lower()
+        mapped = _PLURAL_SINGULAR_MAP.get(last, last)
+        if mapped != last:
+            words[-1] = mapped
+            core = " ".join(words)
+
+        # De-duplicate by case-insensitive text
+        norm_lower = core.lower()
+        if not norm_lower:
+            continue
+        if norm_lower in seen_lower:
+            continue
+        seen_lower.add(norm_lower)
+        ingredients.append(core)
+
+    # If we ended up with nothing (e.g., it was all size words), fall back to original text
+    if not ingredients:
+        return _normalize_spaces(desc)
+
+    out = ", ".join(ingredients)
+
+    # Restore whitelisted phrases
+    for placeholder, phrase in phrase_placeholders.items():
+        out = out.replace(placeholder, phrase)
+
+    return _normalize_spaces(out)
+
+
 # ---------- Name cleanup (ultra-safe) ----------
 
 def clean_item_name(s: str) -> str:
@@ -431,7 +580,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
     return name, ""
 
 
-# ---------- Description cleanup (SOFT MODE, v3 — Day 34) ----------
+# ---------- Description cleanup (SOFT MODE, v3 — Day 35) ----------
 
 def clean_description_soft(s: str) -> Tuple[str, float]:
     """
@@ -440,18 +589,15 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
     salvage_ratio = portion of tokens preserved.
     Used to decide whether to prefix [AI Cleaned] or not.
 
-    Pipeline (Day 34 + micro-passes):
+    Pipeline (Day 35):
       - Unicode + run collapse
       - Punctuation cleanup
       - Space normalization
-      - _smooth_ingredients            (Day 33 base)
-      - _normalize_w_with              (safe "w/" -> "with" normalization)
-      - _normalize_ingredients         (Pt.5 — deep normalization)
-      - _smooth_connectors             (Pt.6 — connector & phrase smoothing)
-
-    Future (ingredient-list mode):
-      - Optional pass to remove connectors like 'with', 'and' inside pure
-        ingredient lists to render cold lists only.
+      - _smooth_ingredients        (Day 33 base)
+      - _normalize_w_with          (safe "w/" -> "with" normalization)
+      - _normalize_ingredients     (Pt.5 — deep normalization)
+      - _smooth_connectors         (Pt.6 — connector & phrase smoothing)
+      - _normalize_ingredient_list (Pt.7–8 — ingredient list mode + size stripping)
     """
     if not s:
         return "", 0.0
@@ -464,11 +610,15 @@ def clean_description_soft(s: str) -> Tuple[str, float]:
     t = _cleanup_punct(t)
     t = _normalize_spaces(t)
 
-    # Day 33–34 description refinement pipeline
+    # Day 33–35 description refinement pipeline
     t = _smooth_ingredients(t)
     t = _normalize_w_with(t)
     t = _normalize_ingredients(t)
     t = _smooth_connectors(t)
+
+    # Optional ingredient-list normalization (can be toggled via INGREDIENT_LIST_MODE)
+    if INGREDIENT_LIST_MODE:
+        t = _normalize_ingredient_list(t)
 
     cleaned_tokens = t.split()
     # Count how many cleaned tokens still appear in the raw description
@@ -505,7 +655,7 @@ def _decide_description(desc_raw: str, desc_clean: str, salvage_ratio: float) ->
     return desc_clean
 
 
-# ---------- Core normalizer (Day 34 text-only mode) ----------
+# ---------- Core normalizer (Day 35 text-only mode) ----------
 
 def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -544,7 +694,7 @@ def normalize_draft_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             x for x in (desc_raw, name_tail) if x
         ).strip()
 
-        # Step 4: soft-clean description text (token-soup + punctuation + Day 34 smoothing)
+        # Step 4: soft-clean description text (token-soup + punctuation + Day 35 smoothing)
         desc_clean, salvage_ratio = clean_description_soft(combined_desc_raw)
         desc_final = _decide_description(combined_desc_raw, desc_clean, salvage_ratio)
 

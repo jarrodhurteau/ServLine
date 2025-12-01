@@ -246,13 +246,13 @@ Day 27 complete.
 ## 🚀 Day 28 – Phase 4 pts.5–6
 
 ### ✔ Phase 4 pt.5 — Price Integrity Engine
-- Added `price_integrity.py`
-- Detects outlier prices and unsafe OCR misreads
-- Auto-corrects obvious cases
-- Produces `corrected_price_cents` + flags
-- Integrated into `ocr_pipeline`
-- Finalize uses corrected prices
-- All exports validated
+- Added `price_integrity.py`  
+- Detects outlier prices and unsafe OCR misreads  
+- Auto-corrects obvious cases  
+- Produces `corrected_price_cents` + flags  
+- Integrated into `ocr_pipeline`  
+- Finalize uses corrected prices  
+- All exports validated  
 
 ### ✔ Phase 4 pt.6 — Draft-Friendly Variants
 - Normalized variant/price mapping  
@@ -308,7 +308,7 @@ OCR debug stability
 - Token-soup reduction (removes `\, }, Ew, Wm, Ss` etc.)  
 - Normalizes punctuation without overcorrecting  
 - Salvage-ratio tagging (`[AI Cleaned]`) only when needed  
-- Verified end-to-end on pizza_real import (Preview → Draft → Finalize → Export)
+- Verified end-to-end on pizza_real import (Preview → Draft → Finalize → Export)  
 
 ⭐ **Day 33 complete — text structure is now stable and readable, with no risk to prices or categories.**
 
@@ -334,16 +334,43 @@ OCR debug stability
 
 ---
 
-# 🌄 Phase 5 – Remaining Roadmap (Text & Semantics)
+## 🚀 Day 35 – Phase 5 pts.7–8
 
-- Phase 5 pt.7 — Ingredient List Normalization Mode (toggleable list-style descriptions)  
-- Phase 5 pt.8 — Size / Variant-aware text cleanup  
-- Prep for Phase 6 (Structured CSV / JSON import)
+### ✔ Phase 5 pt.7 — Ingredient List Normalization Mode
+- Introduced **ingredient-list mode** inside `ai_cleanup.py`  
+- Converts description text into clean, comma-separated ingredient lists  
+- Strips connector/filler words (`with`, `and`, `or`, `of`, `&`, etc.) without inventing new tokens  
+- Preserves key phrases like “mac and cheese” and other whitelisted ingredient combos  
+- Uses salvage-ratio logic and `[AI Cleaned]` tagging when content is mostly junk  
+- Fully text-only: structured fields (prices, categories, variants) remain untouched  
+
+### ✔ Phase 5 pt.8 — Size / Variant-Aware Text Cleanup
+- Added size-word and portion-word stripping to prevent sizes from becoming “ingredients”  
+- Ensures variant labels (e.g., sauces, styles) are not duplicated or corrupted in descriptions  
+- Guards descriptions that carry “on the side” style service text so meaning is preserved  
+- Integrated as the final pass in the description pipeline, behind a toggleable `INGREDIENT_LIST_MODE`  
+- Verified on `pizza_real.pdf` end-to-end (Preview → Draft → Clean & Refine export)  
+
+⭐ **Day 35 complete — ingredient descriptions are now list-style, size-safe, variant-aware, and still strictly non-hallucinated.**
+
+---
+
+# 🌄 Phase 5 – Status & Next Focus
+
+- Phase 5 text surgeon is now:
+  - Long-name aware  
+  - Ingredient-list aware  
+  - Size/variant-aware  
+  - Safe for prices/categories/variants  
+
+Next major focus after Phase 5:
+- Phase 6 — Structured CSV / JSON menu import (leveraging our finalized text/semantic pipeline).
 
 ---
 
 # ⭐ Next Steps
-You will start **Day 35 – Phase 5 pt.7**  
+
+You will start **Day 36 – Phase 6 pt.1**  
 when you say:
 
-**“ready for day 35”**
+**“ready for day 36”**
