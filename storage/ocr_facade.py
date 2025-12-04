@@ -4,7 +4,8 @@ OCR façade — Phase 3 + Phase 4 (Structured Output v2 + Superimport Prep)
 Bridges the segmenter to higher-level app code.
 
 Public API:
-- extract_menu_from_pdf(path) -> (categories_dict, debug_payload)
+- build_structured_menu(path) -> (categories_dict, debug_payload)  # One Brain entrypoint
+- extract_menu_from_pdf(path) -> (categories_dict, debug_payload)  # legacy name, still used
 - health() -> engine + versions
 """
 
@@ -381,3 +382,29 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
     }
 
     return categories, debug_payload
+
+
+# ============================================================================
+# One Brain façade (canonical entrypoint)
+# ============================================================================
+def build_structured_menu(path: str) -> Tuple[StructuredMenuPayload, Dict[str, Any]]:
+    """
+    One Brain entrypoint.
+
+    For now this is a thin wrapper around extract_menu_from_pdf(path) so we have a
+    single, named façade for app callers (worker, AI preview, commit, finalize, __ocrtxt).
+    """
+    return extract_menu_from_pdf(path)
+
+
+def build_structured_menu(path: str) -> Tuple[StructuredMenuPayload, Dict[str, Any]]:
+    """
+    Canonical One Brain entrypoint for OCR + AI structuring.
+
+    Currently a thin wrapper around `extract_menu_from_pdf` for PDF menus,
+    but this is the single place the rest of the app should call into.
+    Later we can extend this to support images or other sources while
+    keeping the public API stable.
+    """
+    return extract_menu_from_pdf(path)
+

@@ -142,10 +142,11 @@ try:
 except Exception:
     drafts_store = None  # guarded below
 
-# OCR engine (Day-21 revamp)
+# OCR engine (Day-21 revamp / One Brain façade)
 try:
-    from storage.ocr_facade import extract_menu_from_pdf as extract_items_from_path
-    from storage.ocr_facade import health as ocr_health_lib
+    from storage.ocr_facade import build_structured_menu, health as ocr_health_lib
+    # Keep legacy name for compatibility with existing helpers
+    extract_items_from_path = build_structured_menu
     print("[APP] Loaded OCR facade OK")  # DEBUG
 except Exception as e:
     print("[APP] OCR facade failed:", e)  # DEBUG
