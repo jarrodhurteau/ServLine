@@ -55,7 +55,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 # --- Variant & Category Hierarchy — Phase 4 pt.3–4 ---
-from portal.storage.variant_engine import classify_raw_variant, normalize_variant_group
+from storage.variant_engine import classify_raw_variant, normalize_variant_group
 from .category_hierarchy import infer_category_hierarchy
 
 # ---------- light header normalizer ----------

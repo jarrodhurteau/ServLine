@@ -2,7 +2,7 @@
 from flask import Blueprint, send_file, request, abort, Response
 from pathlib import Path
 from portal.ocr_worker import ocr_image, _prep_cv
-from portal.storage.ocr_pipeline import segment_document  # <-- NEW: use Phase-3 pipeline
+from storage.ocr_pipeline import segment_document  # <-- NEW: use Phase-3 pipeline
 from PIL import Image
 import io
 import os

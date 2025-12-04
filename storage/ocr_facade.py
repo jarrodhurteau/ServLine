@@ -28,8 +28,8 @@ if str(ROOT / "portal") not in sys.path:
     sys.path.append(str(ROOT / "portal"))
 
 # --- OCR/Pipeline imports ---
-from portal.storage.ocr_pipeline import segment_document  # type: ignore
-from portal.storage.ocr_utils import normalize_orientation  # type: ignore
+from storage.ocr_pipeline import segment_document  # type: ignore
+from storage.ocr_utils import normalize_orientation  # type: ignore
 
 try:
     from .ai_ocr_helper import analyze_ocr_text  # type: ignore
