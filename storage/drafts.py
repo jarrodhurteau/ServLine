@@ -1048,11 +1048,12 @@ def create_draft_from_structured_items(
     *,
     source_type: str = "structured_csv",
     source_meta: Optional[Dict[str, Any]] = None,
+    source_job_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a new draft from structured CSV/JSON items, bypassing OCR.
 
-    Assumptions about each item dict (from storage.structured_import):
+    Assumptions about each item dict (from structured ingestion helpers):
       - name: required, non-empty
       - description: optional string
       - category: optional
@@ -1065,12 +1066,18 @@ def create_draft_from_structured_items(
       - Default price_cents to 0 when absent, but NEVER invent prices.
       - Default confidence to 100 for structured imports (high trust).
       - Store a small 'source' JSON blob indicating that this is a structured import.
+      - Optionally link to import_jobs via source_job_id.
     """
     # Persist a small source blob so we can future-debug where this draft came from.
+    meta: Dict[str, Any] = dict(source_meta or {})
+    if source_job_id is not None:
+        # Keep the import job id both in the column and in the JSON blob.
+        meta.setdefault("import_job_id", int(source_job_id))
+
     src_payload = {
         "kind": "structured_import",
         "source_type": source_type,
-        "meta": source_meta or {},
+        "meta": meta,
     }
     source_blob = json.dumps(src_payload, ensure_ascii=False)
 
@@ -1079,7 +1086,7 @@ def create_draft_from_structured_items(
         restaurant_id=restaurant_id,
         status="editing",
         source=source_blob,
-        source_job_id=None,
+        source_job_id=source_job_id,
         source_file_path=None,
     )
 

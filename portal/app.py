@@ -18,6 +18,8 @@ from typing import Optional, Iterable, Tuple, List, Dict, Any
 import hashlib  # <-- added for cat_hue filter
 import time     # <-- NEW: for gentle polling after upload
 from storage import drafts
+from storage import import_jobs as import_jobs_store  # <-- NEW: structured import helpers
+
 
 # --- Forward decls for type checkers (real implementations appear later) ---
 def _ocr_image_to_text(img_path: Path) -> str: ...
@@ -1584,34 +1586,29 @@ def dev_upload_form():
 # ------------------------
 # **NEW** Import landing page + HTML POST handler
 # ------------------------
-@app.route("/import", methods=["GET"], strict_slashes=False)
-@login_required
-def import_page():
-    with db_connect() as conn:
-        restaurants = conn.execute(
-            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
-        ).fetchall()
-    return _safe_render("import.html", restaurants=restaurants)
-
-@app.route("/import", methods=["POST"], strict_slashes=False)
+@app.route("/import", methods=["GET", "POST"], strict_slashes=False)
 @login_required
 def import_upload():
     """
     Handles uploaded menu files (images or PDFs) and launches the OCR import job.
 
-    After saving and processing the file, this route redirects to the Import Preview
-    page where you can review the parsed output, rotate the image if needed, and confirm
-    before editing the generated draft.
+    GET  -> render the import upload page.
+    POST -> save the file, launch OCR job, then redirect to Import Preview.
     """
+    # Handle landing-page GET so /import from navbar doesn't 405
+    if request.method == "GET":
+        return _safe_render("import.html")
+
+    # POST: actual upload handler
     try:
         file = request.files.get("file")
         if not file or file.filename == "":
             flash("Please choose a file to upload.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         if not allowed_file(file.filename):
             flash("Unsupported file type. Allowed: JPG, JPEG, PNG, PDF.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         base_name = secure_filename(file.filename) or "upload"
         tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
@@ -1639,7 +1636,7 @@ def import_upload():
                 "success",
             )
 
-        # ✅ NEW: Redirect straight to Import Preview instead of waiting for Draft Editor
+        # ✅ Redirect straight to Import Preview instead of waiting for Draft Editor
         flash("Import complete — review preview below and rotate if needed.", "success")
         return redirect(url_for("imports_view", job_id=job_id))
 
@@ -1649,7 +1646,121 @@ def import_upload():
     except Exception as e:
         flash(f"Server error while saving upload: {e}", "error")
 
-    return redirect(url_for("import_page"))
+    # On error, bounce back to the same import page
+    return redirect(url_for("import_upload"))
+
+
+
+# ------------------------
+# NEW: Structured CSV import (Phase 6 pt.1)
+# ------------------------
+@app.post("/import/csv")
+@login_required
+def import_csv():
+    """
+    Structured ingestion for CSV menus (bypasses OCR).
+
+    Expected form fields:
+      - csv_file: uploaded .csv file
+      - restaurant_id: optional (uses session restaurant for customers)
+
+    Flow:
+      - Save CSV into uploads/
+      - Call storage.import_jobs.create_csv_import_job_from_file(...)
+      - Create a DB-backed draft via drafts_store.create_draft_from_structured_items
+      - Redirect to Draft Editor (if draft exists) or the import detail page.
+    """
+    _require_drafts_storage()
+
+    # Ensure storage/import_jobs helpers are present
+    if not hasattr(import_jobs_store, "create_csv_import_job_from_file"):
+        flash("CSV import helpers are not available yet (storage.import_jobs.create_csv_import_job_from_file missing).", "error")
+        return redirect(url_for("import_page"))
+
+    try:
+        # Accept either 'csv_file' (preferred) or fallback to 'file'
+        file = request.files.get("csv_file") or request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose a CSV file to upload.", "error")
+            return redirect(url_for("import_page"))
+
+        base_name = secure_filename(file.filename) or "upload.csv"
+        if not base_name.lower().endswith(".csv"):
+            flash("Structured CSV import currently only accepts .csv files.", "error")
+            return redirect(url_for("import_page"))
+
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        restaurant_id = _resolve_restaurant_id_from_request()
+
+        # Let the storage layer parse + validate the CSV
+        result = import_jobs_store.create_csv_import_job_from_file(
+            save_path,
+            restaurant_id=restaurant_id,
+        )
+
+        job_id = int(result.get("job_id"))
+        items = result.get("items") or []
+        summary = result.get("summary") or {}
+        errors = result.get("errors") or []
+
+        # Build a draft from the structured items using the shared drafts storage
+        title = summary.get("title") or f"Imported CSV {datetime.utcnow().date()}"
+        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        draft_id = None
+        if callable(create_structured) and items:
+            draft = create_structured(
+                title=title,
+                restaurant_id=restaurant_id,
+                items=items,
+                source_type="structured_csv",
+                source_meta={
+                    "filename": base_name,
+                    "row_count": summary.get("row_count"),
+                    "valid_rows": summary.get("valid_rows"),
+                    "invalid_rows": summary.get("invalid_rows"),
+                    "job_id": job_id,   # ✅ keep job linkage inside source_meta only
+                },
+            )
+
+            draft_id = int(draft.get("id") or draft.get("draft_id"))
+
+        # Flash a concise summary
+        row_count = summary.get("row_count", len(items))
+        valid_rows = summary.get("valid_rows", len(items))
+        invalid_rows = summary.get("invalid_rows", len(errors))
+        msg = f"CSV import created job #{job_id}: {valid_rows} item(s) imported"
+        if row_count is not None:
+            msg += f" out of {row_count} row(s)"
+        if invalid_rows:
+            msg += f" ({invalid_rows} row(s) skipped)."
+            level = "warning"
+        else:
+            msg += "."
+            level = "success"
+        flash(msg, level)
+
+        if errors:
+            # Keep the message short; detailed surfacing can be added in the template later.
+            flash("Some CSV rows could not be imported. Check your CSV headers and formats.", "warning")
+
+        # Prefer jumping straight into the draft editor if we have a draft id
+        if draft_id:
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+
+        # Fallback: show the structured job detail
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    except RequestEntityTooLarge:
+        flash("CSV file too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+        return redirect(url_for("import_page"))
+    except Exception as e:
+        flash(f"CSV import failed: {e}", "error")
+        return redirect(url_for("import_page"))
+
+
 # ------------------------
 # Imports pages
 # ------------------------
@@ -1890,6 +2001,228 @@ def imports_delete_job(job_id):
     flash(f"Job #{job_id} moved to deleted.", "success")
     return redirect(url_for("imports"))
 
+
+# ------------------------------------------------------------
+# Phase 6 pt.1 — Structured CSV import → Drafts
+# ------------------------------------------------------------
+
+def _canonical_field_for_header(header: str) -> Optional[str]:
+    """
+    Map a CSV header to a canonical field name using storage.import_jobs
+    HEADER_ALIASES / CANONICAL_FIELDS if available.
+
+    Returns one of:
+      - "name", "description", "category", "subcategory",
+        "price", "price_cents", "size", "sku"
+      - or None if we don't recognize the header.
+    """
+    h = (header or "").strip().lower()
+    if not h:
+        return None
+
+    aliases = getattr(import_jobs_store, "HEADER_ALIASES", {}) or {}
+    for field, names in aliases.items():
+        try:
+            if h in {n.lower() for n in names}:
+                return field
+        except Exception:
+            continue
+
+    canon_fields = set(getattr(import_jobs_store, "CANONICAL_FIELDS", []) or [])
+    if h in canon_fields:
+        return h
+
+    return None
+
+
+def _price_to_cents_loose(value: Any) -> int:
+    """
+    Loose parser for price columns in CSV (dollars → cents).
+
+    Accepts things like:
+      - "12.99"
+      - "$12.99"
+      - " 12 "
+    Returns 0 on failure and clamps negatives to 0.
+    """
+    if value is None:
+        return 0
+    try:
+        txt = str(value).strip().replace("$", "")
+        cents = int(round(float(txt) * 100))
+    except Exception:
+        return 0
+    return cents if cents > 0 else 0
+
+
+def _csv_to_structured_items(file_storage) -> List[Dict[str, Any]]:
+    """
+    Read an uploaded CSV file and normalize rows into structured menu items
+    suitable for drafts.create_draft_from_structured_items(...).
+
+    Supported canonical fields (columns can use any alias defined in
+    storage.import_jobs.HEADER_ALIASES):
+
+      name (required)
+      description
+      category
+      subcategory
+      price          (dollars; we convert via _price_to_cents_loose)
+      price_cents    (integer cents)
+      size
+      sku
+    """
+    raw = file_storage.read()
+    # Basic charset handling; utf-8-sig for common BOM'd exports, else latin-1 fallback
+    try:
+        text = raw.decode("utf-8-sig")
+    except Exception:
+        text = raw.decode("latin-1", errors="ignore")
+
+    f = io.StringIO(text)
+    reader = csv.DictReader(f)
+
+    if not reader.fieldnames:
+        return []
+
+    # Build header → canonical mapping once
+    header_map: Dict[str, Optional[str]] = {}
+    for col in reader.fieldnames:
+        header_map[col] = _canonical_field_for_header(col)
+
+    items: List[Dict[str, Any]] = []
+
+    for row in reader:
+        if not isinstance(row, dict):
+            continue
+
+        normalized: Dict[str, Any] = {}
+
+        for orig_col, value in row.items():
+            canon = header_map.get(orig_col)
+            if not canon:
+                continue
+            normalized[canon] = value
+
+        name = (normalized.get("name") or "").strip()
+        if not name:
+            # No name → skip this row entirely
+            continue
+
+        description = (normalized.get("description") or "").strip()
+
+        subcat = (normalized.get("subcategory") or "").strip() or None
+        cat = (normalized.get("category") or "").strip() or None
+        category = subcat or cat
+
+        # Price handling: prefer explicit cents column, else parse dollars
+        price_cents: int = 0
+        if normalized.get("price_cents") not in (None, ""):
+            try:
+                price_cents = int(str(normalized["price_cents"]).strip())
+            except Exception:
+                price_cents = 0
+        elif normalized.get("price") not in (None, ""):
+            price_cents = _price_to_cents_loose(normalized.get("price"))
+
+        # Never allow negative
+        if price_cents < 0:
+            price_cents = 0
+
+        item: Dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "category": category,
+            "subcategory": subcat,
+            "price_cents": price_cents,
+        }
+
+        # Optional extras we might care about later (ignored by drafts for now)
+        size = (normalized.get("size") or "").strip()
+        if size:
+            item["size_name"] = size
+
+        sku = (normalized.get("sku") or "").strip()
+        if sku:
+            item["sku"] = sku
+
+        items.append(item)
+
+    return items
+
+
+@app.post("/api/drafts/import_structured")
+@login_required
+def import_structured_draft():
+    """
+    Phase 6 pt.1 — Structured CSV import route.
+
+    Accepts a CSV of menu items, normalizes to structured items, and creates
+    a new DB-backed draft via storage.drafts.create_draft_from_structured_items.
+
+    Request (multipart/form-data):
+      - file: CSV file
+      - restaurant_id: optional (used to pre-link the draft)
+      - title: optional draft title
+
+    Response (JSON):
+      {
+        "ok": true,
+        "draft_id": 123,
+        "redirect_url": "/drafts/123/edit"
+      }
+    """
+    try:
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            return jsonify({"ok": False, "error": "No file uploaded."}), 400
+
+        if not file.filename.lower().endswith(".csv"):
+            return jsonify({"ok": False, "error": "Only CSV structured imports are supported right now."}), 400
+
+        _require_drafts_storage()
+        create_fn = getattr(drafts_store, "create_draft_from_structured_items", None)
+        if not callable(create_fn):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Structured draft creation is not available in this environment.",
+                    }
+                ),
+                500,
+            )
+
+        restaurant_id = _resolve_restaurant_id_from_request()
+        title = (request.form.get("title") or "").strip() or f"Structured Import {datetime.utcnow().date()}"
+
+        items = _csv_to_structured_items(file)
+        if not items:
+            return jsonify({"ok": False, "error": "No valid rows found in CSV."}), 400
+
+        draft = create_fn(
+            title=title,
+            restaurant_id=restaurant_id,
+            items=items,
+            source_type="structured_csv",
+            source_meta={"filename": file.filename},
+        )
+        draft_id = int(draft.get("id") or draft.get("draft_id") or 0)
+        if not draft_id:
+            return jsonify({"ok": False, "error": "Structured draft creation did not return a draft id."}), 500
+
+        return jsonify(
+            {
+                "ok": True,
+                "draft_id": draft_id,
+                "redirect_url": url_for("draft_editor", draft_id=draft_id),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Structured import failed: {e}"}), 500
+
+
 # ------------------------
 # Serving uploads (secure; block .trash)
 # ------------------------
@@ -1902,6 +2235,7 @@ def serve_upload(filename):
     if TRASH_FOLDER.resolve() in requested.parents or requested == TRASH_FOLDER.resolve():
         abort(403)
     return send_from_directory(str(UPLOAD_FOLDER), filename, as_attachment=False)
+
 
 # ------------------------
 # Upload Management (Recycle Bin) + Artifact cleanup

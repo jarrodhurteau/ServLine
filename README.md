@@ -34,7 +34,7 @@ infra/   # Infra scripts (ngrok, Flask runner, stop scripts)
   run_infra.ps1  
   stop_infra.ps1  
 
-storage/ # SQLite database + OCR pipeline + seed + schema  
+storage/ # SQLite database + OCR brain + semantic engines (ONE BRAIN)  
   servline.db  
   schema.sql  
   seed_dev.sql  
@@ -42,7 +42,7 @@ storage/ # SQLite database + OCR pipeline + seed + schema
   ocr_pipeline.py  
   ocr_utils.py  
   ocr_types.py  
-  ocr_facade.py  
+  ocr_facade.py                        # ✅ Canonical OCR entrypoint (One Brain)  
   ai_ocr_helper.py  
   ai_cleanup.py  
   semantic_engine.py                   # Phase 4 pt.3  
@@ -160,10 +160,34 @@ No warning UI added — signal too weak vs noise.
 
 ---
 
+## 🧠 ONE BRAIN MIGRATION (SPECIAL MILESTONE)
+
+### ✅ One Brain OCR Unification — COMPLETE
+
+All OCR, AI, and semantic logic has been centralized into `/storage`.  
+Legacy OCR paths have been phased out.
+
+### Achievements:
+- 🔁 Portal OCR retired
+- 🧠 Single canonical brain (`storage/ocr_facade.py`)
+- 🔎 Health endpoint confirmed green
+- ♻ Legacy imports shimmed then removed
+- 🔐 Draft pipeline using unified AI cleanup
+- 🧾 Finalize confirmed using One Brain end-to-end
+
+### Result:
+ServLine now operates with a **true unified OCR engine**.  
+All text extraction, cleanup, semantic logic, and validation flow through one brain.
+
+**One Brain migration complete.**
+
+---
+
 # 🌄 System State
 
 ServLine OCR is now:
 
+✅ Unified  
 ✅ End-to-end stable  
 ✅ Non-hallucinating  
 ✅ Price-safe  
