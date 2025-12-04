@@ -1,0 +1,5 @@
+Name,Description,Category,Price,Size,SKU
+Cheese Pizza,Classic cheese pizza,Pizza,9.99,Medium,CHZ-MED
+Pepperoni Pizza,Loaded with pepperoni,Pizza,12.50,Large,PEP-LRG
+Wings 10pc,Crispy wings tossed in sauce,Wings,11.00,10pc,WNG-10
+Bad Row Missing Name,,Pizza,15.00,,BAD-ROW

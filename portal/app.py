@@ -19,6 +19,7 @@ import hashlib  # <-- added for cat_hue filter
 import time     # <-- NEW: for gentle polling after upload
 from storage import drafts
 from storage import import_jobs as import_jobs_store  # <-- NEW: structured import helpers
+from storage.import_jobs import create_csv_import_job_from_file  # <-- NEW: Phase 6 pt.2 helper
 
 
 # --- Forward decls for type checkers (real implementations appear later) ---
@@ -68,6 +69,7 @@ except Exception:
 #    (this triggers the version banner inside ocr_worker.py)
 from portal import ocr_worker
 print("[App] Imported portal.ocr_worker")  # optional confirmation from app.py
+
 
 # ------------------------
 # App & Config
@@ -2155,20 +2157,29 @@ def _csv_to_structured_items(file_storage) -> List[Dict[str, Any]]:
 @login_required
 def import_structured_draft():
     """
-    Phase 6 pt.1 — Structured CSV import route.
+    Phase 6 pt.2 — Structured CSV import route (One Brain-backed).
 
-    Accepts a CSV of menu items, normalizes to structured items, and creates
-    a new DB-backed draft via storage.drafts.create_draft_from_structured_items.
+    Flow:
+      1) Accept CSV upload via multipart/form-data.
+      2) Save CSV to disk (under UPLOAD_FOLDER).
+      3) Use storage.import_jobs.create_csv_import_job_from_file(...) to:
+         - parse + validate rows via One Brain contracts
+         - create an import_jobs row (source_type=structured_csv)
+      4) Create a DB-backed draft via storage.drafts.create_draft_from_structured_items.
+      5) Return JSON with job_id, draft_id, summary, and redirect_url.
 
     Request (multipart/form-data):
       - file: CSV file
       - restaurant_id: optional (used to pre-link the draft)
       - title: optional draft title
 
-    Response (JSON):
+    Response (JSON on success):
       {
         "ok": true,
+        "job_id": 42,
         "draft_id": 123,
+        "summary": {...},
+        "errors": [...],
         "redirect_url": "/drafts/123/edit"
       }
     """
@@ -2178,49 +2189,106 @@ def import_structured_draft():
             return jsonify({"ok": False, "error": "No file uploaded."}), 400
 
         if not file.filename.lower().endswith(".csv"):
-            return jsonify({"ok": False, "error": "Only CSV structured imports are supported right now."}), 400
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Only CSV structured imports are supported right now.",
+                }
+            ), 400
 
+        # Ensure drafts storage is available and supports structured creation
         _require_drafts_storage()
         create_fn = getattr(drafts_store, "create_draft_from_structured_items", None)
         if not callable(create_fn):
-            return (
-                jsonify(
-                    {
-                        "ok": False,
-                        "error": "Structured draft creation is not available in this environment.",
-                    }
-                ),
-                500,
-            )
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Structured draft creation is not available in this environment.",
+                }
+            ), 500
 
+        # Resolve restaurant + title
         restaurant_id = _resolve_restaurant_id_from_request()
-        title = (request.form.get("title") or "").strip() or f"Structured Import {datetime.utcnow().date()}"
+        title = (
+            (request.form.get("title") or "").strip()
+            or f"Structured Import {datetime.utcnow().date()}"
+        )
 
-        items = _csv_to_structured_items(file)
+        # --- Phase 6 pt.2: save CSV to disk and create a One Brain import_job ---
+        safe_name = secure_filename(file.filename) or "structured.csv"
+        unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+        csv_path = (UPLOAD_FOLDER / unique_name).resolve()
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        file.save(str(csv_path))
+
+        # Use the One Brain helper to parse + create import_jobs row
+        job_result = create_csv_import_job_from_file(
+            csv_path, restaurant_id=restaurant_id
+        )
+        job_id = int(job_result.get("job_id") or 0)
+        items = job_result.get("items") or []
+        errors = job_result.get("errors") or []
+        summary = job_result.get("summary") or {}
+        job_summary = job_result.get("job_summary") or {}
+
+        if job_id <= 0:
+            return jsonify(
+                {"ok": False, "error": "Failed to create structured import job."}
+            ), 500
+
         if not items:
-            return jsonify({"ok": False, "error": "No valid rows found in CSV."}), 400
+            # We DID create a job row, but there were no valid items.
+            return jsonify(
+                {
+                    "ok": False,
+                    "job_id": job_id,
+                    "error": "CSV parsed but produced no valid structured items.",
+                    "summary": summary,
+                    "errors": errors,
+                }
+            ), 400
+
+        # --- Create the DB-backed draft from structured items ---
+        source_meta = {
+            "filename": file.filename,
+            "csv_path": str(csv_path),
+            "job_id": job_id,
+            "summary": job_summary,
+        }
 
         draft = create_fn(
             title=title,
             restaurant_id=restaurant_id,
             items=items,
             source_type="structured_csv",
-            source_meta={"filename": file.filename},
+            source_meta=source_meta,
         )
         draft_id = int(draft.get("id") or draft.get("draft_id") or 0)
         if not draft_id:
-            return jsonify({"ok": False, "error": "Structured draft creation did not return a draft id."}), 500
+            return jsonify(
+                {
+                    "ok": False,
+                    "job_id": job_id,
+                    "error": "Structured draft creation did not return a draft id.",
+                }
+            ), 500
 
         return jsonify(
             {
                 "ok": True,
+                "job_id": job_id,
                 "draft_id": draft_id,
+                "summary": summary,
+                "errors": errors,
                 "redirect_url": url_for("draft_editor", draft_id=draft_id),
             }
-        )
+        ), 200
 
     except Exception as e:
+        # Log for dev; keep JSON response stable for the UI
+        app.logger.exception("Structured import failed")
         return jsonify({"ok": False, "error": f"Structured import failed: {e}"}), 500
+
 
 
 # ------------------------
