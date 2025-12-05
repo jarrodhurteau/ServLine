@@ -5,6 +5,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+# Optional XLSX support (Phase 6 pt.3 — structured_xlsx ingestion)
+try:
+    import openpyxl  # type: ignore[import]
+except Exception:  # pragma: no cover - defensive; library may not be installed
+    openpyxl = None  # type: ignore[assignment]
+
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "storage" / "servline.db"
 
@@ -84,11 +90,11 @@ def list_import_jobs(limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Structured ingestion: CSV helpers
+# Structured ingestion: CSV/XLSX helpers
 # ---------------------------------------------------------------------------
 
 try:
-    # One Brain contracts for structured ingestion (CSV / JSON)
+    # One Brain contracts for structured ingestion (CSV / JSON / XLSX)
     from . import contracts as structured_contracts  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - defensive; should exist in modern env
     structured_contracts = None  # type: ignore[assignment]
@@ -169,17 +175,17 @@ HEADER_ALIASES: Dict[str, Set[str]] = {
 
 def _normalize_header(h: str) -> str:
     """
-    Normalize a CSV header to a simple token for alias matching.
+    Normalize a header to a simple token for alias matching.
     """
     return "".join(ch for ch in h.lower() if ch.isalnum())
 
 
 def _detect_header_mapping(headers: List[str]) -> Dict[str, str]:
     """
-    Detect which CSV headers correspond to canonical structured fields.
+    Detect which headers correspond to canonical structured fields.
 
     Returns mapping:
-        { canonical_field: csv_header }
+        { canonical_field: original_header }
     """
     mapping: Dict[str, str] = {}
 
@@ -202,7 +208,7 @@ def _csv_row_to_structured_item(
     header_map: Dict[str, str],
 ) -> Dict[str, Any]:
     """
-    Convert a raw CSV row (DictReader output) into a canonical structured item dict.
+    Convert a raw row dict (CSV or XLSX) into a canonical structured item dict.
     """
     item: Dict[str, Any] = {}
 
@@ -263,8 +269,92 @@ def parse_structured_csv(
     return clean_items, errors, summary, header_map
 
 
+def parse_structured_xlsx(
+    xlsx_path: Path,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int], Dict[str, str]]:
+    """
+    Parse an XLSX file (first sheet) into structured menu items and run validation
+    via One Brain contracts.
+
+    Behavior:
+      - Uses the first worksheet in the workbook
+      - Uses the first row as headers
+      - Normalizes headers with the same logic as CSV
+      - Reuses _csv_row_to_structured_item(...) for row shaping
+
+    Returns:
+      clean_items:  list of normalized items ready for draft creation
+      errors:       list of row-level validation error dicts
+      summary:      summary dict (total_rows / valid_rows / error_rows)
+      header_map:   mapping of canonical field -> XLSX header name
+    """
+    if structured_contracts is None:
+        raise RuntimeError(
+            "storage.contracts module is required for structured XLSX parsing; "
+            "make sure storage/contracts.py exists."
+        )
+
+    if openpyxl is None:
+        raise RuntimeError(
+            "openpyxl is required for structured XLSX ingestion. "
+            "Install it in your environment to enable XLSX imports."
+        )
+
+    xlsx_path = Path(xlsx_path)
+    if not xlsx_path.exists():
+        raise FileNotFoundError(xlsx_path)
+
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)  # type: ignore[call-arg]
+    sheets = wb.worksheets
+    if not sheets:
+        raise ValueError(f"XLSX file {xlsx_path} has no worksheets")
+
+    ws = sheets[0]
+    rows_iter = ws.iter_rows(values_only=True)
+
+    # First row = headers
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        raise ValueError(f"XLSX file {xlsx_path} is empty or missing a header row")
+
+    headers: List[str] = []
+    for idx, cell in enumerate(header_row):
+        if cell is None:
+            headers.append(f"column_{idx+1}")
+        else:
+            text = str(cell).strip()
+            headers.append(text or f"column_{idx+1}")
+
+    header_map = _detect_header_mapping(headers)
+
+    raw_items: List[Dict[str, Any]] = []
+    for row_values in rows_iter:
+        if row_values is None:
+            continue
+
+        # Build raw row dict keyed by headers
+        row_dict: Dict[str, Any] = {}
+        is_empty = True
+        for idx, value in enumerate(row_values):
+            if idx >= len(headers):
+                break
+            if value not in (None, "", " "):
+                is_empty = False
+            row_dict[headers[idx]] = value
+
+        # Skip completely empty rows
+        if is_empty:
+            continue
+
+        raw_items.append(_csv_row_to_structured_item(row_dict, header_map))
+
+    clean_items, errors, summary = structured_contracts.validate_structured_items(raw_items)
+    return clean_items, errors, summary, header_map
+
+
 # ---------------------------------------------------------------------------
-# Structured import job creation (CSV + generic)
+# Structured import job creation (CSV/XLSX + generic)
 # ---------------------------------------------------------------------------
 
 def create_structured_import_job(
@@ -278,12 +368,13 @@ def create_structured_import_job(
     status: str = "parsed",
 ) -> int:
     """
-    Create an import_jobs row for a structured import (CSV / JSON).
+    Create an import_jobs row for a structured import (CSV / JSON / XLSX).
 
     This function is resilient to schema differences by introspecting columns.
 
     Used by:
       - create_csv_import_job_from_file (...)
+      - create_xlsx_import_job_from_file (...)
       - (later) JSON-based structured ingest.
 
     Returns:
@@ -374,6 +465,60 @@ def create_csv_import_job_from_file(
         source_type="structured_csv",
         filename=csv_path.name,
         source_path=str(csv_path),
+        restaurant_id=restaurant_id,
+        summary=job_summary,
+        payload=None,
+        status=status,
+    )
+
+    return {
+        "job_id": job_id,
+        "items": clean_items,
+        "errors": errors,
+        "summary": summary,
+        "header_map": header_map,
+        "job_summary": job_summary,
+    }
+
+
+def create_xlsx_import_job_from_file(
+    xlsx_path: Path,
+    restaurant_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    High-level helper for Phase 6 pt.3:
+
+    - Parse an XLSX into structured items (first sheet, first row = headers)
+    - Validate via One Brain contracts
+    - Create an import_jobs row recording the results
+    - Return details for draft creation + UI summary
+
+    Returns dict:
+      {
+        "job_id": int,
+        "items": [... clean items ...],
+        "errors": [... error dicts ...],
+        "summary": {... counts ...},
+        "header_map": {... canonical -> xlsx header ...},
+        "job_summary": {... stored in summary_json (if column exists) ...},
+      }
+    """
+    xlsx_path = Path(xlsx_path)
+    clean_items, errors, summary, header_map = parse_structured_xlsx(xlsx_path)
+
+    job_summary: Dict[str, Any] = {
+        "ingest_mode": "structured_xlsx",
+        "header_map": header_map,
+        "summary": summary,
+        "error_rows": errors,
+    }
+
+    status = "parsed_with_errors" if errors else "parsed"
+
+    job_id = create_structured_import_job(
+        source_type="structured_xlsx",
+        filename=xlsx_path.name,
+        source_path=str(xlsx_path),
         restaurant_id=restaurant_id,
         summary=job_summary,
         payload=None,

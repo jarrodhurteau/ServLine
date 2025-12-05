@@ -1764,6 +1764,115 @@ def import_csv():
 
 
 # ------------------------
+# NEW: Structured XLSX import (Phase 6 pt.3)
+# ------------------------
+@app.post("/import/xlsx")
+@login_required
+def import_xlsx():
+    """
+    Structured ingestion for Excel menus (XLSX, bypasses OCR).
+
+    Expected form fields:
+      - xlsx_file: uploaded .xlsx file (preferred)
+      - file:      fallback field name
+      - restaurant_id: optional (uses session restaurant for customers)
+
+    Flow:
+      - Save XLSX into uploads/
+      - Call storage.import_jobs.create_xlsx_import_job_from_file(...)
+      - Create a DB-backed draft via drafts_store.create_draft_from_structured_items
+      - Redirect to Draft Editor (if draft exists) or the import detail page.
+    """
+    _require_drafts_storage()
+
+    # Ensure storage/import_jobs helpers are present
+    if not hasattr(import_jobs_store, "create_xlsx_import_job_from_file"):
+        flash("XLSX import helpers are not available yet (storage.import_jobs.create_xlsx_import_job_from_file missing).", "error")
+        return redirect(url_for("import_page"))
+
+    try:
+        # Accept either 'xlsx_file' (preferred) or fallback to 'file'
+        file = request.files.get("xlsx_file") or request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose an XLSX file to upload.", "error")
+            return redirect(url_for("import_page"))
+
+        base_name = secure_filename(file.filename) or "upload.xlsx"
+        if not base_name.lower().endswith(".xlsx"):
+            flash("Structured Excel import currently only accepts .xlsx files.", "error")
+            return redirect(url_for("import_page"))
+
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        restaurant_id = _resolve_restaurant_id_from_request()
+
+        # Let the storage layer parse + validate the XLSX
+        result = import_jobs_store.create_xlsx_import_job_from_file(
+            save_path,
+            restaurant_id=restaurant_id,
+        )
+
+        job_id = int(result.get("job_id"))
+        items = result.get("items") or []
+        summary = result.get("summary") or {}
+        errors = result.get("errors") or []
+
+        # Build a draft from the structured items using the shared drafts storage
+        title = summary.get("title") or f"Imported XLSX {datetime.utcnow().date()}"
+        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        draft_id = None
+        if callable(create_structured) and items:
+            draft = create_structured(
+                title=title,
+                restaurant_id=restaurant_id,
+                items=items,
+                source_type="structured_xlsx",
+                source_meta={
+                    "filename": base_name,
+                    "row_count": summary.get("row_count"),
+                    "valid_rows": summary.get("valid_rows"),
+                    "invalid_rows": summary.get("invalid_rows"),
+                    "job_id": job_id,
+                },
+            )
+            draft_id = int(draft.get("id") or draft.get("draft_id"))
+
+        # Flash a concise summary
+        row_count = summary.get("row_count", len(items))
+        valid_rows = summary.get("valid_rows", len(items))
+        invalid_rows = summary.get("invalid_rows", len(errors))
+        msg = f"XLSX import created job #{job_id}: {valid_rows} item(s) imported"
+        if row_count is not None:
+            msg += f" out of {row_count} row(s)"
+        if invalid_rows:
+            msg += f" ({invalid_rows} row(s) skipped)."
+            level = "warning"
+        else:
+            msg += "."
+            level = "success"
+        flash(msg, level)
+
+        if errors:
+            flash("Some XLSX rows could not be imported. Check your column headers and formats.", "warning")
+
+        # Prefer jumping straight into the draft editor if we have a draft id
+        if draft_id:
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+
+        # Fallback: show the structured job detail
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    except RequestEntityTooLarge:
+        flash("XLSX file too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+        return redirect(url_for("import_page"))
+    except Exception as e:
+        flash(f"XLSX import failed: {e}", "error")
+        return redirect(url_for("import_page"))
+
+
+# ------------------------
 # Imports pages
 # ------------------------
 @app.get("/imports")
@@ -3701,14 +3810,13 @@ def imports_ai_finalize(job_id: int):
 
     Steps:
       1) Reuse /imports/<job_id>/ai/commit to regenerate draft items from the
-         latest AI heuristics (variants, price_text, etc.).
-      2) Run apply_ai_cleanup() on the resulting draft.
-      3) Mark draft as finalized and redirect into the Draft Editor.
+         latest AI heuristics (variants, price_text, etc.) *and* run AI cleanup.
+      2) Locate the draft for this job.
+      3) Redirect into the Draft Editor.
 
-    This uses the same AI pipeline as imports_ai_commit and the same cleanup
-    pipeline as /drafts/<draft_id>/cleanup.
+    This keeps the AI pipeline logic centralized in imports_ai_commit so the
+    finalize button is just a friendly one-click wrapper.
     """
-    from storage.ai_cleanup import apply_ai_cleanup
     _require_drafts_storage()
 
     # --- Step 1: run AI commit (side effects only; ignore its Response) ---
@@ -3717,42 +3825,21 @@ def imports_ai_finalize(job_id: int):
         #   - OCR the upload (preferring rotated working copy)
         #   - run analyze_ocr_text()
         #   - replace draft_items for this job
-        imports_ai_commit(job_id)  # noqa: F821 - calling view function directly
+        #   - run apply_ai_cleanup() and set status="finalized"
+        imports_ai_commit(job_id)
     except Exception as e:
-        flash(f"AI commit failed: {e}", "error")
+        flash(f"AI finalize failed during commit: {e}", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
     # --- Step 2: locate draft for this job ---
     draft_id = _get_or_create_draft_for_job(job_id)
     if not draft_id:
-        flash("No draft available for this job after AI commit.", "error")
+        flash("No draft available for this job after AI finalize.", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
-    # Flip status to processing while cleanup runs
-    try:
-        drafts_store.save_draft_metadata(int(draft_id), status="processing")
-    except Exception:
-        pass
-
-    # --- Step 3: run AI cleanup on the draft ---
-    try:
-        updated = apply_ai_cleanup(int(draft_id))
-        try:
-            drafts_store.save_draft_metadata(int(draft_id), status="finalized")
-        except Exception:
-            pass
-
-        flash(f"AI finalize complete — {int(updated)} item(s) cleaned.", "success")
-        return redirect(url_for("draft_editor", draft_id=int(draft_id)))
-
-    except Exception as e:
-        # On failure, roll status back to editing so UI doesn't get stuck
-        try:
-            drafts_store.save_draft_metadata(int(draft_id), status="editing")
-        except Exception:
-            pass
-        flash(f"AI finalize failed: {e}", "error")
-        return redirect(url_for("imports_detail", job_id=job_id))
+    # --- Step 3: send user into the Draft Editor ---
+    flash("AI finalize complete.", "success")
+    return redirect(url_for("draft_editor", draft_id=int(draft_id)))
 
 
 # ------------------------
