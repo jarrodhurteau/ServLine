@@ -15,7 +15,7 @@
     /* Actions alignment */
     .actions { display:flex; justify-content:flex-end; gap:.5rem; flex-wrap:wrap; }
 
-    /* Disable look for Edit until ready */
+    /* Disable look for Edit/Finalize until ready */
     .btn[aria-disabled="true"] {
       opacity:.55; pointer-events:none; filter:grayscale(20%);
     }
@@ -85,6 +85,24 @@
                   <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary" data-raw>Raw OCR</a>
                   {# Edit is enabled only when draft is ready; JS will toggle aria-disabled #}
                   <a href="{{ url_for('imports_draft', job_id=j.id) }}" class="btn btn-primary" data-edit aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}">Edit</a>
+
+                  {# NEW: One-click Finalize with AI Cleanup — disabled until draft is ready #}
+                  <form
+                    action="{{ url_for('imports_ai_finalize', job_id=j.id) }}"
+                    method="post"
+                    style="display:inline"
+                    onsubmit="return confirm('Run AI Finalize for job #{{ j.id }} and open its draft?');"
+                  >
+                    <button
+                      type="submit"
+                      class="btn btn-secondary"
+                      data-finalize
+                      aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}"
+                    >
+                      Finalize with AI
+                    </button>
+                  </form>
+
                   <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline" onsubmit="return confirm('Delete job #{{ j.id }}? This moves related files to Recycle Bin.');">
                     <button type="submit" class="btn btn-danger">Delete</button>
                   </form>
@@ -158,8 +176,14 @@
         // toggle Edit enablement
         const edit = r.querySelector('[data-edit]');
         if (edit) {
-          const enable = !!draftReady && ['done','approved','published','editing','submitted','restored'].includes(status);
-          edit.setAttribute('aria-disabled', enable ? 'false' : 'true');
+          const enableEdit = !!draftReady && ['done','approved','published','editing','submitted','restored'].includes(status);
+          edit.setAttribute('aria-disabled', enableEdit ? 'false' : 'true');
+        }
+        // toggle Finalize enablement (we *allow* finalize as soon as job isn't pending/processing and there's a draft)
+        const finalizeBtn = r.querySelector('[data-finalize]');
+        if (finalizeBtn) {
+          const enableFinalize = !!draftReady && !['deleted','discarded','failed'].includes(status);
+          finalizeBtn.setAttribute('aria-disabled', enableFinalize ? 'false' : 'true');
         }
       }
 

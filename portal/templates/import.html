@@ -5,7 +5,7 @@
   <section class="card max-w-3xl mx-auto">
     <h1 class="text-xl font-semibold mb-2">Import a Menu</h1>
     <p class="muted mb-4">
-      Upload a photo or PDF. We’ll create a draft you can review and publish into your menus.
+      Upload a photo, PDF, or structured CSV. We’ll create a draft you can review and publish into your menus.
     </p>
 
     <!-- Toolbar -->
@@ -14,7 +14,7 @@
     </div>
 
     <!-- Upload panels -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <!-- Upload Image -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Upload Image</h2>
@@ -34,6 +34,18 @@
         </form>
         <p class="muted mt-2 text-sm">For digital menus. We’ll extract text and structure a draft.</p>
       </div>
+
+      <!-- Structured CSV Import -->
+      <div class="card">
+        <h2 class="text-lg font-semibold mb-2">Structured CSV (POS export)</h2>
+        <form id="csvForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
+          <input type="file" name="file" accept=".csv,text/csv" required class="form-control w-full" />
+          <button type="submit" class="btn btn-secondary w-full" id="csvBtn">Import CSV to Draft</button>
+        </form>
+        <p class="muted mt-2 text-sm">
+          For POS-style CSV exports (name, price, category, etc.). We’ll create a structured draft in the Draft Editor.
+        </p>
+      </div>
     </div>
 
     <!-- Shared upload progress UI -->
@@ -49,11 +61,11 @@
     </div>
 
     <div class="mt-4 text-xs muted">
-      Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF.
+      Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF, CSV.
     </div>
   </section>
 
-  <!-- Inline upload script: uses JSON API to get job_id, then redirects to /imports/view/<job_id> -->
+  <!-- Inline upload script: uses JSON APIs to get job/draft, then redirects -->
   <script>
   (function () {
     const progressWrap = document.getElementById('uploadProgress');
@@ -68,6 +80,7 @@
     function disableDuringUpload(disabled) {
       document.getElementById('imgBtn')?.toggleAttribute('disabled', disabled);
       document.getElementById('pdfBtn')?.toggleAttribute('disabled', disabled);
+      document.getElementById('csvBtn')?.toggleAttribute('disabled', disabled);
     }
 
     function doUpload(formEl) {
@@ -79,9 +92,6 @@
 
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
-
-      // Optional: if the server infers restaurant from session, nothing else is needed.
-      // If you later add a <select name="restaurant_id">, the FormData will include it automatically.
 
       setActive(true);
       disableDuringUpload(true);
@@ -127,6 +137,71 @@
       xhr.send(fd);
     }
 
+    function doCsvUpload(formEl) {
+      const fileInput = formEl.querySelector('input[type="file"]');
+      if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+        alert('Please choose a CSV file first.');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      // You can later add restaurant_id/title inputs; FormData will pick them up automatically.
+
+      setActive(true);
+      disableDuringUpload(true);
+      bar.style.width = '0%';
+      label.textContent = 'Uploading CSV… 0%';
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/drafts/import_structured', true);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.max(0, Math.min(100, Math.round((e.loaded / e.total) * 100)));
+          bar.style.width = pct + '%';
+          label.textContent = `Uploading CSV… ${pct}%`;
+        } else {
+          label.textContent = 'Uploading CSV…';
+        }
+      };
+
+      xhr.onerror = () => {
+        setActive(false);
+        disableDuringUpload(false);
+        alert('Network error during CSV upload.');
+      };
+
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 4) {
+          let data = {};
+          try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) {}
+
+          if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+            bar.style.width = '100%';
+            label.textContent = 'Creating draft…';
+
+            const redirectUrl = data.redirect_url
+              || (data.draft_id ? `/drafts/${data.draft_id}/edit` : null);
+
+            if (redirectUrl) {
+              window.location.href = redirectUrl;
+            } else {
+              setActive(false);
+              disableDuringUpload(false);
+              alert('Structured import completed but missing redirect URL.');
+            }
+          } else {
+            setActive(false);
+            disableDuringUpload(false);
+            alert((data && data.error) || 'Structured import failed.');
+          }
+        }
+      };
+
+      xhr.send(fd);
+    }
+
     document.getElementById('imgForm')?.addEventListener('submit', (e) => {
       e.preventDefault();
       doUpload(e.currentTarget);
@@ -135,6 +210,11 @@
     document.getElementById('pdfForm')?.addEventListener('submit', (e) => {
       e.preventDefault();
       doUpload(e.currentTarget);
+    });
+
+    document.getElementById('csvForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      doCsvUpload(e.currentTarget);
     });
   })();
   </script>
