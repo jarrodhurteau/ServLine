@@ -1677,19 +1677,19 @@ def import_csv():
     # Ensure storage/import_jobs helpers are present
     if not hasattr(import_jobs_store, "create_csv_import_job_from_file"):
         flash("CSV import helpers are not available yet (storage.import_jobs.create_csv_import_job_from_file missing).", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
 
     try:
         # Accept either 'csv_file' (preferred) or fallback to 'file'
         file = request.files.get("csv_file") or request.files.get("file")
         if not file or file.filename == "":
             flash("Please choose a CSV file to upload.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         base_name = secure_filename(file.filename) or "upload.csv"
         if not base_name.lower().endswith(".csv"):
             flash("Structured CSV import currently only accepts .csv files.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
         save_path = UPLOAD_FOLDER / tmp_name
@@ -1757,10 +1757,11 @@ def import_csv():
 
     except RequestEntityTooLarge:
         flash("CSV file too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
     except Exception as e:
         flash(f"CSV import failed: {e}", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
+
 
 
 # ------------------------
@@ -1788,19 +1789,19 @@ def import_xlsx():
     # Ensure storage/import_jobs helpers are present
     if not hasattr(import_jobs_store, "create_xlsx_import_job_from_file"):
         flash("XLSX import helpers are not available yet (storage.import_jobs.create_xlsx_import_job_from_file missing).", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
 
     try:
         # Accept either 'xlsx_file' (preferred) or fallback to 'file'
         file = request.files.get("xlsx_file") or request.files.get("file")
         if not file or file.filename == "":
             flash("Please choose an XLSX file to upload.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         base_name = secure_filename(file.filename) or "upload.xlsx"
         if not base_name.lower().endswith(".xlsx"):
             flash("Structured Excel import currently only accepts .xlsx files.", "error")
-            return redirect(url_for("import_page"))
+            return redirect(url_for("import_upload"))
 
         tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
         save_path = UPLOAD_FOLDER / tmp_name
@@ -1866,10 +1867,10 @@ def import_xlsx():
 
     except RequestEntityTooLarge:
         flash("XLSX file too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
     except Exception as e:
         flash(f"XLSX import failed: {e}", "error")
-        return redirect(url_for("import_page"))
+        return redirect(url_for("import_upload"))
 
 
 # ------------------------
@@ -1940,6 +1941,7 @@ def debug_blocks_page(job_id: int):
         back_url=url_for("imports_detail", job_id=job_id),
     )
 
+
 @app.get("/imports/raw/<int:job_id>")
 @login_required
 def imports_raw(job_id):
@@ -2005,6 +2007,7 @@ def imports_draft(job_id: int):
         return redirect(url_for("draft_editor", draft_id=draft_id))
     flash("Draft not ready for editor yet. Showing legacy import view.", "info")
     return redirect(url_for("imports_detail", job_id=job_id))
+
 
 @app.post("/imports/<int:job_id>/set_restaurant")
 @login_required
@@ -3896,6 +3899,20 @@ except Exception:
     from routes.core import core_bp  # fallback if relative import fails
 
 app.register_blueprint(core_bp)
+
+
+# --------------------------------------------------------
+# TEMPORARY TEST ROUTE — bypass browser validation
+# --------------------------------------------------------
+@app.get("/test_csv_form")
+def test_csv_form():
+    return """
+    <form action="/import/csv" method="post" enctype="multipart/form-data">
+        <input type="file" name="csv_file">
+        <button type="submit">Test CSV Upload</button>
+    </form>
+    """
+
 
 # ------------------------
 # Run
