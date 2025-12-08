@@ -373,6 +373,7 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
         conf_raw = float(data["conf"][i])
     except Exception:
         conf_raw = -1.0
+
     if conf_raw < conf_floor:
         return None
 
@@ -380,11 +381,30 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
     if not cleaned or _token_is_garbage(cleaned):
         return None
 
-    x, y, w, h = int(data["left"][i]), int(data["top"][i]), int(data["width"][i]), int(data["height"][i])
-    if w <= 0 or h <= 0:
+    # More defensive around bbox dimensions
+    x = int(data["left"][i])
+    y = int(data["top"][i])
+    try:
+        w = int(data["width"][i])
+        h = int(data["height"][i])
+    except Exception:
         return None
 
-    return {"text": cleaned, "bbox": {"x": x, "y": y, "w": w, "h": h}, "conf": conf_raw}
+    # Clamp negatives to 0
+    if w < 0:
+        w = 0
+    if h < 0:
+        h = 0
+
+    # Skip zero / 1-pixel “ghost” words
+    if w <= 1 or h <= 1:
+        return None
+
+    return {
+        "text": cleaned,
+        "bbox": {"x": x, "y": y, "w": w, "h": h},
+        "conf": conf_raw,
+    }
 
 
 # -----------------------------
