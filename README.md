@@ -19,8 +19,8 @@ portal/  # Flask portal website
     menus.html  
     items.html  
     item_form.html  
-    imports.html  
-    import.html  
+    imports.html                        # Import page (image/PDF + structured CSV/XLSX panels)  
+    import.html                         # Legacy import view (per-job)  
     drafts.html  
     draft_editor.html  
     uploads.html  
@@ -53,7 +53,7 @@ storage/ # SQLite database + OCR brain + semantic engines (ONE BRAIN)
   contracts.py                         # One Brain structured-item contracts (Phase 6 pt.1–2)  
 
 fixtures/                              # Sample menus & test assets  
-  menus/                               # e.g. pizza_real.pdf, sample_structured_menu.csv  
+  menus/                               # e.g. pizza_real.pdf, sample_structured_menu.csv, sample_structured_menu.xlsx  
 
 uploads/                               # User-uploaded menu files  
 
@@ -191,7 +191,7 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ### Phase 6 pt.1 — Structured Draft Import API
 - Added `/api/drafts/import_structured`  
-- CSV upload produces canonical structured items  
+- Structured uploads produce canonical structured items  
 - Draft created via One Brain validation  
 - JSON response returns `draft_id` + `redirect_url`
 
@@ -206,7 +206,7 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ---
 
-# 🚀 Day 38 — Phase 6 pt.3–4: AI Finalize Wiring + Structured Import UI
+## 🚀 Day 38 — Phase 6 pt.3–4: AI Finalize Wiring + Structured Import UI
 
 ### Phase 6 pt.3 — AI Finalize → Draft Editor Integration
 - `imports_ai_finalize` now uses the **One Brain cleanup pipeline**  
@@ -217,7 +217,7 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 - End-to-end test passed
 
 ### Phase 6 pt.4 — Structured Import UI (Portal)
-- Added **Structured CSV import panel** to `import.html`  
+- Added **Structured CSV import panel** to `imports.html`  
 - CSV uploads now create drafts directly from the portal  
 - Progress bar unified across image/PDF/CSV imports  
 - Added **Finalize with AI** button to `imports.html` job rows  
@@ -226,9 +226,60 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 - Full portal workflow now supports:
   - OCR imports → Drafts  
   - Structured CSV imports → Drafts  
-  - AI Finalize → Draft Editor
+  - AI Finalize → Draft Editor  
 
 **Phase 6 pt.3–4 complete.**
+
+---
+
+## 📊 Day 39 — Phase 6 pt.5–6: Structured CSV/XLSX Imports → Draft Editor
+
+Day 39 completes the first **file-type family** for structured ingestion: CSV and XLSX both behave like first-class menu sources and land directly in the Draft Editor.
+
+### Phase 6 pt.5 — Structured CSV Import Route
+
+- Added `/import/csv` route in `portal.app` for **structured CSV** uploads.  
+- Validates file presence and extension (`.csv` only).  
+- Saves the upload into `uploads/` with a unique name.  
+- Calls `import_jobs_store.create_csv_import_job_from_file(...)` to:
+  - parse the CSV  
+  - normalize rows through One Brain contracts  
+  - create an `import_jobs` row with `ingest_mode="structured_csv"`.  
+- Uses `drafts_store.create_draft_from_structured_items(...)` to build a DB-backed draft from `items`.  
+- Stores linkage (`job_id`, row counts, filename) inside `source_meta`.  
+- Flashes a concise summary banner:  
+  - `job_id`, total rows, valid rows, skipped rows.  
+- On success, redirects straight to the Draft Editor: `/drafts/<draft_id>/edit`.  
+- On failure (size, bad type, missing helper), falls back with clear flash messages.
+
+### Phase 6 pt.6 — Structured XLSX Import Route + UI
+
+- Added `/import/xlsx` route in `portal.app` for **Excel-style (one row per item) menus**.  
+- Validates file presence and extension (`.xlsx` only).  
+- Saves XLSX files into `uploads/` with unique names.  
+- Calls `import_jobs_store.create_xlsx_import_job_from_file(...)` to:
+  - read the workbook  
+  - normalize rows using the same structured contracts as CSV  
+  - create `import_jobs` entries with `ingest_mode="structured_xlsx"`.  
+- Uses `drafts_store.create_draft_from_structured_items(...)` to create the draft with `source_type="structured_xlsx"`.  
+- Flashes a summary banner mirroring the CSV path (rows imported / skipped).  
+- Redirects directly to the Draft Editor on success, or back to `/import` with friendly errors on failure.  
+
+#### Import Page UI (imports.html)
+
+- Import landing page now supports **four** primary flows:
+  - Upload Image → OCR → Draft  
+  - Upload PDF → OCR → Draft  
+  - Structured CSV (POS export) → Draft  
+  - Structured Excel (XLSX) → Draft  
+- Adds a dedicated **Structured Excel (XLSX)** card with:
+  - file selector (`accept=".xlsx"`)  
+  - “Import XLSX to Draft” CTA button  
+  - explanation copy for row-per-item POS exports.  
+- Keeps a single shared progress bar + upload UX for image/PDF/structured imports.  
+- Structured CSV/XLSX paths both reuse the One Brain structured contracts and draft creation, so everything downstream (AI Finalize, exports, price integrity, etc.) behaves exactly like OCR-based drafts.
+
+**Phase 6 pt.5–6 complete: ServLine can now ingest real POS-style CSV/XLSX files into drafts with no OCR involved.**
 
 ---
 
@@ -245,14 +296,14 @@ ServLine menu understanding is now:
 ✅ Ingredient-aware  
 ✅ Debuggable  
 ✅ Human-editable  
-✅ Structured CSV-ready (Phase 6 foundation)  
+✅ Structured CSV/XLSX-ready (Phase 6 foundation)  
 ✅ Portal UI supports both OCR and structured ingestion paths  
 
 ---
 
 # 🧭 Roadmap: Best-in-Class OCR & Import Plan
 
-(unchanged except Phase 6 progress — omitted for brevity)
+(High-level roadmap unchanged; Phase 6 progress updated.)
 
 ---
 
@@ -260,10 +311,8 @@ ServLine menu understanding is now:
 
 Next up in Phase 6:
 
-- JSON structured import  
-- XLSX structured import  
-- Live preview + column mapping  
-- POS-grade ingestion layer  
+- **JSON structured import** (API + file) built on the same contracts  
+- **Live preview + column mapping UI** for structured sources  
+- **POS-grade ingestion layer** (multi-location behavior, taxes/fees, and export-quality guarantees)  
 
-You’ll pick this up with:
-
+You’ll pick this up with Day 40 (Phase 6 pt.7–8).
