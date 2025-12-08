@@ -5,7 +5,7 @@
   <section class="card max-w-3xl mx-auto">
     <h1 class="text-xl font-semibold mb-2">Import a Menu</h1>
     <p class="muted mb-4">
-      Upload a photo, PDF, or structured CSV. We’ll create a draft you can review and publish into your menus.
+      Upload a photo, PDF, or structured CSV/XLSX. We’ll create a draft you can review and publish into your menus.
     </p>
 
     <!-- Toolbar -->
@@ -46,6 +46,18 @@
           For POS-style CSV exports (name, price, category, etc.). We’ll create a structured draft in the Draft Editor.
         </p>
       </div>
+
+      <!-- Structured XLSX Import -->
+      <div class="card">
+        <h2 class="text-lg font-semibold mb-2">Structured Excel (XLSX)</h2>
+        <form id="xlsxForm" action="{{ url_for('import_xlsx') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+          <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="form-control w-full" />
+          <button type="submit" class="btn btn-secondary w-full" id="xlsxBtn">Import XLSX to Draft</button>
+        </form>
+        <p class="muted mt-2 text-sm">
+          For Excel-style exports (one row per item). We’ll create a structured draft in the Draft Editor.
+        </p>
+      </div>
     </div>
 
     <!-- Shared upload progress UI -->
@@ -61,7 +73,7 @@
     </div>
 
     <div class="mt-4 text-xs muted">
-      Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF, CSV.
+      Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF, CSV, XLSX.
     </div>
   </section>
 
@@ -81,6 +93,7 @@
       document.getElementById('imgBtn')?.toggleAttribute('disabled', disabled);
       document.getElementById('pdfBtn')?.toggleAttribute('disabled', disabled);
       document.getElementById('csvBtn')?.toggleAttribute('disabled', disabled);
+      // XLSX uses a normal form POST to /import/xlsx for now (no shared progress bar hook).
     }
 
     function doUpload(formEl) {
@@ -216,6 +229,8 @@
       e.preventDefault();
       doCsvUpload(e.currentTarget);
     });
+
+    // Note: xlsxForm posts directly to /import/xlsx (server handles redirect + flashes).
   })();
   </script>
 {% endblock %}
