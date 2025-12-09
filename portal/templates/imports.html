@@ -15,7 +15,7 @@
     /* Actions alignment */
     .actions { display:flex; justify-content:flex-end; gap:.5rem; flex-wrap:wrap; }
 
-    /* Disable look for Edit/Finalize until ready */
+    /* Disable look for buttons until ready */
     .btn[aria-disabled="true"] {
       opacity:.55; pointer-events:none; filter:grayscale(20%);
     }
@@ -46,6 +46,7 @@
         </thead>
         <tbody>
           {% for j in jobs %}
+            {# --- Status + pill wiring --- #}
             {% set st = (j.status or '').lower() %}
             {% set pill_class =
               'pill-gray'   if st in ['', 'pending'] else
@@ -69,6 +70,17 @@
               'Discarded'   if st == 'discarded' else
               (st|capitalize if st else '—')
             %}
+
+            {# Treat structured jobs (CSV/XLSX/JSON) as mapping-capable for now #}
+            {% set filename = j.filename or '' %}
+            {% set ext = filename.split('.')[-1] | lower %}
+            {% set src_type = (j.source_type or '') | lower %}
+            {% set is_structured =
+              ext in ['csv', 'xlsx', 'json'] or
+              src_type in ['structured_csv', 'structured_xlsx', 'structured_json'] or
+              src_type.startswith('structured_')
+            %}
+
             <tr data-job-id="{{ j.id }}" data-status="{{ st }}">
               <td class="text-muted">#{{ j.id }}</td>
               <td>{{ j.filename }}</td>
@@ -83,10 +95,43 @@
                 <div class="actions">
                   <a href="{{ url_for('imports_detail', job_id=j.id) }}" class="btn btn-primary" data-view>View</a>
                   <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary" data-raw>Raw OCR</a>
-                  {# Edit is enabled only when draft is ready; JS will toggle aria-disabled #}
-                  <a href="{{ url_for('imports_draft', job_id=j.id) }}" class="btn btn-primary" data-edit aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}">Edit</a>
 
-                  {# NEW: One-click Finalize with AI Cleanup — disabled until draft is ready #}
+                  {# Column Mapping:
+                     - Enabled only for structured imports (CSV/XLSX/JSON)
+                     - Disabled stub for OCR/image/PDF jobs
+                  #}
+                  {% if is_structured %}
+                    <a
+                      href="{{ url_for('imports_mapping', job_id=j.id) }}"
+                      class="btn btn-secondary"
+                      data-mapping
+                      aria-disabled="false"
+                    >
+                      Column Mapping
+                    </a>
+                  {% else %}
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      data-mapping
+                      aria-disabled="true"
+                      title="Column mapping is available only for CSV/XLSX/JSON imports."
+                    >
+                      Column Mapping
+                    </button>
+                  {% endif %}
+
+                  {# Edit is enabled only when draft is ready; JS will toggle aria-disabled #}
+                  <a
+                    href="{{ url_for('imports_draft', job_id=j.id) }}"
+                    class="btn btn-primary"
+                    data-edit
+                    aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}"
+                  >
+                    Edit
+                  </a>
+
+                  {# One-click Finalize with AI Cleanup — disabled until draft is ready #}
                   <form
                     action="{{ url_for('imports_ai_finalize', job_id=j.id) }}"
                     method="post"
@@ -103,7 +148,12 @@
                     </button>
                   </form>
 
-                  <form action="/imports/{{ j.id }}/delete" method="post" style="display:inline" onsubmit="return confirm('Delete job #{{ j.id }}? This moves related files to Recycle Bin.');">
+                  <form
+                    action="/imports/{{ j.id }}/delete"
+                    method="post"
+                    style="display:inline"
+                    onsubmit="return confirm('Delete job #{{ j.id }}? This moves related files to Recycle Bin.');"
+                  >
                     <button type="submit" class="btn btn-danger">Delete</button>
                   </form>
                 </div>
@@ -185,6 +235,8 @@
           const enableFinalize = !!draftReady && !['deleted','discarded','failed'].includes(status);
           finalizeBtn.setAttribute('aria-disabled', enableFinalize ? 'false' : 'true');
         }
+        // Column mapping button stays tied purely to presence of structured metadata,
+        // so we don't toggle it here — the Jinja side already gated it.
       }
 
       async function poll() {

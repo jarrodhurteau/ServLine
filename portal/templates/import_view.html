@@ -38,6 +38,14 @@
     .preview-placeholder { color:var(--muted); font-size:.9rem; padding:.5rem 0; }
   </style>
 
+  {# --- Structured / mapping detection: mirror imports.html --- #}
+  {% set filename = job.filename or '' %}
+  {% set ext = filename.split('.')[-1] | lower %}
+  {% set src_type = (job.source_type or '') | lower %}
+  {% set is_structured_ext = ext in ['csv', 'xlsx', 'json'] %}
+  {% set is_structured_type = src_type.startswith('structured_') %}
+  {% set is_structured = is_structured_ext or is_structured_type %}
+
   <section class="card">
     <div class="flex items-center gap-3 flex-wrap">
       <h1 class="text-xl font-semibold">Import #{{ job.id }}</h1>
@@ -81,6 +89,11 @@
             {% if job.restaurant_id %}
               <div class="k">Restaurant</div>
               <div>#{{ job.restaurant_id }}</div>
+            {% endif %}
+
+            {% if job.source_type %}
+              <div class="k">Source</div>
+              <div><code>{{ job.source_type }}</code></div>
             {% endif %}
           </div>
         </div>
@@ -137,7 +150,27 @@
           <button type="submit" class="btn w-full">Clone Draft</button>
         </form>
 
-               <!-- ===== AI TOOLS ===== -->
+        {# ===== Column Mapping (detail page) ===== #}
+        {% if is_structured %}
+          <a
+            href="{{ url_for('imports_mapping', job_id=job.id) }}"
+            class="btn w-full"
+          >
+            Column Mapping
+          </a>
+        {% else %}
+          <button
+            type="button"
+            class="btn w-full"
+            aria-disabled="true"
+            title="Column mapping is only available for structured CSV/XLSX/JSON imports."
+          >
+            Column Mapping
+          </button>
+        {% endif %}
+        {# ======================================= #}
+
+        <!-- ===== AI TOOLS ===== -->
         <div class="ai-section">
           <div class="ai-title">⚡ AI Tools</div>
           <div class="ai-note">
@@ -152,12 +185,11 @@
 
           <!-- POST with redirect so no blank JSON page -->
           <form id="ai-commit-form"
-      action="{{ url_for('imports_ai_finalize', job_id=job.id) }}?redirect=1"
-      method="post"
-      title="Automatically improve names, merge split descriptions, and clean OCR noise.">
-  <button type="submit" class="btn w-full">Finalize with AI Cleanup</button>
-</form>
-
+                action="{{ url_for('imports_ai_finalize', job_id=job.id) }}?redirect=1"
+                method="post"
+                title="Automatically improve names, merge split descriptions, and clean OCR noise.">
+            <button type="submit" class="btn w-full">Finalize with AI Cleanup</button>
+          </form>
         </div>
         <!-- ===================== -->
 
@@ -312,7 +344,7 @@
     }
     pollStatus();
 
-        // confirms for risky actions
+    // confirms for risky actions
     (function () {
       const approve  = document.getElementById('approve-form');
       const discard  = document.getElementById('discard-form');
@@ -331,11 +363,9 @@
             e.preventDefault();
             return;
           }
-          // show overlay while the server processes the AI pass and redirects
           if (window.showProgressBar) showProgressBar(60000, 'Finalizing with AI…');
         });
       }
     })();
-
   </script>
 {% endblock %}

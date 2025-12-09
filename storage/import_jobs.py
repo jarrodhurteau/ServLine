@@ -354,7 +354,7 @@ def parse_structured_xlsx(
 
 
 # ---------------------------------------------------------------------------
-# Structured import job creation (CSV/XLSX + generic)
+# Structured import job creation (CSV/XLSX/JSON + generic)
 # ---------------------------------------------------------------------------
 
 def create_structured_import_job(
@@ -375,7 +375,7 @@ def create_structured_import_job(
     Used by:
       - create_csv_import_job_from_file (...)
       - create_xlsx_import_job_from_file (...)
-      - (later) JSON-based structured ingest.
+      - create_json_import_job_from_file (...)
 
     Returns:
       job_id (int)
@@ -446,17 +446,20 @@ def create_csv_import_job_from_file(
         "errors": [... error dicts ...],
         "summary": {... counts ...},
         "header_map": {... canonical -> csv header ...},
+        "sample_rows": [... first N clean items ...],
         "job_summary": {... stored in summary_json (if column exists) ...},
       }
     """
     csv_path = Path(csv_path)
     clean_items, errors, summary, header_map = parse_structured_csv(csv_path)
+    sample_rows = clean_items[:10]
 
     job_summary: Dict[str, Any] = {
         "ingest_mode": "structured_csv",
         "header_map": header_map,
         "summary": summary,
         "error_rows": errors,
+        "sample_rows": sample_rows,
     }
 
     status = "parsed_with_errors" if errors else "parsed"
@@ -477,6 +480,7 @@ def create_csv_import_job_from_file(
         "errors": errors,
         "summary": summary,
         "header_map": header_map,
+        "sample_rows": sample_rows,
         "job_summary": job_summary,
     }
 
@@ -498,19 +502,22 @@ def create_xlsx_import_job_from_file(
         "job_id": int,
         "items": [... clean items ...],
         "errors": [... error dicts ...],
-        "summary": {... counts ...},
+        "summary": {... counts ...],
         "header_map": {... canonical -> xlsx header ...},
+        "sample_rows": [... first N clean items ...],
         "job_summary": {... stored in summary_json (if column exists) ...},
       }
     """
     xlsx_path = Path(xlsx_path)
     clean_items, errors, summary, header_map = parse_structured_xlsx(xlsx_path)
+    sample_rows = clean_items[:10]
 
     job_summary: Dict[str, Any] = {
         "ingest_mode": "structured_xlsx",
         "header_map": header_map,
         "summary": summary,
         "error_rows": errors,
+        "sample_rows": sample_rows,
     }
 
     status = "parsed_with_errors" if errors else "parsed"
@@ -531,5 +538,116 @@ def create_xlsx_import_job_from_file(
         "errors": errors,
         "summary": summary,
         "header_map": header_map,
+        "sample_rows": sample_rows,
+        "job_summary": job_summary,
+    }
+
+
+def create_json_import_job_from_file(
+    json_path: Path,
+    restaurant_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    High-level helper for Phase 6 pt.7 (structured JSON):
+
+    - Load a JSON file containing either:
+        * {"items": [... structured items ...]}
+        * [... structured items ...]
+    - Validate via One Brain contracts
+    - Create an import_jobs row recording the results
+    - Return details for draft creation + UI summary
+
+    Returns dict:
+      {
+        "job_id": int,
+        "items": [... clean items ...],
+        "errors": [... error dicts ...],
+        "summary": {... counts ...},
+        "header_map": {...},  # typically empty for JSON
+        "sample_rows": [... first N clean items ...],
+        "job_summary": {... stored in summary_json (if column exists) ...},
+      }
+    """
+    if structured_contracts is None:
+        raise RuntimeError(
+            "storage.contracts module is required for structured JSON parsing; "
+            "make sure storage/contracts.py exists."
+        )
+
+    json_path = Path(json_path)
+    if not json_path.exists():
+        raise FileNotFoundError(json_path)
+
+    try:
+        with json_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON file {json_path.name}: {exc}") from exc
+
+    clean_items: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    summary: Dict[str, int] = {}
+
+    # For JSON we usually don't have "headers" in the CSV/XLSX sense.
+    # We keep header_map empty and let the UI handle that gracefully.
+    header_map: Dict[str, str] = {}
+
+    if isinstance(payload, dict):
+        # Dict payload should contain an "items" array; use the payload-level validator.
+        ok, msg, clean_items, item_errors, base_summary = structured_contracts.validate_structured_menu_payload(payload)
+        errors = item_errors
+        summary = base_summary or {
+            "total_rows": len(clean_items) + len(errors),
+            "valid_rows": len(clean_items),
+            "error_rows": len(errors),
+        }
+
+        # If the shape is fundamentally wrong (no items and no rows), bail out.
+        if not ok and summary.get("total_rows", 0) == 0:
+            raise ValueError(f"Invalid structured JSON payload: {msg}")
+    elif isinstance(payload, list):
+        # Top-level list of items.
+        clean_items, item_errors, base_summary = structured_contracts.validate_structured_items(payload)
+        errors = item_errors
+        summary = base_summary or {
+            "total_rows": len(payload),
+            "valid_rows": len(clean_items),
+            "error_rows": len(errors),
+        }
+    else:
+        raise ValueError(
+            "Structured JSON payload must be either an object with an 'items' array "
+            "or a top-level list of items."
+        )
+
+    sample_rows = clean_items[:10]
+
+    job_summary: Dict[str, Any] = {
+        "ingest_mode": "structured_json",
+        "header_map": header_map,
+        "summary": summary,
+        "error_rows": errors,
+        "sample_rows": sample_rows,
+    }
+
+    status = "parsed_with_errors" if errors else "parsed"
+
+    job_id = create_structured_import_job(
+        source_type="structured_json",
+        filename=json_path.name,
+        source_path=str(json_path),
+        restaurant_id=restaurant_id,
+        summary=job_summary,
+        payload=None,
+        status=status,
+    )
+
+    return {
+        "job_id": job_id,
+        "items": clean_items,
+        "errors": errors,
+        "summary": summary,
+        "header_map": header_map,
+        "sample_rows": sample_rows,
         "job_summary": job_summary,
     }

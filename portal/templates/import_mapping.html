@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Column Mapping · Import #{{ job.id }} · ServLine{% endblock %}
+
+{% block content %}
+  <style>
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
+    .pill-gray  { background:#e5e7eb; color:#374151; }
+    .pill-blue  { background:#dbeafe; color:#1e40af; }
+    .pill-yellow{ background:#fef3c7; color:#92400e; }
+    .pill-green { background:#dcfce7; color:#065f46; }
+    .pill-red   { background:#fee2e2; color:#991b1b; }
+    .pill-purple{ background:#ede9fe; color:#5b21b6; }
+
+    .mapping-grid {
+      display:grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+      gap:1rem;
+      align-items:flex-start;
+    }
+
+    .mapping-table {
+      width:100%;
+      border-collapse:collapse;
+      font-size:.95rem;
+    }
+    .mapping-table th,
+    .mapping-table td {
+      padding:6px 8px;
+      border-bottom:1px solid var(--line);
+      vertical-align:middle;
+    }
+    .mapping-table th {
+      text-align:left;
+      font-weight:600;
+      color:var(--muted);
+      font-size:.8rem;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+    .mapping-table tr:last-child td {
+      border-bottom:none;
+    }
+
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:.8rem;
+      background:rgba(148, 163, 184, .18);
+      color:var(--muted);
+      border:1px solid rgba(148, 163, 184, .3);
+    }
+
+    .sample-table-wrap {
+      border-radius:12px;
+      border:1px solid var(--line);
+      overflow:auto;
+      max-height:260px;
+    }
+    .sample-table {
+      width:100%;
+      border-collapse:collapse;
+      font-size:.9rem;
+    }
+    .sample-table th,
+    .sample-table td {
+      padding:6px 8px;
+      border-bottom:1px solid var(--line);
+      white-space:nowrap;
+      text-overflow:ellipsis;
+      overflow:hidden;
+      max-width:220px;
+    }
+    .sample-table th {
+      position:sticky;
+      top:0;
+      background:rgba(15,23,42,.96);
+      backdrop-filter:blur(4px);
+      z-index:1;
+      font-size:.8rem;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      color:var(--muted);
+    }
+    .sample-table tr:last-child td {
+      border-bottom:none;
+    }
+
+    .muted-small {
+      font-size:.85rem;
+      color:var(--muted);
+    }
+
+    select.mapping-select {
+      width:100%;
+      border-radius:10px;
+      padding:6px 8px;
+      border:1px solid var(--line);
+      background:#020617;
+      color:var(--ink);
+      font-size:.9rem;
+    }
+    select.mapping-select[disabled] {
+      opacity:.7;
+      cursor:not-allowed;
+    }
+  </style>
+
+  {% set st = (job.status or '')|lower %}
+  {% set pill_class =
+        'pill-gray'   if st in ['', 'pending', 'deleted'] else
+        'pill-blue'   if st in ['processing', 'restored'] else
+        'pill-green'  if st in ['done', 'published', 'approved'] else
+        'pill-yellow' if st in ['submitted', 'review'] else
+        'pill-purple' if st in ['editing'] else
+        'pill-red'
+  %}
+  {% set status_label =
+        'Pending'     if st == 'pending' else
+        'Processing'  if st == 'processing' else
+        'Ready'       if st == 'done' else
+        'Submitted'   if st == 'submitted' else
+        'Editing'     if st == 'editing' else
+        'Published'   if st == 'published' else
+        'Approved'    if st == 'approved' else
+        'Restored'    if st == 'restored' else
+        'Deleted'     if st == 'deleted' else
+        'Discarded'   if st == 'discarded' else
+        (st|capitalize if st else '—')
+  %}
+
+  {% set header_map = mapping.header_map or {} %}
+  {% set sample_rows = mapping.sample_rows or [] %}
+  {% set cols = mapping.column_names or [] %}
+
+  <section class="card">
+    <div class="flex items-center gap-3 flex-wrap mb-2">
+      <h1 class="text-xl font-semibold">Column Mapping · Import #{{ job.id }}</h1>
+      <span class="pill {{ pill_class }}">{{ status_label }}</span>
+
+      <div class="ml-auto flex gap-2 flex-wrap">
+        <a href="{{ url_for('imports_detail', job_id=job.id) }}" class="btn btn-ghost">Back to Import</a>
+        <a href="{{ url_for('imports') }}" class="btn">All Imports</a>
+      </div>
+    </div>
+
+    <p class="muted-small mb-3">
+      This is a <strong>preview-only skeleton</strong> for structured imports.
+      It shows how your CSV/XLSX/JSON columns map into ServLine fields.
+      Saving changes from here will arrive in a later phase.
+    </p>
+
+    <div class="mb-4 flex flex-wrap gap-3 items-center">
+      <span class="badge">
+        <span>Source</span>
+        <code>{{ job.filename }}</code>
+      </span>
+      {% if mapping.file_ext %}
+        <span class="badge">
+          <span>Type</span>
+          <code>.{{ mapping.file_ext }}</code>
+        </span>
+      {% endif %}
+      {% if mapping.source_type %}
+        <span class="badge">
+          <span>Source kind</span>
+          <code>{{ mapping.source_type }}</code>
+        </span>
+      {% endif %}
+      {% if cols %}
+        <span class="badge">
+          <span>Columns</span>
+          <code>{{ cols|length }}</code>
+        </span>
+      {% endif %}
+    </div>
+
+    <div class="mapping-grid">
+      <!-- Column mapping table -->
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Column Mapping</h2>
+        {% if cols %}
+          <table class="mapping-table">
+            <thead>
+              <tr>
+                <th>Original column</th>
+                <th>Mapped to (preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for col in cols %}
+                {% set mapped = header_map.get(col) %}
+                <tr>
+                  <td>
+                    <code>{{ col }}</code>
+                  </td>
+                  <td>
+                    <select class="mapping-select" disabled title="Preview-only; mapping editor coming soon.">
+                      <option value="">— Select target (coming soon) —</option>
+
+                      {% set options = [
+                        ('name', 'Name'),
+                        ('description', 'Description'),
+                        ('category', 'Category'),
+                        ('subcategory', 'Subcategory'),
+                        ('price', 'Price (dollars)'),
+                        ('price_cents', 'Price (cents)'),
+                        ('size', 'Size / variant'),
+                        ('sku', 'SKU'),
+                        ('ignored', 'Ignore')
+                      ] %}
+
+                      {% for val, label in options %}
+                        <option value="{{ val }}" {% if mapped == val %}selected{% endif %}>
+                          {{ label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    {% if mapped %}
+                      <p class="muted-small mt-1">
+                        Current mapping: <code>{{ mapped }}</code>
+                      </p>
+                    {% else %}
+                      <p class="muted-small mt-1">
+                        No mapping stored yet for this column.
+                      </p>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted-small">
+            No column metadata is available yet for this job. Once the structured
+            parser records headers, they will appear here.
+          </p>
+        {% endif %}
+      </div>
+
+      <!-- Sample data preview -->
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Sample Rows</h2>
+        {% if sample_rows and cols %}
+          <div class="sample-table-wrap">
+            <table class="sample-table">
+              <thead>
+                <tr>
+                  {% for col in cols %}
+                    <th><code>{{ col }}</code></th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in sample_rows[:5] %}
+                  <tr>
+                    {% for col in cols %}
+                      <td>
+                        {% if row is mapping and row.get(col) is defined %}
+                          {{ row.get(col) }}
+                        {% elif row is sequence and not (row is string) %}
+                          {{ row[loop.index0] if loop.index0 < row|length else '' }}
+                        {% else %}
+                          {{ row }}
+                        {% endif %}
+                      </td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p class="muted-small mt-1">
+            Showing up to 5 sample rows. Exact behavior depends on how the storage
+            layer populated <code>sample_rows</code>.
+          </p>
+        {% else %}
+          <p class="muted-small">
+            No sample rows have been recorded for this job yet. When your structured
+            import helper saves <code>sample_rows</code>, a preview will appear here.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // Friendly timestamp formatting if you ever add times here later.
+  </script>
+{% endblock %}

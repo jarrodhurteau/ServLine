@@ -17,9 +17,7 @@ from datetime import datetime
 from typing import Optional, Iterable, Tuple, List, Dict, Any
 import hashlib  # <-- added for cat_hue filter
 import time     # <-- NEW: for gentle polling after upload
-from storage import drafts
 from storage import import_jobs as import_jobs_store  # <-- NEW: structured import helpers
-from storage.import_jobs import create_csv_import_job_from_file  # <-- NEW: Phase 6 pt.2 helper
 
 
 # --- Forward decls for type checkers (real implementations appear later) ---
@@ -952,6 +950,85 @@ def imports_rotate_image(job_id: int):
         return redirect(url_for("imports_detail", job_id=job_id))
     return jsonify({"ok": True, "angle": angle})
 
+
+# ------------------------
+# NEW: Column mapping / preview skeleton (Phase 6 pt.8)
+# ------------------------
+@app.get("/imports/<int:job_id>/mapping")
+@login_required
+def imports_mapping(job_id: int):
+    """
+    Skeleton UI for column mapping for structured imports (CSV/XLSX/JSON).
+
+    Uses import_jobs.header_map + import_jobs.sample_rows to render a simple preview.
+    For now, we also allow *fresh* structured jobs that don't have metadata yet,
+    so the UI can show an empty mapping skeleton instead of bouncing.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404, description="Import job not found")
+
+    # sqlite3.Row has .keys(), but guard defensively
+    col_names = set(row.keys()) if hasattr(row, "keys") else set()
+
+    # Detect "structured" the same way the templates do
+    filename = row["filename"] or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    src_type = (row["source_type"] if "source_type" in col_names else "") or ""
+    src_type = src_type.lower()
+
+    is_structured_ext = ext in ("csv", "xlsx", "json")
+    is_structured_type = src_type.startswith("structured_")
+    is_structured = is_structured_ext or is_structured_type
+
+    raw_header_map = row["header_map"] if "header_map" in col_names else None
+    raw_sample_rows = row["sample_rows"] if "sample_rows" in col_names else None
+
+    # If this job is *not* structured and has no metadata, bounce back to detail
+    if not is_structured and not raw_header_map and not raw_sample_rows:
+        flash("Column mapping is only available for structured CSV/XLSX/JSON imports.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    def _coerce_json(val, default):
+        if val is None:
+            return default
+        if isinstance(val, (dict, list)):
+            return val
+        try:
+            return json.loads(val)
+        except Exception:
+            return default
+
+    header_map = _coerce_json(raw_header_map, {})
+    sample_rows = _coerce_json(raw_sample_rows, [])
+
+    # Try to infer column names:
+    #   - Prefer header_map keys
+    #   - Otherwise, if sample_rows are dicts, use their keys
+    column_names: list[str] = []
+    if isinstance(header_map, dict) and header_map:
+        column_names = list(header_map.keys())
+    elif sample_rows and isinstance(sample_rows, list):
+        first = sample_rows[0]
+        if isinstance(first, dict):
+            column_names = list(first.keys())
+
+    mapping_ctx = {
+        "header_map": header_map,
+        "sample_rows": sample_rows,
+        "column_names": column_names,
+        "is_structured": is_structured,
+        "file_ext": ext,
+        "source_type": src_type,
+    }
+
+    return _safe_render(
+        "import_mapping.html",
+        job=row,
+        mapping=mapping_ctx,
+    )
+
+
 # ------------------------
 # Import flow: Upload -> Job -> Worker -> Draft JSON (OCR)
 # ------------------------
@@ -1585,6 +1662,60 @@ def dev_upload_form():
     </html>
     """
 
+
+@app.get("/test_json_form")
+@login_required
+def test_json_form():
+    """
+    Dev-only helper to POST a structured JSON file into /import/json.
+    """
+    return """
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Dev JSON Import Test</title>
+        <style>
+          :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; --brand:#7aa2ff; --brandH:#5a86f7; }
+          * { box-sizing: border-box; }
+          body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+          .wrap { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+          .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+          h2 { margin: 0 0 8px; }
+          p { margin: 0 0 12px; color: var(--muted); }
+          .btn {
+            display: inline-block; padding: 8px 14px; border-radius: 12px;
+            border: 1px solid var(--brand); background: var(--brand);
+            color: #000; font-weight: 600; cursor: pointer; text-decoration: none;
+            transition: background .2s, border-color .2s;
+          }
+          .btn:hover { background: var(--brandH); border-color: var(--brandH); }
+          .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+          .mt-3{ margin-top: .75rem; } .mt-4{ margin-top: 1rem; }
+          input[type="file"] { color: #000; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+          code { color: #b7cdfb; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="card">
+            <h2>Dev JSON Import Test</h2>
+            <p>Upload a structured JSON payload and send it to <code>/import/json</code>.</p>
+            <form class="mt-3" action="/import/json" method="post" enctype="multipart/form-data">
+              <input type="file" name="json_file" accept="application/json" required />
+              <div class="mt-3 row">
+                <button type="submit" class="btn">Upload JSON</button>
+                <a href="/import" class="btn">Back to Import</a>
+              </div>
+            </form>
+            <p class="mt-4">Expected: JSON that passes the structured item contract.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+
 # ------------------------
 # **NEW** Import landing page + HTML POST handler
 # ------------------------
@@ -1710,7 +1841,9 @@ def import_csv():
 
         # Build a draft from the structured items using the shared drafts storage
         title = summary.get("title") or f"Imported CSV {datetime.utcnow().date()}"
-        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        create_structured = getattr(
+            drafts_store, "create_draft_from_structured_items", None
+        )
         draft_id = None
         if callable(create_structured) and items:
             draft = create_structured(
@@ -1718,16 +1851,19 @@ def import_csv():
                 restaurant_id=restaurant_id,
                 items=items,
                 source_type="structured_csv",
+                # 🔑 link this draft back to import_jobs.id
+                source_job_id=job_id,
                 source_meta={
                     "filename": base_name,
                     "row_count": summary.get("row_count"),
                     "valid_rows": summary.get("valid_rows"),
                     "invalid_rows": summary.get("invalid_rows"),
-                    "job_id": job_id,   # ✅ keep job linkage inside source_meta only
+                    "job_id": job_id,
                 },
             )
-
             draft_id = int(draft.get("id") or draft.get("draft_id"))
+
+
 
         # Flash a concise summary
         row_count = summary.get("row_count", len(items))
@@ -1764,6 +1900,7 @@ def import_csv():
 
 
 
+
 # ------------------------
 # NEW: Structured XLSX import (Phase 6 pt.3)
 # ------------------------
@@ -1788,7 +1925,10 @@ def import_xlsx():
 
     # Ensure storage/import_jobs helpers are present
     if not hasattr(import_jobs_store, "create_xlsx_import_job_from_file"):
-        flash("XLSX import helpers are not available yet (storage.import_jobs.create_xlsx_import_job_from_file missing).", "error")
+        flash(
+            "XLSX import helpers are not available yet (storage.import_jobs.create_xlsx_import_job_from_file missing).",
+            "error",
+        )
         return redirect(url_for("import_upload"))
 
     try:
@@ -1822,7 +1962,9 @@ def import_xlsx():
 
         # Build a draft from the structured items using the shared drafts storage
         title = summary.get("title") or f"Imported XLSX {datetime.utcnow().date()}"
-        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        create_structured = getattr(
+            drafts_store, "create_draft_from_structured_items", None
+        )
         draft_id = None
         if callable(create_structured) and items:
             draft = create_structured(
@@ -1830,6 +1972,8 @@ def import_xlsx():
                 restaurant_id=restaurant_id,
                 items=items,
                 source_type="structured_xlsx",
+                # 🔗 link draft → import job using the canonical kwarg
+                source_job_id=job_id,
                 source_meta={
                     "filename": base_name,
                     "row_count": summary.get("row_count"),
@@ -1856,7 +2000,10 @@ def import_xlsx():
         flash(msg, level)
 
         if errors:
-            flash("Some XLSX rows could not be imported. Check your column headers and formats.", "warning")
+            flash(
+                "Some XLSX rows could not be imported. Check your column headers and formats.",
+                "warning",
+            )
 
         # Prefer jumping straight into the draft editor if we have a draft id
         if draft_id:
@@ -1871,6 +2018,120 @@ def import_xlsx():
     except Exception as e:
         flash(f"XLSX import failed: {e}", "error")
         return redirect(url_for("import_upload"))
+
+
+
+# ------------------------
+# NEW: Structured JSON import (Phase 6 pt.7)
+# ------------------------
+@app.post("/import/json")
+@login_required
+def import_json():
+    """
+    Structured ingestion for JSON menus (bypasses OCR).
+
+    Expected form fields:
+      - json_file: uploaded .json file (preferred)
+      - file:      fallback field name
+      - restaurant_id: optional (uses session restaurant for customers)
+
+    Flow:
+      - Save JSON into uploads/
+      - Call storage.import_jobs.create_json_import_job_from_file(...)
+      - Create a DB-backed draft via drafts_store.create_draft_from_structured_items
+      - Redirect to Draft Editor (if draft exists) or the import detail page.
+    """
+    _require_drafts_storage()
+
+    # Ensure storage/import_jobs helpers are present
+    if not hasattr(import_jobs_store, "create_json_import_job_from_file"):
+        flash(
+            "JSON import helpers are not available yet (storage.import_jobs.create_json_import_job_from_file missing).",
+            "error",
+        )
+        return redirect(url_for("import_upload"))
+
+    try:
+        # Accept either 'json_file' (preferred) or fallback to 'file'
+        file = request.files.get("json_file") or request.files.get("file")
+        if not file or file.filename == "":
+            flash("Please choose a JSON file to upload.", "error")
+            return redirect(url_for("import_upload"))
+
+        base_name = secure_filename(file.filename) or "upload.json"
+        if not base_name.lower().endswith(".json"):
+            flash("Structured JSON import currently only accepts .json files.", "error")
+            return redirect(url_for("import_upload"))
+
+        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+        save_path = UPLOAD_FOLDER / tmp_name
+        file.save(str(save_path))
+
+        restaurant_id = _resolve_restaurant_id_from_request()
+
+        # Let the storage layer parse + validate the JSON
+        result = import_jobs_store.create_json_import_job_from_file(
+            save_path,
+            restaurant_id=restaurant_id,
+        )
+
+        job_id = int(result.get("job_id"))
+        items = result.get("items") or []
+        summary = result.get("summary") or {}
+        errors = result.get("errors") or []
+
+        # Build a draft from the structured items using the shared drafts storage
+        title = summary.get("title") or f"Imported JSON {datetime.utcnow().date()}"
+        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        draft_id = None
+        if callable(create_structured) and items:
+            draft = create_structured(
+                title=title,
+                restaurant_id=restaurant_id,
+                items=items,
+                source_type="structured_json",
+                source_meta={
+                    "filename": base_name,
+                    "row_count": summary.get("row_count"),
+                    "valid_rows": summary.get("valid_rows"),
+                    "invalid_rows": summary.get("invalid_rows"),
+                    "job_id": job_id,
+                },
+            )
+            draft_id = int(draft.get("id") or draft.get("draft_id"))
+
+        # Flash a concise summary
+        row_count = summary.get("row_count", len(items))
+        valid_rows = summary.get("valid_rows", len(items))
+        invalid_rows = summary.get("invalid_rows", len(errors))
+        msg = f"JSON import created job #{job_id}: {valid_rows} item(s) imported"
+        if row_count is not None:
+            msg += f" out of {row_count} row(s)"
+        if invalid_rows:
+            msg += f" ({invalid_rows} row(s) skipped)."
+            level = "warning"
+        else:
+            msg += "."
+            level = "success"
+        flash(msg, level)
+
+        if errors:
+            flash("Some JSON rows could not be imported. Check your JSON structure and field names.", "warning")
+
+        # Prefer jumping straight into the draft editor if we have a draft id
+        if draft_id:
+            return redirect(url_for("draft_editor", draft_id=draft_id))
+
+        # Fallback: show the structured job detail
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    except RequestEntityTooLarge:
+        flash("JSON file too large. Try a smaller file or raise MAX_CONTENT_LENGTH.", "error")
+        return redirect(url_for("import_upload"))
+    except Exception as e:
+        flash(f"JSON import failed: {e}", "error")
+        return redirect(url_for("import_upload"))
+
 
 
 # ------------------------
@@ -2334,9 +2595,11 @@ def import_structured_draft():
         file.save(str(csv_path))
 
         # Use the One Brain helper to parse + create import_jobs row
-        job_result = create_csv_import_job_from_file(
+        job_result = import_jobs_store.create_csv_import_job_from_file(
             csv_path, restaurant_id=restaurant_id
         )
+
+
         job_id = int(job_result.get("job_id") or 0)
         items = job_result.get("items") or []
         errors = job_result.get("errors") or []
@@ -2373,9 +2636,12 @@ def import_structured_draft():
             restaurant_id=restaurant_id,
             items=items,
             source_type="structured_csv",
+            # 🔑 link draft back to this import job
+            source_job_id=job_id,
             source_meta=source_meta,
         )
         draft_id = int(draft.get("id") or draft.get("draft_id") or 0)
+
         if not draft_id:
             return jsonify(
                 {
@@ -3524,15 +3790,35 @@ def imports_ai_preview(job_id: int):
     No draft/db writes occur here — it's a read-only preview.
 
     NOW prefers the user-rotated working image if present.
-    """
-    if analyze_ocr_text is None:
-        return jsonify({"ok": False, "error": "AI helper not available"}), 501
 
+    NOTE: For structured CSV/JSON imports we do NOT re-OCR; preview is only
+    available for image/PDF OCR jobs.
+    """
     row = get_import_job(job_id)
     if not row:
         abort(404)
 
+    # Detect structured imports (CSV/JSON/XLSX) and bail out early
+    try:
+        source_type = (row["source_type"] or "").lower()
+    except Exception:
+        source_type = ""
     src_name = (row["filename"] or "").strip()
+    suffix = Path(src_name).suffix.lower() if src_name else ""
+    is_structured = (
+        source_type.startswith("structured")
+        or suffix in (".csv", ".json", ".xlsx", ".xls")
+    )
+
+    if is_structured:
+        return jsonify({
+            "ok": False,
+            "error": "AI preview is only available for image/PDF OCR imports (this job is a structured CSV/JSON import)."
+        }), 400
+
+    if analyze_ocr_text is None:
+        return jsonify({"ok": False, "error": "AI helper not available"}), 501
+
     if not src_name:
         return jsonify({"ok": False, "error": "No source filename on job"}), 400
 
@@ -3569,6 +3855,7 @@ def imports_ai_preview(job_id: int):
         "extracted_chars": len(raw_text),
         "preview": doc
     }), 200
+
 
 def _build_price_text(ai_item: dict) -> Optional[str]:
     """
@@ -3624,17 +3911,24 @@ def _build_price_text(ai_item: dict) -> Optional[str]:
 @login_required
 def imports_ai_commit(job_id: int):
     """
-    Re-OCR the original upload (same as /ai/preview), run analyze_ocr_text(),
-    then replace the draft items for this job with the cleaned items.
+    For OCR/image/PDF imports:
+      - Re-OCR the original upload (same as /ai/preview),
+      - run analyze_ocr_text(),
+      - replace the draft items for this job with the cleaned items,
+      - run AI cleanup.
+
+    For structured CSV/JSON imports:
+      - Skip OCR entirely,
+      - run AI cleanup on the existing draft items,
+      - mark the draft as finalized.
 
     Behavior:
       - JSON/AJAX: returns JSON.
       - Regular form post or ?redirect=1: flashes + redirects back to Draft Editor.
 
-    NOW prefers the user-rotated working image if present.
+    NOW prefers the user-rotated working image if present for OCR jobs.
     """
     from storage.ai_cleanup import apply_ai_cleanup
-
 
     # detect redirect vs JSON (matches fix-descriptions pattern)
     ct = (request.headers.get("Content-Type") or "").lower()
@@ -3645,12 +3939,6 @@ def imports_ai_commit(job_id: int):
         or is_form_post
     )
 
-    if analyze_ocr_text is None:
-        if wants_redirect:
-            flash("AI helper not available.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "AI helper not available"}), 501
-
     row = get_import_job(job_id)
     if not row:
         if wants_redirect:
@@ -3658,7 +3946,78 @@ def imports_ai_commit(job_id: int):
             return redirect(url_for("imports"))
         abort(404)
 
+    # Detect structured imports vs OCR-style imports
+    try:
+        source_type = (row["source_type"] or "").lower()
+    except Exception:
+        source_type = ""
     src_name = (row["filename"] or "").strip()
+    suffix = Path(src_name).suffix.lower() if src_name else ""
+    is_structured = (
+        source_type.startswith("structured")
+        or suffix in (".csv", ".json", ".xlsx", ".xls")
+    )
+
+    # ---------------- Structured path: no OCR, just AI cleanup on existing draft ----------------
+    if is_structured:
+        _require_drafts_storage()
+        draft_id = _get_or_create_draft_for_job(job_id)
+        if not draft_id:
+            if wants_redirect:
+                flash("No draft available for this job.", "error")
+                return redirect(url_for("imports_detail", job_id=job_id))
+            return jsonify({"ok": False, "error": "No draft available for this job"},), 400
+
+        # Flip status while we run cleanup
+        try:
+            drafts_store.save_draft_metadata(int(draft_id), status="processing")
+        except Exception:
+            pass
+
+        try:
+            cleaned = apply_ai_cleanup(int(draft_id))
+            try:
+                drafts_store.save_draft_metadata(int(draft_id), status="finalized")
+            except Exception:
+                pass
+
+            if wants_redirect:
+                flash(
+                    f"Finalize complete — AI cleanup updated {int(cleaned)} item(s).",
+                    "success",
+                )
+                return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+
+            return jsonify({
+                "ok": True,
+                "job_id": job_id,
+                "draft_id": int(draft_id),
+                "inserted_count": 0,
+                "updated_count": 0,
+                "cleaned_count": int(cleaned),
+                "status": "finalized",
+            }), 200
+
+        except Exception as e:
+            app.logger.exception("AI cleanup during structured imports_ai_commit failed")
+            try:
+                drafts_store.save_draft_metadata(int(draft_id), status="editing")
+            except Exception:
+                pass
+
+            if wants_redirect:
+                flash(f"AI cleanup failed: {e}", "error")
+                return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+
+            return jsonify({"ok": False, "error": str(e), "status": "editing"}), 500
+
+    # ---------------- OCR path: original behavior ----------------
+    if analyze_ocr_text is None:
+        if wants_redirect:
+            flash("AI helper not available.", "error")
+            return redirect(url_for("imports_detail", job_id=job_id))
+        return jsonify({"ok": False, "error": "AI helper not available"}), 501
+
     if not src_name:
         if wants_redirect:
             flash("No source filename on job.", "error")
@@ -3736,7 +4095,7 @@ def imports_ai_commit(job_id: int):
             "name": name,
             "description": desc.strip() or None,
             "price_cents": int(price_cents),
-            "price_text": price_text,  # <-- NEW
+            "price_text": price_text,
             "category": cat,
             "position": None,
             "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf
@@ -3766,30 +4125,35 @@ def imports_ai_commit(job_id: int):
 
     # Run AI cleanup on the freshly-committed draft
     try:
-        updated = apply_ai_cleanup(int(draft_id))
+        cleaned = apply_ai_cleanup(int(draft_id))
     except Exception as e:
-        # If cleanup blows up, fall back but don't kill the whole request
-        updated = 0
+        cleaned = 0
         app.logger.exception("AI cleanup during imports_ai_commit failed: %s", e)
 
     # Nudge updated_at + status
     try:
-        drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"), status="finalized")
+        drafts_store.save_draft_metadata(
+            draft_id,
+            title=(drafts_store.get_draft(draft_id) or {}).get("title"),
+            status="finalized",
+        )
     except TypeError:
-        # older save_draft_metadata without status kwarg
         try:
-            drafts_store.save_draft_metadata(draft_id, title=(drafts_store.get_draft(draft_id) or {}).get("title"))
+            drafts_store.save_draft_metadata(
+                draft_id,
+                title=(drafts_store.get_draft(draft_id) or {}).get("title"),
+            )
         except Exception:
             pass
     except Exception:
         pass
 
     inserted_count = len(ins.get("inserted_ids", []))
-    updated_count  = len(ins.get("updated_ids", []))
+    updated_count = len(ins.get("updated_ids", []))
 
     if wants_redirect:
         flash(
-            f"Finalize complete — {inserted_count} item(s) inserted, {int(updated)} cleaned.",
+            f"Finalize complete — {inserted_count} item(s) inserted, {int(cleaned)} cleaned.",
             "success",
         )
         return redirect(url_for("draft_editor", draft_id=draft_id))
@@ -3800,9 +4164,10 @@ def imports_ai_commit(job_id: int):
         "draft_id": draft_id,
         "inserted_count": inserted_count,
         "updated_count": updated_count,
-        "cleaned_count": int(updated),
+        "cleaned_count": int(cleaned),
         "status": "finalized",
     }), 200
+
 
 
 @app.post("/imports/<int:job_id>/ai/finalize")
@@ -3811,24 +4176,20 @@ def imports_ai_finalize(job_id: int):
     """
     One-click "Finalize with AI Cleanup" flow for an import job.
 
-    Steps:
-      1) Reuse /imports/<job_id>/ai/commit to regenerate draft items from the
-         latest AI heuristics (variants, price_text, etc.) *and* run AI cleanup.
-      2) Locate the draft for this job.
-      3) Redirect into the Draft Editor.
+    For OCR/image/PDF imports:
+      - delegates to /imports/<job_id>/ai/commit to re-OCR + regenerate items
+        and run AI cleanup.
 
-    This keeps the AI pipeline logic centralized in imports_ai_commit so the
-    finalize button is just a friendly one-click wrapper.
+    For structured CSV/JSON imports:
+      - delegates to /imports/<job_id>/ai/commit which skips OCR and simply
+        runs AI cleanup on the existing draft items.
+
+    In both cases, we end in the Draft Editor for the associated draft.
     """
     _require_drafts_storage()
 
     # --- Step 1: run AI commit (side effects only; ignore its Response) ---
     try:
-        # This will:
-        #   - OCR the upload (preferring rotated working copy)
-        #   - run analyze_ocr_text()
-        #   - replace draft_items for this job
-        #   - run apply_ai_cleanup() and set status="finalized"
         imports_ai_commit(job_id)
     except Exception as e:
         flash(f"AI finalize failed during commit: {e}", "error")
@@ -3845,6 +4206,7 @@ def imports_ai_finalize(job_id: int):
     return redirect(url_for("draft_editor", draft_id=int(draft_id)))
 
 
+
 # ------------------------
 # Diagnostics
 # ------------------------
@@ -3855,7 +4217,28 @@ def __ping():
 
 @app.get("/__routes")
 def __routes():
-    return jsonify(sorted([r.rule for r in app.url_map.iter_rules()]))
+    """
+    Debug helper: list all registered routes.
+
+    Made defensive so that if any weird rule object blows up during
+    stringification or sorting, we surface the error instead of a bare 500.
+    """
+    try:
+        routes = []
+        for r in app.url_map.iter_rules():
+            try:
+                routes.append(str(r.rule))
+            except Exception as inner:
+                # Fallback so a single bad rule doesn't kill the whole endpoint
+                routes.append(f"<unprintable rule: {inner.__class__.__name__}>")
+
+        routes.sort()
+        return jsonify({"ok": True, "count": len(routes), "routes": routes})
+    except Exception as e:
+        # With FLASK_DEBUG=1 and the dev errorhandler, this will also log the traceback.
+        app.logger.exception("__routes failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.get("/__boom")
 def __boom():

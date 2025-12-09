@@ -223,10 +223,6 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 - Added **Finalize with AI** button to `imports.html` job rows  
 - Status polling now toggles AI Finalize + Edit buttons dynamically  
 - No impact on legacy OCR upload UX  
-- Full portal workflow now supports:
-  - OCR imports → Drafts  
-  - Structured CSV imports → Drafts  
-  - AI Finalize → Draft Editor  
 
 **Phase 6 pt.3–4 complete.**
 
@@ -234,52 +230,47 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ## 📊 Day 39 — Phase 6 pt.5–6: Structured CSV/XLSX Imports → Draft Editor
 
-Day 39 completes the first **file-type family** for structured ingestion: CSV and XLSX both behave like first-class menu sources and land directly in the Draft Editor.
-
 ### Phase 6 pt.5 — Structured CSV Import Route
-
-- Added `/import/csv` route in `portal.app` for **structured CSV** uploads.  
-- Validates file presence and extension (`.csv` only).  
-- Saves the upload into `uploads/` with a unique name.  
-- Calls `import_jobs_store.create_csv_import_job_from_file(...)` to:
-  - parse the CSV  
-  - normalize rows through One Brain contracts  
-  - create an `import_jobs` row with `ingest_mode="structured_csv"`.  
-- Uses `drafts_store.create_draft_from_structured_items(...)` to build a DB-backed draft from `items`.  
-- Stores linkage (`job_id`, row counts, filename) inside `source_meta`.  
-- Flashes a concise summary banner:  
-  - `job_id`, total rows, valid rows, skipped rows.  
-- On success, redirects straight to the Draft Editor: `/drafts/<draft_id>/edit`.  
-- On failure (size, bad type, missing helper), falls back with clear flash messages.
+- `/import/csv` route  
+- CSV normalized → items validated → draft created  
+- Summary banner  
+- Redirect to Draft Editor  
 
 ### Phase 6 pt.6 — Structured XLSX Import Route + UI
+- `/import/xlsx` route  
+- Excel rows normalized → items validated → draft created  
+- Summary banner  
+- Redirect to Draft Editor  
+- Import page updated with XLSX card  
 
-- Added `/import/xlsx` route in `portal.app` for **Excel-style (one row per item) menus**.  
-- Validates file presence and extension (`.xlsx` only).  
-- Saves XLSX files into `uploads/` with unique names.  
-- Calls `import_jobs_store.create_xlsx_import_job_from_file(...)` to:
-  - read the workbook  
-  - normalize rows using the same structured contracts as CSV  
-  - create `import_jobs` entries with `ingest_mode="structured_xlsx"`.  
-- Uses `drafts_store.create_draft_from_structured_items(...)` to create the draft with `source_type="structured_xlsx"`.  
-- Flashes a summary banner mirroring the CSV path (rows imported / skipped).  
-- Redirects directly to the Draft Editor on success, or back to `/import` with friendly errors on failure.  
+**Phase 6 pt.5–6 complete.**
 
-#### Import Page UI (imports.html)
+---
 
-- Import landing page now supports **four** primary flows:
-  - Upload Image → OCR → Draft  
-  - Upload PDF → OCR → Draft  
-  - Structured CSV (POS export) → Draft  
-  - Structured Excel (XLSX) → Draft  
-- Adds a dedicated **Structured Excel (XLSX)** card with:
-  - file selector (`accept=".xlsx"`)  
-  - “Import XLSX to Draft” CTA button  
-  - explanation copy for row-per-item POS exports.  
-- Keeps a single shared progress bar + upload UX for image/PDF/structured imports.  
-- Structured CSV/XLSX paths both reuse the One Brain structured contracts and draft creation, so everything downstream (AI Finalize, exports, price integrity, etc.) behaves exactly like OCR-based drafts.
+## 📐 Day 40 — Phase 6 pt.7–8: JSON Imports + Column Mapping Skeleton
 
-**Phase 6 pt.5–6 complete: ServLine can now ingest real POS-style CSV/XLSX files into drafts with no OCR involved.**
+### Phase 6 pt.7 — JSON Structured Import (foundation validated)
+- JSON files now brought into the portal structured-import flow  
+- JSON drafts validated through One Brain structured-item contracts  
+- Draft Editor works for structured JSON just like CSV/XLSX  
+- Export buttons (CSV/JSON/XLSX) verified  
+- Finalize with AI works on structured JSON
+
+### Phase 6 pt.8 — Column Mapping (Preview Skeleton)
+- Added new route: `/imports/<job_id>/mapping`  
+- Added full template: `import_mapping.html`  
+- Mapping page shows:
+  - filename  
+  - status  
+  - placeholder Column Mapping panel  
+  - placeholder Sample Rows panel  
+- If no metadata exists (`header_map` / `sample_rows`), UI shows friendly empty-state text  
+- “Column Mapping” button enabled only for structured jobs  
+- Non-structured jobs redirect back with message:
+  - *“Column mapping is only available for structured CSV/XLSX/JSON imports.”*
+
+**Day 40 completes the structured import trifecta: CSV + XLSX + JSON, and introduces the first UI for Column Mapping.**  
+Column mapping is now wired, routed, templated, and ready for Phase 6 pt.9–10 (live mappings + saving).
 
 ---
 
@@ -296,8 +287,8 @@ ServLine menu understanding is now:
 ✅ Ingredient-aware  
 ✅ Debuggable  
 ✅ Human-editable  
-✅ Structured CSV/XLSX-ready (Phase 6 foundation)  
-✅ Portal UI supports both OCR and structured ingestion paths  
+✅ Structured CSV/XLSX/JSON-ready  
+✅ Column Mapping UI foundation added  
 
 ---
 
@@ -311,8 +302,8 @@ ServLine menu understanding is now:
 
 Next up in Phase 6:
 
-- **JSON structured import** (API + file) built on the same contracts  
-- **Live preview + column mapping UI** for structured sources  
-- **POS-grade ingestion layer** (multi-location behavior, taxes/fees, and export-quality guarantees)  
+- Live JSON import panel + summary UI  
+- Full **Column Mapping Editor** (interactive)  
+- Save mapping to job → re-parse → draft  
+- POS-grade ingestion layer (multi-location formatting, tax/fees, etc.)
 
-You’ll pick this up with Day 40 (Phase 6 pt.7–8).
