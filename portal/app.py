@@ -548,41 +548,107 @@ def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row)
     return int(cur.lastrowid)
 
 def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
-    """Return a draft_id for this import job, creating from legacy JSON if needed."""
+    """
+    Return a draft_id for this import job, preferring AI/preview JSON when available.
+
+    Priority:
+      1. Reuse existing DB-backed draft linked via source_job_id.
+      2. For OCR/AI jobs: use ai_preview_path / preview_path JSON if present.
+      3. For structured JSON jobs: use embedded payload_json when present.
+      4. Fallback: legacy JSON at draft_path.
+    """
     _require_drafts_storage()
     row = get_import_job(job_id)
     if not row:
         return None
 
-    # Existing DB-backed draft?
+    # -----------------------------
+    # 1) Existing DB-backed draft?
+    # -----------------------------
     if hasattr(drafts_store, "find_draft_by_source_job"):
         existing = drafts_store.find_draft_by_source_job(job_id)
         if existing and (existing.get("id") or existing.get("draft_id")):
             draft_id = int(existing.get("id") or existing.get("draft_id"))
-            # NEW: sync restaurant_id if the job has one and draft is missing it
+
+            # Sync restaurant_id if the job has one and draft is missing it
             try:
-                if row["restaurant_id"] and not (existing.get("restaurant_id")):
-                    drafts_store.save_draft_metadata(draft_id, restaurant_id=int(row["restaurant_id"]))
+                if (
+                    hasattr(row, "keys")
+                    and "restaurant_id" in row.keys()
+                    and row["restaurant_id"]
+                    and not existing.get("restaurant_id")
+                ):
+                    drafts_store.save_draft_metadata(
+                        draft_id,
+                        restaurant_id=int(row["restaurant_id"]),
+                    )
             except Exception:
                 pass
+
             return draft_id
 
-    # Legacy JSON → new draft
-    abs_path = _abs_from_rel(row["draft_path"]) if row["draft_path"] else None
+    # We’ll build draft_json from the best available source.
+    draft_json: Optional[Dict[str, Any]] = None
+    keys = set(row.keys()) if hasattr(row, "keys") else set()
+
+    # -----------------------------
+    # 2) Prefer file-based AI preview JSON (OCR jobs)
+    #    Try ai_preview_path → preview_path → draft_path
+    # -----------------------------
+    abs_path: Optional[Path] = None
+    for key in ("ai_preview_path", "preview_path", "draft_path"):
+        raw_path = row[key] if key in keys else None
+        if raw_path:
+            candidate = _abs_from_rel(raw_path)
+            if candidate and candidate.exists():
+                abs_path = candidate
+                break
+
     if abs_path and abs_path.exists() and hasattr(drafts_store, "create_draft_from_import"):
-        with open(abs_path, "r", encoding="utf-8") as f:
-            draft_json = json.load(f)
-        created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
-        draft_id = int(created.get("id") or created.get("draft_id"))
-        # NEW: set draft.restaurant_id from the job if available
         try:
-            if row["restaurant_id"]:
-                drafts_store.save_draft_metadata(draft_id, restaurant_id=int(row["restaurant_id"]))
+            with open(abs_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                draft_json = loaded
+        except Exception:
+            draft_json = None
+
+    # -----------------------------
+    # 3) Fallback: embedded payload_json (structured JSON jobs)
+    # -----------------------------
+    if draft_json is None and "payload_json" in keys:
+        payload_raw = row["payload_json"]
+        if payload_raw:
+            try:
+                candidate = json.loads(payload_raw)
+                if isinstance(candidate, dict):
+                    draft_json = candidate
+            except Exception:
+                draft_json = None
+
+    if draft_json is None:
+        return None
+
+    # -----------------------------
+    # 4) Create new draft from chosen JSON
+    # -----------------------------
+    created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
+    draft_id = int(created.get("id") or created.get("draft_id"))
+
+    # -----------------------------
+    # 5) Sync restaurant_id
+    # -----------------------------
+    if "restaurant_id" in keys and row["restaurant_id"]:
+        try:
+            drafts_store.save_draft_metadata(
+                draft_id,
+                restaurant_id=int(row["restaurant_id"]),
+            )
         except Exception:
             pass
-        return draft_id
 
-    return None
+    return draft_id
+
 
 # ---------- MISSING HELPERS (wired to /imports actions) ----------
 def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cents: int) -> bool:

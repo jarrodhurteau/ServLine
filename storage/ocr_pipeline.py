@@ -73,6 +73,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
@@ -108,8 +109,18 @@ UNSHARP_RADIUS = 1.0
 UNSHARP_PERCENT = 120
 UNSHARP_THRESHOLD = 3
 
-# Robust Tesseract settings
-OCR_CONFIG = r"--oem 3 --psm 6 -c preserve_interword_spaces=1"
+# Robust Tesseract settings (Phase 7 scaffolding for multi-pass)
+BASE_OCR_CONFIG = r"--oem 3 -c preserve_interword_spaces=1"
+OCR_CONFIG = BASE_OCR_CONFIG + " --psm 6"
+
+# Phase 7 pt.1–2 feature flags (env-controlled; default OFF)
+ENABLE_VISION_PREPROCESS = os.getenv("OCR_ENABLE_VISION_PREPROCESS", "0") == "1"
+VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
+
+ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
+MULTIPASS_PSMS: List[int] = [6]
+MULTIPASS_ROTATIONS: List[int] = [0, 90, 180, 270]
+
 
 _ALLOWED_CHARS = r"A-Za-z0-9\$\.\,\-\/&'\"°\(\):;#\+ "
 _ALLOWED_RE = re.compile(f"[^{_ALLOWED_CHARS}]+")
@@ -210,6 +221,118 @@ def _is_pricey_text(text: str) -> bool:
         return True
 
     return False
+
+
+# -----------------------------
+# Phase 7 pt.1 — Vision preprocessing scaffold
+# -----------------------------
+
+
+def _vision_debug_save(image: Image.Image, page_index: int, column_index: Optional[int], stage: str) -> None:
+    """
+    Debug-save helper for the Vision layer.
+
+    Controlled by OCR_VISION_DEBUG_DIR. If unset, this is a no-op.
+    Files are written as:
+      page{page_index:03d}_c{column_index}_{stage}.png
+    """
+    if not VISION_DEBUG_DIR:
+        return
+
+    try:
+        debug_root = Path(VISION_DEBUG_DIR)
+        debug_root.mkdir(parents=True, exist_ok=True)
+        col_suffix = f"_c{column_index}" if column_index is not None else ""
+        filename = f"page{page_index:03d}{col_suffix}_{stage}.png"
+        out_path = debug_root / filename
+        image.save(out_path)
+    except Exception:
+        # Debug hooks must never break OCR
+        return
+
+
+def _vision_grayscale_normalize(image: Image.Image) -> Image.Image:
+    """
+    Placeholder for grayscale normalization.
+
+    Phase 7 pt.1 scaffold only — returns the input image unchanged.
+    """
+    return image
+
+
+def _vision_unsharp_placeholder(image: Image.Image) -> Image.Image:
+    """
+    Placeholder for unsharp masking in the Vision layer.
+
+    Phase 7 pt.1 scaffold only — returns the input image unchanged.
+    """
+    return image
+
+
+def _vision_denoise_placeholder(image: Image.Image) -> Image.Image:
+    """
+    Placeholder for denoise step in the Vision layer.
+
+    Phase 7 pt.1 scaffold only — returns the input image unchanged.
+    """
+    return image
+
+
+def _vision_shadow_removal_placeholder(image: Image.Image) -> Image.Image:
+    """
+    Placeholder for shadow-removal in the Vision layer.
+
+    Phase 7 pt.1 scaffold only — returns the input image unchanged.
+    """
+    return image
+
+
+def _vision_adaptive_threshold_placeholder(image: Image.Image) -> Image.Image:
+    """
+    Placeholder for adaptive thresholding in the Vision layer.
+
+    Phase 7 pt.1 scaffold only — returns the input image unchanged.
+    """
+    return image
+
+
+def vision_preprocess(image: Image.Image, page_index: int, column_index: Optional[int] = None) -> Image.Image:
+    """
+    Unified Vision OCR preprocessing entrypoint (Phase 7 pt.1 scaffold).
+
+    For now this is a thin wrapper around ocr_utils.preprocess_page(), plus:
+      - Debug-save hooks for each conceptual stage
+      - Placeholder functions for:
+          grayscale normalize
+          unsharp mask
+          denoise
+          shadow-removal
+          adaptive threshold
+
+    All placeholder functions are identity transforms, so even when
+    OCR_ENABLE_VISION_PREPROCESS=1, the effective output remains identical
+    to ocr_utils.preprocess_page(image, do_deskew=True).
+    """
+    base = ocr_utils.preprocess_page(image, do_deskew=True)
+    _vision_debug_save(base, page_index, column_index, "base")
+
+    gray = _vision_grayscale_normalize(base)
+    _vision_debug_save(gray, page_index, column_index, "gray")
+
+    sharp = _vision_unsharp_placeholder(gray)
+    _vision_debug_save(sharp, page_index, column_index, "unsharp")
+
+    denoised = _vision_denoise_placeholder(sharp)
+    _vision_debug_save(denoised, page_index, column_index, "denoise")
+
+    de_shadowed = _vision_shadow_removal_placeholder(denoised)
+    _vision_debug_save(de_shadowed, page_index, column_index, "shadow")
+
+    thresh = _vision_adaptive_threshold_placeholder(de_shadowed)
+    _vision_debug_save(thresh, page_index, column_index, "thresh")
+
+    return thresh
+
 
 
 # -----------------------------
@@ -362,9 +485,86 @@ def annotate_prices_and_variants_on_text_blocks(text_blocks: List[Dict[str, Any]
 # -----------------------------
 
 def _ocr_page(im: Image.Image) -> Dict[str, List]:
+    """
+    Single-pass Tesseract OCR using the default OCR_CONFIG.
+
+    This remains the baseline behavior for the pipeline and is used
+    whenever multi-pass is disabled.
+    """
     return pytesseract.image_to_data(
-        im, output_type=pytesseract.Output.DICT, config=OCR_CONFIG
+        im,
+        output_type=pytesseract.Output.DICT,
+        config=OCR_CONFIG,
     )
+
+
+def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[str, List]:
+    """
+    Single OCR pass for a specific (rotation, psm) combination.
+
+    Phase 7 pt.2 scaffold: uses BASE_OCR_CONFIG with a dynamic --psm.
+    """
+    working = image
+    if rotation != 0:
+        working = image.rotate(rotation, expand=True)
+
+    config = f"{BASE_OCR_CONFIG} --psm {psm}"
+    data = pytesseract.image_to_data(
+        working,
+        output_type=pytesseract.Output.DICT,
+        config=config,
+    )
+
+    tokens = len(data.get("text", []))
+    print(
+        f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}"
+    )
+
+    return data
+
+
+def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
+    """
+    Placeholder confidence fusion for multi-pass OCR (Phase 7 pt.2).
+
+    For now this simply returns the first pass's data unchanged.
+    Later this will consider per-word confidences and combine results
+    across PSMs and rotations.
+    """
+    if not passes:
+        raise ValueError("No OCR passes provided to fuse_multipass_results()")
+
+    # Each element of `passes` is a dict[str, list] from image_to_data.
+    return passes[0]  # type: ignore[return-value]
+
+
+def run_multipass_ocr(image: Image.Image, page_index: int, column_index: int) -> Dict[str, List]:
+    """
+    Multi-pass OCR wrapper.
+
+    When ENABLE_MULTIPASS_OCR is False, this is exactly equivalent to
+    a call to _ocr_page(image). When enabled, it runs multiple passes
+    over rotations and PSM values, then fuses them via the placeholder
+    fuse_multipass_results() helper.
+    """
+    if not ENABLE_MULTIPASS_OCR:
+        return _ocr_page(image)
+
+    passes: List[Dict[str, List]] = []
+
+    for rotation in MULTIPASS_ROTATIONS:
+        for psm in MULTIPASS_PSMS:
+            data = _run_single_ocr_pass(image, psm=psm, rotation=rotation)
+            passes.append(data)
+
+    fused = fuse_multipass_results(passes)
+    tokens = len(fused.get("text", []))
+    print(
+        f"[Multipass] page={page_index} col={column_index} fused_tokens={tokens} "
+        f"psms={MULTIPASS_PSMS} rotations={MULTIPASS_ROTATIONS}"
+    )
+
+    return fused
 
 
 def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP) -> Optional[Word]:
@@ -981,9 +1181,13 @@ def segment_document(
             pass
 
         # 🔹 High-clarity preprocessing and adaptive column split
-        im_pre = ocr_utils.preprocess_page(im, do_deskew=True)
+        if ENABLE_VISION_PREPROCESS:
+            im_pre = vision_preprocess(im, page_index=page_index, column_index=None)
+        else:
+            im_pre = ocr_utils.preprocess_page(im, do_deskew=True)
 
         # Dynamic min_gap based on image width; helps real menus where
+
         # gutters are relatively narrow but consistent.
         width, height = im_pre.size
         # Roughly ~0.4–1% of page width, clamped to a reasonable range.
@@ -1008,8 +1212,9 @@ def segment_document(
         page_text_blocks: List[Dict[str, Any]] = []
 
         for col_idx, col_img in enumerate(columns, start=1):
-            data = _ocr_page(col_img)
+            data = run_multipass_ocr(col_img, page_index=page_index, column_index=col_idx)
             words: List[Word] = []
+
             n = len(data.get("text", []))
             for i in range(n):
                 w = _make_word(i, data)
@@ -1122,12 +1327,23 @@ def segment_document(
                 "high_clarity+segmentation+two_column_merge+"
                 "category_infer+multi_price_variants+block_roles+"
                 "multiline_reconstruct+variant_enrich+category_hierarchy+"
-                "price_integrity_prep+structured_v2_prep"
+                "price_integrity_prep+structured_v2_prep+"
+                "vision_scaffold+multipass_scaffold"
             ),
             "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
+            "vision_layer": {
+                "enabled": ENABLE_VISION_PREPROCESS,
+                "debug_dir": VISION_DEBUG_DIR or None,
+            },
+            "multipass": {
+                "enabled": ENABLE_MULTIPASS_OCR,
+                "psms": MULTIPASS_PSMS,
+                "rotations": MULTIPASS_ROTATIONS,
+            },
         },
     }
     return segmented
+
 
 
 if __name__ == "__main__":

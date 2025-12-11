@@ -49,7 +49,8 @@ except Exception:
         source: Dict[str, Any]
         meta: Dict[str, Any]
 
-PIPELINE_VERSION = "phase-4-structured_v2+superimport_prep+ai-helper-rev9"
+PIPELINE_VERSION = "phase-7-scaffold-vision+multipass+structured_v2+superimport_prep+ai-helper-rev9"
+
 
 
 # ============================================================================

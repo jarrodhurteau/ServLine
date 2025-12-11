@@ -274,33 +274,47 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ### Phase 6 pt.9 — Column Mapping Wired to One Brain Metadata
 - `/imports/<job_id>/mapping` now reads real metadata from `import_jobs`:
-  - `header_map` (original header → canonical field)  
-  - `sample_rows` (up to five normalized rows)  
-- `import_mapping.html` shows:
-  - Left panel: Original column names and their current canonical mapping (Name, Description, Category, Price)  
-  - Right panel: Table of sample rows using the same headers  
-- Handles mixed and partial metadata:
-  - If only headers exist, mapping panel still renders  
-  - If only sample rows exist, table still renders with inferred headers  
-  - If neither exists, shows friendly “no column metadata yet” messaging  
+  - `header_map`  
+  - `sample_rows`  
+- Mapping page shows both:
+  - Left: original → canonical mappings  
+  - Right: sample row table using same header order  
+- Graceful degrade for partial metadata  
+- Robust handling for CSV/XLSX import jobs  
 
 ### Phase 6 pt.10 — JSON Import Panel + Mapping Eligibility Rules
-- Import page (`imports.html`) updated with **Structured JSON** upload card:
-  - JSON uploads post to `/import/json`  
-  - Route wires through `storage.import_jobs.create_json_import_job_from_file`  
-  - Valid JSON creates a structured draft and redirects to Draft Editor with summary flashes  
-- Import jobs table now distinguishes mapping-capable jobs:
-  - **Column Mapping button enabled only for table-shaped structured imports (CSV/XLSX)**  
-  - JSON, PDFs, and image-based jobs show a disabled Column Mapping button with tooltip  
-- Column Mapping page validated for:
-  - Structured CSV imports  
-  - Structured XLSX imports  
-- JSON structured jobs continue to flow through:
-  - Draft Editor  
-  - AI Finalize  
-  - Export endpoints  
+- Structured JSON card added to `imports.html`  
+- `/import/json` route implemented  
+- JSON jobs redirect to Draft Editor automatically  
+- Column Mapping button enabled **only** for CSV/XLSX jobs  
+- JSON, PDF, and image-based jobs show disabled Mapping button with tooltip  
 
-**Day 41 completes Phase 6 pt.9–10: live column mapping previews for CSV/XLSX and a first-class JSON upload path in the portal.**
+**Day 41 completes Phase 6 pt.9–10.**
+
+---
+
+## 🧠 Day 42 — Phase 7 pt.1–2: One Brain OCR Verification & Draft Pipeline Hardening
+
+### Phase 7 pt.1 — Enforce One Brain OCR Everywhere
+- Verified that all OCR extraction calls route exclusively through:  
+  `storage/ocr_facade.py`  
+- Removed remaining legacy fallback paths  
+- Confirmed worker OCR active (`ocr_engine: "ocr_worker"`)  
+- Added explicit pipeline metadata: `"pipeline": "one_brain_v2"`  
+- Ensured draft creation prefers `payload_json` from AI Preview  
+- Added strict debugging hooks to confirm no legacy OCR is ever invoked  
+
+### Phase 7 pt.2 — Draft Construction + Debug Layer Hardening
+- Refactored `_get_or_create_draft_for_job` for clarity & correctness  
+- Removed duplicate function body accidentally introduced in past patches  
+- Ensured:
+  - AI payload → draft creation is first choice  
+  - Legacy draft_path is *only* used when AI payload missing  
+  - Debug metadata correctly indicates pipeline path  
+  - No stray “fix attempts” remain  
+- Verified full end-to-end import → draft → AI Preview → debug path  
+
+**Day 42 complete — One Brain pipeline fully verified and stable.**
 
 ---
 
@@ -319,20 +333,16 @@ ServLine menu understanding is now:
 ✅ Human-editable  
 ✅ Structured CSV/XLSX/JSON-ready  
 ✅ Column Mapping view wired to real metadata  
-
----
-
-# 🧭 Roadmap: Best-in-Class OCR & Import Plan
-
-(High-level roadmap unchanged; Phase 6 progress updated.)
+✅ One Brain OCR verified + hardened (Day 42)
 
 ---
 
 # ⭐ Next Execution Phase
 
-Next up in Phase 6:
+Next up in Phase 7:
 
-- Full **Column Mapping Editor** (interactive overrides for each header)  
-- Persist user mappings back to `import_jobs` and any dedicated mapping tables  
-- Re-run structured parsing under updated mappings to regenerate draft items  
-- POS-grade ingestion layer (multi-location formatting, tax and fee fields, sections, and modifiers)
+- One Brain OCR confidence fusion  
+- Multi-pass OCR (0°, 90°, 180°, 270°)  
+- Rotation and layout understanding  
+- Improved block → item grouping stability  
+

@@ -1021,14 +1021,16 @@ def create_draft_from_import(
             pass
         return {"id": draft_id, "draft_id": draft_id}
 
-    # ---------- Fallback: legacy categories path ----------
+        # ----------- Fallback: legacy categories path -----------
     flat_items = _flat_from_legacy_categories(draft_json)
     _insert_items_bulk(draft_id, flat_items)
     try:
         save_ocr_debug(
             draft_id,
             {
-                "bridge": "legacy",
+                # This describes the bridge mode, not the old engine
+                "bridge": "one_brain_legacy_categories",
+                "pipeline": "one_brain_v2",
                 "import_job_id": import_job_id,
                 "legacy_categories_count": len(
                     draft_json.get("categories") or []
@@ -1039,6 +1041,7 @@ def create_draft_from_import(
     except Exception:
         pass
     return {"id": draft_id, "draft_id": draft_id}
+
 
 
 # ------------------------------------------------------------
