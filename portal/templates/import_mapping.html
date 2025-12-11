@@ -147,9 +147,10 @@
     </div>
 
     <p class="muted-small mb-3">
-      This is a <strong>preview-only skeleton</strong> for structured imports.
-      It shows how your CSV/XLSX/JSON columns map into ServLine fields.
-      Saving changes from here will arrive in a later phase.
+      This view shows how the <strong>structured import engine</strong> interpreted your
+      CSV/XLSX/JSON headers using
+      <code>HEADER_ALIASES</code> and <code>CANONICAL_FIELDS</code> in the storage layer.
+      It is <strong>read-only for now</strong> — interactive mapping / saving overrides will land in a later phase.
     </p>
 
     <div class="mb-4 flex flex-wrap gap-3 items-center">
@@ -198,7 +199,7 @@
                   </td>
                   <td>
                     <select class="mapping-select" disabled title="Preview-only; mapping editor coming soon.">
-                      <option value="">— Select target (coming soon) —</option>
+                      <option value="">— Select target (preview only) —</option>
 
                       {% set options = [
                         ('name', 'Name'),
@@ -220,11 +221,12 @@
                     </select>
                     {% if mapped %}
                       <p class="muted-small mt-1">
-                        Current mapping: <code>{{ mapped }}</code>
+                        Current mapping (from aliases): <code>{{ mapped }}</code>
                       </p>
                     {% else %}
                       <p class="muted-small mt-1">
-                        No mapping stored yet for this column.
+                        No mapping stored yet for this column. It will be <em>ignored</em> by structured imports
+                        unless you add an alias in the storage layer.
                       </p>
                     {% endif %}
                   </td>
@@ -232,6 +234,11 @@
               {% endfor %}
             </tbody>
           </table>
+          <p class="muted-small mt-2">
+            Mappings are inferred automatically. To change them today, update
+            <code>HEADER_ALIASES</code> / <code>CANONICAL_FIELDS</code> in
+            <code>storage.import_jobs</code>. A full UI editor will hook into this later.
+          </p>
         {% else %}
           <p class="muted-small">
             No column metadata is available yet for this job. Once the structured
@@ -287,6 +294,6 @@
   </section>
 
   <script>
-    // Friendly timestamp formatting if you ever add times here later.
+    // Friendly timestamp / column stats hooks can live here later if needed.
   </script>
 {% endblock %}

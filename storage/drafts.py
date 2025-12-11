@@ -7,7 +7,10 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import re
 
-from .import_jobs import get_import_job
+from .import_jobs import (
+    get_import_job,
+    rebuild_structured_items_from_header_map,
+)
 
 
 # ------------------------------------------------------------
@@ -1041,6 +1044,62 @@ def create_draft_from_import(
 # ------------------------------------------------------------
 # Structured import → Drafts
 # ------------------------------------------------------------
+
+def _flat_items_from_structured_items(
+    items: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Shared flattener for structured items (CSV/XLSX/JSON) into draft_items rows.
+
+    Rules:
+      - name: required, non-empty
+      - description: optional string
+      - category: prefer subcategory over category
+      - price_cents: integer, clamped to >= 0 (no invention beyond provided value)
+      - confidence: default 100 when missing (structured imports are high trust)
+    """
+    flat_items: List[Dict[str, Any]] = []
+
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+
+        name = (raw.get("name") or "").strip()
+        if not name:
+            continue
+
+        description = (raw.get("description") or "").strip()
+
+        subcat = (raw.get("subcategory") or "").strip() or None
+        cat = (raw.get("category") or "").strip() or None
+        category = subcat or cat
+
+        price_cents_raw = raw.get("price_cents")
+        try:
+            price_cents = int(price_cents_raw) if price_cents_raw is not None else 0
+        except Exception:
+            price_cents = 0
+        if price_cents < 0:
+            price_cents = 0
+
+        confidence = raw.get("confidence")
+        if confidence is None:
+            confidence = 100  # structured import: assume high confidence
+
+        flat_items.append(
+            {
+                "name": name,
+                "description": description,
+                "price_cents": price_cents,
+                "category": category,
+                "position": None,
+                "confidence": confidence,
+            }
+        )
+
+    return flat_items
+
+
 def create_draft_from_structured_items(
     title: str,
     restaurant_id: Optional[int],
@@ -1090,45 +1149,76 @@ def create_draft_from_structured_items(
         source_file_path=None,
     )
 
-    flat_items: List[Dict[str, Any]] = []
-    for raw in items:
-        if not isinstance(raw, dict):
-            continue
+    flat_items = _flat_items_from_structured_items(items)
+    _insert_items_bulk(draft_id, flat_items)
 
-        name = (raw.get("name") or "").strip()
-        if not name:
-            continue
+    return {"id": draft_id, "draft_id": draft_id}
 
-        description = (raw.get("description") or "").strip()
-        subcat = (raw.get("subcategory") or "").strip() or None
-        cat = (raw.get("category") or "").strip() or None
-        category = subcat or cat
 
-        price_cents_raw = raw.get("price_cents")
-        try:
-            price_cents = int(price_cents_raw) if price_cents_raw is not None else 0
-        except Exception:
-            price_cents = 0
-        if price_cents < 0:
-            price_cents = 0
+def rebuild_draft_from_mapping(
+    job_id: int,
+    header_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Recompute structured items for a structured import job using the latest
+    column mapping, and replace the linked draft's items in-place.
 
-        confidence = raw.get("confidence")
-        if confidence is None:
-            confidence = 100  # structured import: assume high confidence
+    Flow:
+      - Use storage.import_jobs.rebuild_structured_items_from_header_map(...) to
+        rebuild clean structured items based on raw_rows + header_map.
+      - Find the existing draft linked to this job via source_job_id.
+      - Delete existing draft_items for that draft.
+      - Reinsert items using the same structured → flat rules as initial import.
 
-        flat_items.append(
-            {
-                "name": name,
-                "description": description,
-                "price_cents": price_cents,
-                "category": category,
-                "position": None,
-                "confidence": confidence,
-            }
+    Returns:
+      {
+        "draft_id": int,
+        "job_id": int,
+        "header_map": {...},   # final header map used
+        "summary": {...},      # counts dict
+        "errors": [...],       # row-level validation errors
+        "sample_rows": [...],  # preview items
+      }
+    """
+    # 1) Rebuild items from the mapping engine.
+    (
+        clean_items,
+        errors,
+        summary,
+        final_header_map,
+        sample_rows,
+    ) = rebuild_structured_items_from_header_map(int(job_id), header_map=header_map)
+
+    # 2) Locate an existing draft for this import job.
+    draft = find_draft_by_source_job(int(job_id))
+    if not draft:
+        raise ValueError(
+            f"No draft found for structured import job {job_id}; "
+            "cannot apply column mapping."
         )
 
+    draft_id = int(draft["id"])
+
+    # 3) Clear existing items and reinsert.
+    with db_connect() as conn:
+        conn.execute("DELETE FROM draft_items WHERE draft_id=?", (draft_id,))
+        conn.commit()
+
+    flat_items = _flat_items_from_structured_items(clean_items)
     _insert_items_bulk(draft_id, flat_items)
-    return {"id": draft_id, "draft_id": draft_id}
+
+    # 4) Ensure draft is in editing state after rebuild.
+    save_draft_metadata(draft_id, status="editing")
+
+    return {
+        "draft_id": draft_id,
+        "job_id": int(job_id),
+        "header_map": final_header_map,
+        "summary": summary,
+        "errors": errors,
+        "sample_rows": sample_rows,
+    }
+
 
 
 # ------------------------------------------------------------

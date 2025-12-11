@@ -35,7 +35,7 @@ def _get_import_jobs_columns() -> Set[str]:
       - summary_json
       - payload_json
 
-    without breaking older DBs that don't have them yet.
+    without breaking older DBs that do not have them yet.
     """
     with db_connect() as conn:
         rows = conn.execute("PRAGMA table_info(import_jobs)").fetchall()
@@ -57,18 +57,17 @@ def get_import_job(job_id: int) -> Optional[Dict[str, Any]]:
         status TEXT
         created_at TEXT
         updated_at TEXT
-        ... plus any OCR / structured metadata columns, e.g.:
-            source_type TEXT
-            restaurant_id INTEGER
-            summary_json TEXT
-            payload_json TEXT
+        source_type TEXT
+        restaurant_id INTEGER
+        summary_json TEXT
+        payload_json TEXT
 
     Returns dict or None.
     """
     with db_connect() as conn:
         row = conn.execute(
             "SELECT * FROM import_jobs WHERE id = ?",
-            (int(job_id),)
+            (int(job_id),),
         ).fetchone()
 
         if not row:
@@ -84,7 +83,7 @@ def list_import_jobs(limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
     with db_connect() as conn:
         rows = conn.execute(
             "SELECT * FROM import_jobs ORDER BY id DESC LIMIT ? OFFSET ?",
-            (limit, offset)
+            (limit, offset),
         ).fetchall()
         return [{k: r[k] for k in r.keys()} for r in rows]
 
@@ -185,7 +184,9 @@ def _detect_header_mapping(headers: List[str]) -> Dict[str, str]:
     Detect which headers correspond to canonical structured fields.
 
     Returns mapping:
+
         { canonical_field: original_header }
+
     """
     mapping: Dict[str, str] = {}
 
@@ -208,17 +209,14 @@ def _csv_row_to_structured_item(
     header_map: Dict[str, str],
 ) -> Dict[str, Any]:
     """
-    Convert a raw row dict (CSV or XLSX) into a canonical structured item dict.
+    Convert a raw row dict (CSV or XLSX or JSON-origin) into a canonical structured item dict.
     """
     item: Dict[str, Any] = {}
 
     for canonical in CANONICAL_FIELDS:
-        csv_header = header_map.get(canonical)
-        if csv_header is not None:
-            item[canonical] = raw_row.get(csv_header)
-        else:
-            # some fields simply won't be mapped; that's OK
-            pass
+        source_header = header_map.get(canonical)
+        if source_header is not None:
+            item[canonical] = raw_row.get(source_header)
 
     # Collect leftover columns as meta
     meta: Dict[str, Any] = {}
@@ -236,20 +234,27 @@ def _csv_row_to_structured_item(
 
 def parse_structured_csv(
     csv_path: Path,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int], Dict[str, str]]:
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    Dict[str, int],
+    Dict[str, str],
+    List[Dict[str, Any]],
+]:
     """
     Parse a CSV file into structured menu items and run validation via One Brain contracts.
 
     Returns:
       clean_items:  list of normalized items ready for draft creation
       errors:       list of row-level validation error dicts
-      summary:      summary dict (total_rows / valid_rows / error_rows)
-      header_map:   mapping of canonical field -> CSV header name
+      summary:      summary dict (total_rows, valid_rows, error_rows)
+      header_map:   mapping of canonical field to CSV header name
+      raw_rows:     list of raw row dicts keyed by original headers (for mapping engine)
     """
     if structured_contracts is None:
         raise RuntimeError(
             "storage.contracts module is required for structured CSV parsing; "
-            "make sure storage/contracts.py exists."
+            "make sure storage/contracts.py exists.",
         )
 
     csv_path = Path(csv_path)
@@ -261,17 +266,27 @@ def parse_structured_csv(
         headers = reader.fieldnames or []
         header_map = _detect_header_mapping(headers)
 
-        raw_items: List[Dict[str, Any]] = []
-        for row in reader:
-            raw_items.append(_csv_row_to_structured_item(row, header_map))
+        raw_rows: List[Dict[str, Any]] = []
+        structured_items: List[Dict[str, Any]] = []
 
-    clean_items, errors, summary = structured_contracts.validate_structured_items(raw_items)
-    return clean_items, errors, summary, header_map
+        for row in reader:
+            raw_row = dict(row)
+            raw_rows.append(raw_row)
+            structured_items.append(_csv_row_to_structured_item(raw_row, header_map))
+
+    clean_items, errors, summary = structured_contracts.validate_structured_items(structured_items)
+    return clean_items, errors, summary, header_map, raw_rows
 
 
 def parse_structured_xlsx(
     xlsx_path: Path,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int], Dict[str, str]]:
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    Dict[str, int],
+    Dict[str, str],
+    List[Dict[str, Any]],
+]:
     """
     Parse an XLSX file (first sheet) into structured menu items and run validation
     via One Brain contracts.
@@ -280,24 +295,25 @@ def parse_structured_xlsx(
       - Uses the first worksheet in the workbook
       - Uses the first row as headers
       - Normalizes headers with the same logic as CSV
-      - Reuses _csv_row_to_structured_item(...) for row shaping
+      - Reuses _csv_row_to_structured_item for row shaping
 
     Returns:
       clean_items:  list of normalized items ready for draft creation
       errors:       list of row-level validation error dicts
-      summary:      summary dict (total_rows / valid_rows / error_rows)
-      header_map:   mapping of canonical field -> XLSX header name
+      summary:      summary dict (total_rows, valid_rows, error_rows)
+      header_map:   mapping of canonical field to XLSX header name
+      raw_rows:     list of raw row dicts keyed by original headers (for mapping engine)
     """
     if structured_contracts is None:
         raise RuntimeError(
             "storage.contracts module is required for structured XLSX parsing; "
-            "make sure storage/contracts.py exists."
+            "make sure storage/contracts.py exists.",
         )
 
     if openpyxl is None:
         raise RuntimeError(
             "openpyxl is required for structured XLSX ingestion. "
-            "Install it in your environment to enable XLSX imports."
+            "Install it in your environment to enable XLSX imports.",
         )
 
     xlsx_path = Path(xlsx_path)
@@ -321,19 +337,20 @@ def parse_structured_xlsx(
     headers: List[str] = []
     for idx, cell in enumerate(header_row):
         if cell is None:
-            headers.append(f"column_{idx+1}")
+            headers.append(f"column_{idx + 1}")
         else:
             text = str(cell).strip()
-            headers.append(text or f"column_{idx+1}")
+            headers.append(text or f"column_{idx + 1}")
 
     header_map = _detect_header_mapping(headers)
 
-    raw_items: List[Dict[str, Any]] = []
+    raw_rows: List[Dict[str, Any]] = []
+    structured_items: List[Dict[str, Any]] = []
+
     for row_values in rows_iter:
         if row_values is None:
             continue
 
-        # Build raw row dict keyed by headers
         row_dict: Dict[str, Any] = {}
         is_empty = True
         for idx, value in enumerate(row_values):
@@ -343,18 +360,18 @@ def parse_structured_xlsx(
                 is_empty = False
             row_dict[headers[idx]] = value
 
-        # Skip completely empty rows
         if is_empty:
             continue
 
-        raw_items.append(_csv_row_to_structured_item(row_dict, header_map))
+        raw_rows.append(row_dict)
+        structured_items.append(_csv_row_to_structured_item(row_dict, header_map))
 
-    clean_items, errors, summary = structured_contracts.validate_structured_items(raw_items)
-    return clean_items, errors, summary, header_map
+    clean_items, errors, summary = structured_contracts.validate_structured_items(structured_items)
+    return clean_items, errors, summary, header_map, raw_rows
 
 
 # ---------------------------------------------------------------------------
-# Structured import job creation (CSV/XLSX/JSON + generic)
+# Structured import job creation (CSV/XLSX/JSON and generic)
 # ---------------------------------------------------------------------------
 
 def create_structured_import_job(
@@ -368,14 +385,14 @@ def create_structured_import_job(
     status: str = "parsed",
 ) -> int:
     """
-    Create an import_jobs row for a structured import (CSV / JSON / XLSX).
+    Create an import_jobs row for a structured import (CSV, JSON, XLSX).
 
     This function is resilient to schema differences by introspecting columns.
 
     Used by:
-      - create_csv_import_job_from_file (...)
-      - create_xlsx_import_job_from_file (...)
-      - create_json_import_job_from_file (...)
+      - create_csv_import_job_from_file
+      - create_xlsx_import_job_from_file
+      - create_json_import_job_from_file
 
     Returns:
       job_id (int)
@@ -432,26 +449,29 @@ def create_csv_import_job_from_file(
     restaurant_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    High-level helper for Phase 6 pt.1:
+    High-level helper for Phase 6 pt.1.
 
-    - Parse a CSV into structured items
-    - Validate via One Brain contracts
-    - Create an import_jobs row recording the results
-    - Return details for draft creation + UI summary
+    Steps:
+      - Parse a CSV into structured items
+      - Validate via One Brain contracts
+      - Create an import_jobs row recording the results
+      - Return details for draft creation and UI summary
 
     Returns dict:
+
       {
         "job_id": int,
         "items": [... clean items ...],
         "errors": [... error dicts ...],
         "summary": {... counts ...},
-        "header_map": {... canonical -> csv header ...},
+        "header_map": {... canonical to CSV header ...},
         "sample_rows": [... first N clean items ...],
         "job_summary": {... stored in summary_json (if column exists) ...},
       }
+
     """
     csv_path = Path(csv_path)
-    clean_items, errors, summary, header_map = parse_structured_csv(csv_path)
+    clean_items, errors, summary, header_map, raw_rows = parse_structured_csv(csv_path)
     sample_rows = clean_items[:10]
 
     job_summary: Dict[str, Any] = {
@@ -460,7 +480,12 @@ def create_csv_import_job_from_file(
         "summary": summary,
         "error_rows": errors,
         "sample_rows": sample_rows,
+        "raw_rows": raw_rows,
     }
+
+    # Store column_names for the mapping UI
+    column_names = list(raw_rows[0].keys()) if raw_rows else []
+    job_summary["column_names"] = column_names
 
     status = "parsed_with_errors" if errors else "parsed"
 
@@ -490,26 +515,29 @@ def create_xlsx_import_job_from_file(
     restaurant_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    High-level helper for Phase 6 pt.3:
+    High-level helper for Phase 6 pt.3.
 
-    - Parse an XLSX into structured items (first sheet, first row = headers)
-    - Validate via One Brain contracts
-    - Create an import_jobs row recording the results
-    - Return details for draft creation + UI summary
+    Steps:
+      - Parse an XLSX into structured items (first sheet, first row is headers)
+      - Validate via One Brain contracts
+      - Create an import_jobs row recording the results
+      - Return details for draft creation and UI summary
 
     Returns dict:
+
       {
         "job_id": int,
         "items": [... clean items ...],
         "errors": [... error dicts ...],
         "summary": {... counts ...],
-        "header_map": {... canonical -> xlsx header ...},
+        "header_map": {... canonical to XLSX header ...},
         "sample_rows": [... first N clean items ...],
         "job_summary": {... stored in summary_json (if column exists) ...},
       }
+
     """
     xlsx_path = Path(xlsx_path)
-    clean_items, errors, summary, header_map = parse_structured_xlsx(xlsx_path)
+    clean_items, errors, summary, header_map, raw_rows = parse_structured_xlsx(xlsx_path)
     sample_rows = clean_items[:10]
 
     job_summary: Dict[str, Any] = {
@@ -518,7 +546,11 @@ def create_xlsx_import_job_from_file(
         "summary": summary,
         "error_rows": errors,
         "sample_rows": sample_rows,
+        "raw_rows": raw_rows,
     }
+
+    column_names = list(raw_rows[0].keys()) if raw_rows else []
+    job_summary["column_names"] = column_names
 
     status = "parsed_with_errors" if errors else "parsed"
 
@@ -548,30 +580,37 @@ def create_json_import_job_from_file(
     restaurant_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    High-level helper for Phase 6 pt.7 (structured JSON):
+    High-level helper for Phase 6 pt.7 (structured JSON).
 
-    - Load a JSON file containing either:
-        * {"items": [... structured items ...]}
-        * [... structured items ...]
-    - Validate via One Brain contracts
-    - Create an import_jobs row recording the results
-    - Return details for draft creation + UI summary
+    Steps:
+      - Load a JSON file containing either:
+          * {"items": [... structured or semi-structured items ...]}
+          * [... structured or semi-structured items ...]
+      - Validate via One Brain contracts
+      - Create an import_jobs row recording the results
+      - Return details for draft creation and UI summary
+
+    For JSON, we also record:
+      - raw_rows: original item dicts (for column mapping)
+      - header_map: initial guess based on item keys (may be empty)
 
     Returns dict:
+
       {
         "job_id": int,
         "items": [... clean items ...],
         "errors": [... error dicts ...],
         "summary": {... counts ...},
-        "header_map": {...},  # typically empty for JSON
+        "header_map": {...},
         "sample_rows": [... first N clean items ...],
         "job_summary": {... stored in summary_json (if column exists) ...},
       }
+
     """
     if structured_contracts is None:
         raise RuntimeError(
             "storage.contracts module is required for structured JSON parsing; "
-            "make sure storage/contracts.py exists."
+            "make sure storage/contracts.py exists.",
         )
 
     json_path = Path(json_path)
@@ -588,12 +627,21 @@ def create_json_import_job_from_file(
     errors: List[Dict[str, Any]] = []
     summary: Dict[str, int] = {}
 
-    # For JSON we usually don't have "headers" in the CSV/XLSX sense.
-    # We keep header_map empty and let the UI handle that gracefully.
+    raw_rows: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        items = payload.get("items")
+        if isinstance(items, list):
+            raw_rows = [dict(row) for row in items if isinstance(row, dict)]
+    elif isinstance(payload, list):
+        raw_rows = [dict(row) for row in payload if isinstance(row, dict)]
+
     header_map: Dict[str, str] = {}
+    if raw_rows:
+        first_row = raw_rows[0]
+        headers = list(first_row.keys())
+        header_map = _detect_header_mapping(headers)
 
     if isinstance(payload, dict):
-        # Dict payload should contain an "items" array; use the payload-level validator.
         ok, msg, clean_items, item_errors, base_summary = structured_contracts.validate_structured_menu_payload(payload)
         errors = item_errors
         summary = base_summary or {
@@ -602,11 +650,9 @@ def create_json_import_job_from_file(
             "error_rows": len(errors),
         }
 
-        # If the shape is fundamentally wrong (no items and no rows), bail out.
         if not ok and summary.get("total_rows", 0) == 0:
             raise ValueError(f"Invalid structured JSON payload: {msg}")
     elif isinstance(payload, list):
-        # Top-level list of items.
         clean_items, item_errors, base_summary = structured_contracts.validate_structured_items(payload)
         errors = item_errors
         summary = base_summary or {
@@ -617,7 +663,7 @@ def create_json_import_job_from_file(
     else:
         raise ValueError(
             "Structured JSON payload must be either an object with an 'items' array "
-            "or a top-level list of items."
+            "or a top-level list of items.",
         )
 
     sample_rows = clean_items[:10]
@@ -628,7 +674,11 @@ def create_json_import_job_from_file(
         "summary": summary,
         "error_rows": errors,
         "sample_rows": sample_rows,
+        "raw_rows": raw_rows,
     }
+
+    column_names = list(raw_rows[0].keys()) if raw_rows else []
+    job_summary["column_names"] = column_names
 
     status = "parsed_with_errors" if errors else "parsed"
 
@@ -638,7 +688,7 @@ def create_json_import_job_from_file(
         source_path=str(json_path),
         restaurant_id=restaurant_id,
         summary=job_summary,
-        payload=None,
+        payload=payload if isinstance(payload, (dict, list)) else None,
         status=status,
     )
 
@@ -651,3 +701,135 @@ def create_json_import_job_from_file(
         "sample_rows": sample_rows,
         "job_summary": job_summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# Column mapping and rebuild helpers (Phase 6 pt.9)
+# ---------------------------------------------------------------------------
+
+def get_structured_job_summary(job_id: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Convenience helper for mapping UI and engine.
+
+    Returns:
+      job:     full import_jobs row as a dict
+      summary: parsed summary_json dict (or empty dict)
+    """
+    job = get_import_job(job_id)
+    if not job:
+        raise ValueError(f"import job {job_id} not found")
+
+    raw_summary = job.get("summary_json")
+    summary: Dict[str, Any]
+    if raw_summary:
+        try:
+            summary = json.loads(raw_summary)
+        except Exception:
+            summary = {}
+    else:
+        summary = {}
+
+    return job, summary
+
+
+def update_import_job_header_map(job_id: int, header_map: Dict[str, str]) -> None:
+    """
+    Persist an updated header_map into import_jobs.summary_json.
+
+    This does not recompute items; it only writes the metadata.
+    """
+    columns = _get_import_jobs_columns()
+    if "summary_json" not in columns:
+        return
+
+    job, summary = get_structured_job_summary(job_id)
+    if not isinstance(summary, dict):
+        summary = {}
+
+    summary["header_map"] = header_map
+
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE import_jobs SET summary_json = ? WHERE id = ?",
+            (json.dumps(summary), int(job_id)),
+        )
+        conn.commit()
+
+
+def rebuild_structured_items_from_header_map(
+    job_id: int,
+    header_map: Optional[Dict[str, str]] = None,
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    Dict[str, int],
+    Dict[str, str],
+    List[Dict[str, Any]],
+]:
+    """
+    Rebuild structured items for a job using an updated header_map.
+
+    This powers the Column Mapping engine.
+
+    Steps:
+      - Load raw_rows from summary_json (original CSV, XLSX, or JSON rows)
+      - Apply the supplied header_map (or existing one if not provided)
+      - Run validate_structured_items on the mapped rows via One Brain contracts
+      - Update summary_json with the new mapping and preview data
+
+    Returns:
+      clean_items:  new normalized items ready for replacing draft items
+      errors:       list of validation error dicts
+      summary:      summary dict
+      header_map:   the header_map that was used (final)
+      sample_rows:  first N clean items
+    """
+    if structured_contracts is None:
+        raise RuntimeError(
+            "storage.contracts module is required for structured mapping; "
+            "make sure storage/contracts.py exists.",
+        )
+
+    columns = _get_import_jobs_columns()
+    job, summary = get_structured_job_summary(job_id)
+
+    raw_rows = summary.get("raw_rows") or []
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise ValueError(
+            "This import job does not have raw_rows recorded. "
+            "Column mapping based rebuild is not available.",
+        )
+
+    if header_map is None:
+        header_map = summary.get("header_map") or {}
+    if not isinstance(header_map, dict):
+        header_map = {}
+
+    structured_items: List[Dict[str, Any]] = []
+    for raw_row in raw_rows:
+        if not isinstance(raw_row, dict):
+            continue
+        structured_items.append(_csv_row_to_structured_item(raw_row, header_map))
+
+    clean_items, errors, base_summary = structured_contracts.validate_structured_items(structured_items)
+    summary_counts = base_summary or {
+        "total_rows": len(structured_items),
+        "valid_rows": len(clean_items),
+        "error_rows": len(errors),
+    }
+    sample_rows = clean_items[:10]
+
+    summary["header_map"] = header_map
+    summary["summary"] = summary_counts
+    summary["error_rows"] = errors
+    summary["sample_rows"] = sample_rows
+
+    if "summary_json" in columns:
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE import_jobs SET summary_json = ? WHERE id = ?",
+                (json.dumps(summary), int(job_id)),
+            )
+            conn.commit()
+
+    return clean_items, errors, summary_counts, header_map, sample_rows

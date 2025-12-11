@@ -952,72 +952,99 @@ def imports_rotate_image(job_id: int):
 
 
 # ------------------------
-# NEW: Column mapping / preview skeleton (Phase 6 pt.8)
+# Column mapping / preview (Phase 6 pt.9)
 # ------------------------
 @app.get("/imports/<int:job_id>/mapping")
 @login_required
 def imports_mapping(job_id: int):
     """
-    Skeleton UI for column mapping for structured imports (CSV/XLSX/JSON).
+    Read-only column mapping preview for structured imports (CSV/XLSX).
 
-    Uses import_jobs.header_map + import_jobs.sample_rows to render a simple preview.
-    For now, we also allow *fresh* structured jobs that don't have metadata yet,
-    so the UI can show an empty mapping skeleton instead of bouncing.
+    We rebuild the preview directly from the original source file using the
+    One Brain parsers in storage.import_jobs:
+
+      - parse_structured_csv(path)
+      - parse_structured_xlsx(path)
+
+    The template expects:
+      mapping = {
+        "header_map":   { original_header -> canonical_field },
+        "sample_rows":  [ {original_header: value, ...}, ... ],
+        "column_names": [ "Header 1", "Header 2", ... ],
+        "is_structured": bool,
+        "file_ext": "csv" | "xlsx",
+        "source_type": "structured_csv" | "structured_xlsx" | ...
+      }
     """
     row = get_import_job(job_id)
     if not row:
         abort(404, description="Import job not found")
 
-    # sqlite3.Row has .keys(), but guard defensively
+    # sqlite3.Row supports .keys() and item access
     col_names = set(row.keys()) if hasattr(row, "keys") else set()
 
-    # Detect "structured" the same way the templates do
-    filename = row["filename"] or ""
+    filename = (row["filename"] if "filename" in col_names else "") or ""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    src_type = (row["source_type"] if "source_type" in col_names else "") or ""
-    src_type = src_type.lower()
 
-    is_structured_ext = ext in ("csv", "xlsx", "json")
+    src_type_raw = row["source_type"] if "source_type" in col_names else ""
+    src_type = (src_type_raw or "").lower()
+
+    is_structured_ext = ext in ("csv", "xlsx")
     is_structured_type = src_type.startswith("structured_")
     is_structured = is_structured_ext or is_structured_type
 
-    raw_header_map = row["header_map"] if "header_map" in col_names else None
-    raw_sample_rows = row["sample_rows"] if "sample_rows" in col_names else None
-
-    # If this job is *not* structured and has no metadata, bounce back to detail
-    if not is_structured and not raw_header_map and not raw_sample_rows:
-        flash("Column mapping is only available for structured CSV/XLSX/JSON imports.", "error")
+    # For now we only support CSV/XLSX in the mapping preview.
+    if not is_structured or ext not in ("csv", "xlsx"):
+        flash("Column mapping is currently only available for structured CSV/XLSX imports.", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
-    def _coerce_json(val, default):
-        if val is None:
-            return default
-        if isinstance(val, (dict, list)):
-            return val
-        try:
-            return json.loads(val)
-        except Exception:
-            return default
+    source_path_str = row["source_path"] if "source_path" in col_names else ""
+    if not source_path_str:
+        flash("This structured import does not have a source_path recorded.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
 
-    header_map = _coerce_json(raw_header_map, {})
-    sample_rows = _coerce_json(raw_sample_rows, [])
+    src_path = Path(source_path_str)
+    if not src_path.exists():
+        flash("The original structured import file could not be found on disk.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
 
-    # Try to infer column names:
-    #   - Prefer header_map keys
-    #   - Otherwise, if sample_rows are dicts, use their keys
-    column_names: list[str] = []
-    if isinstance(header_map, dict) and header_map:
-        column_names = list(header_map.keys())
-    elif sample_rows and isinstance(sample_rows, list):
-        first = sample_rows[0]
-        if isinstance(first, dict):
-            column_names = list(first.keys())
+    header_map_canon_to_header: Dict[str, str] = {}
+    raw_rows: List[Dict[str, Any]] = []
+
+    try:
+        # Use the One Brain helpers to parse the file and recover raw rows
+        if ext == "csv" or src_type == "structured_csv":
+            _, _, _, header_map_canon_to_header, raw_rows = import_jobs_store.parse_structured_csv(src_path)
+        elif ext == "xlsx" or src_type == "structured_xlsx":
+            _, _, _, header_map_canon_to_header, raw_rows = import_jobs_store.parse_structured_xlsx(src_path)
+        else:
+            header_map_canon_to_header = {}
+            raw_rows = []
+    except Exception as exc:
+        app.logger.exception("Failed to build column mapping preview for import job %s", job_id)
+        flash(f"Could not build column mapping preview: {exc}", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    # raw_rows are the original tabular rows keyed by the file's headers.
+    column_names: List[str] = []
+    sample_rows: List[Dict[str, Any]] = []
+
+    if raw_rows and isinstance(raw_rows, list) and isinstance(raw_rows[0], dict):
+        first_row = raw_rows[0]
+        column_names = list(first_row.keys())
+        sample_rows = raw_rows[:5]
+
+    # Invert canonical -> header mapping into header -> canonical for the UI
+    header_map_original_to_canonical: Dict[str, str] = {}
+    for canonical, original in (header_map_canon_to_header or {}).items():
+        if original:
+            header_map_original_to_canonical[original] = canonical
 
     mapping_ctx = {
-        "header_map": header_map,
+        "header_map": header_map_original_to_canonical,
         "sample_rows": sample_rows,
         "column_names": column_names,
-        "is_structured": is_structured,
+        "is_structured": True,
         "file_ext": ext,
         "source_type": src_type,
     }
@@ -1027,6 +1054,7 @@ def imports_mapping(job_id: int):
         job=row,
         mapping=mapping_ctx,
     )
+
 
 
 # ------------------------

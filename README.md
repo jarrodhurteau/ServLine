@@ -19,7 +19,7 @@ portal/  # Flask portal website
     menus.html  
     items.html  
     item_form.html  
-    imports.html                        # Import page (image/PDF + structured CSV/XLSX panels)  
+    imports.html                        # Import page (image/PDF + structured CSV/XLSX/JSON panels)  
     import.html                         # Legacy import view (per-job)  
     drafts.html  
     draft_editor.html  
@@ -49,7 +49,7 @@ storage/ # SQLite database + OCR brain + semantic engines (ONE BRAIN)
   variant_engine.py                    # Phase 4 pt.3  
   category_hierarchy.py                # Phase 4 pt.4  
   price_integrity.py                   # Phase 4 pt.5–10  
-  import_jobs.py                       # Import jobs + structured CSV/XLSX helpers (Phase 6)  
+  import_jobs.py                       # Import jobs + structured CSV/XLSX/JSON helpers (Phase 6)  
   contracts.py                         # One Brain structured-item contracts (Phase 6 pt.1–2)  
 
 fixtures/                              # Sample menus & test assets  
@@ -221,7 +221,7 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 - CSV uploads now create drafts directly from the portal  
 - Progress bar unified across image/PDF/CSV imports  
 - Added **Finalize with AI** button to `imports.html` job rows  
-- Status polling now toggles AI Finalize + Edit buttons dynamically  
+- Status polling toggles AI Finalize and Edit buttons dynamically  
 - No impact on legacy OCR upload UX  
 
 **Phase 6 pt.3–4 complete.**
@@ -232,13 +232,13 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ### Phase 6 pt.5 — Structured CSV Import Route
 - `/import/csv` route  
-- CSV normalized → items validated → draft created  
+- CSV normalized, validated, and turned into draft items  
 - Summary banner  
 - Redirect to Draft Editor  
 
 ### Phase 6 pt.6 — Structured XLSX Import Route + UI
 - `/import/xlsx` route  
-- Excel rows normalized → items validated → draft created  
+- Excel rows normalized, validated, and turned into draft items  
 - Summary banner  
 - Redirect to Draft Editor  
 - Import page updated with XLSX card  
@@ -250,27 +250,57 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 ## 📐 Day 40 — Phase 6 pt.7–8: JSON Imports + Column Mapping Skeleton
 
 ### Phase 6 pt.7 — JSON Structured Import (foundation validated)
-- JSON files now brought into the portal structured-import flow  
+- JSON files brought into the structured-import flow  
 - JSON drafts validated through One Brain structured-item contracts  
 - Draft Editor works for structured JSON just like CSV/XLSX  
 - Export buttons (CSV/JSON/XLSX) verified  
 - Finalize with AI works on structured JSON
 
-### Phase 6 pt.8 — Column Mapping (Preview Skeleton)
-- Added new route: `/imports/<job_id>/mapping`  
-- Added full template: `import_mapping.html`  
+### Phase 6 pt.8 — Column Mapping (Initial Skeleton)
+- Added route: `/imports/<job_id>/mapping`  
+- Initial template: `import_mapping.html`  
 - Mapping page shows:
   - filename  
   - status  
-  - placeholder Column Mapping panel  
-  - placeholder Sample Rows panel  
-- If no metadata exists (`header_map` / `sample_rows`), UI shows friendly empty-state text  
-- “Column Mapping” button enabled only for structured jobs  
-- Non-structured jobs redirect back with message:
-  - *“Column mapping is only available for structured CSV/XLSX/JSON imports.”*
+  - Column Mapping panel  
+  - Sample Rows panel  
+- Graceful empty state when `header_map` and `sample_rows` are missing  
 
-**Day 40 completes the structured import trifecta: CSV + XLSX + JSON, and introduces the first UI for Column Mapping.**  
-Column mapping is now wired, routed, templated, and ready for Phase 6 pt.9–10 (live mappings + saving).
+**Day 40 completes the structured import trifecta at the engine level (CSV + XLSX + JSON) and lays the groundwork for column mapping.**
+
+---
+
+## 🧭 Day 41 — Phase 6 pt.9–10: Live Column Mapping + JSON Portal Upload
+
+### Phase 6 pt.9 — Column Mapping Wired to One Brain Metadata
+- `/imports/<job_id>/mapping` now reads real metadata from `import_jobs`:
+  - `header_map` (original header → canonical field)  
+  - `sample_rows` (up to five normalized rows)  
+- `import_mapping.html` shows:
+  - Left panel: Original column names and their current canonical mapping (Name, Description, Category, Price)  
+  - Right panel: Table of sample rows using the same headers  
+- Handles mixed and partial metadata:
+  - If only headers exist, mapping panel still renders  
+  - If only sample rows exist, table still renders with inferred headers  
+  - If neither exists, shows friendly “no column metadata yet” messaging  
+
+### Phase 6 pt.10 — JSON Import Panel + Mapping Eligibility Rules
+- Import page (`imports.html`) updated with **Structured JSON** upload card:
+  - JSON uploads post to `/import/json`  
+  - Route wires through `storage.import_jobs.create_json_import_job_from_file`  
+  - Valid JSON creates a structured draft and redirects to Draft Editor with summary flashes  
+- Import jobs table now distinguishes mapping-capable jobs:
+  - **Column Mapping button enabled only for table-shaped structured imports (CSV/XLSX)**  
+  - JSON, PDFs, and image-based jobs show a disabled Column Mapping button with tooltip  
+- Column Mapping page validated for:
+  - Structured CSV imports  
+  - Structured XLSX imports  
+- JSON structured jobs continue to flow through:
+  - Draft Editor  
+  - AI Finalize  
+  - Export endpoints  
+
+**Day 41 completes Phase 6 pt.9–10: live column mapping previews for CSV/XLSX and a first-class JSON upload path in the portal.**
 
 ---
 
@@ -288,7 +318,7 @@ ServLine menu understanding is now:
 ✅ Debuggable  
 ✅ Human-editable  
 ✅ Structured CSV/XLSX/JSON-ready  
-✅ Column Mapping UI foundation added  
+✅ Column Mapping view wired to real metadata  
 
 ---
 
@@ -302,8 +332,7 @@ ServLine menu understanding is now:
 
 Next up in Phase 6:
 
-- Live JSON import panel + summary UI  
-- Full **Column Mapping Editor** (interactive)  
-- Save mapping to job → re-parse → draft  
-- POS-grade ingestion layer (multi-location formatting, tax/fees, etc.)
-
+- Full **Column Mapping Editor** (interactive overrides for each header)  
+- Persist user mappings back to `import_jobs` and any dedicated mapping tables  
+- Re-run structured parsing under updated mappings to regenerate draft items  
+- POS-grade ingestion layer (multi-location formatting, tax and fee fields, sections, and modifiers)

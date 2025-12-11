@@ -71,15 +71,21 @@
               (st|capitalize if st else '—')
             %}
 
-            {# Treat structured jobs (CSV/XLSX/JSON) as mapping-capable for now #}
+            {# Structured detection for Column Mapping:
+               - Active only for table-shaped imports (CSV/XLSX)
+               - JSON is treated as non-mapping for now
+            #}
             {% set filename = j.filename or '' %}
-            {% set ext = filename.split('.')[-1] | lower %}
+            {% if '.' in filename %}
+              {% set ext = filename.rsplit('.', 1)[-1] | lower %}
+            {% else %}
+              {% set ext = '' %}
+            {% endif %}
             {% set src_type = (j.source_type or '') | lower %}
-            {% set is_structured =
-              ext in ['csv', 'xlsx', 'json'] or
-              src_type in ['structured_csv', 'structured_xlsx', 'structured_json'] or
-              src_type.startswith('structured_')
-            %}
+
+            {% set is_structured_csv  = ext == 'csv'  or src_type == 'structured_csv' %}
+            {% set is_structured_xlsx = ext == 'xlsx' or src_type == 'structured_xlsx' %}
+            {% set is_structured_table = is_structured_csv or is_structured_xlsx %}
 
             <tr data-job-id="{{ j.id }}" data-status="{{ st }}">
               <td class="text-muted">#{{ j.id }}</td>
@@ -97,10 +103,10 @@
                   <a href="{{ url_for('imports_raw', job_id=j.id) }}" class="btn btn-primary" data-raw>Raw OCR</a>
 
                   {# Column Mapping:
-                     - Enabled only for structured imports (CSV/XLSX/JSON)
-                     - Disabled stub for OCR/image/PDF jobs
+                     - Enabled only for structured table imports (CSV/XLSX)
+                     - Disabled stub for JSON, PDFs, images, and other jobs
                   #}
-                  {% if is_structured %}
+                  {% if is_structured_table %}
                     <a
                       href="{{ url_for('imports_mapping', job_id=j.id) }}"
                       class="btn btn-secondary"
@@ -115,7 +121,7 @@
                       class="btn btn-secondary"
                       data-mapping
                       aria-disabled="true"
-                      title="Column mapping is available only for CSV/XLSX/JSON imports."
+                      title="Column mapping is only available for structured CSV/XLSX imports."
                     >
                       Column Mapping
                     </button>
@@ -172,7 +178,7 @@
     (function() {
       function fmt(d) {
         try {
-          const dt = new Date((d || '').replace(' ', 'T') + 'Z'); // SQLite "YYYY-MM-DD HH:MM:SS"
+          const dt = new Date((d || '').replace(' ', 'T') + 'Z');
           if (isNaN(dt)) return d;
           const opts = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
           return dt.toLocaleString(undefined, opts).replace(',', ' ·');
@@ -212,36 +218,30 @@
 
       function updateRow(r, status, updatedAt, draftReady) {
         r.dataset.status = status;
-        // pill
         const pill = r.querySelector('[data-status-pill]');
         if (pill) {
           pill.className = 'pill ' + PILL_CLASS(status);
           pill.textContent = LABEL(status);
         }
-        // updated timestamp (fallback to raw)
         if (updatedAt) {
           const t = r.querySelectorAll('time.ts')[1];
           if (t) { t.textContent = updatedAt; }
         }
-        // toggle Edit enablement
         const edit = r.querySelector('[data-edit]');
         if (edit) {
           const enableEdit = !!draftReady && ['done','approved','published','editing','submitted','restored'].includes(status);
           edit.setAttribute('aria-disabled', enableEdit ? 'false' : 'true');
         }
-        // toggle Finalize enablement (we *allow* finalize as soon as job isn't pending/processing and there's a draft)
         const finalizeBtn = r.querySelector('[data-finalize]');
         if (finalizeBtn) {
           const enableFinalize = !!draftReady && !['deleted','discarded','failed'].includes(status);
           finalizeBtn.setAttribute('aria-disabled', enableFinalize ? 'false' : 'true');
         }
-        // Column mapping button stays tied purely to presence of structured metadata,
-        // so we don't toggle it here — the Jinja side already gated it.
       }
 
       async function poll() {
         const pendingRows = live();
-        if (!pendingRows.length) return; // nothing to do
+        if (!pendingRows.length) return;
         await Promise.all(pendingRows.map(async r => {
           const id = r.getAttribute('data-job-id');
           try {
@@ -250,7 +250,6 @@
             const data = await res.json();
             const st = (data.status || '').toLowerCase();
             const draftReady = !!data.draft_ready;
-            // Format updated_at like the header script
             let niceUpdated = data.updated_at;
             try {
               const dt = new Date((niceUpdated || '').replace(' ', 'T') + 'Z');
@@ -260,18 +259,16 @@
               }
             } catch {}
             updateRow(r, st, niceUpdated, draftReady);
-          } catch (e) { /* ignore network hiccups */ }
+          } catch (e) {}
         }));
       }
 
-      // Poll quickly at first, then slow down
-      let fastTicks = 8; // ~40s fast mode
+      let fastTicks = 8;
       setInterval(() => {
         poll();
         if (fastTicks > 0) fastTicks--;
       }, 5000);
 
-      // Also run once after a short delay so the page paints first
       setTimeout(poll, 1200);
     })();
   </script>
