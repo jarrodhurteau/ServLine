@@ -1317,6 +1317,36 @@ def segment_document(
         "blocks": all_blocks,                  # Phase-2 compatible
         "text_blocks": all_text_blocks,        # Phase-3+ TextBlock dicts (+category fields, +prices/variants, +roles)
         "preview_blocks": all_preview_blocks,  # Phase-3/4 compact overlay records (+category, +hierarchy, +prices/variants, +roles)
+
+        # ------------------------------------------------------------
+        # NEW (Day 43 Phase 7 pt.3): Layout Debug payload
+        #
+        # This is what portal/app.py should store under dbg["layout_debug"]
+        # so /drafts/<id>/layout-debug.json can return it.
+        # ------------------------------------------------------------
+        "layout_debug": {
+            "ok": True,
+            "pages": len(pages),
+            "dpi": dpi,
+            "preview_blocks": all_preview_blocks,
+            "meta": {
+                "source": source,
+                "engine": "tesseract",
+                "version": str(pytesseract.get_tesseract_version()),
+                "config": OCR_CONFIG,
+                "conf_floor": LOW_CONF_DROP,
+                "vision_layer": {
+                    "enabled": ENABLE_VISION_PREPROCESS,
+                    "debug_dir": VISION_DEBUG_DIR or None,
+                },
+                "multipass": {
+                    "enabled": ENABLE_MULTIPASS_OCR,
+                    "psms": MULTIPASS_PSMS,
+                    "rotations": MULTIPASS_ROTATIONS,
+                },
+            },
+        },
+
         "meta": {
             "source": source,
             "engine": "tesseract",
@@ -1343,6 +1373,30 @@ def segment_document(
         },
     }
     return segmented
+
+
+def run_layout_debug_for_pdf(
+    pdf_path: str,
+    dpi: int = DEFAULT_DPI,
+) -> Dict[str, Any]:
+    """
+    Day 43 Phase 7 pt.3–4
+
+    Canonical entrypoint for layout debug generation.
+    This is what portal/app.py should call when it wants
+    segmentation + preview_blocks + layout_debug payload.
+    """
+    segmented = segment_document(pdf_path=pdf_path, dpi=dpi)
+
+    # Defensive: guarantee shape even if upstream changes
+    layout_debug = segmented.get("layout_debug")
+    if not layout_debug:
+        layout_debug = {
+            "ok": False,
+            "error": "segment_document did not produce layout_debug",
+        }
+
+    return layout_debug
 
 
 

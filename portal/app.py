@@ -17,12 +17,23 @@ from datetime import datetime
 from typing import Optional, Iterable, Tuple, List, Dict, Any
 import hashlib  # <-- added for cat_hue filter
 import time     # <-- NEW: for gentle polling after upload
+
+# --- Paths ---
+ROOT = Path(__file__).resolve().parents[1]
+
+# Make project root importable so we can import storage.*
+import sys
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
 from storage import import_jobs as import_jobs_store  # <-- NEW: structured import helpers
+from storage.ocr_pipeline import segment_document
 
 
 # --- Forward decls for type checkers (real implementations appear later) ---
 def _ocr_image_to_text(img_path: Path) -> str: ...
 def _pdf_to_text(pdf_path: Path) -> str: ...
+
 
 # stdlib for exports
 import io
@@ -40,20 +51,27 @@ from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 
 # OCR health imports
-from importlib.util import find_spec
 import pytesseract
 
-# Try to import the OCR library health function; fall back safely
-try:
-    from storage.ocr_facade import health as ocr_health_lib
-except Exception as import_err:
-    _OCR_IMPORT_ERR = repr(import_err)
+# OCR health (single source of truth)
+ocr_health_lib = None  # type: ignore[assignment]
 
-    def ocr_health_lib():
+try:
+    from storage.ocr_facade import health as _ocr_health_lib  # type: ignore
+    ocr_health_lib = _ocr_health_lib
+except Exception as e:
+    _ocr_health_import_error = repr(e)
+
+    def _fallback_ocr_health_lib():
         return {
             "engine": "error",
-            "error": _OCR_IMPORT_ERR,
+            "error": f"ocr_facade health import failed: {_ocr_health_import_error}",
         }
+
+    ocr_health_lib = _fallback_ocr_health_lib
+
+
+
 
 # ✅ Try to import the contract validator (with safe fallback if file not added yet)
 try:
@@ -62,6 +80,7 @@ except Exception:
     def validate_draft_payload(_payload):  # type: ignore
         # No-op validator so app still runs if contracts.py isn't present yet.
         return True, ""
+
 
 # ✅ Make sure the OCR worker is imported at app startup
 #    (this triggers the version banner inside ocr_worker.py)
@@ -89,13 +108,7 @@ from portal.routes_debug_preocr import debug_preocr
 app.register_blueprint(debug_preocr)
 
 # --- Paths ---
-ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "storage" / "servline.db"
-
-# Make project root importable so we can import storage.*
-import sys
-if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
 
 # --- Load .env if available (so TESSERACT_CMD / POPPLER_PATH work even without PATH) ---
 try:
@@ -146,21 +159,14 @@ except Exception:
 
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
-    from storage.ocr_facade import build_structured_menu, health as ocr_health_lib
-    # Keep legacy name for compatibility with existing helpers
+    from storage.ocr_facade import build_structured_menu
     extract_items_from_path = build_structured_menu
-    print("[APP] Loaded OCR facade OK")  # DEBUG
+    print("[APP] Loaded OCR facade OK")
 except Exception as e:
-    print("[APP] OCR facade failed:", e)  # DEBUG
+    print("[APP] OCR facade failed:", e)
 
     extract_items_from_path = None
-    _ocr_facade_error = repr(e)  # capture the message safely
-
-    def ocr_health_lib():
-        return {
-            "engine": "error",
-            "error": f"ocr_facade import failed: {_ocr_facade_error}",
-        }
+    _ocr_facade_error = repr(e)
 
 # AI OCR Heuristics (Day 20)
 try:
@@ -827,7 +833,8 @@ def ocr_health_route():
             "probe_error": worker_probe.get("error"),
         },
         "ocr_worker_version": worker_version,
-        "ocr_lib_health": (ocr_health_lib() if callable(ocr_health_lib) else None),
+        "ocr_lib_health": (ocr_health_lib() if ocr_health_lib else None),
+
     })
 
 @app.get("/db/health")
@@ -1438,73 +1445,101 @@ def _build_draft_from_helper(job_id: int, saved_file_path: Path):
     return draft_dict, debug_payload
 
 
-# ---------- NEW: wrap ocr_worker result into draft schema ----------
-def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: dict) -> dict:
-    """
-    The worker returns either a category-like block (with 'items') or a single item.
-    We normalize into our draft schema with minimal transformation.
-    """
-    # Determine category name and item list
-    if isinstance(worker_obj, dict) and "items" in worker_obj:
-        cat_name = (worker_obj.get("category") or worker_obj.get("name") or "Uncategorized").strip() or "Uncategorized"
-        items = worker_obj.get("items") or []
-    else:
-        cat_name = (worker_obj.get("category") if isinstance(worker_obj, dict) else None) or "Uncategorized"
-        items = [worker_obj] if isinstance(worker_obj, dict) else []
 
-    # Map items into our expected fields (name, description, sizes, variants passthrough)
-    norm_items = []
-    for it in items:
-        if not isinstance(it, dict):
+
+def _draft_items_from_draft_json(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Convert saved draft JSON format:
+      {"categories":[{"name": "...", "items":[{...}]}]}
+    into a flat list of DB draft_items rows expected by drafts_store.upsert_draft_items.
+    """
+    out: List[Dict[str, Any]] = []
+
+    categories = draft.get("categories") or []
+    if not isinstance(categories, list):
+        return out
+
+    pos = 1
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = (cat.get("name") or "Uncategorized").strip() or "Uncategorized"
+
+        items = cat.get("items") or []
+        if not isinstance(items, list):
             continue
 
-        nm = (it.get("name") or "").strip()
-        if not nm:
-            continue
-
-        desc = (it.get("description") or "").strip()
-
-        # Normalize sizes → [{name, price}]
-        sizes_in = it.get("sizes") or []
-        sizes_out = []
-        for s in sizes_in:
-            if not isinstance(s, dict):
+        for it in items:
+            if not isinstance(it, dict):
                 continue
-            sn = (s.get("name") or "").strip()
+
+            name = (it.get("name") or "").strip()
+            desc = (it.get("description") or "").strip()
+
+            price_val = None
+            sizes = it.get("sizes")
+            if isinstance(sizes, list) and sizes:
+                first = sizes[0]
+                if isinstance(first, dict):
+                    price_val = first.get("price")
+            if price_val is None:
+                price_val = it.get("price")
+
             try:
-                sp = float(s.get("price")) if s.get("price") is not None else 0.0
+                price = float(price_val) if price_val is not None and str(price_val).strip() != "" else None
             except Exception:
-                sp = 0.0
-            if sn or sp:
-                sizes_out.append({"name": sn, "price": round(sp, 2)})
+                price = None
 
-        # Base item payload
-        item_out = {
-            "name": nm,
-            "description": desc,
-            "sizes": sizes_out,
-        }
+            if not name and not desc and price is None:
+                continue
 
-        # 🔹 NEW: passthrough variants if the worker provided them
-        variants = it.get("variants")
-        if variants:
-            item_out["variants"] = variants
+            out.append(
+                {
+                    "name": name or "Untitled",
+                    "description": desc,
+                    "price": price,
+                    "category": cat_name,
+                    "position": pos,
+                }
+            )
+            pos += 1
 
-        # 🔹 Optional: keep confidence/category if present on worker item
-        if it.get("confidence") is not None:
-            item_out["confidence"] = it.get("confidence")
-        if it.get("category"):
-            item_out["category"] = it.get("category")
+    return out
 
-        norm_items.append(item_out)
 
-    categories = [{"name": cat_name, "items": norm_items}] if norm_items else [{"name": "Uncategorized", "items": []}]
-    return {
-        "job_id": job_id,
-        "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": "ocr_worker"},
-        "extracted_at": _now_iso(),
+def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert the ocr_worker draft object into the on-disk draft JSON format expected by the rest of the app.
+
+    Critical: preserve categories/items so /imports/raw/<job_id> is not empty and Draft Editor has items.
+    """
+    from datetime import datetime, timezone
+
+    categories = worker_obj.get("categories")
+    if not isinstance(categories, list):
+        categories = []
+
+    source = worker_obj.get("source")
+    if not isinstance(source, dict):
+        source = {}
+
+    # Ensure source has the basics
+    source.setdefault("type", "upload")
+    source.setdefault("file", saved_file_path.name)
+    source.setdefault("ocr_engine", "ocr_worker")
+
+    extracted_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    draft: Dict[str, Any] = {
+        "job_id": int(job_id),
+        "restaurant_id": worker_obj.get("restaurant_id"),
+        "currency": worker_obj.get("currency") or "USD",
         "categories": categories,
+        "source": source,
+        "extracted_at": extracted_at,
     }
+    return draft
+
 
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     try:
@@ -1530,23 +1565,42 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(src_for_ocr), job_id=str(job_id))
                 draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
                 engine = "ocr_worker"
-                # If the worker exposed segmentation, store it for debug overlays
-                if drafts_store is not None and hasattr(drafts_store, "save_ocr_debug"):
-                    try:
-                        dbg_obj = worker_obj.get("debug") if isinstance(worker_obj, dict) else None
-                        if dbg_obj:
-                            drafts_store.save_ocr_debug(_get_or_create_draft_for_job(job_id) or 0, dbg_obj)
-                    except Exception:
-                        pass
+
+                # Capture debug for later save (AFTER we have a real draft_id)
+                if isinstance(worker_obj, dict):
+                    dbg_obj = worker_obj.get("debug")
+                    if isinstance(dbg_obj, dict):
+                        debug_payload = dbg_obj
             except Exception as e:
                 helper_error = f"ocr_worker_failed: {e}"
                 draft = None
+
 
         # 1) Helper path (typically for PDFs), fallback if image path failed
         if draft is None and extract_items_from_path is not None:
             try:
                 draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
                 engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
+
+                # NEW: For PDFs, also generate layout_debug from the Phase-3+ pipeline
+                try:
+                    suffix = saved_file_path.suffix.lower()
+                    if suffix == ".pdf":
+                        seg = segment_document(pdf_path=str(saved_file_path), dpi=400)
+                        if isinstance(debug_payload, dict):
+                            ld = seg.get("layout_debug")
+                            if ld is None:
+                                ld = {
+                                    "ok": True,
+                                    "pages": seg.get("pages"),
+                                    "dpi": seg.get("dpi"),
+                                    "preview_blocks": seg.get("preview_blocks") or [],
+                                    "meta": seg.get("meta") or {},
+                                }
+                            debug_payload["layout_debug"] = ld
+                except Exception:
+                    pass
+
             except Exception as e:
                 helper_error = str(e)
                 draft = None
@@ -1564,17 +1618,28 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
             if text:
                 draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
-                debug_payload = {"notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
-                                 "items": [], "lines": text.splitlines()[:500]}
+                debug_payload = {
+                    "notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
+                    "items": [],
+                    "lines": text.splitlines()[:500],
+                }
             else:
                 draft = {
                     "job_id": job_id,
                     "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
                     "extracted_at": _now_iso(),
                     "categories": [
-                        {"name": "Uncategorized", "items": [
-                            {"name": "OCR not configured", "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.", "sizes": []}
-                        ]}]
+                        {
+                            "name": "Uncategorized",
+                            "items": [
+                                {
+                                    "name": "OCR not configured",
+                                    "description": "Install Tesseract; for PDFs also install pdf2image + Poppler.",
+                                    "sizes": [],
+                                }
+                            ],
+                        }
+                    ],
                 }
                 debug_payload = {"notes": ["no_text_extracted"]}
 
@@ -1590,19 +1655,39 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
         update_import_job(job_id, status="done", draft_path=rel_draft_path)
 
+    except Exception as e:
+        update_import_job(job_id, status="failed", error=str(e))
+
+        # ✅ Normalize draft["source"] if it was produced as a JSON string (prevents weird UI/source rendering)
+        if isinstance(draft, dict):
+            src = draft.get("source")
+            if isinstance(src, str):
+                try:
+                    draft["source"] = json.loads(src)
+                except Exception:
+                    draft["source"] = {"raw": src}
+
+        # ✅ CRITICAL: hydrate DB-backed draft items so the Draft Editor shows rows immediately
         try:
             if drafts_store is not None:
                 draft_id = _get_or_create_draft_for_job(job_id)
-                if draft_id and debug_payload and hasattr(drafts_store, "save_ocr_debug"):
-                    try:
-                        drafts_store.save_ocr_debug(draft_id, debug_payload)
-                    except Exception:
-                        pass
+
+                if draft_id and hasattr(drafts_store, "upsert_draft_items"):
+                    items = _draft_items_from_draft_json(draft if isinstance(draft, dict) else {})
+                    if items:
+                        drafts_store.upsert_draft_items(draft_id, items)
+
+                # Optional: Save OCR debug payload (best-effort)
+                if draft_id and hasattr(drafts_store, "save_ocr_debug"):
+                    payload = debug_payload if isinstance(debug_payload, dict) else {}
+                    payload.setdefault("import_job_id", int(job_id))
+                    payload.setdefault("pipeline", engine or "unknown")
+                    payload.setdefault("bridge", "run_ocr_and_make_draft")
+                    drafts_store.save_ocr_debug(draft_id, payload)
         except Exception:
             pass
 
-    except Exception as e:
-        update_import_job(job_id, status="failed", error=str(e))
+
 
 # Upload route (JSON API) — returns job id
 @app.post("/api/menus/import")
@@ -2299,19 +2384,50 @@ def debug_blocks_page(job_id: int):
 
 @app.get("/imports/raw/<int:job_id>")
 @login_required
-def imports_raw(job_id):
+def imports_raw(job_id: int):
+    """
+    DB-first "raw" view for an import job.
+    Returns the draft payload synthesized from the drafts storage layer
+    (the same source the Draft Editor uses), NOT the legacy draft_path file.
+    """
     row = get_import_job(job_id)
     if not row:
         abort(404)
-    draft_path = row["draft_path"]
-    if not draft_path:
-        return jsonify({"job_id": job_id, "status": row["status"], "message": "No draft file yet"}), 200
-    abs_path = _abs_from_rel(draft_path)
-    if not abs_path or not abs_path.exists():
-        return jsonify({"error": "Draft path missing on disk", "draft_path": draft_path}), 500
-    with open(abs_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return jsonify(data)
+
+    _require_drafts_storage()
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        return jsonify({"ok": False, "job_id": job_id, "message": "No draft available for this job yet"}), 200
+
+    draft_meta = drafts_store.get_draft(draft_id) if hasattr(drafts_store, "get_draft") else {"id": draft_id}
+    items = drafts_store.get_draft_items(draft_id) if hasattr(drafts_store, "get_draft_items") else []
+
+    categories_map: Dict[str, List[Dict[str, Any]]] = {}
+    for it in (items or []):
+        cat = (it.get("category") or "Uncategorized").strip() or "Uncategorized"
+        categories_map.setdefault(cat, []).append(
+            {
+                "id": it.get("id"),
+                "name": it.get("name") or "",
+                "description": it.get("description") or "",
+                "price_cents": it.get("price_cents") or 0,
+                "price": (float(it.get("price_cents") or 0) / 100.0) if it.get("price_cents") else 0.0,
+                "confidence": it.get("confidence"),
+                "position": it.get("position"),
+            }
+        )
+
+    categories = [{"name": k, "items": v} for k, v in categories_map.items()]
+
+    payload = {
+        "job_id": int(job_id),
+        "draft_id": int(draft_id),
+        "source": (draft_meta.get("source") if isinstance(draft_meta, dict) else None) or {"type": "db"},
+        "extracted_at": (draft_meta.get("created_at") if isinstance(draft_meta, dict) else None) or _now_iso(),
+        "categories": categories,
+    }
+    return jsonify(payload)
+
 
 # ---- NEW: Segmentation preview bridges (JSON) ----
 def _load_debug_for_draft(draft_id: int) -> Dict[str, Any]:
@@ -2321,10 +2437,24 @@ def _load_debug_for_draft(draft_id: int) -> Dict[str, Any]:
     if not load_fn:
         return {}
     dbg = load_fn(draft_id) or {}
-    # Normalize possible shapes
     if not isinstance(dbg, dict):
         return {}
     return dbg
+
+
+def _load_layout_debug_for_draft(draft_id: int) -> Dict[str, Any]:
+    """
+    Phase 7 — layout/geometry debug payload.
+    Expected keys (optional, experimental):
+      - blocks
+      - proto_sections
+      - block_labels
+      - geometry_stats
+    """
+    dbg = _load_debug_for_draft(draft_id)
+    layout = dbg.get("layout_debug") or {}
+    return layout if isinstance(layout, dict) else {}
+
 
 @app.get("/drafts/<int:draft_id>/blocks")
 @login_required
@@ -2352,6 +2482,7 @@ def imports_blocks(job_id: int):
     if not draft_id:
         return jsonify({"ok": False, "error": "No draft found for job"}), 404
     return drafts_blocks(draft_id)  # returns a Response
+
 
 # Bridge to Draft Editor (DB-first)
 @app.get("/imports/<int:job_id>/draft")
@@ -3600,6 +3731,7 @@ def draft_ocr_debug_json(draft_id: int):
         return jsonify({"error": "No OCR debug payload found for this draft"}), 404
     return jsonify(dbg)
 
+
 @app.get("/drafts/<int:draft_id>/ocr-debug.csv")
 @login_required
 def draft_ocr_debug_csv(draft_id: int):
@@ -3654,6 +3786,61 @@ def draft_ocr_debug_csv(draft_id: int):
     resp.headers["Content-Type"] = "text/csv; charset=utf-8"
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_ocr_debug.csv"'
     return resp
+
+# ------------------------------------------------------------
+# NEW: Layout Debug JSON (job -> draft -> stored payload)
+# ------------------------------------------------------------
+
+@app.get("/drafts/<int:draft_id>/layout-debug.json")
+@login_required
+def draft_layout_debug_json(draft_id: int):
+    _require_drafts_storage()
+
+    load_fn = getattr(drafts_store, "load_ocr_debug", None)
+    if not callable(load_fn):
+        return jsonify({"ok": False, "error": "OCR debug storage not available"}), 404
+
+    dbg = load_fn(draft_id) or {}
+    if not isinstance(dbg, dict):
+        dbg = {}
+
+    payload = (
+        dbg.get("layout_debug")
+        or dbg.get("layout")
+        or dbg.get("debug_layout")
+        or dbg.get("blocks_layout")
+        or None
+    )
+
+    if not payload:
+        return jsonify({
+            "ok": True,
+            "draft_id": draft_id,
+            "note": "No layout_debug payload present yet",
+        }), 200
+
+    return jsonify({
+        "ok": True,
+        "draft_id": draft_id,
+        "layout_debug": payload,
+    }), 200
+
+
+@app.get("/imports/<int:job_id>/layout-debug.json")
+@login_required
+def imports_layout_debug_json(job_id: int):
+    _require_drafts_storage()
+    draft_id = _get_or_create_draft_for_job(job_id)
+    if not draft_id:
+        return jsonify({"ok": False, "job_id": job_id, "error": "No draft found for job"}), 404
+    return draft_layout_debug_json(int(draft_id))
+
+
+@app.get("/ocr/layout-debug/<int:job_id>.json")
+@login_required
+def ocr_layout_debug_alias(job_id: int):
+    return imports_layout_debug_json(job_id)
+
 
 # Exporters
 @app.get("/drafts/<int:draft_id>/export.csv")

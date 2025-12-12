@@ -7,10 +7,16 @@ Phase 4 pt.11–12 additions:
 - Structured item/section/menu payload types shared across Preview → Draft → Finalize → Export.
 - Rich metadata: confidence maps, cleanup flags, provenance.
 - Normalized ordering + section path/slug/position + auto_group hooks for Superimport.
+
+Phase 7 pt.3–4 additions (BC-safe):
+- Geometry-first dataclasses (WordGeom/Span/BlockGeom) for layout engine prototypes.
+- Keep existing TypedDict API untouched for production extraction.
 """
 
 from __future__ import annotations
-from typing import TypedDict, List, NotRequired, Dict, Optional
+
+from dataclasses import dataclass, field
+from typing import Dict, List, NotRequired, Optional, TypedDict, Tuple
 
 
 # ────────────────────────────────────────────────
@@ -25,7 +31,7 @@ class BBox(TypedDict):
 
 
 # ────────────────────────────────────────────────
-# 🔤 OCR primitives
+# 🔤 OCR primitives (TypedDicts — production / API surface)
 # ────────────────────────────────────────────────
 
 class Word(TypedDict):
@@ -41,7 +47,7 @@ class Line(TypedDict):
 
 
 # ────────────────────────────────────────────────
-# 🧱 OCR Block (original Phase 1/2)
+# 🧱 OCR Block (original Phase 1/2) — production / API surface
 # ────────────────────────────────────────────────
 
 class Block(TypedDict):
@@ -256,7 +262,65 @@ class OCRResult(TypedDict):
 Segmented = Dict[str, object]  # {"pages": int, "dpi": int, "blocks": List[Block], "meta": {...}]
 
 
+# ────────────────────────────────────────────────
+# 🧱 Phase 7 pt.3 — Geometry-first dataclasses (layout engine prototypes)
+# These are intentionally separate from the production TypedDict API above.
+# ────────────────────────────────────────────────
+
+BBoxTuple = Tuple[int, int, int, int]  # (x1, y1, x2, y2)
+
+
+@dataclass(frozen=True, slots=True)
+class WordGeom:
+    """
+    Geometry-first word token for layout engine research.
+
+    Coordinates use absolute pixel space unless normalized upstream.
+    bbox: (x1, y1, x2, y2)
+    """
+    text: str
+    bbox: BBoxTuple
+    conf: float = 0.0  # 0–100 or 0–1 depending on source; pipeline can normalize
+    page_index: int = 0
+    source: Optional[str] = None
+    meta: Dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Span:
+    """
+    A horizontally-merged run of words (typically within a single line).
+    """
+    words: Tuple[WordGeom, ...]
+    bbox: BBoxTuple
+    text: str
+    page_index: int = 0
+    meta: Dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BlockGeom:
+    """
+    A geometric block cluster (paragraph/region) made of spans/lines.
+    """
+    id: str
+    page_index: int
+    bbox: BBoxTuple
+    lines: Tuple[Tuple[Span, ...], ...]  # lines -> spans
+    merged_text: str
+
+    # Proto-labels (pt.4) — BC-safe, optional
+    label: Optional[str] = None           # "header" | "item" | "price" | "junk" | ...
+    section_hint: Optional[str] = None    # e.g. "PIZZA", "WINGS"
+    meta: Dict[str, object] = field(default_factory=dict)
+
+
+# ────────────────────────────────────────────────
+# Exports
+# ────────────────────────────────────────────────
+
 __all__ = [
+    # Production/API TypedDicts
     "BBox",
     "Word",
     "Line",
@@ -274,4 +338,9 @@ __all__ = [
     "StructuredItem",
     "StructuredSection",
     "StructuredMenuPayload",
+    # Phase 7 layout prototypes
+    "BBoxTuple",
+    "WordGeom",
+    "Span",
+    "BlockGeom",
 ]

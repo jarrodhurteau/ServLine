@@ -13,19 +13,29 @@ ServLine OCR Utils — helpers for PDF→image, preprocessing, and env checks.
 ⚠️ Phase 4 pt.11–12:
 - Propagate category/hierarchy metadata into OCRBlock preview structures for
   consistent structured output across Preview → Draft → Finalize.
+
+⚠️ Phase 7 pt.3–4 (layout research, parallel-only):
+- Bounding-box normalization + geometric helpers
+- Prototype word→span→line→block grouping utilities
+- Skew estimate + lightweight block_map debug preview helpers
+
+NOTE:
+- This module intentionally keeps Phase 7 layout types importable at runtime without
+  breaking execution environments, while still being Pylance/mypy friendly via
+  TYPE_CHECKING and string annotations.
 """
 
 from __future__ import annotations
 
+import glob
+import io
+import math
 import os
 import re
-import glob
-import math
-import io
-from typing import List, Optional, Tuple, Iterable, Any, TYPE_CHECKING, Dict
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
-from PIL import Image, ImageOps, ImageFilter, ImageEnhance
-from pdf2image import convert_from_path, convert_from_bytes
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from pdf2image import convert_from_bytes, convert_from_path
 import pytesseract
 
 # Optional deps
@@ -45,12 +55,21 @@ try:
 except Exception:  # pragma: no cover
     NDArray = Any  # type: ignore
 
-# Phase 3/4 types
+# Phase 3/4 types (TypedDicts)
 try:
     from .ocr_types import BBox, Line, TextBlock, OCRBlock  # TypedDicts
 except Exception:
     # Soft fallback if local import style differs during IDE refactors
     from storage.ocr_types import BBox, Line, TextBlock, OCRBlock  # type: ignore
+
+# Phase 7 layout prototype dataclasses (typing-only; keeps Pylance happy)
+if TYPE_CHECKING:
+    from .ocr_types import BBoxTuple, WordGeom, Span, BlockGeom
+else:
+    BBoxTuple = Tuple[int, int, int, int]  # runtime fallback
+    WordGeom = Any  # runtime fallback
+    Span = Any      # runtime fallback
+    BlockGeom = Any # runtime fallback
 
 
 # =============================
@@ -134,8 +153,7 @@ def apply_exif_orientation(img: Image.Image) -> Image.Image:
     try:
         fixed = ImageOps.exif_transpose(img)
         buf = io.BytesIO()
-        # Save to PNG to drop EXIF; reopen to get a clean image object
-        fixed.save(buf, format="PNG")
+        fixed.save(buf, format="PNG")  # Save to PNG to drop EXIF
         buf.seek(0)
         return Image.open(buf).convert("RGB")
     except Exception:
@@ -234,9 +252,13 @@ def normalize_image(
     if contrast_boost and contrast_boost != 1.0:
         out = ImageEnhance.Contrast(out).enhance(contrast_boost)
     if sharpen_radius > 0:
-        out = out.filter(ImageFilter.UnsharpMask(radius=sharpen_radius,
-                                                 percent=unsharp_percent,
-                                                 threshold=unsharp_threshold))
+        out = out.filter(
+            ImageFilter.UnsharpMask(
+                radius=sharpen_radius,
+                percent=unsharp_percent,
+                threshold=unsharp_threshold,
+            )
+        )
     return out
 
 
@@ -289,21 +311,45 @@ def deskew(img: Image.Image) -> Image.Image:
         return img
     (h, w) = gray.shape
     M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-    rotated = cv2.warpAffine(mat, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    rotated = cv2.warpAffine(
+        mat,
+        M,
+        (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
     return cv_to_pil(rotated)
 
 
 def preprocess_page(img: Image.Image, *, do_deskew: bool = True) -> Image.Image:
     if np is None or cv2 is None:
-        return normalize_image(img, to_grayscale=True, contrast_boost=1.25,
-                               sharpen_radius=1.0, unsharp_percent=140, unsharp_threshold=2)
+        return normalize_image(
+            img,
+            to_grayscale=True,
+            contrast_boost=1.25,
+            sharpen_radius=1.0,
+            unsharp_percent=140,
+            unsharp_threshold=2,
+        )
     bgr = pil_to_cv(img)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     g1 = clahe.apply(gray)
-    bin_img = cv2.adaptiveThreshold(g1, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                    cv2.THRESH_BINARY, 35, 11)
-    den = cv2.fastNlMeansDenoising(bin_img, None, h=10, templateWindowSize=7, searchWindowSize=21)
+    bin_img = cv2.adaptiveThreshold(
+        g1,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        35,
+        11,
+    )
+    den = cv2.fastNlMeansDenoising(
+        bin_img,
+        None,
+        h=10,
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
     sharp = _cv_unsharp(den, amount=0.8, radius=2)
     out = cv2.cvtColor(sharp, cv2.COLOR_GRAY2BGR)
     pil = cv_to_pil(out)
@@ -346,8 +392,6 @@ NON_ALNUM_RATIO_MAX = 0.50
 PRICE_MIN = 100
 PRICE_MAX = 9999
 
-# Common menu-y words to bias lines away from being considered garbage.
-# This is intentionally lightweight — not a full vocabulary, just obvious tells.
 _MENU_HINT_WORDS = {
     "pizza",
     "pizzas",
@@ -461,16 +505,6 @@ def find_price_candidates(text: str) -> List[int]:
 
 
 def _looks_like_menu_line(text: str, price_hit: bool) -> bool:
-    """
-    Heuristic to decide if a line is *probably* a real menu line, so that we
-    bias against discarding it as garbage.
-
-    Signals:
-    - Contains common menu keywords ("pizza", "salad", "wings", etc.).
-    - Has at least one space, at least one alpha char, and reasonable length.
-    - If there's a price hit and any alpha, treat it as menu-ish unless it is
-      obviously symbol noise.
-    """
     t = text.lower()
     if not t:
         return False
@@ -479,16 +513,13 @@ def _looks_like_menu_line(text: str, price_hit: bool) -> bool:
     has_space = " " in t
     length = len(t)
 
-    # Keyword hint: strong signal this is real menu text.
     for kw in _MENU_HINT_WORDS:
         if kw in t:
             return True
 
-    # Price + some letters is almost always a menu item or variant line.
     if price_hit and has_alpha and length >= 8:
         return True
 
-    # Generic "looks like text" heuristic: has space, letters, and isn't tiny.
     if has_alpha and has_space and length >= 15:
         return True
 
@@ -496,14 +527,6 @@ def _looks_like_menu_line(text: str, price_hit: bool) -> bool:
 
 
 def is_garbage_line(text: str, price_hit: bool) -> bool:
-    """
-    Decide whether a raw OCR line is garbage.
-
-    Day 33 tuning:
-    - More forgiving for lines that *look* like real menu text.
-    - Extra leniency when a valid price is present (price_hit=True).
-    - Still aggressive on pure symbol gibberish and obviously invalid text.
-    """
     t = clean_text(text)
     if not t or len(t) < 2:
         return True
@@ -512,18 +535,13 @@ def is_garbage_line(text: str, price_hit: bool) -> bool:
     mcr = max_consonant_run(t)
     nar = non_alnum_ratio(t)
 
-    # If it looks like a plausible menu line, heavily bias toward *keeping* it.
     if _looks_like_menu_line(t, price_hit):
-        # Only treat as garbage if it's extreme symbol noise.
         if nar > 0.85 and vr < 0.10:
             return True
         if mcr > MAX_CONSONANT_RUN + 4:
             return True
-        # Otherwise, keep it.
         return False
 
-    # For lines with a price, relax thresholds slightly to avoid burning
-    # multi-item or variant lines that happen to look a bit noisy.
     if price_hit:
         if vr < (VOWEL_RATIO_MIN * 0.6):
             return True
@@ -533,7 +551,6 @@ def is_garbage_line(text: str, price_hit: bool) -> bool:
             return True
         return False
 
-    # Non-price lines: use original stricter guards.
     if vr < VOWEL_RATIO_MIN:
         return True
     if mcr > MAX_CONSONANT_RUN:
@@ -615,3 +632,567 @@ def _merge_lines_text(lines: List[Line]) -> str:
         if t:
             out.append(t)
     return "\n".join(out)
+
+
+def group_text_blocks(
+    lines: List[Line],
+    *,
+    max_y_gap_px: int = 18,
+    align_tol_px: int = 28,
+    min_vert_overlap_px: int = 6,
+) -> List[TextBlock]:
+    """
+    Phase 3 compatibility function expected by storage.ocr_pipeline.segment_document().
+
+    Input: a flat list of OCR "lines" (TypedDict Line with {"text", "bbox": {"x","y","w","h"}}).
+    Output: a list of TextBlock-like dicts:
+      {
+        "bbox":  {"x","y","w","h"},
+        "lines": [Line, ...],
+        "text":  "merged text"
+      }
+
+    The grouping heuristic is intentionally simple and stable:
+      - sort lines top→bottom
+      - append line to current block if:
+          (a) vertical gap is small, AND
+          (b) there is some vertical overlap, AND
+          (c) left/right edges roughly align
+      - otherwise, start a new block
+    """
+    if not lines:
+        return []
+
+    # Sort lines by y, then x for stable grouping
+    sorted_lines = sorted(lines, key=lambda l: (int(l["bbox"]["y"]), int(l["bbox"]["x"])))
+
+    blocks: List[List[Line]] = []
+    cur: List[Line] = []
+
+    def line_xyxy(ln: Line) -> Tuple[int, int, int, int]:
+        return bbox_to_x1y1x2y2(ln["bbox"])
+
+    def flush() -> None:
+        nonlocal cur, blocks
+        if cur:
+            blocks.append(cur)
+            cur = []
+
+    cur_bbox_xyxy: Optional[Tuple[int, int, int, int]] = None
+
+    for ln in sorted_lines:
+        b = line_xyxy(ln)
+
+        if cur_bbox_xyxy is None:
+            cur = [ln]
+            cur_bbox_xyxy = b
+            continue
+
+        # Metrics vs current block bbox
+        gap_y = b[1] - cur_bbox_xyxy[3]  # how far below current block
+        v_ov = _vert_overlap_xy(cur_bbox_xyxy, b)
+        align_ok = _rough_align_xy(cur_bbox_xyxy, b, align_tol_px)
+
+        can_join = (
+            gap_y <= max_y_gap_px
+            and v_ov >= min_vert_overlap_px
+            and align_ok
+        )
+
+        if can_join:
+            cur.append(ln)
+            cur_bbox_xyxy = _expand_xyxy(cur_bbox_xyxy, b)
+        else:
+            flush()
+            cur = [ln]
+            cur_bbox_xyxy = b
+
+    flush()
+
+    out: List[TextBlock] = []
+    for blk_lines in blocks:
+        # Compute bbox
+        bb: Optional[Tuple[int, int, int, int]] = None
+        for ln in blk_lines:
+            b = line_xyxy(ln)
+            bb = b if bb is None else _expand_xyxy(bb, b)
+
+        x1, y1, x2, y2 = bb or (0, 0, 0, 0)
+        bbox: BBox = _xyxy_to_bbox(x1, y1, x2, y2)
+
+        out.append(
+            {
+                "bbox": bbox,
+                "lines": blk_lines,
+                "text": _merge_lines_text(blk_lines),
+            }
+        )
+
+    return out
+
+def blocks_for_preview(
+    text_blocks: List[TextBlock],
+    *,
+    max_blocks: int = 200,
+    max_chars: int = 180,
+) -> List[OCRBlock]:
+    """
+    Phase 3/4 compatibility helper expected by storage.ocr_pipeline.segment_document().
+
+    Input: TextBlock list (each has bbox + lines + merged text).
+    Output: OCRBlock list for UI/debug preview.
+
+    We keep the preview payload lightweight and stable:
+      - id: deterministic per-page ordering
+      - bbox: same bbox as the text block
+      - text: a short, single-line snippet
+      - meta: includes line_count for quick inspection
+
+    This intentionally does NOT depend on Phase 7 layout dataclasses.
+    """
+    out: List[OCRBlock] = []
+
+    if not text_blocks:
+        return out
+
+    for i, tb in enumerate(text_blocks[:max_blocks], start=1):
+        bb = tb.get("bbox") or {"x": 0, "y": 0, "w": 0, "h": 0}
+
+        # Prefer TextBlock["text"], else merge from lines.
+        raw_text = (tb.get("text") or "").strip()
+        if not raw_text:
+            try:
+                raw_text = _merge_lines_text(tb.get("lines") or [])
+            except Exception:
+                raw_text = ""
+
+        # Normalize to a compact single-line snippet.
+        snippet = raw_text.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+        snippet = re.sub(r"\s+", " ", snippet).strip()
+        if len(snippet) > max_chars:
+            snippet = snippet[:max_chars].rstrip()
+
+        lines = tb.get("lines") or []
+        line_count = 0
+        try:
+            line_count = int(len(lines))
+        except Exception:
+            line_count = 0
+
+        out.append(
+            {
+                "id": f"tb_{i}",
+                "bbox": bb,
+                "text": snippet,
+                "lines": lines,
+                "meta": {"line_count": line_count},
+            }
+        )
+
+    return out
+
+
+# =============================
+# Phase 7 — Geometry helpers (layout engine, parallel-only)
+# =============================
+
+def xyxy_norm(box: "BBoxTuple") -> "BBoxTuple":
+    """Ensure (x1,y1,x2,y2) is ordered and non-inverted."""
+    x1, y1, x2, y2 = box
+    nx1 = int(min(x1, x2))
+    nx2 = int(max(x1, x2))
+    ny1 = int(min(y1, y2))
+    ny2 = int(max(y1, y2))
+    return (nx1, ny1, nx2, ny2)
+
+
+def xyxy_w(box: "BBoxTuple") -> int:
+    x1, y1, x2, y2 = xyxy_norm(box)
+    return max(0, x2 - x1)
+
+
+def xyxy_h(box: "BBoxTuple") -> int:
+    x1, y1, x2, y2 = xyxy_norm(box)
+    return max(0, y2 - y1)
+
+
+def xyxy_area(box: "BBoxTuple") -> int:
+    return xyxy_w(box) * xyxy_h(box)
+
+
+def xyxy_center(box: "BBoxTuple") -> Tuple[float, float]:
+    x1, y1, x2, y2 = xyxy_norm(box)
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+
+def xyxy_expand(a: "BBoxTuple", b: "BBoxTuple") -> "BBoxTuple":
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    return (min(ax1, bx1), min(ay1, by1), max(ax2, bx2), max(ay2, by2))
+
+
+def xyxy_intersection(a: "BBoxTuple", b: "BBoxTuple") -> "BBoxTuple":
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    x1 = max(ax1, bx1)
+    y1 = max(ay1, by1)
+    x2 = min(ax2, bx2)
+    y2 = min(ay2, by2)
+    if x2 <= x1 or y2 <= y1:
+        return (0, 0, 0, 0)
+    return (x1, y1, x2, y2)
+
+
+def xyxy_iou(a: "BBoxTuple", b: "BBoxTuple") -> float:
+    inter = xyxy_intersection(a, b)
+    ia = xyxy_area(inter)
+    if ia <= 0:
+        return 0.0
+    ua = xyxy_area(a) + xyxy_area(b) - ia
+    if ua <= 0:
+        return 0.0
+    return float(ia) / float(ua)
+
+
+def xyxy_vert_overlap(a: "BBoxTuple", b: "BBoxTuple") -> int:
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    top = max(ay1, by1)
+    bottom = min(ay2, by2)
+    return max(0, bottom - top)
+
+
+def xyxy_horiz_gap(a: "BBoxTuple", b: "BBoxTuple") -> int:
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    if bx1 > ax2:
+        return bx1 - ax2
+    if ax1 > bx2:
+        return ax1 - bx2
+    return 0
+
+
+def xyxy_vert_gap(a: "BBoxTuple", b: "BBoxTuple") -> int:
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    if by1 > ay2:
+        return by1 - ay2
+    if ay1 > by2:
+        return ay1 - by2
+    return 0
+
+
+def xyxy_left_right_align(a: "BBoxTuple", b: "BBoxTuple", tol_px: int) -> bool:
+    ax1, ay1, ax2, ay2 = xyxy_norm(a)
+    bx1, by1, bx2, by2 = xyxy_norm(b)
+    return (abs(ax1 - bx1) <= tol_px) or (abs(ax2 - bx2) <= tol_px)
+
+
+def estimate_skew_degrees(words: Iterable["WordGeom"], *, max_words: int = 250) -> float:
+    """
+    Rough skew estimate in degrees using word centers across lines.
+    Uses a simple least-squares fit of y = m*x + b over word centers.
+    Returns small angles near 0 for upright pages.
+    """
+    pts: List[Tuple[float, float]] = []
+    n = 0
+    for w in words:
+        if n >= max_words:
+            break
+        try:
+            wb = getattr(w, "bbox", None)
+            if wb is None:
+                continue
+            cx, cy = xyxy_center(wb)
+            pts.append((cx, cy))
+            n += 1
+        except Exception:
+            continue
+
+    if len(pts) < 8:
+        return 0.0
+
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x_mean = sum(xs) / float(len(xs))
+    y_mean = sum(ys) / float(len(ys))
+
+    num = 0.0
+    den = 0.0
+    for x, y in pts:
+        dx = x - x_mean
+        dy = y - y_mean
+        num += dx * dy
+        den += dx * dx
+
+    if den <= 1e-9:
+        return 0.0
+
+    m = num / den
+    rad = math.atan(m)
+    deg = rad * (180.0 / math.pi)
+
+    if abs(deg) < 0.1:
+        return 0.0
+    if abs(deg) > 20:
+        return 0.0
+    return float(deg)
+
+
+def words_to_spans(
+    words: List["WordGeom"],
+    *,
+    y_overlap_ratio: float = 0.50,
+    max_gap_factor: float = 1.35,
+) -> List["Span"]:
+    """
+    Merge words into spans within a *single* line band (call after you've grouped by line).
+    This function assumes the provided words belong to one line-ish cluster.
+
+    y_overlap_ratio: require overlap >= ratio*min(h1,h2)
+    max_gap_factor: allow horizontal gap <= max_gap_factor*median_word_height
+    """
+    if not words:
+        return []
+
+    ws = sorted(words, key=lambda w: (xyxy_norm(w.bbox)[0], xyxy_norm(w.bbox)[1]))
+    heights = [max(1, xyxy_h(w.bbox)) for w in ws]
+    med_h = median([float(h) for h in heights]) or 12.0
+    max_gap = int(max(4.0, med_h * max_gap_factor))
+
+    spans: List["Span"] = []
+
+    cur_words: List["WordGeom"] = []
+    cur_bbox: Optional["BBoxTuple"] = None
+    cur_text_parts: List[str] = []
+
+    def flush() -> None:
+        nonlocal cur_words, cur_bbox, cur_text_parts, spans
+        if not cur_words or cur_bbox is None:
+            cur_words = []
+            cur_bbox = None
+            cur_text_parts = []
+            return
+        text = " ".join([t for t in cur_text_parts if t]).strip()
+        spans.append(
+            Span(
+                words=tuple(cur_words),
+                bbox=xyxy_norm(cur_bbox),
+                text=text,
+                page_index=getattr(cur_words[0], "page_index", 0),
+                meta={},
+            )
+        )
+        cur_words = []
+        cur_bbox = None
+        cur_text_parts = []
+
+    for w in ws:
+        wb = xyxy_norm(w.bbox)
+        if cur_bbox is None:
+            cur_words = [w]
+            cur_bbox = wb
+            cur_text_parts = [w.text]
+            continue
+
+        overlap = xyxy_vert_overlap(cur_bbox, wb)
+        min_h = max(1, min(xyxy_h(cur_bbox), xyxy_h(wb)))
+        overlap_ok = (overlap / float(min_h)) >= y_overlap_ratio
+        gap = xyxy_horiz_gap(cur_bbox, wb)
+
+        if overlap_ok and gap <= max_gap:
+            cur_words.append(w)
+            cur_bbox = xyxy_expand(cur_bbox, wb)
+            cur_text_parts.append(w.text)
+        else:
+            flush()
+            cur_words = [w]
+            cur_bbox = wb
+            cur_text_parts = [w.text]
+
+    flush()
+    return spans
+
+
+def group_words_to_lines(
+    words: List["WordGeom"],
+    *,
+    y_gap_factor: float = 0.60,
+    min_words_per_line: int = 1,
+) -> List[List["WordGeom"]]:
+    """
+    Cluster words into line bands using y-center proximity and height similarity.
+    Returns list of line word-lists (each line sorted by x).
+    """
+    if not words:
+        return []
+
+    ws = sorted(words, key=lambda w: (xyxy_center(w.bbox)[1], xyxy_center(w.bbox)[0]))
+    heights = [max(1, xyxy_h(w.bbox)) for w in ws]
+    med_h = median([float(h) for h in heights]) or 12.0
+    max_y_gap = float(med_h) * float(y_gap_factor)
+
+    lines: List[List["WordGeom"]] = []
+    cur: List["WordGeom"] = []
+    cur_y: Optional[float] = None
+
+    for w in ws:
+        cx, cy = xyxy_center(w.bbox)
+        if cur_y is None:
+            cur = [w]
+            cur_y = cy
+            continue
+
+        if abs(cy - cur_y) <= max_y_gap:
+            cur.append(w)
+            cur_y = (cur_y * 0.85) + (cy * 0.15)
+        else:
+            if len(cur) >= min_words_per_line:
+                cur_sorted = sorted(cur, key=lambda ww: xyxy_norm(ww.bbox)[0])
+                lines.append(cur_sorted)
+            cur = [w]
+            cur_y = cy
+
+    if cur and len(cur) >= min_words_per_line:
+        cur_sorted = sorted(cur, key=lambda ww: xyxy_norm(ww.bbox)[0])
+        lines.append(cur_sorted)
+
+    return lines
+
+
+def lines_to_blocks(
+    line_spans: List[List["Span"]],
+    *,
+    x_align_tol_factor: float = 0.40,
+    y_gap_factor: float = 1.15,
+    min_lines_per_block: int = 1,
+) -> List["BlockGeom"]:
+    """
+    Cluster lines into blocks based on:
+    - vertical proximity
+    - left/right alignment
+    - whitespace density proxy (span gaps)
+    - text size similarity (median span height)
+    """
+    if not line_spans:
+        return []
+
+    all_heights: List[float] = []
+    for line in line_spans:
+        for sp in line:
+            all_heights.append(float(max(1, xyxy_h(sp.bbox))))
+    med_h = median(all_heights) or 12.0
+
+    x_tol = int(max(6.0, med_h * x_align_tol_factor))
+    max_y_gap = int(max(8.0, med_h * y_gap_factor))
+
+    def line_bbox(line: List["Span"]) -> "BBoxTuple":
+        b: Optional["BBoxTuple"] = None
+        for sp in line:
+            b = sp.bbox if b is None else xyxy_expand(b, sp.bbox)
+        return xyxy_norm(b or (0, 0, 0, 0))
+
+    blocks: List[List[List["Span"]]] = []
+    cur_block: List[List["Span"]] = []
+    cur_bbox: Optional["BBoxTuple"] = None
+
+    for line in line_spans:
+        lb = line_bbox(line)
+        if cur_bbox is None:
+            cur_block = [line]
+            cur_bbox = lb
+            continue
+
+        y_gap = xyxy_vert_gap(cur_bbox, lb)
+        align = xyxy_left_right_align(cur_bbox, lb, x_tol)
+
+        if y_gap <= max_y_gap and align:
+            cur_block.append(line)
+            cur_bbox = xyxy_expand(cur_bbox, lb)
+        else:
+            if len(cur_block) >= min_lines_per_block:
+                blocks.append(cur_block)
+            cur_block = [line]
+            cur_bbox = lb
+
+    if cur_block and len(cur_block) >= min_lines_per_block:
+        blocks.append(cur_block)
+
+    out: List["BlockGeom"] = []
+    for i, blk_lines in enumerate(blocks):
+        bb: Optional["BBoxTuple"] = None
+        merged_parts: List[str] = []
+        page_index = 0
+
+        for ln in blk_lines:
+            lbb = line_bbox(ln)
+            bb = lbb if bb is None else xyxy_expand(bb, lbb)
+
+            if ln:
+                page_index = int(getattr(ln[0], "page_index", page_index))
+
+            line_text = " ".join([sp.text for sp in ln if getattr(sp, "text", "")]).strip()
+            if line_text:
+                merged_parts.append(line_text)
+
+        merged_text = "\n".join(merged_parts).strip()
+        out.append(
+            BlockGeom(
+                id=f"blk_{page_index}_{i+1}",
+                page_index=int(page_index),
+                bbox=xyxy_norm(bb or (0, 0, 0, 0)),
+                lines=tuple(tuple(ln) for ln in blk_lines),
+                merged_text=merged_text,
+                label=None,
+                section_hint=None,
+                meta={},
+            )
+        )
+
+    return out
+
+
+def build_block_map_preview(
+    blocks: List["BlockGeom"],
+    *,
+    max_blocks: int = 80,
+    max_chars: int = 140,
+) -> List[Dict[str, object]]:
+    """
+    Lightweight debug preview for layout-debug JSON.
+    """
+    out: List[Dict[str, object]] = []
+    for b in blocks[:max_blocks]:
+        x1, y1, x2, y2 = xyxy_norm(b.bbox)
+        txt = (b.merged_text or "").strip().replace("\t", " ")
+        txt = re.sub(r"\s+", " ", txt)
+        if len(txt) > max_chars:
+            txt = txt[:max_chars].rstrip()
+        out.append(
+            {
+                "id": b.id,
+                "page_index": b.page_index,
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "w": int(x2 - x1),
+                "h": int(y2 - y1),
+                "label": b.label,
+                "section_hint": b.section_hint,
+                "text": txt,
+            }
+        )
+    return out
+
+
+def summarize_blocks(blocks: List["BlockGeom"]) -> Dict[str, object]:
+    """
+    Small numeric summaries for debug payload.
+    """
+    if not blocks:
+        return {"block_count": 0, "avg_block_height": 0.0}
+
+    hs = [float(max(0, xyxy_h(b.bbox))) for b in blocks]
+    avg_h = sum(hs) / float(len(hs)) if hs else 0.0
+    return {
+        "block_count": int(len(blocks)),
+        "avg_block_height": float(avg_h),
+    }

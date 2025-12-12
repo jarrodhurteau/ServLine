@@ -301,6 +301,44 @@ PRICE_TAIL = r"(?:\$|S)?\s*(?P<price>\d{1,3}(?:\.\d{2})?)\s*$"
 PRICE_RE = re.compile(rf"(?ix) (?:^|[\s\.\-–—\(\)]+) \$?\s*(\d{{1,3}}(?:\.\d{{2}})?) \s*(?:$|[^0-9])")
 ALL_PRICES_RE = re.compile(r"(?i)\$?\s*(\d{1,3}(?:[.,]\d{2}))")
 
+def _fallback_parse_price_lines(lines: List[str]) -> Dict[str, Any]:
+    """
+    Very simple fallback: if the main parser yields 0 items,
+    extract lines that look like: NAME ... PRICE
+    """
+    items: List[Dict[str, Any]] = []
+
+    for ln in lines:
+        if not ln or _is_noise(ln):
+            continue
+
+        all_prices = [p.replace(",", ".") for p in ALL_PRICES_RE.findall(ln)]
+        if not all_prices:
+            continue
+
+        try:
+            pr = _fix_cents(float(all_prices[-1]))
+        except Exception:
+            continue
+
+        nm = _clean_item_name(ln)
+        if not nm or nm.lower() in ("untitled",):
+            continue
+
+        items.append({
+            "name": nm,
+            "description": "",
+            "sizes": [{"name": "One Size", "price": float(pr)}],
+            "options": [],
+            "tags": [],
+        })
+
+    if not items:
+        return {"categories": []}
+
+    return {"categories": [{"name": "Uncategorized", "items": items}]}
+
+
 KNOWN_CATS = [
     "PIZZA",
     "TOPPINGS",
@@ -569,7 +607,12 @@ def parse_menu_text(text: str) -> Dict[str, Any]:
         merged[key]["items"].extend(c["items"])
     categories = list(merged.values())
 
+    # If the primary heuristic parser found nothing, fall back to a simpler extractor
+    if not categories:
+        return _fallback_parse_price_lines(lines)
+
     return {"categories": categories}
+
 
 # ======================================================================
 #                         DRAFT BUILD + PIPELINE

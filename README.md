@@ -318,6 +318,37 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ---
 
+## 🧠 Day 43 — Phase 7 pt.3–4: OCR Ingestion Audit & Debug Stabilization
+
+### Phase 7 pt.3 — OCR Ingestion Path Audit
+- Performed a full read-only audit of the OCR → Draft ingestion flow.
+- Verified a **single authoritative OCR → Draft creation path**.
+- Confirmed raw OCR persistence, draft hydration, and Draft Editor visibility.
+- Identified and removed duplicate Flask routes causing runtime assertion errors.
+- No OCR behavior changes introduced.
+
+### Phase 7 pt.4 — Debug & Route Hardening
+- Stabilized layout / geometry debug endpoints.
+- Ensured debug routes are read-only and non-invasive.
+- Confirmed no legacy OCR helpers are reachable.
+- System remains fully operational post-audit.
+
+**Day 43 complete — Phase 7 pt.3–4 closed.**
+
+---
+
+# 🔧 Day 44 — Maintenance Day (Planned)
+
+**Not a Phase day. Not Phase 7 pt.5–6.**
+
+Focus areas:
+- OCR work-image correctness vs segmentation artifacts
+- Investigation of noisy OCR output quality
+- Pre-cleanup diagnostics only (no feature expansion)
+- Stability, inspection, and confidence improvements
+
+---
+
 # 🌄 System State
 
 ServLine menu understanding is now:
@@ -333,16 +364,15 @@ ServLine menu understanding is now:
 ✅ Human-editable  
 ✅ Structured CSV/XLSX/JSON-ready  
 ✅ Column Mapping view wired to real metadata  
-✅ One Brain OCR verified + hardened (Day 42)
+✅ One Brain OCR verified + hardened (Day 42–43)
 
 ---
 
 # ⭐ Next Execution Phase
 
-Next up in Phase 7:
+When Phase 7 resumes (post-maintenance):
 
 - One Brain OCR confidence fusion  
 - Multi-pass OCR (0°, 90°, 180°, 270°)  
 - Rotation and layout understanding  
-- Improved block → item grouping stability  
-
+- Improved block → item grouping stability
