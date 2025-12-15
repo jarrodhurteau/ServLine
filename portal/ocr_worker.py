@@ -338,6 +338,8 @@ def ocr_image(image_path: Path) -> str:
 _PRICE_2DP_RX = re.compile(r"(?<!\d)(\d{1,3})\.(\d{2})(?!\d)")
 _SPACED_DEC_RX = re.compile(r"(?<!\d)(\d{1,3})\s*\.\s*(\d{2})(?!\d)")
 _INT_4DIG_RX = re.compile(r"(?<!\d)(\d{4})(?!\d)")
+_SPLIT_DEC_RX = re.compile(r"(?<!\d)(\d{1,3})\s+(\d{2})(?!\d)")
+_ORPHAN_TAIL_RX = re.compile(r"(\d{1,3}\.\d{2})\s+(\d{3,4})\b")
 
 
 def _sanitize_prices_in_text(text: str) -> str:
@@ -381,10 +383,22 @@ def _sanitize_prices_in_text(text: str) -> str:
 
     s = _INT_4DIG_RX.sub(_fix_4dig, s)
 
-    # 6) Normalize whitespace
+    # 6) Fix split decimals: "9 98" -> "9.98"
+    #    Safe only when second token is exactly 2 digits
+    s = _SPLIT_DEC_RX.sub(r"\1.\2", s)
+
+    # 7) Drop orphan numeric tails after a valid price:
+    #    "25.50 475" -> "25.50"
+    def _drop_orphan_tail(m: re.Match) -> str:
+        return m.group(1)
+
+    s = _ORPHAN_TAIL_RX.sub(_drop_orphan_tail, s)
+
+    # 8) Normalize whitespace
     s = re.sub(r"[ \t]{2,}", " ", s)
 
     return s
+
 
 
 def _normalize_text_basic(s: str) -> str:
