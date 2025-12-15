@@ -13,8 +13,14 @@ OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + psm6→psm3 fallback /
 print(f"[OCR] Loaded ocr_worker.py -> {OCR_WORKER_VERSION}")
 
 # Debug saves
-DEBUG_SAVE_PRE: bool = True      # save preprocessed rasters
-DEBUG_SAVE_TEXT: bool = True     # save OCR text (primary+fallback) next to the image
+DEBUG_SAVE_PRE: bool = True          # save preprocess previews (gray + bw)
+DEBUG_SAVE_TEXT: bool = True         # save OCR text (primary+fallback) next to the image
+
+# Maintenance Day 44: prove what Tesseract actually OCR'd
+DEBUG_SAVE_OCR_INPUT: bool = True    # save the exact grayscale artifact used for OCR
+DEBUG_SAVE_OCR_BLOCKS: bool = True   # save each grayscale block sent to Tesseract
+DEBUG_OCR_BLOCKS_MAX: int = 6        # cap block saves to avoid giant debug dumps
+
 
 # Point pytesseract to your install path if needed
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -211,12 +217,49 @@ def _run_ocr_with_config(blocks_gray: List[np.ndarray], config: str) -> str:
 
 def ocr_image(image_path: Path) -> str:
     print(f"[OCR] ocr_image() called with: {image_path}")
+
+    # Maintenance Day 44: surface engine details (diagnostics only)
+    try:
+        ver = pytesseract.get_tesseract_version()
+        print(f"[OCR] tesseract_version={ver}")
+    except Exception as _e:
+        print(f"[OCR] (warn) could not read tesseract version: {_e}")
+
     pil = Image.open(image_path)
     gray, bw = _prep_images(pil, source_path=image_path)
+
+    # Maintenance Day 44: PROVE which artifact is OCR'd
+    # - bw (binary) is used ONLY to detect column spans
+    # - Tesseract OCR is run ONLY on grayscale blocks cut from `gray`
+    base = image_path.with_suffix("")
+    print(f"[OCR] work_artifacts: pre_gray={base.name}.pre_gray.png pre_bw={base.name}.pre_bw.png")
+    print("[OCR] OCR_INPUT=grayscale(gray) (NOT pre_bw/binary); bw is splitter-only")
+
+    # Save the exact OCR input artifact (full processed grayscale)
+    if DEBUG_SAVE_OCR_INPUT:
+        try:
+            Image.fromarray(gray).save(str(base.parent / f"{base.name}.ocr_input_gray.png"))
+            print(f"[OCR] Saved OCR input artifact -> {base.name}.ocr_input_gray.png")
+        except Exception as _e:
+            print(f"[OCR] (warn) could not save OCR input artifact: {_e}")
 
     spans = _column_spans(bw)
     blocks_gray = _extract_grayscale_blocks(gray, spans)
     print(f"[OCR] column blocks detected: {len(blocks_gray)}")
+
+    # Save the exact grayscale blocks sent into Tesseract (cap to avoid dumping too many)
+    if DEBUG_SAVE_OCR_BLOCKS:
+        try:
+            lim = min(len(blocks_gray), max(0, int(DEBUG_OCR_BLOCKS_MAX)))
+            for i in range(lim):
+                Image.fromarray(blocks_gray[i]).save(str(base.parent / f"{base.name}.ocr_block_{i+1:02d}.png"))
+            print(f"[OCR] Saved OCR blocks -> {base.name}.ocr_block_01.png .. (count={lim})")
+        except Exception as _e:
+            print(f"[OCR] (warn) could not save OCR blocks: {_e}")
+
+    # Log exact configs used (diagnostics only)
+    print(f"[OCR] config_main={OCR_CONFIG_MAIN}")
+    print(f"[OCR] config_fallback={OCR_CONFIG_FALLBACK}")
 
     text_main = _run_ocr_with_config(blocks_gray, OCR_CONFIG_MAIN)
     score_main = _quality_score(text_main)
@@ -234,7 +277,6 @@ def ocr_image(image_path: Path) -> str:
 
     try:
         if DEBUG_SAVE_TEXT:
-            base = image_path.with_suffix("")
             (base.parent / f"{base.name}.ocr_main.txt").write_text(text_main, encoding="utf-8", errors="ignore")
             if need_fallback:
                 (base.parent / f"{base.name}.ocr_fallback.txt").write_text(text_fb, encoding="utf-8", errors="ignore")
@@ -243,6 +285,7 @@ def ocr_image(image_path: Path) -> str:
         print(f"[OCR] (warn) could not save debug text: {_e}")
 
     return _postprocess_ocr_text(text_best)
+
 
 # ======================================================================
 #                     NORMALIZATION & POST-FIX

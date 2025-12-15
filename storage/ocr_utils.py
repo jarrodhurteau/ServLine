@@ -322,6 +322,14 @@ def deskew(img: Image.Image) -> Image.Image:
 
 
 def preprocess_page(img: Image.Image, *, do_deskew: bool = True) -> Image.Image:
+    """
+    Maintenance Day 44:
+    Produce a human-readable OCR work image.
+
+    IMPORTANT:
+    - This must NOT return adaptive-threshold/binary output for OCR.
+    - Any thresholding should be treated as a mask/debug artifact, not OCR input.
+    """
     if np is None or cv2 is None:
         return normalize_image(
             img,
@@ -331,53 +339,69 @@ def preprocess_page(img: Image.Image, *, do_deskew: bool = True) -> Image.Image:
             unsharp_percent=140,
             unsharp_threshold=2,
         )
+
     bgr = pil_to_cv(img)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     g1 = clahe.apply(gray)
-    bin_img = cv2.adaptiveThreshold(
-        g1,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        35,
-        11,
-    )
-    den = cv2.fastNlMeansDenoising(
-        bin_img,
-        None,
-        h=10,
-        templateWindowSize=7,
-        searchWindowSize=21,
-    )
+
+    try:
+        den = cv2.fastNlMeansDenoising(
+            g1,
+            None,
+            h=7,
+            templateWindowSize=7,
+            searchWindowSize=21,
+        )
+    except Exception:
+        den = g1
+
     sharp = _cv_unsharp(den, amount=0.8, radius=2)
+
     out = cv2.cvtColor(sharp, cv2.COLOR_GRAY2BGR)
     pil = cv_to_pil(out)
+
     if do_deskew:
         pil = deskew(pil)
+
     return pil
+
 
 
 def split_columns(img: Image.Image, *, min_gap_px: int = 40) -> List[Image.Image]:
     if np is None or cv2 is None:
         return [img]
+
     mat = pil_to_cv(img)
     gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    thr = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+    # Use inverted threshold so "ink" becomes white (255). This makes
+    # column-projection logic stable: gutters have LOW ink counts.
+    thr = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    # Count ink pixels per x-column
     col_sum = np.sum(thr == 255, axis=0)
-    w = col_sum.shape[0]
+
+    w = int(col_sum.shape[0])
     mid = w // 2
     gap_left, gap_right = mid, mid
-    low = (thr.shape[0] * 0.03)
-    while gap_left > 20 and col_sum[gap_left] < low:
+
+    # "Low ink" threshold: gutter should have very little ink
+    low = float(thr.shape[0]) * 0.03
+
+    while gap_left > 20 and float(col_sum[gap_left]) < low:
         gap_left -= 1
-    while gap_right < w - 20 and col_sum[gap_right] < low:
+    while gap_right < w - 20 and float(col_sum[gap_right]) < low:
         gap_right += 1
-    if (gap_right - gap_left) >= min_gap_px:
+
+    if (gap_right - gap_left) >= int(min_gap_px):
         left = mat[:, 0:gap_left]
         right = mat[:, gap_right:w]
         return [cv_to_pil(left), cv_to_pil(right)]
+
     return [img]
+
 
 
 # =============================

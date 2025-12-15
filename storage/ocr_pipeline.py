@@ -4,9 +4,10 @@ ServLine OCR Pipeline — Phase 3 (Segmentation + Category Inference) + Phase 4 
 
 Phase 2 kept:
 - Re-raster PDF pages at 400 DPI for sharper glyphs.
-- Apply preprocess_page() → CLAHE + adaptive threshold + denoise + unsharp + deskew.
-- Split two-column layouts with split_columns().
+- Apply preprocess_page() → CLAHE + denoise + unsharp + deskew (OCR work image; NOT binary threshold).
+- Split two-column layouts with split_columns() (thresholding is used internally here for gutter detection).
 - Word→Line→Block grouping for legacy consumers.
+
 
 Phase 3 pt.1:
 - Text-block segmentation via ocr_utils.group_text_blocks()
@@ -70,6 +71,9 @@ Phase 4 pt.11–12 (prep):
 """
 
 from __future__ import annotations
+
+print("[BOOT] storage/ocr_pipeline.py LOADED")
+
 import os
 import re
 import uuid
@@ -120,6 +124,13 @@ VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
 ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
 MULTIPASS_PSMS: List[int] = [6]
 MULTIPASS_ROTATIONS: List[int] = [0, 90, 180, 270]
+
+# -----------------------------
+# Maintenance Day 44 — OCR input proof artifacts (diagnostics only)
+# -----------------------------
+DEBUG_SAVE_OCR_INPUT_ARTIFACTS = os.getenv("OCR_DEBUG_SAVE_INPUT_ARTIFACTS", "0") == "1"
+DEBUG_INPUT_DIR = os.getenv("OCR_DEBUG_INPUT_DIR") or ""
+
 
 
 _ALLOWED_CHARS = r"A-Za-z0-9\$\.\,\-\/&'\"°\(\):;#\+ "
@@ -227,7 +238,6 @@ def _is_pricey_text(text: str) -> bool:
 # Phase 7 pt.1 — Vision preprocessing scaffold
 # -----------------------------
 
-
 def _vision_debug_save(image: Image.Image, page_index: int, column_index: Optional[int], stage: str) -> None:
     """
     Debug-save helper for the Vision layer.
@@ -247,8 +257,36 @@ def _vision_debug_save(image: Image.Image, page_index: int, column_index: Option
         out_path = debug_root / filename
         image.save(out_path)
     except Exception:
-        # Debug hooks must never break OCR
         return
+
+
+def _debug_save_ocr_input(image: Image.Image, page_index: int, column_index: Optional[int], stage: str) -> None:
+    """
+    Maintenance Day 44:
+    Persist the exact image artifact that is passed into Tesseract OCR.
+
+    Controlled by:
+      OCR_DEBUG_SAVE_INPUT_ARTIFACTS=1
+      OCR_DEBUG_INPUT_DIR=/path
+
+    Output files:
+      page{page_index:03d}_c{column_index}_{stage}.png
+    """
+    if not DEBUG_SAVE_OCR_INPUT_ARTIFACTS:
+        return
+    if not DEBUG_INPUT_DIR:
+        return
+
+    try:
+        out_root = Path(DEBUG_INPUT_DIR)
+        out_root.mkdir(parents=True, exist_ok=True)
+        col_suffix = f"_c{column_index}" if column_index is not None else ""
+        filename = f"page{page_index:03d}{col_suffix}_{stage}.png"
+        out_path = out_root / filename
+        image.save(out_path)
+        print(f"[OCR-Input] saved {stage} -> {out_path}")
+    except Exception as _e:
+        print(f"[OCR-Input] (warn) could not save {stage}: {_e}")
 
 
 def _vision_grayscale_normalize(image: Image.Image) -> Image.Image:
@@ -309,9 +347,12 @@ def vision_preprocess(image: Image.Image, page_index: int, column_index: Optiona
           shadow-removal
           adaptive threshold
 
-    All placeholder functions are identity transforms, so even when
-    OCR_ENABLE_VISION_PREPROCESS=1, the effective output remains identical
-    to ocr_utils.preprocess_page(image, do_deskew=True).
+    All placeholder functions are identity transforms.
+
+    IMPORTANT:
+    The OCR work image is whatever ocr_utils.preprocess_page() returns.
+    This must remain a human-readable work image (NOT an adaptive-threshold/binary artifact).
+
     """
     base = ocr_utils.preprocess_page(image, do_deskew=True)
     _vision_debug_save(base, page_index, column_index, "base")
@@ -1183,8 +1224,18 @@ def segment_document(
         # 🔹 High-clarity preprocessing and adaptive column split
         if ENABLE_VISION_PREPROCESS:
             im_pre = vision_preprocess(im, page_index=page_index, column_index=None)
+            print(f"[OCR-Input] page={page_index} preprocess=vision_preprocess (OCR work image)")
         else:
             im_pre = ocr_utils.preprocess_page(im, do_deskew=True)
+            print(f"[OCR-Input] page={page_index} preprocess=ocr_utils.preprocess_page (OCR work image)")
+
+        _debug_save_ocr_input(
+            im_pre,
+            page_index=page_index,
+            column_index=None,
+            stage="work_page"
+        )
+
 
         # Dynamic min_gap based on image width; helps real menus where
 
@@ -1212,8 +1263,27 @@ def segment_document(
         page_text_blocks: List[Dict[str, Any]] = []
 
         for col_idx, col_img in enumerate(columns, start=1):
-            data = run_multipass_ocr(col_img, page_index=page_index, column_index=col_idx)
+            _debug_save_ocr_input(
+                col_img,
+                page_index=page_index,
+                column_index=col_idx,
+                stage="work_col"
+            )
+
+            print(
+                f"[OCR-Input] page={page_index} col={col_idx} "
+                f"image_size={col_img.size} "
+                f"vision_layer={ENABLE_VISION_PREPROCESS} "
+                f"multipass={ENABLE_MULTIPASS_OCR}"
+            )
+
+            data = run_multipass_ocr(
+                col_img,
+                page_index=page_index,
+                column_index=col_idx
+            )
             words: List[Word] = []
+
 
             n = len(data.get("text", []))
             for i in range(n):
@@ -1360,7 +1430,7 @@ def segment_document(
                 "price_integrity_prep+structured_v2_prep+"
                 "vision_scaffold+multipass_scaffold"
             ),
-            "preprocess": "clahe+adaptive+denoise+unsharp+deskew",
+            "preprocess": "clahe+denoise+unsharp+deskew",
             "vision_layer": {
                 "enabled": ENABLE_VISION_PREPROCESS,
                 "debug_dir": VISION_DEBUG_DIR or None,
@@ -1371,6 +1441,7 @@ def segment_document(
                 "rotations": MULTIPASS_ROTATIONS,
             },
         },
+
     }
     return segmented
 

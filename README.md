@@ -337,15 +337,42 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 
 ---
 
-# 🔧 Day 44 — Maintenance Day (Planned)
+# 🔧 Day 44 — Maintenance Day (COMPLETED)
 
 **Not a Phase day. Not Phase 7 pt.5–6.**
 
-Focus areas:
+Maintenance focus:
 - OCR work-image correctness vs segmentation artifacts
 - Investigation of noisy OCR output quality
 - Pre-cleanup diagnostics only (no feature expansion)
 - Stability, inspection, and confidence improvements
+
+### Maintenance Day 44 Findings (Authoritative)
+- OCR input image confirmed **human-readable and non-binary** (grayscale OCR input; bw used only for splitter/debug).
+- Debug artifacts confirmed present and consistent per job (work image, pre_gray, pre_bw, OCR input, block crops, main/fallback OCR outputs).
+- OCR noise source is **not preprocessing**; it is upstream logic behavior:
+  - Orientation normalization + PSM interaction
+  - Quality scoring logic allowing gibberish to pass
+
+### Roadmap Updates Created By Day 44 Diagnosis
+The following fixes are now scheduled into Phase 7 continuation work (pt.5–6):
+
+#### Phase 7 pt.5 — Orientation & OCR Mode Hardening (Added Scope)
+- Make rotation normalization deterministic and first-class before OCR.
+- Tie PSM selection to orientation + layout characteristics.
+- Persist debug metadata:
+  - orientation_applied
+  - psm_selected
+- Add upright OCR input artifact (post-rotation, pre-OCR).
+
+#### Phase 7 pt.6 — OCR Quality Scoring Reality Fix (Added Scope)
+- Harden item quality scoring against gibberish:
+  - alpha-density guard
+  - vowel/token ratio floor
+  - penalize long low-entropy tokens
+- Add quality_flags metadata (flag, do not delete).
+
+**Day 44 complete.**
 
 ---
 
@@ -364,7 +391,8 @@ ServLine menu understanding is now:
 ✅ Human-editable  
 ✅ Structured CSV/XLSX/JSON-ready  
 ✅ Column Mapping view wired to real metadata  
-✅ One Brain OCR verified + hardened (Day 42–43)
+✅ One Brain OCR verified + hardened (Day 42–43)  
+✅ OCR diagnostics completed and scoped into Phase 7 pt.5–6 (Day 44)
 
 ---
 
@@ -372,6 +400,8 @@ ServLine menu understanding is now:
 
 When Phase 7 resumes (post-maintenance):
 
+- Phase 7 pt.5 — Orientation & OCR Mode Hardening  
+- Phase 7 pt.6 — OCR Quality Scoring Reality Fix  
 - One Brain OCR confidence fusion  
 - Multi-pass OCR (0°, 90°, 180°, 270°)  
 - Rotation and layout understanding  
