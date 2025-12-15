@@ -32,7 +32,7 @@ import io
 import math
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING, TypedDict
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from pdf2image import convert_from_bytes, convert_from_path
@@ -145,6 +145,15 @@ def pdf_to_images_from_bytes(pdf_bytes: bytes, dpi: int = 300) -> List[Image.Ima
 # Orientation normalization (NEW)
 # =============================
 
+class OrientationMeta(TypedDict, total=False):
+    method: str
+    degrees_applied: int
+    exif_applied: bool
+    osd_degrees: Optional[int]
+    probe_degrees: Optional[int]
+    probe_scores: Dict[int, float]
+
+
 def apply_exif_orientation(img: Image.Image) -> Image.Image:
     """
     Rotate pixels according to EXIF Orientation, then strip EXIF so
@@ -165,7 +174,7 @@ def detect_orientation_osd(img: Image.Image) -> Optional[int]:
     Ask Tesseract OSD for the rotation. Returns 0/90/180/270 or None.
     """
     try:
-        osd = pytesseract.image_to_osd(img)
+        osd = pytesseract.image_to_osd(img, config="--psm 0")
         m = re.search(r"Rotate:\s*(\d+)", osd or "")
         if not m:
             return None
@@ -199,39 +208,98 @@ def _quick_score(img: Image.Image) -> float:
         return 0.0
 
 
-def probe_best_rotation(img: Image.Image) -> int:
+def probe_best_rotation_with_scores(img: Image.Image) -> Tuple[int, Dict[int, float]]:
     """
     Try 0/90/180/270 on thumbnails and pick the best-scoring rotation.
-    Returns degrees clockwise to apply (0,90,180,270).
+    Returns (degrees_clockwise_to_apply, scores_by_degree).
     """
     candidates = (0, 90, 180, 270)
     base = img.copy()
     best_deg, best_score = 0, -1.0
+    scores: Dict[int, float] = {}
+
     for deg in candidates:
         test = base.rotate(-deg, expand=True)  # rotate CW by deg
         thumb = test.copy()
         thumb.thumbnail((1200, 1200))
         score = _quick_score(thumb)
+        scores[int(deg)] = float(score)
         if score > best_score:
-            best_deg, best_score = deg, score
-    return best_deg
+            best_deg, best_score = int(deg), float(score)
+
+    return int(best_deg), scores
 
 
-def normalize_orientation(img: Image.Image) -> Tuple[Image.Image, int]:
+def probe_best_rotation(img: Image.Image) -> int:
     """
-    Deterministic orientation normalize:
+    Back-compat wrapper: returns degrees clockwise to apply (0,90,180,270).
+    """
+    best_deg, _scores = probe_best_rotation_with_scores(img)
+    return int(best_deg)
+
+
+def normalize_orientation_with_meta(img: Image.Image) -> Tuple[Image.Image, int, OrientationMeta]:
+    """
+    Deterministic orientation normalize with audit metadata:
     1) EXIF transpose & strip
     2) Tesseract OSD if available
     3) Probe 0/90/180/270 as fallback
 
-    Returns (upright_image, degrees_applied_clockwise).
+    Returns (upright_image, degrees_applied_clockwise, meta).
     """
+    meta: OrientationMeta = {
+        "method": "none",
+        "degrees_applied": 0,
+        "exif_applied": False,
+        "osd_degrees": None,
+        "probe_degrees": None,
+        "probe_scores": {},
+    }
+
+    # Step 1: EXIF transpose
     step1 = apply_exif_orientation(img)
-    deg = detect_orientation_osd(step1)
-    if deg is None:
-        deg = probe_best_rotation(step1)
+
+    # Best-effort EXIF applied detection (safe, does not crash)
+    try:
+        meta["exif_applied"] = (step1.size != img.size) or (step1.mode != img.mode)
+    except Exception:
+        meta["exif_applied"] = False
+
+    # Step 2: OSD
+    osd_deg = detect_orientation_osd(step1)
+    meta["osd_degrees"] = osd_deg
+
+    if osd_deg is not None:
+        deg = int(osd_deg)
+        meta["method"] = "osd"
+        meta["degrees_applied"] = int(deg or 0)
+        upright = step1.rotate(-deg, expand=True) if deg else step1
+        return upright, int(deg or 0), meta
+
+    # Step 3: Probe
+    probe_deg, scores = probe_best_rotation_with_scores(step1)
+    meta["probe_degrees"] = int(probe_deg)
+    meta["probe_scores"] = dict(scores)
+
+    deg = int(probe_deg or 0)
+    if deg != 0:
+        meta["method"] = "probe"
+        meta["degrees_applied"] = int(deg)
+    else:
+        meta["method"] = "none"
+        meta["degrees_applied"] = 0
+
     upright = step1.rotate(-deg, expand=True) if deg else step1
+    return upright, int(deg or 0), meta
+
+
+def normalize_orientation(img: Image.Image) -> Tuple[Image.Image, int]:
+    """
+    Back-compat wrapper: returns (upright_image, degrees_applied_clockwise).
+    """
+    upright, deg, _meta = normalize_orientation_with_meta(img)
     return upright, int(deg or 0)
+
 
 
 # =============================

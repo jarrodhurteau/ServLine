@@ -41,10 +41,13 @@ import csv
 import re  # <-- for OCR parsing
 
 # NEW: optional Excel export dependency
+openpyxl = None  # type: ignore[assignment]
 try:
-    from openpyxl import Workbook
+    import openpyxl as _openpyxl  # type: ignore[import]
+    openpyxl = _openpyxl  # type: ignore[assignment]
 except Exception:
-    Workbook = None
+    openpyxl = None  # type: ignore[assignment]
+
 
 # safer filename + big-file error handling
 from werkzeug.utils import secure_filename
@@ -1542,6 +1545,11 @@ def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: Dic
 
 
 def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
+    draft: Any = None
+    debug_payload: Any = None
+    engine = ""
+    helper_error: Optional[str] = None
+
     try:
         update_import_job(job_id, status="processing")
 
@@ -1550,11 +1558,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             _ensure_work_image(job_id, saved_file_path)
         except Exception:
             pass
-
-        draft = None
-        debug_payload = None
-        engine = ""
-        helper_error = None
 
         # Prefer working image (respects later user rotation too if we rerun)
         src_for_ocr, type_tag = _path_for_ocr(job_id, saved_file_path)
@@ -1566,7 +1569,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
                 engine = "ocr_worker"
 
-                # Capture debug for later save (AFTER we have a real draft_id)
+                # Capture debug for later save
                 if isinstance(worker_obj, dict):
                     dbg_obj = worker_obj.get("debug")
                     if isinstance(dbg_obj, dict):
@@ -1574,7 +1577,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             except Exception as e:
                 helper_error = f"ocr_worker_failed: {e}"
                 draft = None
-
 
         # 1) Helper path (typically for PDFs), fallback if image path failed
         if draft is None and extract_items_from_path is not None:
@@ -1643,6 +1645,15 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 }
                 debug_payload = {"notes": ["no_text_extracted"]}
 
+        # ✅ Normalize draft["source"] if it was produced as a JSON string (prevents weird UI/source rendering)
+        if isinstance(draft, dict):
+            src = draft.get("source")
+            if isinstance(src, str):
+                try:
+                    draft["source"] = json.loads(src)
+                except Exception:
+                    draft["source"] = {"raw": src}
+
         rel_draft_path = _save_draft_json(job_id, draft)
 
         try:
@@ -1655,19 +1666,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
         update_import_job(job_id, status="done", draft_path=rel_draft_path)
 
-    except Exception as e:
-        update_import_job(job_id, status="failed", error=str(e))
-
-        # ✅ Normalize draft["source"] if it was produced as a JSON string (prevents weird UI/source rendering)
-        if isinstance(draft, dict):
-            src = draft.get("source")
-            if isinstance(src, str):
-                try:
-                    draft["source"] = json.loads(src)
-                except Exception:
-                    draft["source"] = {"raw": src}
-
-        # ✅ CRITICAL: hydrate DB-backed draft items so the Draft Editor shows rows immediately
+        # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         try:
             if drafts_store is not None:
                 draft_id = _get_or_create_draft_for_job(job_id)
@@ -1677,7 +1676,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     if items:
                         drafts_store.upsert_draft_items(draft_id, items)
 
-                # Optional: Save OCR debug payload (best-effort)
                 if draft_id and hasattr(drafts_store, "save_ocr_debug"):
                     payload = debug_payload if isinstance(debug_payload, dict) else {}
                     payload.setdefault("import_job_id", int(job_id))
@@ -1687,6 +1685,8 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         except Exception:
             pass
 
+    except Exception as e:
+        update_import_job(job_id, status="failed", error=str(e))
 
 
 # Upload route (JSON API) — returns job id
@@ -2269,6 +2269,8 @@ def import_json():
                 restaurant_id=restaurant_id,
                 items=items,
                 source_type="structured_json",
+                # 🔑 link this draft back to import_jobs.id (matches CSV/XLSX behavior)
+                source_job_id=job_id,
                 source_meta={
                     "filename": base_name,
                     "row_count": summary.get("row_count"),
@@ -2277,7 +2279,10 @@ def import_json():
                     "job_id": job_id,
                 },
             )
-            draft_id = int(draft.get("id") or draft.get("draft_id"))
+
+            raw_id = (draft.get("id") or draft.get("draft_id") or 0)
+            draft_id = int(raw_id) if raw_id else None
+
 
         # Flash a concise summary
         row_count = summary.get("row_count", len(items))
@@ -2467,9 +2472,26 @@ def drafts_blocks(draft_id: int):
     }
     """
     dbg = _load_debug_for_draft(draft_id)
+
     preview_blocks = dbg.get("preview_blocks") or []
+    if not isinstance(preview_blocks, list):
+        preview_blocks = []
+
     text_blocks = dbg.get("text_blocks") or dbg.get("blocks") or []
-    return jsonify({"ok": True, "draft_id": draft_id, "preview_blocks": preview_blocks, "text_blocks": text_blocks})
+    if not isinstance(text_blocks, list):
+        text_blocks = []
+
+    # Defensive: only allow dict blocks (prevents jsonify from choking on weird objects)
+    preview_blocks = [b for b in preview_blocks if isinstance(b, dict)]
+    text_blocks = [b for b in text_blocks if isinstance(b, dict)]
+
+    return jsonify({
+        "ok": True,
+        "draft_id": draft_id,
+        "preview_blocks": preview_blocks,
+        "text_blocks": text_blocks,
+    })
+
 
 @app.get("/imports/<int:job_id>/blocks")
 @login_required
@@ -3796,34 +3818,49 @@ def draft_ocr_debug_csv(draft_id: int):
 def draft_layout_debug_json(draft_id: int):
     _require_drafts_storage()
 
-    load_fn = getattr(drafts_store, "load_ocr_debug", None)
-    if not callable(load_fn):
-        return jsonify({"ok": False, "error": "OCR debug storage not available"}), 404
+    layout = _load_layout_debug_for_draft(draft_id)
 
-    dbg = load_fn(draft_id) or {}
-    if not isinstance(dbg, dict):
-        dbg = {}
+    if not layout:
+        # Back-compat fallback: older keys may have been stored at root
+        dbg = _load_debug_for_draft(draft_id) or {}
+        if not isinstance(dbg, dict):
+            dbg = {}
 
-    payload = (
-        dbg.get("layout_debug")
-        or dbg.get("layout")
-        or dbg.get("debug_layout")
-        or dbg.get("blocks_layout")
-        or None
-    )
+        payload = (
+            dbg.get("layout_debug")
+            or dbg.get("layout")
+            or dbg.get("debug_layout")
+            or dbg.get("blocks_layout")
+            or None
+        )
+        if isinstance(payload, dict):
+            layout = payload
 
-    if not payload:
+
+    if not layout:
         return jsonify({
             "ok": True,
             "draft_id": draft_id,
             "note": "No layout_debug payload present yet",
         }), 200
 
+    # If present, meta.orientation should carry your per-page rotation audit trail
+    meta = layout.get("meta") if isinstance(layout, dict) else None
+    if not isinstance(meta, dict):
+        meta = {}
+
+    # Always provide the orientation key so clients can rely on it
+    if "orientation" not in meta or not isinstance(meta.get("orientation"), dict):
+        meta["orientation"] = {}
+
     return jsonify({
         "ok": True,
         "draft_id": draft_id,
-        "layout_debug": payload,
+        "layout_debug": layout,
+        "meta": meta,
     }), 200
+
+
 
 
 @app.get("/imports/<int:job_id>/layout-debug.json")
@@ -3896,13 +3933,20 @@ def draft_export_json(draft_id: int):
 @login_required
 def draft_export_xlsx(draft_id: int):
     _require_drafts_storage()
-    if Workbook is None:
+
+    # Local import makes Pylance happy and keeps runtime behavior correct.
+    try:
+        import openpyxl as xl  # type: ignore[import]
+    except Exception:
+        xl = None
+
+    if xl is None:
         return make_response("openpyxl not installed. pip install openpyxl", 500)
 
     draft = drafts_store.get_draft(draft_id) or {}
     items = drafts_store.get_draft_items(draft_id) or []
 
-    wb = Workbook()
+    wb = xl.Workbook()
     ws = wb.active
     ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]
 
@@ -3926,6 +3970,8 @@ def draft_export_xlsx(draft_id: int):
     resp.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.xlsx"'
     return resp
+
+
 
 # ------------------------
 # NEW: Fix descriptions endpoint used by the editor button
@@ -4469,12 +4515,33 @@ def imports_ai_finalize(job_id: int):
     """
     _require_drafts_storage()
 
-    # --- Step 1: run AI commit (side effects only; ignore its Response) ---
+        # --- Step 1: run AI commit (side effects only; inspect its Response) ---
+    resp = None
     try:
-        imports_ai_commit(job_id)
+        resp = imports_ai_commit(job_id)
     except Exception as e:
         flash(f"AI finalize failed during commit: {e}", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
+
+    # imports_ai_commit may return:
+    #   - a Flask Response
+    #   - a (Response, status_code) tuple
+    status_code = None
+    if isinstance(resp, tuple) and len(resp) >= 2:
+        try:
+            status_code = int(resp[1])
+        except Exception:
+            status_code = None
+    elif hasattr(resp, "status_code"):
+        try:
+            status_code = int(resp.status_code)
+        except Exception:
+            status_code = None
+
+    if status_code is not None and status_code >= 400:
+        flash("AI finalize failed during commit.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
 
     # --- Step 2: locate draft for this job ---
     draft_id = _get_or_create_draft_for_job(job_id)

@@ -8,6 +8,10 @@ import pytesseract
 import numpy as np
 import cv2
 
+# One Brain orientation normalizer (Day 45 pt.5)
+from storage.ocr_utils import normalize_orientation  # type: ignore
+
+
 # -------- version banner (visible on server start) ----------
 OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + psm6→psm3 fallback / debug-save + multi-price parse v3.7 (fix: multi-token size header) [legacy auto-rotate disabled]"
 print(f"[OCR] Loaded ocr_worker.py -> {OCR_WORKER_VERSION}")
@@ -22,8 +26,11 @@ DEBUG_SAVE_OCR_BLOCKS: bool = True   # save each grayscale block sent to Tessera
 DEBUG_OCR_BLOCKS_MAX: int = 6        # cap block saves to avoid giant debug dumps
 
 
-# Point pytesseract to your install path if needed
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Point pytesseract to your install path if needed (only if it exists)
+_tess = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+if _tess.exists():
+    pytesseract.pytesseract.tesseract_cmd = str(_tess)
+
 
 # ======================================================================
 #                         OCR CONFIG (unified)
@@ -38,8 +45,10 @@ OCR_CONFIG_FALLBACK = "--oem 3 --psm 3 -l eng -c preserve_interword_spaces=1"
 #                    ORIENTATION CONTROL (disable legacy)
 # ======================================================================
 
-# We now normalize orientation upstream in servline/storage/ocr_facade.py.
-# Keep this True to prevent double-rotation here.
+# Day 45 pt.5:
+# Orientation MUST be guaranteed here (right before the OCR input is built and sent to Tesseract),
+# because this worker is where the final grayscale blocks are actually OCR'd.
+# Keep legacy OSD auto-rotate disabled to avoid double-rotation or "mystery" orientation changes.
 DISABLE_LEGACY_AUTOROTATE: bool = True
 
 # ======================================================================
@@ -73,10 +82,11 @@ def _rotate_any(gray: np.ndarray, angle_deg: float) -> np.ndarray:
 def _auto_orient(gray: np.ndarray) -> np.ndarray:
     """
     (LEGACY) Use Tesseract OSD to auto-rotate if needed.
-    Disabled by default; rotation now handled upstream to avoid double-rotation.
+    Disabled by default; orientation is enforced in `ocr_image()` via normalize_orientation()
+    to avoid double-rotation or "mystery" changes.
     """
     if DISABLE_LEGACY_AUTOROTATE:
-        print("[Auto-rotate] Skipped in ocr_worker (handled upstream by ocr_facade)")
+        print("[Auto-rotate] Skipped legacy OSD in ocr_worker (worker-enforced normalize_orientation)")
         return gray
 
     try:
@@ -88,6 +98,7 @@ def _auto_orient(gray: np.ndarray) -> np.ndarray:
     except Exception as _e:
         print(f"[OCR] (info) OSD orientation not applied: {_e}")
     return gray
+
 
 def _threshold_with_fallback(gray: np.ndarray, adaptive_block: int = 31, adaptive_C: int = 9) -> np.ndarray:
     """Adaptive threshold with Otsu fallback → binary (0/255)."""
@@ -225,21 +236,40 @@ def ocr_image(image_path: Path) -> str:
     except Exception as _e:
         print(f"[OCR] (warn) could not read tesseract version: {_e}")
 
-    pil = Image.open(image_path)
+    base = image_path.with_suffix("")
+
+    # Day 45 pt.5: Deterministic orientation guarantee
+    # Normalize the PIL image BEFORE any preprocessing so downstream artifacts and OCR inputs are upright.
+    with Image.open(image_path) as _im:
+        pil = _im.copy()
+
+    try:
+        pil_upright, deg = normalize_orientation(pil)
+        applied = int(deg or 0)
+        if applied != 0:
+            print(f"[Orientation] normalize_orientation applied_degrees={applied} (worker-enforced)")
+        else:
+            print("[Orientation] normalize_orientation applied_degrees=0 (already upright)")
+        pil = pil_upright
+    except Exception as _e:
+        print(f"[Orientation] normalize_orientation failed (continuing without): {_e}")
+
     gray, bw = _prep_images(pil, source_path=image_path)
 
-    # Maintenance Day 44: PROVE which artifact is OCR'd
+
+    # Day 45 pt.5: PROVE which bitmap is OCR'd
     # - bw (binary) is used ONLY to detect column spans
     # - Tesseract OCR is run ONLY on grayscale blocks cut from `gray`
-    base = image_path.with_suffix("")
     print(f"[OCR] work_artifacts: pre_gray={base.name}.pre_gray.png pre_bw={base.name}.pre_bw.png")
-    print("[OCR] OCR_INPUT=grayscale(gray) (NOT pre_bw/binary); bw is splitter-only")
+    print("[OCR] OCR_INPUT=processed grayscale(gray); bw is splitter-only")
 
-    # Save the exact OCR input artifact (full processed grayscale)
+    # Save the exact OCR input artifact (full processed grayscale) and a "final" alias
     if DEBUG_SAVE_OCR_INPUT:
         try:
             Image.fromarray(gray).save(str(base.parent / f"{base.name}.ocr_input_gray.png"))
+            Image.fromarray(gray).save(str(base.parent / f"{base.name}.final_ocr_input.png"))
             print(f"[OCR] Saved OCR input artifact -> {base.name}.ocr_input_gray.png")
+            print(f"[OCR] Saved final OCR input -> {base.name}.final_ocr_input.png")
         except Exception as _e:
             print(f"[OCR] (warn) could not save OCR input artifact: {_e}")
 
@@ -253,7 +283,7 @@ def ocr_image(image_path: Path) -> str:
             lim = min(len(blocks_gray), max(0, int(DEBUG_OCR_BLOCKS_MAX)))
             for i in range(lim):
                 Image.fromarray(blocks_gray[i]).save(str(base.parent / f"{base.name}.ocr_block_{i+1:02d}.png"))
-            print(f"[OCR] Saved OCR blocks -> {base.name}.ocr_block_01.png .. (count={lim})")
+            print(f"[OCR] Saved OCR blocks -> {base.name}.ocr_block_01.png (count={lim})")
         except Exception as _e:
             print(f"[OCR] (warn) could not save OCR blocks: {_e}")
 
@@ -266,6 +296,9 @@ def ocr_image(image_path: Path) -> str:
 
     need_fallback = (score_main < 0.48) or (_letters_ratio(text_main) < 0.52)
     text_best, used = text_main, "psm6"
+    text_fb = ""
+    score_fb = 0.0
+
     if need_fallback:
         text_fb = _run_ocr_with_config(blocks_gray, OCR_CONFIG_FALLBACK)
         score_fb = _quality_score(text_fb)
@@ -287,6 +320,7 @@ def ocr_image(image_path: Path) -> str:
     return _postprocess_ocr_text(text_best)
 
 
+
 # ======================================================================
 #                     NORMALIZATION & POST-FIX
 # ======================================================================
@@ -294,7 +328,7 @@ def ocr_image(image_path: Path) -> str:
 def _normalize_text_basic(s: str) -> str:
     repl = {
         "\u201c": '"', "\u201d": '"', "\u2019": "'", "\u2018": "'",
-        "\u2013": "-", "\u2014": "-", "\u00b7": "·", "\u2026": "...",
+        "\u2013": "-", "\u2014": "-", "\u00b7": "·",
         "”": '"', "“": '"', "’": "'", "‘": "'",
         "—": "-", "–": "-",
         "OZ": "oz", "Oz": "oz",

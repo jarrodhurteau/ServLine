@@ -467,24 +467,34 @@ def save_ocr_debug(draft_id: int, payload: Dict[str, Any]) -> None:
     """
     Persist a rich OCR debug payload to a sidecar JSON file:
       storage/.debug/drafts/<draft_id>.json
-    This avoids DB migrations and keeps large blobs off the main table.
+
+    Defensive:
+      - atomic write (tmp + replace) to avoid partial files
+      - default=str to tolerate Path / numpy types / odd objects
     """
     p = _debug_path(int(draft_id))
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(payload or {}, f, ensure_ascii=False, indent=2)
+
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload or {}, f, ensure_ascii=False, indent=2, default=str)
+    tmp.replace(p)
 
 
 def load_ocr_debug(draft_id: int) -> Optional[Dict[str, Any]]:
     """
-    Load the OCR debug payload if present. Returns None if missing or unreadable.
+    Load the OCR debug payload if present.
+    Returns None if missing/unreadable/non-dict.
     """
     p = _debug_path(int(draft_id))
     if not p.exists():
         return None
     try:
         with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
+            obj = json.load(f)
+        if not isinstance(obj, dict):
+            return None
+        return obj
     except Exception:
         return None
 

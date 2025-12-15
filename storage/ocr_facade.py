@@ -302,18 +302,14 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
     if not p.exists():
         raise FileNotFoundError(str(p))
 
-    # Orientation normalize
-    upright_path = _auto_rotate_pdf_if_needed(str(p))
+    # NOTE (Day 45 pt.5):
+    # Do NOT rewrite the PDF here to "fix" orientation.
+    # Orientation must be guaranteed at the final OCR-input bitmap right before Tesseract,
+    # inside the pipeline/worker where the actual OCR call occurs.
+    # Keeping the façade pure makes it impossible to be "tricked" by intermediate artifacts.
+    layout = segment_document(pdf_path=str(p), pdf_bytes=None, dpi=400)
 
-    # Segmenter
-    layout = segment_document(pdf_path=upright_path, pdf_bytes=None, dpi=400)
 
-    # Cleanup temp
-    if upright_path != str(p):
-        try:
-            Path(upright_path).unlink(missing_ok=True)
-        except Exception:
-            pass
 
     # AI helper
     raw_text = _layout_to_raw_text(layout)
@@ -349,8 +345,10 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
             "pipeline_version": PIPELINE_VERSION,
             "superimport_prep": True,
             "hierarchy_preview": hierarchy,
+            "source_file_path": str(p),
         },
     }
+
 
     super_items, super_stats = _build_superimport_items(categories)
     categories["meta"]["superimport"] = {"items": super_items, "stats": super_stats}
@@ -358,15 +356,23 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
     preview_blocks = layout.get("preview_blocks") or []
     text_blocks = layout.get("text_blocks") or layout.get("blocks") or []
 
+    orientation_meta = (
+        layout.get("orientation_meta")
+        or layout.get("orientation")
+        or layout.get("debug_orientation")
+        or {}
+    )
+
     debug_payload: Dict[str, Any] = {
         "version": PIPELINE_VERSION,
         "layout": layout,
         "preview_blocks": preview_blocks,
         "text_blocks": text_blocks,
         "blocks": text_blocks,
+        "orientation": orientation_meta,
         "notes": [
             "phase-4 segmentation",
-            "orientation normalizer applied",
+            "orientation guarantee must be enforced at final OCR-input bitmap (pipeline/worker)",
             "ai-helper rev9",
             "category hierarchy v2",
             "structured output v2 + superimport",
@@ -382,22 +388,13 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
         },
     }
 
+
     return categories, debug_payload
 
 
 # ============================================================================
 # One Brain façade (canonical entrypoint)
 # ============================================================================
-def build_structured_menu(path: str) -> Tuple[StructuredMenuPayload, Dict[str, Any]]:
-    """
-    One Brain entrypoint.
-
-    For now this is a thin wrapper around extract_menu_from_pdf(path) so we have a
-    single, named façade for app callers (worker, AI preview, commit, finalize, __ocrtxt).
-    """
-    return extract_menu_from_pdf(path)
-
-
 def build_structured_menu(path: str) -> Tuple[StructuredMenuPayload, Dict[str, Any]]:
     """
     Canonical One Brain entrypoint for OCR + AI structuring.
@@ -408,4 +405,5 @@ def build_structured_menu(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
     keeping the public API stable.
     """
     return extract_menu_from_pdf(path)
+
 

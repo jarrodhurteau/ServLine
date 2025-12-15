@@ -189,7 +189,7 @@ def _token_is_garbage(tok: str) -> bool:
         return True
     if len(tok) > 28 and _alpha_ratio(tok) < 0.6:
         return True
-    if len(tok) <= 2 and not any(ch.isalnum() for tok in [tok] for ch in tok):
+    if len(tok) <= 2 and not any(ch.isalnum() for ch in tok):
         return True
     if _symbol_ratio(tok) > 0.35:
         return True
@@ -547,7 +547,8 @@ def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[st
     """
     working = image
     if rotation != 0:
-        working = image.rotate(rotation, expand=True)
+        # rotation is interpreted as clockwise degrees in our config
+        working = image.rotate(-rotation, expand=True)
 
     config = f"{BASE_OCR_CONFIG} --psm {psm}"
     data = pytesseract.image_to_data(
@@ -1204,22 +1205,26 @@ def segment_document(
     all_preview_blocks: List[OCRBlock] = []        # Phase-3/4 preview blocks (OCRBlock TypedDict)
 
     page_index = 1
+    page_orientations: List[Dict[str, Any]] = []
+
+    # (moved inside loop after deg_applied is computed)
 
     for im in pages:
-        # Auto-rotate page if sideways
+
+        # Deterministic orientation normalize (EXIF → OSD → probe)
+        deg_applied = 0
         try:
-            osd = image_to_osd(im)
-            if "Rotate: 90" in osd:
-                im = im.rotate(-90, expand=True)
-                print(f"[Auto-rotate] Page {page_index}: rotated -90°")
-            elif "Rotate: 270" in osd:
-                im = im.rotate(90, expand=True)
-                print(f"[Auto-rotate] Page {page_index}: rotated 90°")
-            elif "Rotate: 180" in osd:
-                im = im.rotate(180, expand=True)
-                print(f"[Auto-rotate] Page {page_index}: rotated 180°")
+            im, deg_applied = ocr_utils.normalize_orientation(im)
+            print(f"[Orientation] Page {page_index}: applied_clockwise={deg_applied}")
         except Exception:
-            pass
+            deg_applied = 0
+
+        page_orientations.append(
+            {
+                "page": int(page_index),
+                "degrees_applied_clockwise": int(deg_applied),
+            }
+        )
 
         # 🔹 High-clarity preprocessing and adaptive column split
         if ENABLE_VISION_PREPROCESS:
@@ -1235,6 +1240,7 @@ def segment_document(
             column_index=None,
             stage="work_page"
         )
+
 
 
         # Dynamic min_gap based on image width; helps real menus where
@@ -1330,51 +1336,40 @@ def segment_document(
 
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
-        for pb in pblocks:
+        for tb, pb in zip(page_text_blocks, pblocks):
             pb["page"] = page_index
 
-            # Column may or may not already be present; look it up from text_blocks by id
-            if pb.get("column") is None:
-                col_from_tb = next(
-                    (tb.get("column") for tb in page_text_blocks if tb.get("id") == pb.get("id")),
-                    None,
-                )
-                if col_from_tb is not None:
-                    pb["column"] = col_from_tb
-
-            tb_for_pb = next(
-                (tb for tb in page_text_blocks if tb.get("id") == pb.get("id")),
-                None,
-            )
+            if tb.get("column") is not None:
+                pb["column"] = tb.get("column")
 
             # Mirror category / hierarchy / inference info for overlay
-            if tb_for_pb is not None:
-                if pb.get("category") is None and "category" in tb_for_pb:
-                    pb["category"] = tb_for_pb.get("category")
-                if pb.get("category_confidence") is None and "category_confidence" in tb_for_pb:
-                    pb["category_confidence"] = tb_for_pb.get("category_confidence")
-                if "rule_trace" in tb_for_pb and pb.get("rule_trace") is None:
-                    pb["rule_trace"] = tb_for_pb.get("rule_trace")
+            if "category" in tb:
+                pb["category"] = tb.get("category")
+            if "category_confidence" in tb:
+                pb["category_confidence"] = tb.get("category_confidence")
+            if "rule_trace" in tb:
+                pb["rule_trace"] = tb.get("rule_trace")
 
-                # Hierarchy: subcategory + section_path
-                if "subcategory" in tb_for_pb and pb.get("subcategory") is None:
-                    pb["subcategory"] = tb_for_pb.get("subcategory")
-                if "section_path" in tb_for_pb and pb.get("section_path") is None:
-                    pb["section_path"] = tb_for_pb.get("section_path")
+            # Hierarchy: subcategory + section_path
+            if "subcategory" in tb:
+                pb["subcategory"] = tb.get("subcategory")
+            if "section_path" in tb:
+                pb["section_path"] = tb.get("section_path")
 
-                # Mirror price/variant info + roles for overlay + preview JSON
-                if "price_candidates" in tb_for_pb:
-                    pb["price_candidates"] = tb_for_pb["price_candidates"]
-                if "variants" in tb_for_pb:
-                    pb["variants"] = tb_for_pb["variants"]
-                if "role" in tb_for_pb:
-                    pb["role"] = tb_for_pb["role"]
-                if "is_heading" in tb_for_pb:
-                    pb["is_heading"] = tb_for_pb["is_heading"]
-                if "is_noise" in tb_for_pb:
-                    pb["is_noise"] = tb_for_pb["is_noise"]
-                if tb_for_pb.get("meta") and tb_for_pb["meta"].get("multiline_reconstructed"):
-                    pb.setdefault("meta", {})["multiline_reconstructed"] = True
+            # Mirror price/variant info + roles for overlay + preview JSON
+            if "price_candidates" in tb:
+                pb["price_candidates"] = tb["price_candidates"]
+            if "variants" in tb:
+                pb["variants"] = tb["variants"]
+            if "role" in tb:
+                pb["role"] = tb["role"]
+            if "is_heading" in tb:
+                pb["is_heading"] = tb["is_heading"]
+            if "is_noise" in tb:
+                pb["is_noise"] = tb["is_noise"]
+            if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
+                pb.setdefault("meta", {})["multiline_reconstructed"] = True
+
 
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
@@ -1414,6 +1409,7 @@ def segment_document(
                     "psms": MULTIPASS_PSMS,
                     "rotations": MULTIPASS_ROTATIONS,
                 },
+                "orientation": page_orientations,
             },
         },
 
@@ -1440,6 +1436,7 @@ def segment_document(
                 "psms": MULTIPASS_PSMS,
                 "rotations": MULTIPASS_ROTATIONS,
             },
+            "orientation": page_orientations,
         },
 
     }
