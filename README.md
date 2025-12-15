@@ -376,6 +376,30 @@ The following fixes are now scheduled into Phase 7 continuation work (pt.5–6):
 
 ---
 
+## 🧠 Day 45 — Phase 7 pt.5–6: Orientation Enforcement + OCR Reality Fixes
+
+### Phase 7 pt.5 — Orientation & OCR Mode Hardening (Completed)
+- Enforced deterministic orientation normalization inside the OCR worker:
+  - `normalize_orientation()` is applied before preprocessing and before building OCR inputs.
+  - Legacy Tesseract OSD auto-rotate is explicitly disabled to prevent double-rotation or unpredictable orientation changes.
+- Added stronger OCR input provenance:
+  - Saved the exact processed grayscale artifact used for OCR (`.ocr_input_gray.png` and `.final_ocr_input.png`).
+  - Saved a capped set of per-column OCR grayscale blocks (`.ocr_block_XX.png`) to prove what was actually sent to Tesseract.
+- Logged OCR execution clarity:
+  - Explicit logging of OCR configs (`psm6` primary, `psm3` fallback).
+  - Persisted main, fallback, and selected OCR outputs as debug text files.
+
+### Phase 7 pt.6 — OCR Output Reality Fixes (Completed)
+- Hardened OCR postprocessing against common numeric corruption:
+  - Repaired split-decimal artifacts (for example: `9 98` → `9.98`, `17 95` → `17.95`).
+  - Removed trailing orphan numeric garbage after valid prices (for example: `25.50 475` → `25.50`).
+- Confirmed multi-price lines remain intact and usable for downstream parsing.
+- Verified fixes against real OCR jobs using saved debug artifacts (`ocr_main`, `ocr_fallback`, `ocr_used_*`).
+
+**Day 45 complete — Phase 7 pt.5–6 closed.**
+
+---
+
 # 🌄 System State
 
 ServLine menu understanding is now:
@@ -391,18 +415,21 @@ ServLine menu understanding is now:
 ✅ Human-editable  
 ✅ Structured CSV/XLSX/JSON-ready  
 ✅ Column Mapping view wired to real metadata  
-✅ One Brain OCR verified + hardened (Day 42–43)  
-✅ OCR diagnostics completed and scoped into Phase 7 pt.5–6 (Day 44)
+✅ One Brain OCR verified + hardened (Day 42–45)  
+✅ OCR diagnostics resolved and hardened (Phase 7 pt.5–6)
 
 ---
 
 # ⭐ Next Execution Phase
 
-When Phase 7 resumes (post-maintenance):
+**Day 46 — Phase 7 pt.7–8**
 
-- Phase 7 pt.5 — Orientation & OCR Mode Hardening  
-- Phase 7 pt.6 — OCR Quality Scoring Reality Fix  
-- One Brain OCR confidence fusion  
-- Multi-pass OCR (0°, 90°, 180°, 270°)  
-- Rotation and layout understanding  
-- Improved block → item grouping stability
+- Multi-pass OCR execution (0°, 90°, 180°, 270°) using the same grayscale-first pipeline.
+- Deterministic winner selection using improved quality scoring.
+- Persist per-job metadata:
+  - rotation_selected
+  - psm_selected
+  - quality_score
+  - rejection reasons (flag-only).
+- Confidence fusion across OCR passes.
+- Improved block → item grouping stability.
