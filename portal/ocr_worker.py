@@ -256,7 +256,6 @@ def ocr_image(image_path: Path) -> str:
 
     gray, bw = _prep_images(pil, source_path=image_path)
 
-
     # Day 45 pt.5: PROVE which bitmap is OCR'd
     # - bw (binary) is used ONLY to detect column spans
     # - Tesseract OCR is run ONLY on grayscale blocks cut from `gray`
@@ -291,22 +290,33 @@ def ocr_image(image_path: Path) -> str:
     print(f"[OCR] config_main={OCR_CONFIG_MAIN}")
     print(f"[OCR] config_fallback={OCR_CONFIG_FALLBACK}")
 
-    text_main = _run_ocr_with_config(blocks_gray, OCR_CONFIG_MAIN)
-    score_main = _quality_score(text_main)
+    # Run OCR (raw)
+    text_main_raw = _run_ocr_with_config(blocks_gray, OCR_CONFIG_MAIN)
+    score_main = _quality_score(text_main_raw)
 
-    need_fallback = (score_main < 0.48) or (_letters_ratio(text_main) < 0.52)
-    text_best, used = text_main, "psm6"
-    text_fb = ""
+    need_fallback = (score_main < 0.48) or (_letters_ratio(text_main_raw) < 0.52)
+    used = "psm6"
+    text_fb_raw = ""
     score_fb = 0.0
 
     if need_fallback:
-        text_fb = _run_ocr_with_config(blocks_gray, OCR_CONFIG_FALLBACK)
-        score_fb = _quality_score(text_fb)
+        text_fb_raw = _run_ocr_with_config(blocks_gray, OCR_CONFIG_FALLBACK)
+        score_fb = _quality_score(text_fb_raw)
         if score_fb > score_main * 1.05:
-            text_best, used = text_fb, "psm3"
+            used = "psm3"
         print(f"[OCR] fallback tried (main={score_main:.3f}, fb={score_fb:.3f}) -> using {used}")
     else:
         print(f"[OCR] fallback not needed (main score={score_main:.3f}) -> using psm6")
+
+    # Phase 7 Part 6B Step 1:
+    # Apply deterministic price-token sanitizer to BOTH main and fallback outputs.
+    text_main = _sanitize_prices_in_text(text_main_raw)
+    text_fb = _sanitize_prices_in_text(text_fb_raw) if text_fb_raw else ""
+
+    if used == "psm3":
+        text_best = text_fb
+    else:
+        text_best = text_main
 
     try:
         if DEBUG_SAVE_TEXT:
@@ -324,6 +334,58 @@ def ocr_image(image_path: Path) -> str:
 # ======================================================================
 #                     NORMALIZATION & POST-FIX
 # ======================================================================
+
+_PRICE_2DP_RX = re.compile(r"(?<!\d)(\d{1,3})\.(\d{2})(?!\d)")
+_SPACED_DEC_RX = re.compile(r"(?<!\d)(\d{1,3})\s*\.\s*(\d{2})(?!\d)")
+_INT_4DIG_RX = re.compile(r"(?<!\d)(\d{4})(?!\d)")
+
+
+def _sanitize_prices_in_text(text: str) -> str:
+    """
+    Phase 7 Part 6B Step 1:
+    Narrow, deterministic price/symbol cleanup pass.
+
+    Runs AFTER OCR text generation and BEFORE parsing/postprocess.
+    Intentionally limited to:
+      - spaced decimals: "14 . 75" -> "14.75"
+      - repeated dots: "1395.....2250" -> "1395.2250" (then token normalization below)
+      - junk attached to digits: "£5ap" -> "5"
+      - 4-digit price tokens: "1395" -> "13.95"
+    """
+    if not text:
+        return text
+
+    s = text
+
+    # 1) Normalize spaced decimals: "14 . 75" -> "14.75"
+    s = _SPACED_DEC_RX.sub(r"\1.\2", s)
+
+    # 2) Collapse repeated dots everywhere: "....." -> "."
+    s = re.sub(r"\.{2,}", ".", s)
+
+    # 3) Strip non-digit/non-dot junk glued to numbers (conservative)
+    #    - trailing junk after a digit: "5ap" -> "5"
+    #    - leading junk before a digit: "£5" -> "5"
+    s = re.sub(r"(?<=\d)[^\d\.\s]+", "", s)
+    s = re.sub(r"[^\d\.\s]+(?=\d)", "", s)
+
+    # 4) Remove trailing dot after clean 2dp prices: "14.75." -> "14.75"
+    s = re.sub(r"(?<!\d)(\d{1,3}\.\d{2})\.(?!\d)", r"\1", s)
+
+    # 5) Fix 4-digit “cents implied” tokens: "1395" -> "13.95"
+    def _fix_4dig(m: re.Match) -> str:
+        raw = m.group(1)
+        dollars = raw[:-2]
+        cents = raw[-2:]
+        return f"{int(dollars)}.{cents}"
+
+    s = _INT_4DIG_RX.sub(_fix_4dig, s)
+
+    # 6) Normalize whitespace
+    s = re.sub(r"[ \t]{2,}", " ", s)
+
+    return s
+
 
 def _normalize_text_basic(s: str) -> str:
     repl = {
