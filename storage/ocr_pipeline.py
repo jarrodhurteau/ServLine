@@ -122,8 +122,27 @@ ENABLE_VISION_PREPROCESS = os.getenv("OCR_ENABLE_VISION_PREPROCESS", "0") == "1"
 VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
 
 ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
-MULTIPASS_PSMS: List[int] = [6]
-MULTIPASS_ROTATIONS: List[int] = [0, 90, 180, 270]
+
+# Phase 7 pt.7 — Multi-PSM fusion (rotation sweep is Phase 7 pt.8)
+MULTIPASS_PSMS: List[int] = [6, 4, 11]
+MULTIPASS_ROTATIONS: List[int] = [0]
+
+
+def _effective_ocr_config_string() -> str:
+    """
+    Return an honest config description for debug/meta payloads.
+
+    When multipass is enabled, segment_document() runs multiple PSMs
+    and fuses the resulting tokens. This function makes meta["config"]
+    reflect that reality for demo/debug credibility.
+    """
+    if ENABLE_MULTIPASS_OCR:
+        psms = ",".join(str(p) for p in MULTIPASS_PSMS)
+        rots = ",".join(str(r) for r in MULTIPASS_ROTATIONS)
+        return f"{BASE_OCR_CONFIG} --psm [{psms}] rotations=[{rots}] (fused)"
+    return OCR_CONFIG
+
+
 
 # -----------------------------
 # Maintenance Day 44 — OCR input proof artifacts (diagnostics only)
@@ -539,11 +558,16 @@ def _ocr_page(im: Image.Image) -> Dict[str, List]:
     )
 
 
-def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[str, List]:
+def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[str, Any]:
     """
     Single OCR pass for a specific (rotation, psm) combination.
 
-    Phase 7 pt.2 scaffold: uses BASE_OCR_CONFIG with a dynamic --psm.
+    Returns:
+      {
+        "psm": int,
+        "rotation": int,
+        "data": Dict[str, List]
+      }
     """
     working = image
     if rotation != 0:
@@ -558,46 +582,259 @@ def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[st
     )
 
     tokens = len(data.get("text", []))
-    print(
-        f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}"
-    )
+    print(f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}")
 
-    return data
+    return {"psm": int(psm), "rotation": int(rotation), "data": data}
 
 
 def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
     """
-    Placeholder confidence fusion for multi-pass OCR (Phase 7 pt.2).
+    Phase 7 pt.7 — Multi-PSM fusion.
 
-    For now this simply returns the first pass's data unchanged.
-    Later this will consider per-word confidences and combine results
-    across PSMs and rotations.
+    Input `passes` elements are:
+      {"psm": int, "rotation": int, "data": Dict[str, List]}
+
+    Output is a Dict[str, List] compatible with _make_word():
+      keys: "text", "conf", "left", "top", "width", "height"
     """
     if not passes:
         raise ValueError("No OCR passes provided to fuse_multipass_results()")
 
-    # Each element of `passes` is a dict[str, list] from image_to_data.
-    return passes[0]  # type: ignore[return-value]
+    def _safe_int(v: Any) -> int:
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    def _safe_float(v: Any) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return -1.0
+
+    def _bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        ax2 = ax + aw
+        ay2 = ay + ah
+        bx2 = bx + bw
+        by2 = by + bh
+
+        ix1 = max(ax, bx)
+        iy1 = max(ay, by)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+
+        iw = max(0, ix2 - ix1)
+        ih = max(0, iy2 - iy1)
+        inter = iw * ih
+        if inter <= 0:
+            return 0.0
+
+        area_a = max(1, aw) * max(1, ah)
+        area_b = max(1, bw) * max(1, bh)
+        denom = area_a + area_b - inter
+        if denom <= 0:
+            return 0.0
+        return inter / float(denom)
+
+    def _bbox_overlap_ratio(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+        """
+        Overlap ratio relative to the smaller box area.
+        Useful when IoU is low due to slightly different box sizing.
+        """
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        ax2 = ax + aw
+        ay2 = ay + ah
+        bx2 = bx + bw
+        by2 = by + bh
+
+        ix1 = max(ax, bx)
+        iy1 = max(ay, by)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+
+        iw = max(0, ix2 - ix1)
+        ih = max(0, iy2 - iy1)
+        inter = iw * ih
+        if inter <= 0:
+            return 0.0
+
+        area_a = max(1, aw) * max(1, ah)
+        area_b = max(1, bw) * max(1, bh)
+        denom = float(max(1, min(area_a, area_b)))
+        return inter / denom
+
+    def _extract_candidates(pass_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+        psm = int(pass_obj.get("psm", 0))
+        rotation = int(pass_obj.get("rotation", 0))
+        data = pass_obj.get("data") or {}
+        texts = data.get("text", []) or []
+        confs = data.get("conf", []) or []
+        lefts = data.get("left", []) or []
+        tops = data.get("top", []) or []
+        widths = data.get("width", []) or []
+        heights = data.get("height", []) or []
+
+        out: List[Dict[str, Any]] = []
+        n = len(texts)
+        for i in range(n):
+            raw = (texts[i] or "").strip()
+            conf = _safe_float(confs[i]) if i < len(confs) else -1.0
+            if conf < LOW_CONF_DROP:
+                continue
+
+            cleaned = _clean_token(raw)
+            if not cleaned or _token_is_garbage(cleaned):
+                continue
+
+            x = _safe_int(lefts[i]) if i < len(lefts) else 0
+            y = _safe_int(tops[i]) if i < len(tops) else 0
+            w = _safe_int(widths[i]) if i < len(widths) else 0
+            h = _safe_int(heights[i]) if i < len(heights) else 0
+
+            if w <= 1 or h <= 1:
+                continue
+            if w < 0:
+                w = 0
+            if h < 0:
+                h = 0
+
+            out.append(
+                {
+                    "text": cleaned,
+                    "conf": float(conf),
+                    "bbox": (int(x), int(y), int(w), int(h)),
+                    "psm": psm,
+                    "rotation": rotation,
+                }
+            )
+        return out
+
+    # Collect candidates per pass
+    per_pass_candidates: List[List[Dict[str, Any]]] = []
+    for p in passes:
+        per_pass_candidates.append(_extract_candidates(p))
+
+    # Cluster by (text + overlapping bbox)
+    # Each cluster:
+    #   {"text": str, "bbox": (x,y,w,h), "votes": set[int], "best": candidate}
+    clusters: List[Dict[str, Any]] = []
+
+    # Thresholds tuned to be tolerant across PSM bbox jitter
+    IOU_THR = 0.35
+    OVERLAP_THR = 0.60
+
+    for pass_idx, cand_list in enumerate(per_pass_candidates):
+        for c in cand_list:
+            placed = False
+            for cl in clusters:
+                if cl["text"] != c["text"]:
+                    continue
+                a = cl["bbox"]
+                b = c["bbox"]
+                if _bbox_iou(a, b) >= IOU_THR or _bbox_overlap_ratio(a, b) >= OVERLAP_THR:
+                    cl["votes"].add(pass_idx)
+                    # Keep the best candidate by confidence; break ties by larger area (often more stable boxes)
+                    best = cl["best"]
+                    if c["conf"] > best["conf"]:
+                        cl["best"] = c
+                        cl["bbox"] = c["bbox"]
+                    elif c["conf"] == best["conf"]:
+                        ax, ay, aw, ah = best["bbox"]
+                        bx, by, bw, bh = c["bbox"]
+                        if (bw * bh) > (aw * ah):
+                            cl["best"] = c
+                            cl["bbox"] = c["bbox"]
+                    placed = True
+                    break
+            if not placed:
+                clusters.append(
+                    {
+                        "text": c["text"],
+                        "bbox": c["bbox"],
+                        "votes": set([pass_idx]),
+                        "best": c,
+                    }
+                )
+
+    # Decide which clusters to keep:
+    # - keep if appears in >=2 passes
+    # - OR keep if single-pass but very high confidence (to avoid dropping rare correct words)
+    SINGLE_PASS_CONF_KEEP = 92.0
+
+    kept: List[Dict[str, Any]] = []
+    for cl in clusters:
+        vote_count = len(cl["votes"])
+        best = cl["best"]
+        if vote_count >= 2:
+            kept.append(best)
+        else:
+            if best["conf"] >= SINGLE_PASS_CONF_KEEP:
+                kept.append(best)
+
+    # Sort by reading order
+    kept.sort(key=lambda d: (d["bbox"][1], d["bbox"][0]))
+
+    # Build a minimal "image_to_data-like" dict used by _make_word()
+    fused_text: List[str] = []
+    fused_conf: List[str] = []
+    fused_left: List[int] = []
+    fused_top: List[int] = []
+    fused_width: List[int] = []
+    fused_height: List[int] = []
+
+    for k in kept:
+        x, y, w, h = k["bbox"]
+        fused_text.append(str(k["text"]))
+        fused_conf.append(str(float(k["conf"])))
+        fused_left.append(int(x))
+        fused_top.append(int(y))
+        fused_width.append(int(w))
+        fused_height.append(int(h))
+
+    fused: Dict[str, List] = {
+        "text": fused_text,
+        "conf": fused_conf,
+        "left": fused_left,
+        "top": fused_top,
+        "width": fused_width,
+        "height": fused_height,
+    }
+
+    print(
+        f"[Multipass-Fuse] passes={len(passes)} "
+        f"candidates={sum(len(x) for x in per_pass_candidates)} "
+        f"clusters={len(clusters)} kept={len(kept)} "
+        f"psms={sorted({int(p.get('psm', 0)) for p in passes})} "
+        f"rotations={sorted({int(p.get('rotation', 0)) for p in passes})}"
+    )
+
+    return fused
+
 
 
 def run_multipass_ocr(image: Image.Image, page_index: int, column_index: int) -> Dict[str, List]:
     """
     Multi-pass OCR wrapper.
 
-    When ENABLE_MULTIPASS_OCR is False, this is exactly equivalent to
-    a call to _ocr_page(image). When enabled, it runs multiple passes
-    over rotations and PSM values, then fuses them via the placeholder
-    fuse_multipass_results() helper.
+    Phase 7 pt.7:
+      - Multiple PSMs (6,4,11) on the same image
+      - Rotation stays fixed at 0 (rotation sweep is pt.8)
+      - Fuse via fuse_multipass_results()
+
+    When ENABLE_MULTIPASS_OCR is False, behavior remains identical to _ocr_page(image).
     """
     if not ENABLE_MULTIPASS_OCR:
         return _ocr_page(image)
 
-    passes: List[Dict[str, List]] = []
+    passes: List[Dict[str, Any]] = []
 
     for rotation in MULTIPASS_ROTATIONS:
         for psm in MULTIPASS_PSMS:
-            data = _run_single_ocr_pass(image, psm=psm, rotation=rotation)
-            passes.append(data)
+            pass_obj = _run_single_ocr_pass(image, psm=psm, rotation=rotation)
+            passes.append(pass_obj)
 
     fused = fuse_multipass_results(passes)
     tokens = len(fused.get("text", []))
@@ -605,8 +842,8 @@ def run_multipass_ocr(image: Image.Image, page_index: int, column_index: int) ->
         f"[Multipass] page={page_index} col={column_index} fused_tokens={tokens} "
         f"psms={MULTIPASS_PSMS} rotations={MULTIPASS_ROTATIONS}"
     )
-
     return fused
+
 
 
 def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP) -> Optional[Word]:
@@ -1389,55 +1626,57 @@ def segment_document(
         # This is what portal/app.py should store under dbg["layout_debug"]
         # so /drafts/<id>/layout-debug.json can return it.
         # ------------------------------------------------------------
-        "layout_debug": {
-            "ok": True,
-            "pages": len(pages),
-            "dpi": dpi,
-            "preview_blocks": all_preview_blocks,
-            "meta": {
-                "source": source,
-                "engine": "tesseract",
-                "version": str(pytesseract.get_tesseract_version()),
-                "config": OCR_CONFIG,
-                "conf_floor": LOW_CONF_DROP,
-                "vision_layer": {
-                    "enabled": ENABLE_VISION_PREPROCESS,
-                    "debug_dir": VISION_DEBUG_DIR or None,
-                },
-                "multipass": {
-                    "enabled": ENABLE_MULTIPASS_OCR,
-                    "psms": MULTIPASS_PSMS,
-                    "rotations": MULTIPASS_ROTATIONS,
-                },
-                "orientation": page_orientations,
-            },
+"layout_debug": {
+    "ok": True,
+    "pages": len(pages),
+    "dpi": dpi,
+    "preview_blocks": all_preview_blocks,
+    "meta": {
+        "source": source,
+        "engine": "tesseract",
+        "version": str(pytesseract.get_tesseract_version()),
+        "config": _effective_ocr_config_string(),
+        "conf_floor": LOW_CONF_DROP,
+        "vision_layer": {
+            "enabled": ENABLE_VISION_PREPROCESS,
+            "debug_dir": VISION_DEBUG_DIR or None,
         },
+        "multipass": {
+            "enabled": ENABLE_MULTIPASS_OCR,
+            "psms": MULTIPASS_PSMS,
+            "rotations": MULTIPASS_ROTATIONS,
+        },
+        "orientation": page_orientations,
+    },
+},
 
-        "meta": {
-            "source": source,
-            "engine": "tesseract",
-            "version": str(pytesseract.get_tesseract_version()),
-            "config": OCR_CONFIG,
-            "conf_floor": LOW_CONF_DROP,
-            "mode": (
-                "high_clarity+segmentation+two_column_merge+"
-                "category_infer+multi_price_variants+block_roles+"
-                "multiline_reconstruct+variant_enrich+category_hierarchy+"
-                "price_integrity_prep+structured_v2_prep+"
-                "vision_scaffold+multipass_scaffold"
-            ),
-            "preprocess": "clahe+denoise+unsharp+deskew",
-            "vision_layer": {
-                "enabled": ENABLE_VISION_PREPROCESS,
-                "debug_dir": VISION_DEBUG_DIR or None,
-            },
-            "multipass": {
-                "enabled": ENABLE_MULTIPASS_OCR,
-                "psms": MULTIPASS_PSMS,
-                "rotations": MULTIPASS_ROTATIONS,
-            },
-            "orientation": page_orientations,
-        },
+
+"meta": {
+    "source": source,
+    "engine": "tesseract",
+    "version": str(pytesseract.get_tesseract_version()),
+    "config": _effective_ocr_config_string(),
+    "conf_floor": LOW_CONF_DROP,
+    "mode": (
+        "high_clarity+segmentation+two_column_merge+"
+        "category_infer+multi_price_variants+block_roles+"
+        "multiline_reconstruct+variant_enrich+category_hierarchy+"
+        "price_integrity_prep+structured_v2_prep+"
+        "vision_scaffold+multipass_scaffold"
+    ),
+    "preprocess": "clahe+denoise+unsharp+deskew",
+    "vision_layer": {
+        "enabled": ENABLE_VISION_PREPROCESS,
+        "debug_dir": VISION_DEBUG_DIR or None,
+    },
+    "multipass": {
+        "enabled": ENABLE_MULTIPASS_OCR,
+        "psms": MULTIPASS_PSMS,
+        "rotations": MULTIPASS_ROTATIONS,
+    },
+    "orientation": page_orientations,
+},
+
 
     }
     return segmented
