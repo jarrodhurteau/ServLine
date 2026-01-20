@@ -123,9 +123,10 @@ VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
 
 ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
 
-# Phase 7 pt.7 — Multi-PSM fusion (rotation sweep is Phase 7 pt.8)
+# Phase 7 pt.7 — Multi-PSM fusion
+# Phase 7 pt.8 — Rotation sweep for mis-oriented uploads (OCR-only fallback)
 MULTIPASS_PSMS: List[int] = [6, 4, 11]
-MULTIPASS_ROTATIONS: List[int] = [0]
+MULTIPASS_ROTATIONS: List[int] = [0, 90, 180, 270]
 
 
 def _effective_ocr_config_string() -> str:
@@ -562,16 +563,24 @@ def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[st
     """
     Single OCR pass for a specific (rotation, psm) combination.
 
+    rotation is interpreted as clockwise degrees.
+    We rotate the image for OCR only, then later un-rotate bboxes back
+    into the original image coordinate space.
+
     Returns:
       {
         "psm": int,
         "rotation": int,
+        "orig_size": (w, h),
         "data": Dict[str, List]
       }
     """
+    orig_w, orig_h = image.size
+
     working = image
     if rotation != 0:
-        # rotation is interpreted as clockwise degrees in our config
+        # PIL rotates counter-clockwise for positive angles.
+        # We interpret rotation as clockwise degrees, so rotate by -rotation.
         working = image.rotate(-rotation, expand=True)
 
     config = f"{BASE_OCR_CONFIG} --psm {psm}"
@@ -584,7 +593,13 @@ def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[st
     tokens = len(data.get("text", []))
     print(f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}")
 
-    return {"psm": int(psm), "rotation": int(rotation), "data": data}
+    return {
+        "psm": int(psm),
+        "rotation": int(rotation),
+        "orig_size": (int(orig_w), int(orig_h)),
+        "data": data,
+    }
+
 
 
 def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
@@ -665,10 +680,91 @@ def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
         area_b = max(1, bw) * max(1, bh)
         denom = float(max(1, min(area_a, area_b)))
         return inter / denom
+    
+    def _unrotate_bbox_to_original(
+        bbox: Tuple[int, int, int, int],
+        rotation_clockwise: int,
+        orig_w: int,
+        orig_h: int,
+    ) -> Tuple[int, int, int, int]:
+        """
+        Convert a bbox from the rotated OCR image coordinate space back into the
+        original (unrotated) image coordinate space.
+
+        We rotate the image for OCR using:
+          working = image.rotate(-rotation_clockwise, expand=True)
+
+        So rotation_clockwise ∈ {0,90,180,270}.
+
+        We map by transforming the bbox corners using the inverse transform
+        from rotated->original and then taking min/max.
+
+        Returns: (x, y, w, h) in original image coords.
+        """
+        x, y, w, h = bbox
+        if rotation_clockwise % 360 == 0:
+            return (int(x), int(y), int(w), int(h))
+
+        def _inv_point(px: int, py: int) -> Tuple[int, int]:
+            r = int(rotation_clockwise) % 360
+
+            # Inverse mapping from rotated (working) coords -> original coords.
+            # rotation is clockwise, and working was created by rotating original clockwise.
+            if r == 90:
+                # CW 90: original->rotated: (x,y)->(H-1-y, x)
+                # inverse: rotated->original: (x',y')->(y', H-1-x')
+                return (int(py), int(orig_h - 1 - px))
+
+            if r == 180:
+                # CW 180: original->rotated: (x,y)->(W-1-x, H-1-y)
+                # inverse is same
+                return (int(orig_w - 1 - px), int(orig_h - 1 - py))
+
+            if r == 270:
+                # CW 270 == CCW 90: original->rotated: (x,y)->(y, W-1-x)
+                # inverse: (x',y')->(W-1-y', x')
+                return (int(orig_w - 1 - py), int(px))
+
+            return (int(px), int(py))
+
+        # corners in rotated space
+        x1, y1 = int(x), int(y)
+        x2, y2 = int(x + w), int(y)
+        x3, y3 = int(x), int(y + h)
+        x4, y4 = int(x + w), int(y + h)
+
+        pts = [
+            _inv_point(x1, y1),
+            _inv_point(x2, y2),
+            _inv_point(x3, y3),
+            _inv_point(x4, y4),
+        ]
+
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+
+        min_x = max(0, min(xs))
+        min_y = max(0, min(ys))
+        max_x = min(orig_w, max(xs))
+        max_y = min(orig_h, max(ys))
+
+        new_w = max(0, int(max_x - min_x))
+        new_h = max(0, int(max_y - min_y))
+
+        return (int(min_x), int(min_y), int(new_w), int(new_h))
+
 
     def _extract_candidates(pass_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
         psm = int(pass_obj.get("psm", 0))
         rotation = int(pass_obj.get("rotation", 0))
+
+        orig_size = pass_obj.get("orig_size") or (0, 0)
+        try:
+            orig_w = int(orig_size[0])
+            orig_h = int(orig_size[1])
+        except Exception:
+            orig_w, orig_h = 0, 0
+
         data = pass_obj.get("data") or {}
         texts = data.get("text", []) or []
         confs = data.get("conf", []) or []
@@ -701,16 +797,29 @@ def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
             if h < 0:
                 h = 0
 
+            bbox = (int(x), int(y), int(w), int(h))
+
+            # Un-rotate bbox back into original image coordinate space so all
+            # downstream geometry is consistent (grouping, preview overlays, etc.)
+            if rotation != 0 and orig_w > 0 and orig_h > 0:
+                bbox = _unrotate_bbox_to_original(
+                    bbox=bbox,
+                    rotation_clockwise=rotation,
+                    orig_w=orig_w,
+                    orig_h=orig_h,
+                )
+
             out.append(
                 {
                     "text": cleaned,
                     "conf": float(conf),
-                    "bbox": (int(x), int(y), int(w), int(h)),
+                    "bbox": bbox,
                     "psm": psm,
                     "rotation": rotation,
                 }
             )
         return out
+
 
     # Collect candidates per pass
     per_pass_candidates: List[List[Dict[str, Any]]] = []
@@ -820,29 +929,111 @@ def run_multipass_ocr(image: Image.Image, page_index: int, column_index: int) ->
     Multi-pass OCR wrapper.
 
     Phase 7 pt.7:
-      - Multiple PSMs (6,4,11) on the same image
-      - Rotation stays fixed at 0 (rotation sweep is pt.8)
-      - Fuse via fuse_multipass_results()
+      - Multiple PSMs (6,4,11) and fuse tokens.
+
+    Phase 7 pt.8:
+      - Rotation sweep (0/90/180/270) to handle mis-oriented uploads.
+      - We DO NOT fuse across rotations (bbox coordinate systems differ).
+      - Instead:
+          1) Fuse within each rotation (across PSMs).
+          2) Score each rotation's fused output.
+          3) Choose the best rotation and return its fused output.
 
     When ENABLE_MULTIPASS_OCR is False, behavior remains identical to _ocr_page(image).
     """
     if not ENABLE_MULTIPASS_OCR:
         return _ocr_page(image)
 
-    passes: List[Dict[str, Any]] = []
+    def _score_fused_data(data: Dict[str, List]) -> float:
+        """
+        Rotation scoring heuristic:
+        - Prefer more usable tokens and higher confidence.
+        """
+        texts = data.get("text", []) or []
+        confs = data.get("conf", []) or []
+        total_conf = 0.0
+        usable = 0
 
+        n = len(texts)
+        for i in range(n):
+            t = (texts[i] or "").strip()
+            if not t:
+                continue
+            try:
+                c = float(confs[i]) if i < len(confs) else -1.0
+            except Exception:
+                c = -1.0
+            if c < 0:
+                continue
+            usable += 1
+            total_conf += c
+
+        # Primary signal: usable token count
+        # Secondary: total confidence
+        return float(usable) * 10.0 + float(total_conf)
+
+    # Build passes grouped by rotation
+    passes_by_rotation: Dict[int, List[Dict[str, Any]]] = {}
     for rotation in MULTIPASS_ROTATIONS:
+        rot_passes: List[Dict[str, Any]] = []
         for psm in MULTIPASS_PSMS:
             pass_obj = _run_single_ocr_pass(image, psm=psm, rotation=rotation)
-            passes.append(pass_obj)
+            rot_passes.append(pass_obj)
+        passes_by_rotation[int(rotation)] = rot_passes
 
-    fused = fuse_multipass_results(passes)
-    tokens = len(fused.get("text", []))
+    # Fuse per rotation and score
+    best_rotation = 0
+    best_score = -1.0
+    best_fused: Optional[Dict[str, List]] = None
+
+    for rotation, rot_passes in passes_by_rotation.items():
+        fused_rot = fuse_multipass_results(rot_passes)
+        score = _score_fused_data(fused_rot)
+        tokens = len(fused_rot.get("text", []) or [])
+
+        print(
+            f"[Multipass-Rotation] page={page_index} col={column_index} "
+            f"rotation={rotation} fused_tokens={tokens} score={score:.2f}"
+        )
+
+        # Tie-breaker: prefer rotation 0 when scores are extremely close
+        if best_fused is None:
+            best_rotation = int(rotation)
+            best_score = float(score)
+            best_fused = fused_rot
+            continue
+
+        if score > best_score + 0.01:
+            best_rotation = int(rotation)
+            best_score = float(score)
+            best_fused = fused_rot
+            continue
+
+        if abs(score - best_score) <= 0.01:
+            # Prefer 0 rotation when basically tied
+            if best_rotation != 0 and int(rotation) == 0:
+                best_rotation = 0
+                best_score = float(score)
+                best_fused = fused_rot
+
+    if best_fused is None:
+        # Should never happen, but keep safe fallback
+        return _ocr_page(image)
+
+    tokens_best = len(best_fused.get("text", []) or [])
     print(
-        f"[Multipass] page={page_index} col={column_index} fused_tokens={tokens} "
+        f"[Multipass] page={page_index} col={column_index} "
+        f"chosen_rotation={best_rotation} fused_tokens={tokens_best} "
         f"psms={MULTIPASS_PSMS} rotations={MULTIPASS_ROTATIONS}"
     )
-    return fused
+    if best_rotation != 0:
+        print(
+            f"[Multipass-Warn] page={page_index} col={column_index} "
+            f"rotation_sweep_corrected={best_rotation} (input may have bad orientation metadata)"
+        )
+
+    return best_fused
+
 
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
+import os
 import re
 from PIL import Image, ImageOps
 import pytesseract
@@ -42,8 +43,18 @@ OCR_CONFIG_MAIN = "--oem 3 --psm 6 -l eng -c preserve_interword_spaces=1"
 OCR_CONFIG_FALLBACK = "--oem 3 --psm 3 -l eng -c preserve_interword_spaces=1"
 
 # ======================================================================
+#                    PHASE 7 PT.8 — ROTATION SWEEP (WORKER WIRING)
+# ======================================================================
+
+# If the upload comes in rotated (common with PDFs/images), we brute-force 0/90/180/270
+# and choose the best OCR output by quality score.
+ENABLE_ROTATION_SWEEP: bool = os.getenv("OCR_ENABLE_ROTATION_SWEEP", "1") == "1"
+ROTATION_SWEEP_DEGREES_CW: List[int] = [0, 90, 180, 270]
+
+# ======================================================================
 #                    ORIENTATION CONTROL (disable legacy)
 # ======================================================================
+
 
 # Day 45 pt.5:
 # Orientation MUST be guaranteed here (right before the OCR input is built and sent to Tesseract),
@@ -219,8 +230,41 @@ def _quality_score(s: str) -> float:
     return 0.7 * lr + 0.3 * price_component
 
 def _ocr_block_gray(gray_block: np.ndarray, config: str) -> str:
-    pil = Image.fromarray(gray_block)
-    return pytesseract.image_to_string(pil, config=config)
+    """
+    Phase 7 pt.8 (wired in worker):
+    Try OCR at multiple rotations and keep the best text by _quality_score().
+
+    Rotation degrees here are CLOCKWISE (0/90/180/270).
+    PIL.rotate() is counter-clockwise, so we rotate by -deg to get clockwise effect.
+    """
+    pil_base = Image.fromarray(gray_block)
+
+    if not ENABLE_ROTATION_SWEEP:
+        return pytesseract.image_to_string(pil_base, config=config)
+
+    best_text = ""
+    best_score = -1.0
+    best_deg = 0
+
+    for deg_cw in ROTATION_SWEEP_DEGREES_CW:
+        if deg_cw == 0:
+            pil_work = pil_base
+        else:
+            pil_work = pil_base.rotate(-deg_cw, expand=True)
+
+        txt = pytesseract.image_to_string(pil_work, config=config)
+        score = _quality_score(txt)
+
+        if score > best_score:
+            best_score = score
+            best_text = txt
+            best_deg = int(deg_cw)
+
+    if best_deg != 0:
+        print(f"[RotationSweep] block_best_rotation_cw={best_deg} score={best_score:.3f} config={config}")
+
+    return best_text
+
 
 def _run_ocr_with_config(blocks_gray: List[np.ndarray], config: str) -> str:
     texts = [_ocr_block_gray(b, config=config) for b in blocks_gray]

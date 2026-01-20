@@ -1,6 +1,8 @@
 # ServLine
-The ServLine project is a portal + API + AI brain system for restaurant call handling.  
-This repo follows a phased build plan (Day 1 → onward), with Git commits marking each milestone.
+
+ServLine is a **portal + API + AI brain** system for restaurant menu onboarding (OCR + structured imports → living editable menu → export to POS).
+
+This repo follows a phased build plan (**Day 1 → onward**), with Git commits marking each milestone.
 
 ---
 
@@ -11,6 +13,7 @@ portal/  # Flask portal website
   app.py  
   requirements.txt  
   contracts.py                          # lightweight draft schema validator (added Day 19 landmark)  
+  ocr_worker.py                         # active OCR worker (image pipeline + parsing + debug artifacts)  
   templates/  
     base.html  
     index.html  
@@ -42,7 +45,7 @@ storage/ # SQLite database + OCR brain + semantic engines (ONE BRAIN)
   ocr_pipeline.py  
   ocr_utils.py  
   ocr_types.py  
-  ocr_facade.py                        # ✅ Canonical OCR entrypoint (One Brain)  
+  ocr_facade.py                        # ✅ Canonical OCR library entrypoint (One Brain)  
   ai_ocr_helper.py  
   ai_cleanup.py  
   semantic_engine.py                   # Phase 4 pt.3  
@@ -166,20 +169,19 @@ Stabilization and validation phase.
 
 ### ✅ One Brain OCR Unification — COMPLETE
 
-All OCR, AI, and semantic logic has been centralized into `/storage`.  
-Legacy OCR paths have been phased out.
+All OCR, AI, and semantic logic has been centralized into `/storage` as a reusable library.  
+Legacy OCR entrypoints were retired or shimmed to route through the unified architecture.
 
 ### Achievements:
-- 🔁 Portal OCR retired  
-- 🧠 Single canonical brain (`storage/ocr_facade.py`)  
+- 🧠 Single canonical OCR library entrypoint (`storage/ocr_facade.py`)  
 - 🔎 Health endpoint confirmed green  
 - ♻ Legacy imports shimmed then removed  
 - 🔐 Draft pipeline using unified AI cleanup  
 - 🧾 Finalize confirmed using One Brain end-to-end  
 
 ### Result:
-ServLine now operates with a **true unified OCR engine**.  
-All text extraction, cleanup, semantic logic, and validation flow through one brain.
+ServLine operates with a **true unified brain layer**.  
+OCR utilities, cleanup, semantic logic, and validation live in `/storage` and are callable from the portal.
 
 **One Brain migration complete.**
 
@@ -296,42 +298,41 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 ## 🧠 Day 42 — Phase 7 pt.1–2: One Brain OCR Verification & Draft Pipeline Hardening
 
 ### Phase 7 pt.1 — Enforce One Brain OCR Everywhere
-- Verified that all OCR extraction calls route exclusively through:  
-  `storage/ocr_facade.py`  
-- Removed remaining legacy fallback paths  
-- Confirmed worker OCR active (`ocr_engine: "ocr_worker"`)  
-- Added explicit pipeline metadata: `"pipeline": "one_brain_v2"`  
-- Ensured draft creation prefers `payload_json` from AI Preview  
-- Added strict debugging hooks to confirm no legacy OCR is ever invoked  
+- Verified OCR extraction calls route exclusively through the intended pipeline for imports.  
+- Removed remaining legacy fallback paths where found.  
+- Confirmed worker OCR active (`ocr_engine: "ocr_worker"`).  
+- Added explicit pipeline metadata for debugging and audits.  
+- Ensured draft creation prefers AI Preview payload when present.  
+- Added strict debugging hooks to confirm no legacy OCR is invoked.
 
 ### Phase 7 pt.2 — Draft Construction + Debug Layer Hardening
 - Refactored `_get_or_create_draft_for_job` for clarity & correctness  
 - Removed duplicate function body accidentally introduced in past patches  
 - Ensured:
   - AI payload → draft creation is first choice  
-  - Legacy draft_path is *only* used when AI payload missing  
+  - Legacy draft_path is used only when AI payload missing  
   - Debug metadata correctly indicates pipeline path  
   - No stray “fix attempts” remain  
 - Verified full end-to-end import → draft → AI Preview → debug path  
 
-**Day 42 complete — One Brain pipeline fully verified and stable.**
+**Day 42 complete — Phase 7 pt.1–2 stable.**
 
 ---
 
 ## 🧠 Day 43 — Phase 7 pt.3–4: OCR Ingestion Audit & Debug Stabilization
 
 ### Phase 7 pt.3 — OCR Ingestion Path Audit
-- Performed a full read-only audit of the OCR → Draft ingestion flow.
-- Verified a **single authoritative OCR → Draft creation path**.
-- Confirmed raw OCR persistence, draft hydration, and Draft Editor visibility.
-- Identified and removed duplicate Flask routes causing runtime assertion errors.
-- No OCR behavior changes introduced.
+- Full read-only audit of OCR → Draft ingestion flow  
+- Verified a single authoritative OCR → Draft creation path  
+- Confirmed raw OCR persistence, draft hydration, and Draft Editor visibility  
+- Identified and removed duplicate Flask routes causing runtime assertion errors  
+- No OCR behavior changes introduced  
 
 ### Phase 7 pt.4 — Debug & Route Hardening
-- Stabilized layout / geometry debug endpoints.
-- Ensured debug routes are read-only and non-invasive.
-- Confirmed no legacy OCR helpers are reachable.
-- System remains fully operational post-audit.
+- Stabilized layout / geometry debug endpoints  
+- Ensured debug routes are read-only and non-invasive  
+- Confirmed no legacy OCR helpers are reachable  
+- System remains fully operational post-audit  
 
 **Day 43 complete — Phase 7 pt.3–4 closed.**
 
@@ -342,35 +343,35 @@ Phase 6 begins the **no-OCR structured import path**, letting ServLine ingest PO
 **Not a Phase day. Not Phase 7 pt.5–6.**
 
 Maintenance focus:
-- OCR work-image correctness vs segmentation artifacts
-- Investigation of noisy OCR output quality
-- Pre-cleanup diagnostics only (no feature expansion)
-- Stability, inspection, and confidence improvements
+- OCR work-image correctness vs segmentation artifacts  
+- Investigation of noisy OCR output quality  
+- Pre-cleanup diagnostics only (no feature expansion)  
+- Stability, inspection, and confidence improvements  
 
 ### Maintenance Day 44 Findings (Authoritative)
-- OCR input image confirmed **human-readable and non-binary** (grayscale OCR input; bw used only for splitter/debug).
-- Debug artifacts confirmed present and consistent per job (work image, pre_gray, pre_bw, OCR input, block crops, main/fallback OCR outputs).
-- OCR noise source is **not preprocessing**; it is upstream logic behavior:
-  - Orientation normalization + PSM interaction
-  - Quality scoring logic allowing gibberish to pass
+- OCR input image confirmed **human-readable and non-binary** (grayscale OCR input; bw used only for splitter/debug).  
+- Debug artifacts confirmed present and consistent per job (work image, pre_gray, pre_bw, OCR input, block crops, main/fallback OCR outputs).  
+- OCR noise source is upstream logic behavior:
+  - Orientation normalization + PSM interaction  
+  - Quality scoring allowing gibberish to pass  
 
 ### Roadmap Updates Created By Day 44 Diagnosis
-The following fixes are now scheduled into Phase 7 continuation work (pt.5–6):
+The following fixes were scheduled into Phase 7 continuation work (pt.5–6):
 
 #### Phase 7 pt.5 — Orientation & OCR Mode Hardening (Added Scope)
-- Make rotation normalization deterministic and first-class before OCR.
-- Tie PSM selection to orientation + layout characteristics.
+- Make rotation normalization deterministic and first-class before OCR  
+- Tie PSM selection to orientation + layout characteristics  
 - Persist debug metadata:
-  - orientation_applied
-  - psm_selected
-- Add upright OCR input artifact (post-rotation, pre-OCR).
+  - orientation_applied  
+  - psm_selected  
+- Add upright OCR input artifact (post-rotation, pre-OCR)  
 
 #### Phase 7 pt.6 — OCR Quality Scoring Reality Fix (Added Scope)
 - Harden item quality scoring against gibberish:
-  - alpha-density guard
-  - vowel/token ratio floor
-  - penalize long low-entropy tokens
-- Add quality_flags metadata (flag, do not delete).
+  - alpha-density guard  
+  - vowel/token ratio floor  
+  - penalize long low-entropy tokens  
+- Add quality_flags metadata (flag-only, do not delete)  
 
 **Day 44 complete.**
 
@@ -400,36 +401,68 @@ The following fixes are now scheduled into Phase 7 continuation work (pt.5–6):
 
 ---
 
+## 🧠 Day 46 — Phase 7 pt.8: Rotation Sweep (Worker Wiring) (COMPLETED)
+
+Phase 7 pt.8 addresses a real-world import problem: **PDFs/images are frequently uploaded sideways or upside down**.  
+We now brute-force rotations and select the best OCR output by a deterministic quality score.
+
+### What was added
+- Rotation sweep flags and defaults (env-driven):
+  - `OCR_ENABLE_ROTATION_SWEEP` (default on)
+  - degrees tested: `0, 90, 180, 270`
+- Rotation sweep wired into the actual OCR path:
+  - sweep happens inside `_ocr_block_gray()` (the function that calls Tesseract)
+  - best rotation is chosen using `_quality_score()`
+- Debug clarity:
+  - logs show rotation selection:  
+    `"[RotationSweep] block_best_rotation_cw=90 score=..."`
+- Verified alongside orientation enforcement:
+  - `normalize_orientation()` still runs first
+  - legacy OSD remains disabled to prevent double-rotation
+
+### End-to-end verification (manual test)
+- Dev: Start All → upload PDF → import completes → draft created
+- Verified log signals:
+  - orientation applied (worker-enforced)
+  - rotation sweep chooses best OCR pass when needed
+  - fallback PSM selection still functions
+- Draft Editor loads with items and AI Finalize works without regressions
+
+**Day 46 complete — Phase 7 pt.8 closed.**
+
+---
+
 # 🌄 System State
 
 ServLine menu understanding is now:
 
-✅ Unified OCR brain  
-✅ End-to-end stable  
-✅ Non-hallucinating  
+✅ Unified OCR brain (library layer in `/storage`)  
+✅ End-to-end stable import flow (upload → OCR → draft → editor)  
+✅ Non-hallucinating AI cleanup  
 ✅ Price-safe  
 ✅ Categorization-safe  
 ✅ Structurally parsed  
 ✅ Ingredient-aware  
-✅ Debuggable  
-✅ Human-editable  
+✅ Debuggable (full OCR artifacts + logs)  
+✅ Human-editable Draft Editor  
 ✅ Structured CSV/XLSX/JSON-ready  
 ✅ Column Mapping view wired to real metadata  
-✅ One Brain OCR verified + hardened (Day 42–45)  
-✅ OCR diagnostics resolved and hardened (Phase 7 pt.5–6)
+✅ One Brain OCR verified + hardened (Day 42–46)  
+✅ Orientation enforcement + debug artifacts (Day 45)  
+✅ Rotation sweep for mis-rotated uploads (Day 46)
 
 ---
 
 # ⭐ Next Execution Phase
 
-**Day 46 — Phase 7 pt.7–8**
+**Day 47 — Phase 7 pt.7**
 
-- Multi-pass OCR execution (0°, 90°, 180°, 270°) using the same grayscale-first pipeline.
+- Multi-pass OCR execution across full-page rotations (0°, 90°, 180°, 270°) using the same grayscale-first pipeline.
 - Deterministic winner selection using improved quality scoring.
 - Persist per-job metadata:
-  - rotation_selected
-  - psm_selected
-  - quality_score
-  - rejection reasons (flag-only).
+  - rotation_selected  
+  - psm_selected  
+  - quality_score  
+  - rejection reasons (flag-only)  
 - Confidence fusion across OCR passes.
 - Improved block → item grouping stability.
