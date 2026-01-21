@@ -48,8 +48,16 @@ OCR_CONFIG_FALLBACK = "--oem 3 --psm 3 -l eng -c preserve_interword_spaces=1"
 
 # If the upload comes in rotated (common with PDFs/images), we brute-force 0/90/180/270
 # and choose the best OCR output by quality score.
-ENABLE_ROTATION_SWEEP: bool = os.getenv("OCR_ENABLE_ROTATION_SWEEP", "1") == "1"
+# LEGACY (RETIRING): this worker should not decide orientation anymore.
+# Orientation must be handled by the One Brain pipeline (storage/ocr_pipeline.py pt.9–10),
+# and/or normalize_orientation() before the work image is produced.
+ENABLE_ROTATION_SWEEP: bool = os.getenv("OCR_ENABLE_ROTATION_SWEEP", "0") == "1"
 ROTATION_SWEEP_DEGREES_CW: List[int] = [0, 90, 180, 270]
+
+if ENABLE_ROTATION_SWEEP:
+    print("[LEGACY-WARN] OCR_ENABLE_ROTATION_SWEEP=1 is set, but rotation sweep in portal/ocr_worker.py is deprecated.")
+    print("[LEGACY-WARN] Disable it and use storage/ocr_pipeline.py multipass rotation scoring (pt.9–10).")
+
 
 # ======================================================================
 #                    ORIENTATION CONTROL (disable legacy)

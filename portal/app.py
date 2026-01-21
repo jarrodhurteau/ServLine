@@ -556,11 +556,32 @@ def _find_or_create_menu_for_job(conn: sqlite3.Connection, job_row: sqlite3.Row)
     )
     return int(cur.lastrowid)
 
-def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
+def _find_draft_for_job(job_id: int) -> Optional[int]:
     """
-    Return a draft_id for this import job, preferring AI/preview JSON when available.
+    Read-only lookup: return an existing DB-backed draft_id linked via source_job_id.
+    Does NOT create drafts from preview/legacy JSON.
+    """
+    _require_drafts_storage()
 
-    Priority:
+    if hasattr(drafts_store, "find_draft_by_source_job"):
+        existing = drafts_store.find_draft_by_source_job(job_id)
+        if existing and (existing.get("id") or existing.get("draft_id")):
+            try:
+                return int(existing.get("id") or existing.get("draft_id"))
+            except Exception:
+                return None
+
+    return None
+
+
+def _get_or_create_draft_for_job(job_id: int, allow_create: bool = False) -> Optional[int]:
+    """
+    Return a draft_id for this import job.
+
+    If allow_create=False (default): read-only behavior, returns existing draft_id or None.
+    If allow_create=True: will create a draft from the best available JSON source.
+
+    Priority (when allow_create=True):
       1. Reuse existing DB-backed draft linked via source_job_id.
       2. For OCR/AI jobs: use ai_preview_path / preview_path JSON if present.
       3. For structured JSON jobs: use embedded payload_json when present.
@@ -574,27 +595,25 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
     # -----------------------------
     # 1) Existing DB-backed draft?
     # -----------------------------
-    if hasattr(drafts_store, "find_draft_by_source_job"):
-        existing = drafts_store.find_draft_by_source_job(job_id)
-        if existing and (existing.get("id") or existing.get("draft_id")):
-            draft_id = int(existing.get("id") or existing.get("draft_id"))
-
-            # Sync restaurant_id if the job has one and draft is missing it
-            try:
-                if (
-                    hasattr(row, "keys")
-                    and "restaurant_id" in row.keys()
-                    and row["restaurant_id"]
-                    and not existing.get("restaurant_id")
-                ):
+    draft_id = _find_draft_for_job(job_id)
+    if draft_id:
+        # Sync restaurant_id if the job has one and draft is missing it
+        try:
+            keys = set(row.keys()) if hasattr(row, "keys") else set()
+            if "restaurant_id" in keys and row["restaurant_id"]:
+                existing = drafts_store.get_draft(draft_id) if hasattr(drafts_store, "get_draft") else {}
+                if isinstance(existing, dict) and not existing.get("restaurant_id"):
                     drafts_store.save_draft_metadata(
                         draft_id,
                         restaurant_id=int(row["restaurant_id"]),
                     )
-            except Exception:
-                pass
+        except Exception:
+            pass
+        return draft_id
 
-            return draft_id
+    # If we are not allowed to create drafts, stop here (GET-safe default).
+    if not allow_create:
+        return None
 
     # We’ll build draft_json from the best available source.
     draft_json: Optional[Dict[str, Any]] = None
@@ -605,15 +624,17 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
     #    Try ai_preview_path → preview_path → draft_path
     # -----------------------------
     abs_path: Optional[Path] = None
+    used_source_label: str = ""
     for key in ("ai_preview_path", "preview_path", "draft_path"):
         raw_path = row[key] if key in keys else None
         if raw_path:
             candidate = _abs_from_rel(raw_path)
             if candidate and candidate.exists():
                 abs_path = candidate
+                used_source_label = key
                 break
 
-    if abs_path and abs_path.exists() and hasattr(drafts_store, "create_draft_from_import"):
+    if abs_path and abs_path.exists():
         try:
             with open(abs_path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
@@ -632,6 +653,7 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
                 candidate = json.loads(payload_raw)
                 if isinstance(candidate, dict):
                     draft_json = candidate
+                    used_source_label = "payload_json"
             except Exception:
                 draft_json = None
 
@@ -641,8 +663,100 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
     # -----------------------------
     # 4) Create new draft from chosen JSON
     # -----------------------------
-    created = drafts_store.create_draft_from_import(draft_json, import_job_id=job_id)
-    draft_id = int(created.get("id") or created.get("draft_id"))
+    draft_id = None
+
+    create_fn = getattr(drafts_store, "create_draft_from_import", None)
+    if callable(create_fn):
+        try:
+            created = create_fn(draft_json, import_job_id=job_id)
+        except Exception:
+            created = None
+
+        if isinstance(created, dict):
+            new_id_raw = created.get("id") or created.get("draft_id")
+            if new_id_raw:
+                try:
+                    draft_id = int(new_id_raw)
+                except Exception:
+                    draft_id = None
+
+    # If create_draft_from_import didn’t produce a usable draft id, fall back to structured-items path.
+    if draft_id is None:
+        create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+        if callable(create_structured):
+            flat = _draft_items_from_draft_json(draft_json)
+
+            structured_items: List[Dict[str, Any]] = []
+            for it in flat:
+                name = (it.get("name") or "").strip()
+                if not name:
+                    continue
+                desc = (it.get("description") or "").strip()
+                category = (it.get("category") or "Uncategorized").strip() or "Uncategorized"
+                confidence = it.get("confidence")
+                position = it.get("position")
+
+                price_val = it.get("price")
+                price_cents = 0
+                if price_val is not None:
+                    try:
+                        price_cents = int(round(float(price_val) * 100.0))
+                    except Exception:
+                        price_cents = 0
+
+                structured_items.append(
+                    {
+                        "name": name,
+                        "description": desc,
+                        "category": category,
+                        "price_cents": int(price_cents),
+                        "confidence": confidence,
+                        "position": position,
+                    }
+                )
+
+            restaurant_id = None
+            if "restaurant_id" in keys and row["restaurant_id"]:
+                try:
+                    restaurant_id = int(row["restaurant_id"])
+                except Exception:
+                    restaurant_id = None
+
+            title = f"Imported OCR {datetime.utcnow().date()}"
+            try:
+                src = draft_json.get("source") if isinstance(draft_json, dict) else None
+                if isinstance(src, dict) and src.get("file"):
+                    title = f"{src.get('file')}"
+            except Exception:
+                title = f"Imported OCR {datetime.utcnow().date()}"
+
+            if structured_items:
+                try:
+                    created2 = create_structured(
+                        title=title,
+                        restaurant_id=restaurant_id,
+                        items=structured_items,
+                        source_type="ocr_legacy_categories",
+                        source_job_id=int(job_id),
+                        source_meta={
+                            "import_job_id": int(job_id),
+                            "source": used_source_label or "unknown",
+                            "draft_json_kind": "categories",
+                        },
+                    )
+                except Exception:
+                    created2 = None
+
+                if isinstance(created2, dict):
+                    new_id_raw2 = created2.get("id") or created2.get("draft_id")
+                    if new_id_raw2:
+                        try:
+                            draft_id = int(new_id_raw2)
+                        except Exception:
+                            draft_id = None
+
+    if draft_id is None:
+        return None
 
     # -----------------------------
     # 5) Sync restaurant_id
@@ -656,7 +770,14 @@ def _get_or_create_draft_for_job(job_id: int) -> Optional[int]:
         except Exception:
             pass
 
-    return draft_id
+    # Best-effort: link back to import_jobs.draft_id if the column exists.
+    try:
+        update_import_job(job_id, draft_id=int(draft_id))
+    except Exception:
+        pass
+
+    return int(draft_id)
+
 
 
 # ---------- MISSING HELPERS (wired to /imports actions) ----------
@@ -671,6 +792,7 @@ def _dedupe_exists(conn: sqlite3.Connection, menu_id: int, name: str, price_cent
         (menu_id, name, price_cents),
     ).fetchone()
     return bool(row)
+
 
 def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
     """
@@ -690,7 +812,8 @@ def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
     if not restaurant_id:
         abort(400, description="No restaurant selected. Choose a restaurant for this import before approving.")
 
-    draft_id = _get_or_create_draft_for_job(job_id)
+    # Explicit user action (POST) -> allow creating draft from preview/legacy JSON if needed
+    draft_id = _get_or_create_draft_for_job(job_id, allow_create=True)
     if not draft_id:
         abort(400, description="No draft available to approve")
 
@@ -705,9 +828,11 @@ def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
             name = (it.get("name") or "").strip()
             if not name:
                 continue
+
             price_cents = it.get("price_cents")
             if price_cents is None:
                 price_cents = _price_to_cents(it.get("price") or it.get("price_text"))
+
             desc = (it.get("description") or "").strip()
 
             if not _dedupe_exists(conn, menu_id, name, int(price_cents)):
@@ -731,16 +856,25 @@ def approve_draft_to_menu(job_id: int) -> Tuple[int, int]:
 
     return menu_id, inserted
 
+
 def discard_draft_for_job(job_id: int) -> int:
-    """Delete all draft items (keep the draft shell so editor can be used later). Returns deleted count."""
+    """
+    Delete all draft items (keep the draft shell so editor can be used later).
+    Returns deleted count.
+    """
     _require_drafts_storage()
-    draft_id = _get_or_create_draft_for_job(job_id)
+
+    # Explicit user action (POST) -> allow creating draft from preview/legacy JSON if needed
+    draft_id = _get_or_create_draft_for_job(job_id, allow_create=True)
     if not draft_id:
         return 0
 
-    # fetch items, delete them
     items = drafts_store.get_draft_items(draft_id) or []
-    ids = [it.get("id") for it in items if it.get("id") is not None]
+    ids = []
+    for it in items:
+        if it.get("id") is not None:
+            ids.append(it.get("id"))
+
     deleted = 0
     if ids:
         deleted = drafts_store.delete_draft_items(draft_id, ids)
@@ -752,6 +886,7 @@ def discard_draft_for_job(job_id: int) -> int:
 
     return int(deleted)
 # ---------- /MISSING HELPERS ----------
+
 
 # ------------------------
 # Health / DB / OCR Health
@@ -948,6 +1083,126 @@ def _path_for_ocr(job_id: int, original: Path) -> Tuple[Path, str]:
     if p and p.exists():
         return p, "image"
     return original, ("image" if original.suffix.lower() in (".jpg", ".jpeg", ".png") else "pdf")
+
+def _score_ocr_text_for_orientation(text: str) -> int:
+    """
+    Heuristic score: prefer outputs that look like real menu text.
+    Higher is better.
+    """
+    t = (text or "").strip()
+    if not t:
+        return 0
+
+    total = len(t)
+
+    letters = 0
+    digits = 0
+    spaces = 0
+    other = 0
+    for ch in t:
+        if ch.isalpha():
+            letters += 1
+        elif ch.isdigit():
+            digits += 1
+        elif ch.isspace():
+            spaces += 1
+        else:
+            other += 1
+
+    # Ratio of "good" characters
+    good = letters + digits + spaces
+    good_ratio = good / max(total, 1)
+
+    # Junk penalty (punctuation/symbol soup tends to spike on wrong rotations)
+    junk_ratio = other / max(total, 1)
+
+    # Word count (rough)
+    words = [w for w in t.split() if w.strip()]
+    word_count = len(words)
+
+    # Simple "menu-ish" signal: presence of prices ($ or digit+dot patterns)
+    has_dollar = "$" in t
+    has_decimal = False
+    for i in range(0, len(t) - 2):
+        if t[i].isdigit() and t[i + 1] == "." and t[i + 2].isdigit():
+            has_decimal = True
+            break
+
+    score = 0
+
+    # Length helps, but cap it
+    score += min(total, 2500)
+
+    # Favor readable text, punish junk
+    score += int(good_ratio * 2000)
+    score -= int(junk_ratio * 1500)
+
+    # Word count helps (cap)
+    score += min(word_count, 300) * 10
+
+    # Tiny boosts if it looks like menu pricing
+    if has_dollar:
+        score += 250
+    if has_decimal:
+        score += 250
+
+    return int(max(score, 0))
+
+
+def _auto_rotate_work_image_if_needed(job_id: int, original_image: Path) -> Optional[Path]:
+    """
+    Ensure a working preview exists, then attempt auto-rotation (0/90/180/270)
+    by OCR-scoring each orientation. If a better orientation is found, rotate
+    the working JPEG in-place.
+
+    Returns the work image Path (rotated if needed) or None on failure.
+    """
+    try:
+        wp = _ensure_work_image(job_id, original_image) or _get_work_image_if_any(job_id)
+        if not wp or not wp.exists():
+            return None
+
+        from PIL import Image
+
+        # Load the working JPEG once
+        with Image.open(wp) as im0:
+            if im0.mode != "RGB":
+                im0 = im0.convert("RGB")
+
+            candidates = [
+                ("0", 0, im0),
+                ("90", 90, im0.rotate(90, expand=True)),
+                ("180", 180, im0.rotate(180, expand=True)),
+                ("270", 270, im0.rotate(270, expand=True)),
+            ]
+
+            best_tag = "0"
+            best_angle = 0
+            best_score = -1
+
+            for tag, angle, im in candidates:
+                try:
+                    # OCR directly from PIL image
+                    txt = pytesseract.image_to_string(im)
+                except Exception:
+                    txt = ""
+                s = _score_ocr_text_for_orientation(txt)
+                if s > best_score:
+                    best_score = s
+                    best_tag = tag
+                    best_angle = angle
+
+            # If best is not 0, rotate the work image in-place
+            if best_angle != 0:
+                best_im = im0.rotate(best_angle, expand=True)
+                if best_im.mode != "RGB":
+                    best_im = best_im.convert("RGB")
+                best_im.save(wp, "JPEG", quality=92, optimize=True)
+
+        return wp
+    except Exception:
+        return None
+
 
 @app.get("/imports/<int:job_id>/preview.jpg")
 @login_required
@@ -1562,18 +1817,27 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         # Prefer working image (respects later user rotation too if we rerun)
         src_for_ocr, type_tag = _path_for_ocr(job_id, saved_file_path)
 
-        # 0) **Preferred when we have an image**: use ocr_worker
-        if type_tag == "image":
+        # 0) RETIRED: portal/ocr_worker is legacy and must not be the preferred path.
+        # Images should flow through the One Brain pipeline via storage.ocr_facade/build_structured_menu.
+        # If facade fails, we will fall back later.
+        if type_tag == "image" and False:
             try:
-                raw_text, worker_obj = ocr_worker.run_image_pipeline(Path(src_for_ocr), job_id=str(job_id))
-                draft = _build_draft_from_worker(job_id, saved_file_path, worker_obj or {})
+                raw_text, worker_obj = ocr_worker.run_image_pipeline(
+                    Path(src_for_ocr),
+                    job_id=str(job_id),
+                )
+                draft = _build_draft_from_worker(
+                    job_id,
+                    saved_file_path,
+                    worker_obj or {},
+                )
                 engine = "ocr_worker"
 
-                # Capture debug for later save
                 if isinstance(worker_obj, dict):
                     dbg_obj = worker_obj.get("debug")
                     if isinstance(dbg_obj, dict):
                         debug_payload = dbg_obj
+
             except Exception as e:
                 helper_error = f"ocr_worker_failed: {e}"
                 draft = None
@@ -1582,26 +1846,36 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         if draft is None and extract_items_from_path is not None:
             try:
                 draft, debug_payload = _build_draft_from_helper(job_id, saved_file_path)
-                engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
+                if isinstance(draft, dict):
+                    engine = (draft.get("source") or {}).get("ocr_engine") or "ocr_helper+tesseract"
+                else:
+                    engine = "ocr_helper+tesseract"
 
                 # NEW: For PDFs, also generate layout_debug from the Phase-3+ pipeline
+                # IMPORTANT: avoid running segment_document twice (facade often already did it)
                 try:
                     suffix = saved_file_path.suffix.lower()
                     if suffix == ".pdf":
-                        seg = segment_document(pdf_path=str(saved_file_path), dpi=400)
+                        # Ensure debug_payload is a dict so we can attach layout_debug
+                        if debug_payload is None:
+                            debug_payload = {}
                         if isinstance(debug_payload, dict):
-                            ld = seg.get("layout_debug")
-                            if ld is None:
-                                ld = {
-                                    "ok": True,
-                                    "pages": seg.get("pages"),
-                                    "dpi": seg.get("dpi"),
-                                    "preview_blocks": seg.get("preview_blocks") or [],
-                                    "meta": seg.get("meta") or {},
-                                }
-                            debug_payload["layout_debug"] = ld
+                            # Only compute if not already provided by the facade
+                            if "layout_debug" not in debug_payload:
+                                seg = segment_document(pdf_path=str(saved_file_path), dpi=400)
+                                ld = seg.get("layout_debug")
+                                if ld is None:
+                                    ld = {
+                                        "ok": True,
+                                        "pages": seg.get("pages"),
+                                        "dpi": seg.get("dpi"),
+                                        "preview_blocks": seg.get("preview_blocks") or [],
+                                        "meta": seg.get("meta") or {},
+                                    }
+                                debug_payload["layout_debug"] = ld
                 except Exception:
                     pass
+
 
             except Exception as e:
                 helper_error = str(e)
@@ -1619,7 +1893,12 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 text = _pdf_to_text(saved_file_path)
 
             if text:
-                draft = _text_to_draft(text, job_id, saved_file_path.name, engine or "tesseract")
+                draft = _text_to_draft(
+                    text,
+                    job_id,
+                    saved_file_path.name,
+                    engine or "tesseract",
+                )
                 debug_payload = {
                     "notes": [f"fallback_engine={engine}", f"len_text={len(text)}"],
                     "items": [],
@@ -1628,7 +1907,11 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             else:
                 draft = {
                     "job_id": job_id,
-                    "source": {"type": "upload", "file": saved_file_path.name, "ocr_engine": engine or "unavailable"},
+                    "source": {
+                        "type": "upload",
+                        "file": saved_file_path.name,
+                        "ocr_engine": engine or "unavailable",
+                    },
                     "extracted_at": _now_iso(),
                     "categories": [
                         {
@@ -1669,7 +1952,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         try:
             if drafts_store is not None:
-                draft_id = _get_or_create_draft_for_job(job_id)
+                draft_id = _get_or_create_draft_for_job(job_id, allow_create=True)
 
                 if draft_id and hasattr(drafts_store, "upsert_draft_items"):
                     items = _draft_items_from_draft_json(draft if isinstance(draft, dict) else {})
@@ -1684,6 +1967,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     drafts_store.save_ocr_debug(draft_id, payload)
         except Exception:
             pass
+
 
     except Exception as e:
         update_import_job(job_id, status="failed", error=str(e))
@@ -2500,21 +2784,81 @@ def imports_blocks(job_id: int):
     Convenience bridge: look up draft for import job and delegate to /drafts/<id>/blocks.
     """
     _require_drafts_storage()
-    draft_id = _get_or_create_draft_for_job(job_id)
-    if not draft_id:
-        return jsonify({"ok": False, "error": "No draft found for job"}), 404
-    return drafts_blocks(draft_id)  # returns a Response
+    @app.get("/imports/<int:job_id>/blocks")
+    @login_required
+    def imports_blocks(job_id: int):
+        """
+        Read-only bridge: serve blocks only if a DB draft already exists.
+        Must NOT create drafts or trigger OCR.
+        """
+        _require_drafts_storage()
+
+        row = get_import_job(job_id)
+        if not row:
+            abort(404)
+
+        data = dict(row)
+        draft_id = data.get("draft_id") or data.get("draftId") or data.get("draft")
+        try:
+            draft_id = int(draft_id) if draft_id is not None else None
+        except Exception:
+            draft_id = None
+
+        if not draft_id:
+            return jsonify({"ok": False, "error": "Draft not ready"}), 404
+
+        return drafts_blocks(draft_id)
+
 
 
 # Bridge to Draft Editor (DB-first)
 @app.get("/imports/<int:job_id>/draft")
 @login_required
 def imports_draft(job_id: int):
-    draft_id = _get_or_create_draft_for_job(job_id)
+    """
+    Bridge to Draft Editor.
+
+    User intent is explicit here ("Open Draft Editor"), so it is OK to:
+      - ensure a DB-backed draft exists for this import job, and
+      - link it back onto import_jobs.draft_id when possible.
+
+    This does NOT trigger OCR. It only ensures the editor has a draft.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    data = dict(row)
+
+    # Prefer DB-backed draft id if present on the job row.
+    draft_id = data.get("draft_id") or data.get("draftId") or data.get("draft")
+    try:
+        draft_id = int(draft_id) if draft_id is not None else None
+    except Exception:
+        draft_id = None
+
     if draft_id:
         return redirect(url_for("draft_editor", draft_id=draft_id))
-    flash("Draft not ready for editor yet. Showing legacy import view.", "info")
+
+    # NEW: On-demand DB draft creation/linking (no OCR)
+    try:
+        draft_id = _ensure_draft_for_job(job_id, row=row)
+    except Exception:
+        draft_id = None
+
+    if draft_id:
+        return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+
+    # Fallback: legacy file draft (still read-only)
+    abs_draft = _abs_from_rel(data.get("draft_path")) if data.get("draft_path") else None
+    if abs_draft and abs_draft.exists():
+        flash("Legacy draft file is ready, but no DB draft id is linked yet.", "info")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+    flash("Draft not ready yet for the editor. Try Clone Draft, or re-run Finalize.", "error")
     return redirect(url_for("imports_detail", job_id=job_id))
+
+
 
 
 @app.post("/imports/<int:job_id>/set_restaurant")
@@ -2923,11 +3267,22 @@ def import_structured_draft():
 @login_required
 def serve_upload(filename):
     requested = (UPLOAD_FOLDER / filename).resolve()
-    if not str(requested).startswith(str(UPLOAD_FOLDER.resolve())):
+
+    # Strong containment check: requested must be inside UPLOAD_FOLDER
+    try:
+        requested.relative_to(UPLOAD_FOLDER.resolve())
+    except Exception:
         abort(403)
-    if TRASH_FOLDER.resolve() in requested.parents or requested == TRASH_FOLDER.resolve():
+
+    # Block anything inside .trash
+    try:
+        requested.relative_to(TRASH_FOLDER.resolve())
         abort(403)
-    return send_from_directory(str(UPLOAD_FOLDER), filename, as_attachment=False)
+    except Exception:
+        pass
+
+    return send_from_directory(str(UPLOAD_FOLDER), str(requested.relative_to(UPLOAD_FOLDER.resolve())), as_attachment=False)
+
 
 
 # ------------------------
@@ -2935,9 +3290,11 @@ def serve_upload(filename):
 # ------------------------
 def _safe_in_uploads(path: Path) -> bool:
     try:
-        return str(path.resolve()).startswith(str(UPLOAD_FOLDER.resolve()))
+        path.resolve().relative_to(UPLOAD_FOLDER.resolve())
+        return True
     except Exception:
         return False
+
 
 def _is_direct_child_file(p: Path) -> bool:
     return p.parent.resolve() == UPLOAD_FOLDER.resolve() and p.is_file()
@@ -3204,9 +3561,10 @@ def uploads_delete():
     names = request.form.getlist("names")
     if not names:
         abort(400, description="No files selected")
-    _move_to_trash(names)
-    flash(f"Moved {len(names)} file(s) to Recycle Bin.", "success")
+    moved = list(_move_to_trash(names))
+    flash(f"Moved {len(moved)} file(s) to Recycle Bin.", "success")
     return redirect(url_for("uploads_page"))
+
 
 @app.get("/uploads/trash")
 @login_required
@@ -4105,6 +4463,231 @@ def fix_descriptions_for_draft(draft_id: int):
 
     return jsonify({"ok": True, "updated_count": int(updated_count)}), 200
 
+def _ensure_draft_for_job(job_id: int, row=None) -> Optional[int]:
+    """
+    Ensure there is a DB-backed draft for an import job.
+
+    Strategy:
+      1) Use existing helper _get_or_create_draft_for_job(job_id)
+      2) If legacy JSON exists (import_jobs.draft_path), upgrade it into a DB draft
+         using drafts_store.create_draft_from_structured_items(...)
+      3) Otherwise attempt to create via drafts_store if it exposes
+         create_draft_from_import / create_draft_from_import_job.
+
+    This function does NOT run OCR.
+    """
+    try:
+        _require_drafts_storage()
+    except Exception:
+        return None
+
+    # First: try the canonical helper
+    try:
+        did = _get_or_create_draft_for_job(job_id)
+        if did:
+            did_int = int(did)
+            try:
+                update_import_job(job_id, draft_id=did_int)
+            except Exception:
+                pass
+            return did_int
+    except Exception:
+        pass
+
+    filename = ""
+    source_type = ""
+    restaurant_id = None
+    legacy_draft_path = None
+
+    try:
+        if row is not None:
+            filename = (row["filename"] or "").strip()
+            try:
+                source_type = (row.get("source_type") or "").strip()
+            except Exception:
+                source_type = ""
+            try:
+                legacy_draft_path = (row.get("draft_path") or "").strip() or None
+            except Exception:
+                legacy_draft_path = None
+            rid = None
+            try:
+                rid = row.get("restaurant_id")
+            except Exception:
+                rid = None
+            try:
+                restaurant_id = int(rid) if rid is not None else None
+            except Exception:
+                restaurant_id = None
+    except Exception:
+        filename = ""
+        source_type = ""
+        restaurant_id = None
+        legacy_draft_path = None
+
+    title = (Path(filename).stem if filename else f"Import {job_id}").strip() or f"Import {job_id}"
+
+    # ---------------------------------------------------------------------
+    # NEW: If the job only has a legacy JSON draft_path, upgrade it to DB.
+    # ---------------------------------------------------------------------
+    try:
+        if legacy_draft_path:
+            abs_legacy = _abs_from_rel(legacy_draft_path)
+            if abs_legacy and abs_legacy.exists():
+                legacy = json.loads(abs_legacy.read_text(encoding="utf-8"))
+
+                items: List[Dict[str, Any]] = []
+                cats = legacy.get("categories") or []
+                for cat_obj in cats:
+                    cat_name = (cat_obj.get("name") or "").strip() or None
+                    for it in (cat_obj.get("items") or []):
+                        base_name = (it.get("name") or "").strip()
+                        if not base_name:
+                            continue
+                        desc = (it.get("description") or "").strip() or None
+
+                        sizes = it.get("sizes") or []
+                        if sizes:
+                            for s in sizes:
+                                size_name = (s.get("name") or "").strip()
+                                price_val = s.get("price", 0)
+                                try:
+                                    price_cents = int(round(float(price_val) * 100))
+                                except Exception:
+                                    price_cents = 0
+                                display_name = f"{base_name} ({size_name})" if size_name else base_name
+                                items.append(
+                                    {
+                                        "name": display_name,
+                                        "description": desc,
+                                        "category": cat_name,
+                                        "subcategory": None,
+                                        "price_cents": max(int(price_cents), 0),
+                                    }
+                                )
+                        else:
+                            price_val = it.get("price", 0)
+                            try:
+                                price_cents = int(round(float(price_val) * 100))
+                            except Exception:
+                                price_cents = 0
+                            items.append(
+                                {
+                                    "name": base_name,
+                                    "description": desc,
+                                    "category": cat_name,
+                                    "subcategory": None,
+                                    "price_cents": max(int(price_cents), 0),
+                                }
+                            )
+
+                create_structured = getattr(drafts_store, "create_draft_from_structured_items", None)
+                if callable(create_structured) and items:
+                    source_meta = {
+                        "job_id": int(job_id),
+                        "filename": filename,
+                        "source_type": source_type or "legacy_json",
+                        "legacy_draft_path": legacy_draft_path,
+                    }
+                    draft = create_structured(
+                        title=title,
+                        restaurant_id=restaurant_id,
+                        items=items,
+                        source_type="legacy_json",
+                        source_job_id=int(job_id),
+                        source_meta=source_meta,
+                    )
+                    did_int = int(draft.get("id") or draft.get("draft_id") or 0)
+
+                    if did_int > 0:
+                        try:
+                            update_import_job(job_id, draft_id=did_int)
+                        except Exception:
+                            pass
+                        return did_int
+    except Exception:
+        pass
+
+    # Second: attempt explicit creation via drafts_store (if supported)
+    create_fn = getattr(drafts_store, "create_draft_from_import", None)
+    if not callable(create_fn):
+        create_fn = getattr(drafts_store, "create_draft_from_import_job", None)
+
+    if not callable(create_fn):
+        return None
+
+    source_file_path = None
+    try:
+        if filename:
+            p = (UPLOAD_FOLDER / filename).resolve()
+            if p.exists():
+                source_file_path = str(p)
+    except Exception:
+        source_file_path = None
+
+    source_meta = {
+        "job_id": int(job_id),
+        "filename": filename,
+        "source_type": source_type,
+    }
+
+    draft = None
+
+    # Try rich kwargs first
+    try:
+        draft = create_fn(
+            title=title,
+            restaurant_id=restaurant_id,
+            source_type=source_type or "ocr",
+            source_job_id=int(job_id),
+            source_file_path=source_file_path,
+            source_meta=source_meta,
+        )
+    except TypeError:
+        draft = None
+    except Exception:
+        draft = None
+
+    # Try minimal kwargs
+    if draft is None:
+        try:
+            draft = create_fn(
+                title=title,
+                restaurant_id=restaurant_id,
+                source_job_id=int(job_id),
+            )
+        except TypeError:
+            draft = None
+        except Exception:
+            draft = None
+
+    # Try positional job_id only
+    if draft is None:
+        try:
+            draft = create_fn(int(job_id))
+        except Exception:
+            draft = None
+
+    did_int = 0
+    try:
+        if isinstance(draft, dict):
+            did_int = int(draft.get("id") or draft.get("draft_id") or 0)
+        elif draft is not None:
+            did_int = int(draft)
+    except Exception:
+        did_int = 0
+
+    if did_int > 0:
+        try:
+            update_import_job(job_id, draft_id=did_int)
+        except Exception:
+            pass
+        return did_int
+
+    return None
+
+
+
 # ------------------------
 # AI Heuristics Preview (Day 20 Phase A)
 # ------------------------
@@ -4153,7 +4736,7 @@ def imports_ai_preview(job_id: int):
     if not src_path.exists():
         return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
 
-    # Prefer working image if available
+    # Prefer working image if available (and auto-rotate if needed for images)
     work = _get_work_image_if_any(job_id)
     try:
         if work and work.exists():
@@ -4161,13 +4744,19 @@ def imports_ai_preview(job_id: int):
         else:
             suffix = src_path.suffix.lower()
             if suffix in (".png", ".jpg", ".jpeg"):
-                raw_text = _ocr_image_to_text(src_path)
+                # NEW: auto-rotate by creating/rotating a working copy
+                wp = _auto_rotate_work_image_if_needed(job_id, src_path)
+                if wp and wp.exists():
+                    raw_text = _ocr_image_to_text(wp)
+                else:
+                    raw_text = _ocr_image_to_text(src_path)
             elif suffix == ".pdf":
                 raw_text = _pdf_to_text(src_path)
             else:
                 return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
     except Exception as e:
         return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
+
 
     if not raw_text:
         return jsonify({"ok": False, "error": "Could not extract text for preview"}), 500
@@ -4288,23 +4877,25 @@ def imports_ai_commit(job_id: int):
     # ---------------- Structured path: no OCR, just AI cleanup on existing draft ----------------
     if is_structured:
         _require_drafts_storage()
-        draft_id = _get_or_create_draft_for_job(job_id)
+        draft_id = _ensure_draft_for_job(job_id, row=row)
         if not draft_id:
             if wants_redirect:
                 flash("No draft available for this job.", "error")
                 return redirect(url_for("imports_detail", job_id=job_id))
-            return jsonify({"ok": False, "error": "No draft available for this job"},), 400
+            return jsonify({"ok": False, "error": "No draft available for this job"}), 400
+
+        draft_id = int(draft_id)
 
         # Flip status while we run cleanup
         try:
-            drafts_store.save_draft_metadata(int(draft_id), status="processing")
+            drafts_store.save_draft_metadata(draft_id, status="processing")
         except Exception:
             pass
 
         try:
-            cleaned = apply_ai_cleanup(int(draft_id))
+            cleaned = apply_ai_cleanup(draft_id)
             try:
-                drafts_store.save_draft_metadata(int(draft_id), status="finalized")
+                drafts_store.save_draft_metadata(draft_id, status="finalized")
             except Exception:
                 pass
 
@@ -4313,17 +4904,19 @@ def imports_ai_commit(job_id: int):
                     f"Finalize complete — AI cleanup updated {int(cleaned)} item(s).",
                     "success",
                 )
-                return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+                return redirect(url_for("draft_editor", draft_id=draft_id))
 
-            return jsonify({
-                "ok": True,
-                "job_id": job_id,
-                "draft_id": int(draft_id),
-                "inserted_count": 0,
-                "updated_count": 0,
-                "cleaned_count": int(cleaned),
-                "status": "finalized",
-            }), 200
+            return jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "draft_id": draft_id,
+                    "inserted_count": 0,
+                    "updated_count": 0,
+                    "cleaned_count": int(cleaned),
+                    "status": "finalized",
+                }
+            ), 200
 
         except Exception as e:
             app.logger.exception("AI cleanup during structured imports_ai_commit failed")
@@ -4358,7 +4951,7 @@ def imports_ai_commit(job_id: int):
             return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
 
-    # Extract raw text (prefers working copy)
+    # Extract raw text (prefers working copy; auto-rotate images if needed)
     try:
         work = _get_work_image_if_any(job_id)
         if work and work.exists():
@@ -4366,7 +4959,12 @@ def imports_ai_commit(job_id: int):
         else:
             suffix = src_path.suffix.lower()
             if suffix in (".png", ".jpg", ".jpeg"):
-                raw_text = _ocr_image_to_text(src_path)
+                # NEW: auto-rotate by creating/rotating a working copy
+                wp = _auto_rotate_work_image_if_needed(job_id, src_path)
+                if wp and wp.exists():
+                    raw_text = _ocr_image_to_text(wp)
+                else:
+                    raw_text = _ocr_image_to_text(src_path)
             elif suffix == ".pdf":
                 raw_text = _pdf_to_text(src_path)
             else:
@@ -4379,6 +4977,7 @@ def imports_ai_commit(job_id: int):
             flash(f"OCR error: {e}", "error")
             return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
+
 
     if not raw_text:
         if wants_redirect:
@@ -4430,12 +5029,15 @@ def imports_ai_commit(job_id: int):
 
     # Replace items in the draft for this job
     _require_drafts_storage()
-    draft_id = _get_or_create_draft_for_job(job_id)
+    draft_id = _ensure_draft_for_job(job_id, row=row)
+
     if not draft_id:
         if wants_redirect:
             flash("No draft available for this job.", "error")
             return redirect(url_for("imports_detail", job_id=job_id))
         return jsonify({"ok": False, "error": "No draft available for this job"}), 400
+ 
+    draft_id = int(draft_id)
 
     existing = drafts_store.get_draft_items(draft_id) or []
     existing_ids = [it.get("id") for it in existing if it.get("id") is not None]
@@ -4512,10 +5114,27 @@ def imports_ai_finalize(job_id: int):
         runs AI cleanup on the existing draft items.
 
     In both cases, we end in the Draft Editor for the associated draft.
+
+    IMPORTANT:
+    imports_ai_commit may return a 302 redirect on both success and failure
+    (flash + redirect). We must interpret redirects correctly so failures
+    don't look like success.
     """
     _require_drafts_storage()
 
-        # --- Step 1: run AI commit (side effects only; inspect its Response) ---
+    # --- Step 0: ensure a DB draft exists for this job (upgrades legacy JSON draft_path -> DB) ---
+    row = get_import_job(job_id)
+    if not row:
+        flash("Import job not found.", "error")
+        return redirect(url_for("imports"))
+
+    ensured_draft_id = _ensure_draft_for_job(job_id, row=row)
+    if not ensured_draft_id:
+        flash("No draft available for this job.", "error")
+        return redirect(url_for("imports_detail", job_id=job_id))
+
+
+    # --- Step 1: run AI commit (side effects only; inspect its Response) ---
     resp = None
     try:
         resp = imports_ai_commit(job_id)
@@ -4526,22 +5145,59 @@ def imports_ai_finalize(job_id: int):
     # imports_ai_commit may return:
     #   - a Flask Response
     #   - a (Response, status_code) tuple
+    resp_obj = resp[0] if isinstance(resp, tuple) and len(resp) >= 1 else resp
     status_code = None
+
     if isinstance(resp, tuple) and len(resp) >= 2:
         try:
             status_code = int(resp[1])
         except Exception:
             status_code = None
-    elif hasattr(resp, "status_code"):
+    elif hasattr(resp_obj, "status_code"):
         try:
-            status_code = int(resp.status_code)
+            status_code = int(resp_obj.status_code)
         except Exception:
             status_code = None
+
+    imports_url = url_for("imports_detail", job_id=job_id)
+
+    # If commit returned a redirect, interpret it:
+    # - Redirect to Draft Editor => success; just follow it.
+    # - Redirect back to imports_detail => failure (commit likely flashed an error).
+    try:
+        location = None
+        if hasattr(resp_obj, "headers"):
+            location = resp_obj.headers.get("Location")
+
+        if location and status_code in (301, 302, 303, 307, 308):
+            loc = str(location)
+            if "/drafts/" in loc:
+                return resp_obj
+            if loc.startswith(imports_url):
+                flash("AI finalize failed during commit.", "error")
+                return redirect(url_for("imports_detail", job_id=job_id))
+    except Exception:
+        pass
 
     if status_code is not None and status_code >= 400:
         flash("AI finalize failed during commit.", "error")
         return redirect(url_for("imports_detail", job_id=job_id))
 
+    # If commit returned JSON, prefer draft_id from the payload.
+    try:
+        commit_json = None
+        if hasattr(resp_obj, "get_json"):
+            commit_json = resp_obj.get_json(silent=True)
+        if isinstance(commit_json, dict):
+            if commit_json.get("ok") is False:
+                flash("AI finalize failed during commit.", "error")
+                return redirect(url_for("imports_detail", job_id=job_id))
+            draft_id_from_commit = commit_json.get("draft_id")
+            if draft_id_from_commit:
+                flash("AI finalize complete.", "success")
+                return redirect(url_for("draft_editor", draft_id=int(draft_id_from_commit)))
+    except Exception:
+        pass
 
     # --- Step 2: locate draft for this job ---
     draft_id = _get_or_create_draft_for_job(job_id)
@@ -4552,7 +5208,6 @@ def imports_ai_finalize(job_id: int):
     # --- Step 3: send user into the Draft Editor ---
     flash("AI finalize complete.", "success")
     return redirect(url_for("draft_editor", draft_id=int(draft_id)))
-
 
 
 # ------------------------
@@ -4638,8 +5293,9 @@ app.register_blueprint(core_bp)
 @app.get("/test_csv_form")
 def test_csv_form():
     return """
-    <form action="/import/csv" method="post" enctype="multipart/form-data">
-        <input type="file" name="csv_file">
+    <form action="/api/drafts/import_structured" method="post" enctype="multipart/form-data">
+        <input type="file" name="file">
+
         <button type="submit">Test CSV Upload</button>
     </form>
     """

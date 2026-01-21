@@ -72,8 +72,6 @@ Phase 4 pt.11–12 (prep):
 
 from __future__ import annotations
 
-print("[BOOT] storage/ocr_pipeline.py LOADED")
-
 import os
 import re
 import uuid
@@ -82,7 +80,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 import pytesseract
-from pytesseract import image_to_osd
 
 from . import ocr_utils
 from . import category_infer
@@ -123,10 +120,14 @@ VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
 
 ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
 
+# Debug logging (env-controlled; default OFF)
+DEBUG_MULTIPASS_LOGS = os.getenv("OCR_DEBUG_MULTIPASS_LOGS", "0") == "1"
+
 # Phase 7 pt.7 — Multi-PSM fusion
 # Phase 7 pt.8 — Rotation sweep for mis-oriented uploads (OCR-only fallback)
 MULTIPASS_PSMS: List[int] = [6, 4, 11]
 MULTIPASS_ROTATIONS: List[int] = [0, 90, 180, 270]
+
 
 
 def _effective_ocr_config_string() -> str:
@@ -591,7 +592,8 @@ def _run_single_ocr_pass(image: Image.Image, psm: int, rotation: int) -> Dict[st
     )
 
     tokens = len(data.get("text", []))
-    print(f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}")
+    if DEBUG_MULTIPASS_LOGS:
+        print(f"[Multipass] rotation={rotation} psm={psm} tokens={tokens}")
 
     return {
         "psm": int(psm),
@@ -923,126 +925,258 @@ def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
     return fused
 
 
-
-def run_multipass_ocr(image: Image.Image, page_index: int, column_index: int) -> Dict[str, List]:
+def run_rotation_multipass_candidates(
+    image: Image.Image,
+    page_index: int,
+    column_index: int,
+    rotations: Optional[List[int]] = None,
+) -> Dict[int, Dict[str, Any]]:
     """
-    Multi-pass OCR wrapper.
+    Day 47 — Phase 7 pt.9
 
-    Phase 7 pt.7:
-      - Multiple PSMs (6,4,11) and fuse tokens.
+    Produce multi-pass OCR candidates for each full-page rotation.
+    This function does NOT score, choose a winner, or persist anything.
 
-    Phase 7 pt.8:
-      - Rotation sweep (0/90/180/270) to handle mis-oriented uploads.
-      - We DO NOT fuse across rotations (bbox coordinate systems differ).
-      - Instead:
-          1) Fuse within each rotation (across PSMs).
-          2) Score each rotation's fused output.
-          3) Choose the best rotation and return its fused output.
+    rotations:
+      - If provided, only these rotations are evaluated.
+      - If None, defaults to MULTIPASS_ROTATIONS.
 
-    When ENABLE_MULTIPASS_OCR is False, behavior remains identical to _ocr_page(image).
+    Returns:
+      {
+        rotation_deg: {
+          "rotation": int,
+          "passes": List[Dict[str, Any]],
+          "fused": Dict[str, List]
+        },
+        ...
+      }
     """
     if not ENABLE_MULTIPASS_OCR:
-        return _ocr_page(image)
+        return {
+            0: {
+                "rotation": 0,
+                "passes": [],
+                "fused": _ocr_page(image),
+            }
+        }
 
-    def _score_fused_data(data: Dict[str, List]) -> float:
-        """
-        Rotation scoring heuristic:
-        - Prefer more usable tokens and higher confidence.
-        """
-        texts = data.get("text", []) or []
-        confs = data.get("conf", []) or []
-        total_conf = 0.0
-        usable = 0
+    rotations_to_try = rotations if rotations is not None else MULTIPASS_ROTATIONS
 
-        n = len(texts)
-        for i in range(n):
-            t = (texts[i] or "").strip()
-            if not t:
-                continue
-            try:
-                c = float(confs[i]) if i < len(confs) else -1.0
-            except Exception:
-                c = -1.0
-            if c < 0:
-                continue
-            usable += 1
-            total_conf += c
+    candidates: Dict[int, Dict[str, Any]] = {}
 
-        # Primary signal: usable token count
-        # Secondary: total confidence
-        return float(usable) * 10.0 + float(total_conf)
-
-    # Build passes grouped by rotation
-    passes_by_rotation: Dict[int, List[Dict[str, Any]]] = {}
-    for rotation in MULTIPASS_ROTATIONS:
+    for rotation in rotations_to_try:
         rot_passes: List[Dict[str, Any]] = []
         for psm in MULTIPASS_PSMS:
             pass_obj = _run_single_ocr_pass(image, psm=psm, rotation=rotation)
             rot_passes.append(pass_obj)
-        passes_by_rotation[int(rotation)] = rot_passes
 
-    # Fuse per rotation and score
-    best_rotation = 0
-    best_score = -1.0
-    best_fused: Optional[Dict[str, List]] = None
-
-    for rotation, rot_passes in passes_by_rotation.items():
         fused_rot = fuse_multipass_results(rot_passes)
-        score = _score_fused_data(fused_rot)
         tokens = len(fused_rot.get("text", []) or [])
 
         print(
-            f"[Multipass-Rotation] page={page_index} col={column_index} "
-            f"rotation={rotation} fused_tokens={tokens} score={score:.2f}"
+            f"[Pt9-Candidates] page={page_index} col={column_index} "
+            f"rotation={int(rotation)} fused_tokens={tokens} psms={MULTIPASS_PSMS}"
         )
 
-        # Tie-breaker: prefer rotation 0 when scores are extremely close
-        if best_fused is None:
+        candidates[int(rotation)] = {
+            "rotation": int(rotation),
+            "passes": rot_passes,
+            "fused": fused_rot,
+        }
+
+    return candidates
+
+
+def score_rotation_fused_data(data: Dict[str, List]) -> Dict[str, Any]:
+    """
+    Day 47 — Phase 7 pt.10
+
+    Deterministic scoring inputs for a rotation's fused output.
+    Returns a dict so we can persist richer metadata than a single float.
+
+    Output:
+      {
+        "score": float,
+        "usable_tokens": int,
+        "total_conf": float,
+        "avg_conf": float
+      }
+    """
+    texts = data.get("text", []) or []
+    confs = data.get("conf", []) or []
+
+    usable = 0
+    total_conf = 0.0
+
+    n = len(texts)
+    for i in range(n):
+        t = (texts[i] or "").strip()
+        if not t:
+            continue
+        try:
+            c = float(confs[i]) if i < len(confs) else -1.0
+        except Exception:
+            c = -1.0
+        if c < 0:
+            continue
+
+        usable += 1
+        total_conf += c
+
+    avg_conf = (total_conf / float(usable)) if usable > 0 else 0.0
+
+    # Deterministic combined score:
+    #   - primary: usable token count
+    #   - secondary: total confidence
+    score = float(usable) * 10.0 + float(total_conf)
+
+    return {
+        "score": float(score),
+        "usable_tokens": int(usable),
+        "total_conf": float(total_conf),
+        "avg_conf": float(avg_conf),
+    }
+
+
+def run_multipass_ocr(
+    image: Image.Image,
+    page_index: int,
+    column_index: int,
+    meta_out: Optional[Dict[str, Any]] = None,
+    rotations: Optional[List[int]] = None,
+) -> Dict[str, List]:
+    """
+    Multi-pass OCR wrapper.
+
+    Phase 7 pt.9:
+      - Execute candidates across rotations (0/90/180/270).
+      - For each rotation, run PSM passes (6,4,11) and fuse within-rotation.
+
+    Phase 7 pt.10:
+      - Deterministically score each rotation's fused output.
+      - Choose the best rotation with explicit tie-break rules.
+      - Populate meta_out with scoring + selection metadata (if provided).
+
+    rotations:
+      - If provided, only these rotations are evaluated for this call.
+      - If None, defaults to MULTIPASS_ROTATIONS.
+
+    When ENABLE_MULTIPASS_OCR is False, behavior remains identical to _ocr_page(image).
+    """
+    if not ENABLE_MULTIPASS_OCR:
+        data = _ocr_page(image)
+        if meta_out is not None:
+            meta_out["enabled"] = False
+            meta_out["selected_rotation"] = 0
+            meta_out["selected_psms"] = []
+            meta_out["rotation_scores"] = {0: {"score": 0.0, "usable_tokens": 0, "total_conf": 0.0, "avg_conf": 0.0}}
+            meta_out["scoring_version"] = "pt10-v1"
+        return data
+
+    candidates = run_rotation_multipass_candidates(
+        image,
+        page_index=page_index,
+        column_index=column_index,
+        rotations=rotations,
+    )
+
+    best_rotation: Optional[int] = None
+    best_score: Optional[float] = None
+    best_fused: Optional[Dict[str, List]] = None
+
+    rotation_scores: Dict[int, Dict[str, Any]] = {}
+    rotation_token_counts: Dict[int, int] = {}
+
+    for rotation, obj in candidates.items():
+        fused_rot = obj.get("fused") or {}
+        score_obj = score_rotation_fused_data(fused_rot)
+        rotation_scores[int(rotation)] = score_obj
+
+        tokens = len(fused_rot.get("text", []) or [])
+        rotation_token_counts[int(rotation)] = int(tokens)
+
+        print(
+            f"[Pt10-RotationScore] page={page_index} col={column_index} "
+            f"rotation={int(rotation)} fused_tokens={tokens} score={float(score_obj['score']):.2f} "
+            f"usable_tokens={int(score_obj['usable_tokens'])} avg_conf={float(score_obj['avg_conf']):.2f}"
+        )
+
+        if best_rotation is None:
             best_rotation = int(rotation)
-            best_score = float(score)
+            best_score = float(score_obj["score"])
             best_fused = fused_rot
             continue
 
-        if score > best_score + 0.01:
+        cur_score = float(score_obj["score"])
+        if best_score is None:
+            best_score = cur_score
+
+        # Primary: higher score wins
+        if cur_score > float(best_score) + 0.01:
             best_rotation = int(rotation)
-            best_score = float(score)
+            best_score = cur_score
             best_fused = fused_rot
             continue
 
-        if abs(score - best_score) <= 0.01:
-            # Prefer 0 rotation when basically tied
-            if best_rotation != 0 and int(rotation) == 0:
+        # Tie band: prefer rotation 0 when extremely close
+        if abs(cur_score - float(best_score)) <= 0.01:
+            if int(best_rotation) != 0 and int(rotation) == 0:
                 best_rotation = 0
-                best_score = float(score)
+                best_score = cur_score
                 best_fused = fused_rot
 
-    if best_fused is None:
-        # Should never happen, but keep safe fallback
-        return _ocr_page(image)
+    if best_fused is None or best_rotation is None:
+        data = _ocr_page(image)
+        if meta_out is not None:
+            meta_out["enabled"] = True
+            meta_out["selected_rotation"] = 0
+            meta_out["selected_psms"] = MULTIPASS_PSMS[:]
+            meta_out["rotation_scores"] = rotation_scores
+            meta_out["rotation_token_counts"] = rotation_token_counts
+            meta_out["scoring_version"] = "pt10-v1"
+        return data
 
     tokens_best = len(best_fused.get("text", []) or [])
     print(
-        f"[Multipass] page={page_index} col={column_index} "
-        f"chosen_rotation={best_rotation} fused_tokens={tokens_best} "
+        f"[Pt10-Selected] page={page_index} col={column_index} "
+        f"selected_rotation={int(best_rotation)} fused_tokens={tokens_best} "
         f"psms={MULTIPASS_PSMS} rotations={MULTIPASS_ROTATIONS}"
     )
-    if best_rotation != 0:
+    if int(best_rotation) != 0:
         print(
-            f"[Multipass-Warn] page={page_index} col={column_index} "
-            f"rotation_sweep_corrected={best_rotation} (input may have bad orientation metadata)"
+            f"[Pt10-Warn] page={page_index} col={column_index} "
+            f"rotation_sweep_corrected={int(best_rotation)} (input may have bad orientation metadata)"
         )
+
+    if meta_out is not None:
+        meta_out["enabled"] = True
+        meta_out["selected_rotation"] = int(best_rotation)
+        meta_out["selected_psms"] = MULTIPASS_PSMS[:]
+        meta_out["rotation_scores"] = rotation_scores
+        meta_out["rotation_token_counts"] = rotation_token_counts
+        meta_out["scoring_version"] = "pt10-v1"
 
     return best_fused
 
 
 
-
 def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP) -> Optional[Word]:
-    raw = (data["text"][i] or "").strip()
+    texts = data.get("text", []) or []
+    confs = data.get("conf", []) or []
+    lefts = data.get("left", []) or []
+    tops = data.get("top", []) or []
+    widths = data.get("width", []) or []
+    heights = data.get("height", []) or []
+
+    if i >= len(texts):
+        return None
+
+    raw = (texts[i] or "").strip()
     try:
-        conf_raw = float(data["conf"][i])
+        conf_raw = float(confs[i]) if i < len(confs) else -1.0
     except Exception:
         conf_raw = -1.0
+
 
     if conf_raw < conf_floor:
         return None
@@ -1052,11 +1186,11 @@ def _make_word(i: int, data: Dict[str, List], conf_floor: float = LOW_CONF_DROP)
         return None
 
     # More defensive around bbox dimensions
-    x = int(data["left"][i])
-    y = int(data["top"][i])
     try:
-        w = int(data["width"][i])
-        h = int(data["height"][i])
+        x = int(lefts[i]) if i < len(lefts) else 0
+        y = int(tops[i]) if i < len(tops) else 0
+        w = int(widths[i]) if i < len(widths) else 0
+        h = int(heights[i]) if i < len(heights) else 0
     except Exception:
         return None
 
@@ -1510,42 +1644,61 @@ def infer_categories_on_text_blocks(text_blocks: List[Dict[str, Any]]) -> None:
 def _group_words_to_lines(words: List[Word]) -> List[Line]:
     if not words:
         return []
+
     heights = [w["bbox"]["h"] for w in words]
-    widths = [w["bbox"]["w"] for w in words]
     median_h = max(1.0, ocr_utils.median([float(h) for h in heights]))
     line_y_tol = 0.6 * median_h
 
     lines: List[Line] = []
     cur_words: List[Word] = []
 
-    def flush_line():
+    def flush_line() -> None:
         nonlocal lines, cur_words
         if not cur_words:
             return
+
         xs = [w["bbox"]["x"] for w in cur_words]
         ys = [w["bbox"]["y"] for w in cur_words]
         xe = [w["bbox"]["x"] + w["bbox"]["w"] for w in cur_words]
         ye = [w["bbox"]["y"] + w["bbox"]["h"] for w in cur_words]
-        bbox: BBox = {"x": min(xs), "y": min(ys), "w": max(xe) - min(xs), "h": max(ye) - min(ys)}
+
+        bbox: BBox = {
+            "x": min(xs),
+            "y": min(ys),
+            "w": max(xe) - min(xs),
+            "h": max(ye) - min(ys),
+        }
+
         line_text = " ".join(w["text"] for w in cur_words)
         line_text = _ALLOWED_RE.sub(" ", line_text)
         line_text = _REPEAT3.sub(r"\1\1", line_text)
         line_text = re.sub(r"\s{2,}", " ", line_text).strip()
+
         letters = sum(1 for c in line_text if c.isalpha())
         digits = sum(1 for c in line_text if c.isdigit())
+
         if len(line_text) < 3 or (letters < 2 and digits == 0):
             cur_words.clear()
             return
-        lines.append({"text": line_text, "bbox": bbox, "words": cur_words[:]})
-        cur_words = []
+
+        lines.append(
+            {
+                "text": line_text,
+                "bbox": bbox,
+                "words": cur_words[:],
+            }
+        )
+        cur_words.clear()
 
     last_y: Optional[float] = None
+
     for w in words:
         wy = w["bbox"]["y"]
         if last_y is None:
             cur_words = [w]
             last_y = wy
             continue
+
         if abs(wy - last_y) <= line_y_tol:
             cur_words.append(w)
             last_y = (last_y + wy) / 2.0
@@ -1554,8 +1707,10 @@ def _group_words_to_lines(words: List[Word]) -> List[Line]:
             flush_line()
             cur_words = [w]
             last_y = wy
+
     cur_words.sort(key=lambda ww: ww["bbox"]["x"])
     flush_line()
+
     lines.sort(key=lambda ln: (ln["bbox"]["y"], ln["bbox"]["x"]))
     return lines
 
@@ -1563,6 +1718,7 @@ def _group_words_to_lines(words: List[Word]) -> List[Line]:
 def _group_lines_to_blocks(lines: List[Line]) -> List[Block]:
     if not lines:
         return []
+
     line_heights = [ln["bbox"]["h"] for ln in lines]
     median_line_h = max(1.0, ocr_utils.median([float(h) for h in line_heights]))
     line_gap_thr = 1.25 * median_line_h
@@ -1570,42 +1726,65 @@ def _group_lines_to_blocks(lines: List[Line]) -> List[Block]:
     blocks: List[Block] = []
     cur: List[Line] = []
 
-    def flush_block():
+    def flush_block() -> None:
         nonlocal blocks, cur
         if not cur:
             return
+
         xs = [l["bbox"]["x"] for l in cur]
         ys = [l["bbox"]["y"] for l in cur]
         xe = [l["bbox"]["x"] + l["bbox"]["w"] for l in cur]
         ye = [l["bbox"]["y"] + l["bbox"]["h"] for l in cur]
-        bbox: BBox = {"x": min(xs), "y": min(ys), "w": max(xe) - min(xs), "h": max(ye) - min(ys)}
-        blocks.append({"id": str(uuid.uuid4()), "page": 1, "bbox": bbox, "lines": cur[:]})
-        cur = []
+
+        bbox: BBox = {
+            "x": min(xs),
+            "y": min(ys),
+            "w": max(xe) - min(xs),
+            "h": max(ye) - min(ys),
+        }
+
+        blocks.append(
+            {
+                "id": str(uuid.uuid4()),
+                "page": 1,
+                "bbox": bbox,
+                "lines": cur[:],
+            }
+        )
+        cur.clear()
 
     def overlap_ratio(a: BBox, b: BBox) -> float:
-        ax1, ax2 = a["x"], a["x"] + a["w"]
-        bx1, bx2 = b["x"], b["x"] + b["w"]
-        inter = max(0, min(ax2, bx2) - max(ax1, bx1))
-        denom = max(1, min(a["w"], b["w"]))
+        ax1 = a["x"]
+        ax2 = a["x"] + a["w"]
+        bx1 = b["x"]
+        bx2 = b["x"] + b["w"]
+        inter = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+        denom = max(1.0, min(a["w"], b["w"]))
         return inter / float(denom)
 
-    prev = None
+    prev: Optional[Line] = None
+
     for ln in lines:
         if prev is None:
             cur = [ln]
             prev = ln
             continue
+
         dy = ln["bbox"]["y"] - prev["bbox"]["y"]
         horiz = overlap_ratio(prev["bbox"], ln["bbox"])
+
         if dy <= line_gap_thr or horiz >= 0.25:
             cur.append(ln)
         else:
             flush_block()
             cur = [ln]
+
         prev = ln
+
     flush_block()
     blocks.sort(key=lambda b: (b["bbox"]["x"], b["bbox"]["y"]))
     return blocks
+
 
 
 # -----------------------------
@@ -1635,7 +1814,8 @@ def segment_document(
     page_index = 1
     page_orientations: List[Dict[str, Any]] = []
 
-    # (moved inside loop after deg_applied is computed)
+    # Day 47 Phase 7 pt.10 — per-column multipass selection metadata (audit only)
+    multipass_runs_meta: List[Dict[str, Any]] = []
 
     for im in pages:
 
@@ -1669,10 +1849,7 @@ def segment_document(
             stage="work_page"
         )
 
-
-
         # Dynamic min_gap based on image width; helps real menus where
-
         # gutters are relatively narrow but consistent.
         width, height = im_pre.size
         # Roughly ~0.4–1% of page width, clamped to a reasonable range.
@@ -1711,13 +1888,34 @@ def segment_document(
                 f"multipass={ENABLE_MULTIPASS_OCR}"
             )
 
+            col_multipass_meta: Dict[str, Any] = {}
+
+            rotations_for_this_page: Optional[List[int]] = None
+            if deg_applied != 0:
+                rotations_for_this_page = [0]
+                print(
+                    f"[Orientation] Page {page_index}: deg_applied={int(deg_applied)} -> multipass rotations restricted to [0]"
+                )
+
             data = run_multipass_ocr(
                 col_img,
                 page_index=page_index,
-                column_index=col_idx
+                column_index=col_idx,
+                meta_out=col_multipass_meta,
+                rotations=rotations_for_this_page,
             )
-            words: List[Word] = []
 
+
+            if col_multipass_meta:
+                multipass_runs_meta.append(
+                    {
+                        "page": int(page_index),
+                        "column": int(col_idx),
+                        "multipass": col_multipass_meta,
+                    }
+                )
+
+            words: List[Word] = []
 
             n = len(data.get("text", []))
             for i in range(n):
@@ -1798,7 +1996,6 @@ def segment_document(
             if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
                 pb.setdefault("meta", {})["multiline_reconstructed"] = True
 
-
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
 
@@ -1817,58 +2014,57 @@ def segment_document(
         # This is what portal/app.py should store under dbg["layout_debug"]
         # so /drafts/<id>/layout-debug.json can return it.
         # ------------------------------------------------------------
-"layout_debug": {
-    "ok": True,
-    "pages": len(pages),
-    "dpi": dpi,
-    "preview_blocks": all_preview_blocks,
-    "meta": {
-        "source": source,
-        "engine": "tesseract",
-        "version": str(pytesseract.get_tesseract_version()),
-        "config": _effective_ocr_config_string(),
-        "conf_floor": LOW_CONF_DROP,
-        "vision_layer": {
-            "enabled": ENABLE_VISION_PREPROCESS,
-            "debug_dir": VISION_DEBUG_DIR or None,
+        "layout_debug": {
+            "ok": True,
+            "pages": len(pages),
+            "dpi": dpi,
+            "preview_blocks": all_preview_blocks,
+            "meta": {
+                "source": source,
+                "engine": "tesseract",
+                "version": str(pytesseract.get_tesseract_version()),
+                "config": _effective_ocr_config_string(),
+                "conf_floor": LOW_CONF_DROP,
+                "vision_layer": {
+                    "enabled": ENABLE_VISION_PREPROCESS,
+                    "debug_dir": VISION_DEBUG_DIR or None,
+                },
+                "multipass": {
+                    "enabled": ENABLE_MULTIPASS_OCR,
+                    "psms": MULTIPASS_PSMS,
+                    "rotations": MULTIPASS_ROTATIONS,
+                    "runs": multipass_runs_meta,
+                },
+                "orientation": page_orientations,
+            },
         },
-        "multipass": {
-            "enabled": ENABLE_MULTIPASS_OCR,
-            "psms": MULTIPASS_PSMS,
-            "rotations": MULTIPASS_ROTATIONS,
+
+        "meta": {
+            "source": source,
+            "engine": "tesseract",
+            "version": str(pytesseract.get_tesseract_version()),
+            "config": _effective_ocr_config_string(),
+            "conf_floor": LOW_CONF_DROP,
+            "mode": (
+                "high_clarity+segmentation+two_column_merge+"
+                "category_infer+multi_price_variants+block_roles+"
+                "multiline_reconstruct+variant_enrich+category_hierarchy+"
+                "price_integrity_prep+structured_v2_prep+"
+                "vision_scaffold+multipass_scaffold"
+            ),
+            "preprocess": "clahe+denoise+unsharp+deskew",
+            "vision_layer": {
+                "enabled": ENABLE_VISION_PREPROCESS,
+                "debug_dir": VISION_DEBUG_DIR or None,
+            },
+            "multipass": {
+                "enabled": ENABLE_MULTIPASS_OCR,
+                "psms": MULTIPASS_PSMS,
+                "rotations": MULTIPASS_ROTATIONS,
+                "runs": multipass_runs_meta,
+            },
+            "orientation": page_orientations,
         },
-        "orientation": page_orientations,
-    },
-},
-
-
-"meta": {
-    "source": source,
-    "engine": "tesseract",
-    "version": str(pytesseract.get_tesseract_version()),
-    "config": _effective_ocr_config_string(),
-    "conf_floor": LOW_CONF_DROP,
-    "mode": (
-        "high_clarity+segmentation+two_column_merge+"
-        "category_infer+multi_price_variants+block_roles+"
-        "multiline_reconstruct+variant_enrich+category_hierarchy+"
-        "price_integrity_prep+structured_v2_prep+"
-        "vision_scaffold+multipass_scaffold"
-    ),
-    "preprocess": "clahe+denoise+unsharp+deskew",
-    "vision_layer": {
-        "enabled": ENABLE_VISION_PREPROCESS,
-        "debug_dir": VISION_DEBUG_DIR or None,
-    },
-    "multipass": {
-        "enabled": ENABLE_MULTIPASS_OCR,
-        "psms": MULTIPASS_PSMS,
-        "rotations": MULTIPASS_ROTATIONS,
-    },
-    "orientation": page_orientations,
-},
-
-
     }
     return segmented
 
@@ -1895,26 +2091,3 @@ def run_layout_debug_for_pdf(
         }
 
     return layout_debug
-
-
-
-if __name__ == "__main__":
-    sample = segment_document(pdf_path="fixtures/sample_menus/pizza_real.pdf")
-    print(
-        list(sample.keys()),
-        "Blocks:", len(sample["blocks"]),
-        "TextBlocks:", len(sample.get("text_blocks", [])),
-        "PreviewBlocks:", len(sample.get("preview_blocks", []))
-    )
-    # Quick glance at inferred categories / roles / variants
-    cats = [
-        (
-            tb.get("category"),
-            tb.get("category_confidence"),
-            tb.get("role"),
-            (tb.get("merged_text") or "")[:40],
-            tb.get("variants"),
-        )
-        for tb in sample.get("text_blocks", [])
-    ]
-    print("Sample categories/roles/variants:", [c for c in cats if c[0] or c[2] or c[4]])
