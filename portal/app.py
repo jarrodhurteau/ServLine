@@ -1036,11 +1036,16 @@ def _ensure_work_image(job_id: int, src_path: Path) -> Optional[Path]:
     Ensure a JPEG preview exists for the job:
     - Images: convert/copy to RGB JPEG
     - PDFs: rasterize first page
+    
+    IMPORTANT: Apply orientation normalization so preview matches OCR input.
     """
     try:
         p = _work_image_path(job_id)
         if p.exists():
             return p
+
+        # Import orientation normalizer from One Brain pipeline
+        from storage.ocr_utils import normalize_orientation
 
         suffix = src_path.suffix.lower()
         if suffix in (".png", ".jpg", ".jpeg"):
@@ -1048,6 +1053,10 @@ def _ensure_work_image(job_id: int, src_path: Path) -> Optional[Path]:
             with Image.open(src_path) as im:
                 if im.mode != "RGB":
                     im = im.convert("RGB")
+                # Apply orientation correction
+                im, deg = normalize_orientation(im)
+                if deg != 0:
+                    print(f"[Preview] job={job_id} orientation corrected by {deg}° for preview")
                 p.parent.mkdir(parents=True, exist_ok=True)
                 im.save(p, "JPEG", quality=92, optimize=True)
             return p
@@ -1063,6 +1072,10 @@ def _ensure_work_image(job_id: int, src_path: Path) -> Optional[Path]:
             im = pages[0]
             if im.mode != "RGB":
                 im = im.convert("RGB")
+            # Apply orientation correction
+            im, deg = normalize_orientation(im)
+            if deg != 0:
+                print(f"[Preview] job={job_id} orientation corrected by {deg}° for preview (PDF)")
             p.parent.mkdir(parents=True, exist_ok=True)
             im.save(p, "JPEG", quality=92, optimize=True)
             return p

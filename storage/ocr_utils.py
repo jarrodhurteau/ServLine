@@ -189,7 +189,13 @@ def detect_orientation_osd(img: Image.Image) -> Optional[int]:
 def _quick_score(img: Image.Image) -> float:
     """
     Fast plausibility score of text for a given rotation.
-    Uses text density + average token length; higher is better.
+    
+    Scoring factors (higher is better):
+    - Total text length (more text = likely correct orientation)
+    - Letter ratio (real words have letters)
+    - Average token length (gibberish tends to be short fragments)
+    - Price hits (menus have prices like $12.99)
+    - Dictionary-ish words (3+ letters, has vowels)
     """
     try:
         txt = pytesseract.image_to_string(
@@ -198,12 +204,53 @@ def _quick_score(img: Image.Image) -> float:
         )
         if not txt:
             return 0.0
-        letters = sum(ch.isalpha() for ch in txt)
-        spaces = txt.count(" ")
-        tokens = [t for t in re.split(r"\s+", txt) if t]
-        avg_len = (sum(len(t) for t in tokens) / max(1, len(tokens)))
-        alpha_ratio = letters / max(1, letters + spaces)
-        return alpha_ratio * 0.6 + min(avg_len, 10) * 0.4
+        
+        txt_clean = txt.strip()
+        total_len = len(txt_clean)
+        if total_len < 10:
+            return 0.0
+        
+        letters = sum(ch.isalpha() for ch in txt_clean)
+        digits = sum(ch.isdigit() for ch in txt_clean)
+        spaces = txt_clean.count(" ")
+        
+        # Tokens (words)
+        tokens = [t for t in re.split(r"\s+", txt_clean) if t]
+        token_count = len(tokens)
+        if token_count == 0:
+            return 0.0
+        
+        avg_len = sum(len(t) for t in tokens) / token_count
+        
+        # Price detection (strong menu signal)
+        price_hits = len(re.findall(r"\$?\d{1,3}\.\d{2}", txt_clean))
+        
+        # "Real word" detection: 3+ letters with at least one vowel
+        vowels = set("aeiouAEIOU")
+        real_words = 0
+        for t in tokens:
+            if len(t) >= 3 and any(c.isalpha() for c in t):
+                if any(c in vowels for c in t):
+                    real_words += 1
+        
+        # Scoring components
+        length_score = min(1.0, total_len / 500.0)  # cap at 500 chars
+        alpha_ratio = letters / max(1, letters + digits + spaces)
+        avg_len_score = min(1.0, avg_len / 8.0)  # ideal ~8 char words
+        price_score = min(1.0, price_hits / 5.0)  # 5+ prices is great
+        real_word_ratio = real_words / max(1, token_count)
+        
+        # Weighted combination
+        score = (
+            length_score * 0.25 +
+            alpha_ratio * 0.20 +
+            avg_len_score * 0.15 +
+            price_score * 0.20 +
+            real_word_ratio * 0.20
+        )
+        
+        return score
+        
     except Exception:
         return 0.0
 
@@ -224,11 +271,12 @@ def probe_best_rotation_with_scores(img: Image.Image) -> Tuple[int, Dict[int, fl
         thumb.thumbnail((1200, 1200))
         score = _quick_score(thumb)
         scores[int(deg)] = float(score)
+        print(f"[OrientationProbe] rotation={deg}° score={score:.4f}")
         if score > best_score:
             best_deg, best_score = int(deg), float(score)
 
+    print(f"[OrientationProbe] SELECTED rotation={best_deg}° (score={best_score:.4f})")
     return int(best_deg), scores
-
 
 def probe_best_rotation(img: Image.Image) -> int:
     """
@@ -265,18 +313,21 @@ def normalize_orientation_with_meta(img: Image.Image) -> Tuple[Image.Image, int,
     except Exception:
         meta["exif_applied"] = False
 
-    # Step 2: OSD
-    osd_deg = detect_orientation_osd(step1)
-    meta["osd_degrees"] = osd_deg
+    # Step 2: OSD (disabled — unreliable for dense menus, probe is better)
+    # osd_deg = detect_orientation_osd(step1)
+    # meta["osd_degrees"] = osd_deg
+    osd_deg = None
+    meta["osd_degrees"] = None
 
-    if osd_deg is not None:
-        deg = int(osd_deg)
-        meta["method"] = "osd"
-        meta["degrees_applied"] = int(deg or 0)
-        upright = step1.rotate(-deg, expand=True) if deg else step1
-        return upright, int(deg or 0), meta
+    # Skip OSD trust — always use probe for menu images
+    # if osd_deg is not None:
+    #     deg = int(osd_deg)
+    #     meta["method"] = "osd"
+    #     meta["degrees_applied"] = int(deg or 0)
+    #     upright = step1.rotate(-deg, expand=True) if deg else step1
+    #     return upright, int(deg or 0), meta
 
-    # Step 3: Probe
+    # Step 3: Probe (always runs now)
     probe_deg, scores = probe_best_rotation_with_scores(step1)
     meta["probe_degrees"] = int(probe_deg)
     meta["probe_scores"] = dict(scores)
