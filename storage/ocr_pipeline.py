@@ -118,7 +118,7 @@ OCR_CONFIG = BASE_OCR_CONFIG + " --psm 6"
 ENABLE_VISION_PREPROCESS = os.getenv("OCR_ENABLE_VISION_PREPROCESS", "0") == "1"
 VISION_DEBUG_DIR = os.getenv("OCR_VISION_DEBUG_DIR") or ""
 
-ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "0") == "1"
+ENABLE_MULTIPASS_OCR = os.getenv("OCR_ENABLE_MULTIPASS_OCR", "1") == "1"
 
 # Debug logging (env-controlled; default OFF)
 DEBUG_MULTIPASS_LOGS = os.getenv("OCR_DEBUG_MULTIPASS_LOGS", "0") == "1"
@@ -871,17 +871,22 @@ def fuse_multipass_results(passes: List[Dict[str, Any]]) -> Dict[str, List]:
                 )
 
     # Decide which clusters to keep:
-    # - keep if appears in >=2 passes
-    # - OR keep if single-pass but very high confidence (to avoid dropping rare correct words)
-    SINGLE_PASS_CONF_KEEP = 92.0
+    # - keep if appears in >=2 passes (high confidence in the token)
+    # - OR keep if single-pass with decent confidence (don't drop valid words)
+    # 
+    # Lowered threshold: 92.0 was too aggressive and dropped most valid text.
+    # 70.0 keeps reasonable single-pass tokens while still filtering junk.
+    SINGLE_PASS_CONF_KEEP = 70.0
 
     kept: List[Dict[str, Any]] = []
     for cl in clusters:
         vote_count = len(cl["votes"])
         best = cl["best"]
         if vote_count >= 2:
+            # Multi-pass agreement — high confidence, keep it
             kept.append(best)
         else:
+            # Single-pass token — keep if confidence is decent
             if best["conf"] >= SINGLE_PASS_CONF_KEEP:
                 kept.append(best)
 
@@ -1858,17 +1863,18 @@ def segment_document(
         columns = ocr_utils.split_columns(im_pre, min_gap_px=min_gap_px)
 
         # Option A: if page is very wide and we only found one column, force 2 columns.
-        if width >= 2400 and len(columns) == 1:
-            mid_x = width // 2
-            left_img = im_pre.crop((0, 0, mid_x, height))
-            right_img = im_pre.crop((mid_x, 0, width, height))
-            columns = [left_img, right_img]
-            print(
-                f"[Columns] Page {page_index}: width={width}px, "
-                f"min_gap_px={min_gap_px}, columns={len(columns)} (fallback forced 2-column split)"
-            )
-        else:
-            print(f"[Columns] Page {page_index}: width={width}px, min_gap_px={min_gap_px}, columns={len(columns)}")
+        # DISABLED FOR TESTING — may be slicing through text on multi-column menus
+        # if width >= 2400 and len(columns) == 1:
+        #     mid_x = width // 2
+        #     left_img = im_pre.crop((0, 0, mid_x, height))
+        #     right_img = im_pre.crop((mid_x, 0, width, height))
+        #     columns = [left_img, right_img]
+        #     print(
+        #         f"[Columns] Page {page_index}: width={width}px, "
+        #         f"min_gap_px={min_gap_px}, columns={len(columns)} (fallback forced 2-column split)"
+        #     )
+        # else:
+        print(f"[Columns] Page {page_index}: width={width}px, min_gap_px={min_gap_px}, columns={len(columns)}")
 
         # Collect text blocks for this page across all columns
         page_text_blocks: List[Dict[str, Any]] = []
@@ -1890,12 +1896,15 @@ def segment_document(
 
             col_multipass_meta: Dict[str, Any] = {}
 
+            # Let multipass always try all rotations — its scoring is more accurate
+            # than the orientation probe for finding the best OCR orientation
             rotations_for_this_page: Optional[List[int]] = None
-            if deg_applied != 0:
-                rotations_for_this_page = [0]
-                print(
-                    f"[Orientation] Page {page_index}: deg_applied={int(deg_applied)} -> multipass rotations restricted to [0]"
-                )
+            # DISABLED: Don't restrict rotations based on orientation probe
+            # if deg_applied != 0:
+            #     rotations_for_this_page = [0]
+            #     print(
+            #         f"[Orientation] Page {page_index}: deg_applied={int(deg_applied)} -> multipass rotations restricted to [0]"
+            #     )
 
             data = run_multipass_ocr(
                 col_img,
