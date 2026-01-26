@@ -98,6 +98,8 @@ from .ocr_types import (
     StructuredMenuPayload,
 )  # TypedDicts; Phase-2 + Phase-3/4 compatibility
 
+from .menu_corrections import correct_ocr_text
+
 # -----------------------------
 # Tunable heuristics
 # -----------------------------
@@ -198,6 +200,7 @@ def _clean_token(text: str) -> str:
     t = _ALLOWED_RE.sub(" ", text)
     t = _REPEAT3.sub(r"\1\1", t)
     t = re.sub(r"\s{2,}", " ", t).strip()
+    t = correct_ocr_text(t)
     return t
 
 
