@@ -162,9 +162,13 @@ Achievements:
 
 ---
 
-## 🧠 Phase 7 — Vision & OCR Hardening (ACTIVE PHASE)
+## 🧠 Phase 7 — Vision & OCR Hardening (COMPLETED)
 
-### Day 42–43 — OCR Path Audit & Debug Stabilization
+Phase 7 focused on eliminating OCR unpredictability and hardening the system so results on real-world menus are **deterministic, debuggable, and trustworthy**.
+
+---
+
+### 🧠 Day 42–43 — OCR Path Audit & Debug Stabilization
 - Verified single OCR → Draft path
 - Removed duplicate routes
 - Hardened debug endpoints
@@ -194,34 +198,34 @@ Achievements:
 
 ---
 
-### 🟢 Day 47 — Phase 7 pt.9 COMPLETE
-**Multi-pass OCR improvements verified**
-
-Summary of fixes:
+### 🟢 Day 47 — Phase 7 pt.9: Multi-pass OCR Improvements
 - Lowered fusion threshold (92 → 70)
 - Disabled forced 2-column split
 - Disabled incorrect multipass rotation restriction
-- OCR now reliably recovers text from rotated PDFs
+- OCR reliably recovers text from rotated PDFs
 
-**Result:**  
-Core text extraction is now **robust and trustworthy**. Remaining work is cleanup, not recovery.
+---
+
+### ✅ Day 48 — Phase 7 pt.10: Scoring & Selection (COMPLETE)
+
+- Deterministic winner selection across OCR passes
+- Confidence-weighted fusion finalized
+- Persisted per-job OCR metadata:
+  - `rotation_selected`
+  - `psm_selected`
+  - `quality_score`
+  - rejection flags (non-destructive)
+- OCR output now reflects **true recognition quality**, not orientation or scoring artifacts
+
+**Phase 7 complete.**
 
 ---
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 7 — pt.10: Scoring & Selection (NEXT)**
+➡ **Phase 8 — Semantic Menu Intelligence (UNLOCKED)**
 
-Focus:
-- Deterministic winner selection
-- Confidence fusion
-- Persist:
-  - `rotation_selected`
-  - `psm_selected`
-  - `quality_score`
-  - rejection flags (non-destructive)
-
-This is the final step before OCR accuracy can be judged honestly.
+With OCR extraction now stable and trustworthy, the system is ready to advance into higher-order semantic reasoning.
 
 ---
 
@@ -230,21 +234,23 @@ This is the final step before OCR accuracy can be judged honestly.
 ServLine now has:
 
 - ✅ Unified OCR brain
-- ✅ Stable import flow
-- ✅ Deterministic orientation
-- ✅ Rotation sweep for bad uploads
-- ✅ Full debug artifacts
-- ✅ Price-safe AI cleanup
-- ✅ Structured CSV/XLSX/JSON imports
-- ✅ Human-editable Draft Editor
+- ✅ Stable import flow (PDF/Image/CSV/XLSX/JSON)
+- ✅ Deterministic orientation handling
+- ✅ Rotation sweep for mis-rotated uploads
+- ✅ Deterministic OCR scoring & selection
+- ✅ Full debug artifacts and metadata
+- ✅ Price-safe, category-safe AI cleanup
+- ✅ Structured Draft Editor
+- ✅ Column mapping for structured imports
 
 ---
 
 ## ⏭️ Next Execution Phase
 
-**Phase 7 pt.10**
-- Multipass OCR scoring & selection
-- Confidence-weighted fusion
-- Final OCR accuracy validation on real menus
+**Phase 8 — Semantic Menu Intelligence**
+- Deep dish/ingredient grammar
+- Portion & variant logic
+- Cross-item consistency
+- Higher-confidence category semantics
 
-Once pt.10 is complete, downstream semantic and demo polish work can resume safely.
+With Phase 7 complete, all downstream work can proceed without OCR instability masking real issues.
