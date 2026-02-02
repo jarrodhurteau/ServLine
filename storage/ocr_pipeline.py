@@ -1264,7 +1264,11 @@ def merge_two_column_rows(page_text_blocks: List[Dict[str, Any]]) -> List[Dict[s
     min_x = min(tb["bbox"]["x"] for tb in with_bbox)
     page_width = max_x - min_x
     # Don't allow pairing across the entire page; keep it local-ish.
-    max_horiz_gap = max(60.0, page_width * 0.45)
+    # FIXED: Use much stricter tolerance to prevent cross-column merges
+    # Old: max(60.0, page_width * 0.45) could be 1980px on wide pages!
+    # New: Cap at 150px to keep merges within same column (based on real merge data showing legitimate merges are <100px)
+    max_horiz_gap = min(150.0, max(60.0, page_width * 0.08))
+    print(f"[OCR_DEBUG] merge_two_column_rows: page_width={page_width}px, max_horiz_gap={max_horiz_gap:.0f}px")
 
     def _text_of(tb: Dict[str, Any]) -> str:
         return (tb.get("merged_text") or tb.get("text") or "").strip()
@@ -1337,6 +1341,10 @@ def merge_two_column_rows(page_text_blocks: List[Dict[str, Any]]) -> List[Dict[s
         base_text = _text_of(best_candidate)
         merged = (base_text + " " + txt_price).strip()
         best_candidate["merged_text"] = merged
+
+        # DEBUG: Log successful merges
+        dx_gap = px_left - (best_candidate["bbox"]["x"] + best_candidate["bbox"]["w"])
+        print(f"[OCR_DEBUG] Merged price block (gap={dx_gap:.0f}px): '{txt_price[:30]}' -> '{base_text[:40]}'")
 
         meta = best_candidate.setdefault("meta", {})
         meta["two_column_merged"] = True
@@ -1653,15 +1661,29 @@ def _group_words_to_lines(words: List[Word]) -> List[Line]:
     if not words:
         return []
 
+    # DEBUG: Verify modified version is being called
+    print(f"[OCR_DEBUG] _group_words_to_lines called with {len(words)} words - MODIFIED VERSION with horizontal gap checking")
+
+    # Calculate tolerances based on typical word geometry
     heights = [w["bbox"]["h"] for w in words]
+    widths = [w["bbox"]["w"] for w in words]
     median_h = max(1.0, ocr_utils.median([float(h) for h in heights]))
+    median_w = max(1.0, ocr_utils.median([float(w) for w in widths]))
+
+    # Vertical tolerance: words on the same line should be vertically close
     line_y_tol = 0.6 * median_h
+
+    # Horizontal tolerance: words on the same line should be horizontally connected
+    # Allow up to ~3x median word width as gap (accounts for spaces, some padding)
+    max_horiz_gap = max(40.0, median_w * 3.0)
 
     lines: List[Line] = []
     cur_words: List[Word] = []
+    cur_y_min: Optional[float] = None
+    cur_y_max: Optional[float] = None
 
     def flush_line() -> None:
-        nonlocal lines, cur_words
+        nonlocal lines, cur_words, cur_y_min, cur_y_max
         if not cur_words:
             return
 
@@ -1687,6 +1709,8 @@ def _group_words_to_lines(words: List[Word]) -> List[Line]:
 
         if len(line_text) < 3 or (letters < 2 and digits == 0):
             cur_words.clear()
+            cur_y_min = None
+            cur_y_max = None
             return
 
         lines.append(
@@ -1697,24 +1721,103 @@ def _group_words_to_lines(words: List[Word]) -> List[Line]:
             }
         )
         cur_words.clear()
-
-    last_y: Optional[float] = None
+        cur_y_min = None
+        cur_y_max = None
 
     for w in words:
         wy = w["bbox"]["y"]
-        if last_y is None:
+        wh = w["bbox"]["h"]
+        wx = w["bbox"]["x"]
+        wy_bottom = wy + wh
+
+        if cur_y_min is None:
+            # Start first line
             cur_words = [w]
-            last_y = wy
+            cur_y_min = wy
+            cur_y_max = wy_bottom
             continue
 
-        if abs(wy - last_y) <= line_y_tol:
-            cur_words.append(w)
-            last_y = (last_y + wy) / 2.0
+        # Check if this word fits within the vertical span of the current line
+        # Don't use running average - check against actual min/max to prevent drift
+        potential_y_min = min(cur_y_min, wy)
+        potential_y_max = max(cur_y_max, wy_bottom)
+        potential_span = potential_y_max - potential_y_min
+
+        # CRITICAL: Check height consistency to prevent merging words from different items
+        # Words on the same line should have similar heights (within 2x ratio)
+        # e.g., "Olive"(h=59) + "CHEESY"(h=121) should NOT merge - 2.05x ratio!
+        if cur_words:
+            cur_heights = [ww["bbox"]["h"] for ww in cur_words]
+            avg_height_in_line = sum(cur_heights) / len(cur_heights)
+            height_ratio = max(wh / avg_height_in_line, avg_height_in_line / wh)
+
+            if height_ratio > 2.0:
+                # Word height too different - start new line
+                print(f"[OCR_DEBUG] Word rejected: height_ratio={height_ratio:.2f}x (word_h={wh}, line_avg_h={avg_height_in_line:.0f})")
+                cur_words.sort(key=lambda ww: ww["bbox"]["x"])
+                flush_line()
+                cur_words = [w]
+                cur_y_min = wy
+                cur_y_max = wy_bottom
+                continue
+
+        # Check if adding this word would keep the line height reasonable
+        if potential_span <= (median_h * 1.8):  # Allow 1.8x median height for slight variations
+            # Also check horizontal proximity to prevent merging distant columns
+            if cur_words:
+                # Calculate what the line width would be if we add this word
+                all_x_left = [ww["bbox"]["x"] for ww in cur_words] + [wx]
+                all_x_right = [ww["bbox"]["x"] + ww["bbox"]["w"] for ww in cur_words] + [wx + w["bbox"]["w"]]
+                potential_line_width = max(all_x_right) - min(all_x_left)
+
+                # Also calculate gap to nearest word (left or right)
+                cur_words_sorted = sorted(cur_words, key=lambda ww: ww["bbox"]["x"])
+                # Find nearest neighbor
+                min_gap = float('inf')
+                for cw in cur_words_sorted:
+                    cw_x = cw["bbox"]["x"]
+                    cw_x_end = cw_x + cw["bbox"]["w"]
+                    # Gap from current word to new word
+                    if wx >= cw_x_end:
+                        gap = wx - cw_x_end
+                    else:
+                        gap = cw_x - (wx + w["bbox"]["w"])
+                    if abs(gap) < abs(min_gap):
+                        min_gap = gap
+
+                # Reject if line would be too wide OR gap to nearest word is too large
+                # Use max line width of ~800px as threshold (about 2-3 columns on a typical menu)
+                max_reasonable_line_width = max(800.0, median_w * 20.0)
+
+                if potential_line_width > max_reasonable_line_width or abs(min_gap) > max_horiz_gap:
+                    # Too wide or too distant - start new line
+                    # DEBUG: Log why word was rejected
+                    if potential_line_width > max_reasonable_line_width:
+                        print(f"[OCR_DEBUG] Word rejected: line_width={potential_line_width:.0f}px > max={max_reasonable_line_width:.0f}px")
+                    if abs(min_gap) > max_horiz_gap:
+                        print(f"[OCR_DEBUG] Word rejected: horiz_gap={min_gap:.0f}px > max={max_horiz_gap:.0f}px")
+                    cur_words.sort(key=lambda ww: ww["bbox"]["x"])
+                    flush_line()
+                    cur_words = [w]
+                    cur_y_min = wy
+                    cur_y_max = wy_bottom
+                else:
+                    # Within both vertical and horizontal tolerance - add to line
+                    cur_words.append(w)
+                    cur_y_min = potential_y_min
+                    cur_y_max = potential_y_max
+            else:
+                # Should not happen, but handle gracefully
+                cur_words.append(w)
+                cur_y_min = potential_y_min
+                cur_y_max = potential_y_max
         else:
+            # Vertical span too large - start new line
             cur_words.sort(key=lambda ww: ww["bbox"]["x"])
             flush_line()
             cur_words = [w]
-            last_y = wy
+            cur_y_min = wy
+            cur_y_max = wy_bottom
 
     cur_words.sort(key=lambda ww: ww["bbox"]["x"])
     flush_line()

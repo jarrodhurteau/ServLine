@@ -760,8 +760,21 @@ def _horiz_gap_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) ->
     return 0
 
 
+def _horiz_overlap_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> int:
+    """Calculate horizontal overlap between two bounding boxes in pixels."""
+    # a and b are (x1, y1, x2, y2)
+    overlap = min(a[2], b[2]) - max(a[0], b[0])
+    return max(0, overlap)
+
+
 def _rough_align_xy(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int], tol_px: int) -> bool:
-    """Left/right edge rough alignment within tolerance."""
+    """
+    Left/right edge rough alignment within tolerance.
+
+    IMPORTANT: This function is too permissive for grouping lines into blocks.
+    It allows distant columns to merge if they share one aligned edge.
+    Use _horiz_overlap_xy() for better column separation.
+    """
     left_aligned = abs(a[0] - b[0]) <= tol_px
     right_aligned = abs(a[2] - b[2]) <= tol_px
     return left_aligned or right_aligned
@@ -780,9 +793,8 @@ def _merge_lines_text(lines: List[Line]) -> str:
 def group_text_blocks(
     lines: List[Line],
     *,
-    max_y_gap_px: int = 18,
-    align_tol_px: int = 28,
-    min_vert_overlap_px: int = 6,
+    max_y_gap_px: int = 12,
+    min_vert_overlap_px: int = 8,
 ) -> List[TextBlock]:
     """
     Phase 3 compatibility function expected by storage.ocr_pipeline.segment_document().
@@ -805,6 +817,9 @@ def group_text_blocks(
     """
     if not lines:
         return []
+
+    # DEBUG: Verify modified version is being called
+    print(f"[OCR_DEBUG] group_text_blocks called with {len(lines)} lines - MODIFIED VERSION with horizontal overlap checking", flush=True)
 
     # Sort lines by y, then x for stable grouping
     sorted_lines = sorted(lines, key=lambda l: (int(l["bbox"]["y"]), int(l["bbox"]["x"])))
@@ -834,13 +849,32 @@ def group_text_blocks(
         # Metrics vs current block bbox
         gap_y = b[1] - cur_bbox_xyxy[3]  # how far below current block
         v_ov = _vert_overlap_xy(cur_bbox_xyxy, b)
-        align_ok = _rough_align_xy(cur_bbox_xyxy, b, align_tol_px)
 
+        # Horizontal overlap check: require significant overlap to prevent
+        # merging lines from different columns
+        h_ov = _horiz_overlap_xy(cur_bbox_xyxy, b)
+
+        # Calculate widths for percentage-based overlap requirement
+        cur_width = cur_bbox_xyxy[2] - cur_bbox_xyxy[0]
+        new_width = b[2] - b[0]
+        min_width = min(cur_width, new_width)
+
+        # CRITICAL FIX: Require horizontal overlap to prevent cross-column merges
+        # Old fallback: (align_ok and min_width < 100) was allowing garbage merges in multi-column layouts!
+        # Even short lines from different columns must have some horizontal overlap to merge.
+        min_horiz_overlap = max(30.0, min_width * 0.3)
+        horiz_overlap_ok = h_ov >= min_horiz_overlap
+
+        # Only allow merging if there's horizontal overlap
         can_join = (
             gap_y <= max_y_gap_px
             and v_ov >= min_vert_overlap_px
-            and align_ok
+            and horiz_overlap_ok  # REMOVED dangerous align_ok fallback
         )
+
+        # DEBUG: Log when horizontal overlap prevents merge
+        if gap_y <= max_y_gap_px and v_ov >= min_vert_overlap_px and not horiz_overlap_ok:
+            print(f"[OCR_DEBUG] BLOCKED merge: horiz_overlap={h_ov}px < min={min_horiz_overlap:.1f}px, widths={cur_width},{new_width}", flush=True)
 
         if can_join:
             cur.append(ln)
