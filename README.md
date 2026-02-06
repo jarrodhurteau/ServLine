@@ -251,17 +251,39 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 50 — Phase 8 pt.1: Validation & Planning (COMPLETE)
+
+**Validation Testing (pt.1a):**
+- Tested height ratio fix on 4 real-world menus
+- Results: 1,778 lines processed, 100% clean, 0% garbage
+- 2.0x threshold confirmed optimal — no adjustment needed
+
+| Menu | Lines | Clean | Garbage |
+|------|-------|-------|---------|
+| Pizza Real (baseline) | 814 | 100% | 0 |
+| Rinaldi's Pizza | 832 | 100% | 0 |
+| Parker's PDF Menu | 94 | 100% | 0 |
+| Parker's JPG Menu | 38 | 100% | 0 |
+
+**Phase 8 Planning (pt.1b):**
+- Reviewed all 5 semantic extraction modules
+- Identified improvement priorities across 4 sprints
+- Created detailed planning document
+
+**Artifacts Created:**
+- [test_height_ratio_validation.py](test_height_ratio_validation.py) — Reusable validation script
+- [docs/day50_validation_results.md](docs/day50_validation_results.md) — Full validation results
+- [docs/phase8_planning.md](docs/phase8_planning.md) — Phase 8 implementation plan
+
+**Day 50 complete. Phase 8 implementation begins Day 51.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 7 Complete — OCR Hardening Finalized**
+➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS)**
 
-All critical OCR grouping issues resolved. The system now correctly:
-- Handles orientation normalization
-- Performs rotation sweep with quality-based selection
-- Prevents cross-item word merging via height consistency validation
-- Produces reliable, structured text extraction from real-world menus
-
-Next phase can proceed without OCR instability.
+Phase 7 OCR hardening validated. Now advancing into semantic reasoning.
 
 ---
 
@@ -274,6 +296,7 @@ ServLine now has:
 - ✅ Deterministic orientation handling
 - ✅ Rotation sweep for mis-rotated uploads
 - ✅ Deterministic OCR scoring & selection
+- ✅ Height-ratio line grouping (validated)
 - ✅ Full debug artifacts and metadata
 - ✅ Price-safe, category-safe AI cleanup
 - ✅ Structured Draft Editor
@@ -281,20 +304,28 @@ ServLine now has:
 
 ---
 
-## ⏭️ Next Execution Phase
+## ⏭️ Phase 8 — Semantic Menu Intelligence
 
-**Phase 8 — Semantic Menu Intelligence**
+With OCR extraction stable and validated, Phase 8 focuses on semantic understanding:
 
-With Phase 7 complete (including the critical line grouping fix on Day 49), OCR extraction is now stable and trustworthy. Ready to advance into higher-order semantic reasoning:
+### Sprint 8.1 — Core Grammar & Structure (Days 51-55)
+- Menu item grammar parser
+- Enhanced long-name parsing
+- Item component detection (base, toppings, modifiers)
 
-- **Deep dish/ingredient grammar** — Understand menu item structure and components
-- **Portion & variant logic** — Better size/variant detection and normalization
-- **Cross-item consistency** — Validate and normalize pricing, categories across items
-- **Higher-confidence category semantics** — Improve category inference and hierarchy
+### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
+- Portion detection (half, whole, family, party)
+- Expanded crust/size vocabulary
+- Variant price validation (S < M < L)
 
-**Immediate Next Steps:**
-1. Test OCR extraction on additional real-world menus to validate height ratio fix
-2. Monitor for any edge cases where height consistency check may be too strict/lenient
-3. Begin Phase 8 planning — identify specific semantic improvements needed
+### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
+- Price consistency checks across similar items
+- Category consistency validation
+- Duplicate detection with price conflicts
 
-All downstream work can now proceed without OCR instability masking real issues. The foundation is solid.
+### Sprint 8.4 — Semantic Confidence (Days 66-70)
+- Geometric heading detection from OCR blocks
+- Phrase-level category matching
+- Multi-signal confidence scoring
+
+**Next Step:** Day 51 — Begin menu item grammar parser

@@ -1,0 +1,208 @@
+================================================================================
+                         SERVLINE DEVELOPMENT ROADMAP
+================================================================================
+
+Last Updated: Day 50 (February 6, 2026)
+
+================================================================================
+PROJECT MISSION
+================================================================================
+
+Upload a real restaurant menu -> accurately parsed -> editable draft -> POS-ready export
+No manual re-entry. No desktop dependency. No OCR surprises.
+
+Target Buyer: POS companies (Square, Toast, etc.)
+
+================================================================================
+COMPLETED PHASES
+================================================================================
+
+[x] Phase 1-2: Portal & Data Model (Days 1-14)
+    - Core Flask UI
+    - Database schema
+    - Draft lifecycle
+    - Exports & error handling
+
+[x] Phase 3: Semantic Reconstruction (Days 23-25)
+    - Rotation preview
+    - Category inference
+    - Two-column merge
+    - Variant detection
+
+[x] Phase 4: Structural OCR System (Days 26-31)
+    - Semantic block understanding
+    - Multi-line merging
+    - Category hierarchy v2
+    - Price Integrity Engine v2
+
+[x] Phase 5: AI Text Surgeon (Days 32-36)
+    - Non-hallucinating cleanup
+    - Ingredient smoothing
+    - Price/category protection
+
+[x] Phase 6: Structured Imports (Days 37-41)
+    - CSV/XLSX/JSON parsing
+    - Column Mapping UI
+    - Unified import flow
+
+[x] Phase 7: Vision & OCR Hardening (Days 42-49)
+    - Deterministic orientation
+    - Rotation sweep (0/90/180/270)
+    - Height-ratio line grouping
+    - Quality-based selection
+    - VALIDATED Day 50: 100% clean extraction on 4 menus
+
+================================================================================
+CURRENT PHASE: Phase 8 — Semantic Menu Intelligence
+================================================================================
+
+Status: IN PROGRESS (Starting Day 51)
+
+Goal: Improve semantic understanding of menu content now that OCR is stable.
+
+Sprint 8.1 — Core Grammar & Structure (Days 51-55)
+--------------------------------------------------
+[ ] Create menu item grammar parser
+[ ] Identify item components: base, toppings, modifiers, sizes
+[ ] Handle compound items ("Meat Lovers with extra cheese")
+[ ] Improve long-name split heuristics
+[ ] Detect natural break points (size, price, description start)
+
+Sprint 8.2 — Variant & Portion Logic (Days 56-60)
+-------------------------------------------------
+[ ] Add portion keywords (half, whole, family, party, slice)
+[ ] Expand pizza crust types (pan, hand-tossed, brooklyn, sicilian)
+[ ] Support wing count variations (6pc, 12pc, 24pc, 50pc)
+[ ] Implement size -> price ordering checks
+[ ] Flag inverted price progressions
+
+Sprint 8.3 — Cross-Item Consistency (Days 61-65)
+------------------------------------------------
+[ ] Validate similar items have similar prices
+[ ] Detect category outliers (cheap pizza, expensive soda)
+[ ] Flag suspicious duplicates with different prices
+[ ] Ensure similar items share categories
+[ ] Improve neighbor-based category smoothing
+
+Sprint 8.4 — Semantic Confidence (Days 66-70)
+---------------------------------------------
+[ ] Use OCR block heights for heading detection
+[ ] Implement section break detection via gaps
+[ ] Promote large-font blocks to category headings
+[ ] Add phrase-level keyword matching
+[ ] Implement multi-signal category scoring
+[ ] Add confidence tiers (high/medium/low/unknown)
+
+Success Metrics:
+- Category accuracy: 75% -> 90%+
+- Variant detection: 60% -> 85%+
+- Price validation: 40% -> 80%+
+- Heading detection: 0% -> 70%+
+
+================================================================================
+FUTURE PHASES (Tentative)
+================================================================================
+
+Phase 9 — Export & Integration (Days 71-80)
+-------------------------------------------
+[ ] POS-specific export formats (Square, Toast, Clover)
+[ ] API endpoints for third-party integration
+[ ] Webhook support for menu updates
+[ ] Bulk export capabilities
+[ ] Export validation and preview
+
+Phase 10 — Multi-Menu & Versioning (Days 81-90)
+-----------------------------------------------
+[ ] Multiple menu support per restaurant
+[ ] Menu versioning and history
+[ ] Diff view between versions
+[ ] Seasonal menu management
+[ ] Menu scheduling (breakfast/lunch/dinner)
+
+Phase 11 — Advanced AI Features (Days 91-100)
+---------------------------------------------
+[ ] Allergen detection and tagging
+[ ] Nutritional estimation
+[ ] Menu item similarity detection
+[ ] Smart category suggestions
+[ ] Description generation assistance
+
+Phase 12 — Production Hardening (Days 101-110)
+----------------------------------------------
+[ ] Performance optimization
+[ ] Caching layer
+[ ] Rate limiting
+[ ] Error recovery and retry logic
+[ ] Monitoring and alerting
+[ ] Load testing
+
+Phase 13 — User Experience Polish (Days 111-120)
+------------------------------------------------
+[ ] Drag-and-drop menu reordering
+[ ] Inline editing improvements
+[ ] Keyboard shortcuts
+[ ] Mobile-responsive editor
+[ ] Undo/redo functionality
+
+================================================================================
+LONG-TERM VISION
+================================================================================
+
+Year 1 Goals:
+- 95%+ accuracy on standard pizza/Italian menus
+- Support for 5+ POS export formats
+- < 2 minute processing time for typical menu
+- Zero manual intervention for clean menus
+
+Year 2 Goals:
+- Expand to all restaurant types (Asian, Mexican, American, etc.)
+- Real-time menu sync with POS systems
+- Multi-language menu support
+- White-label solution for POS vendors
+
+================================================================================
+KEY PRINCIPLES
+================================================================================
+
+1. ONE BRAIN ARCHITECTURE
+   - All OCR/AI logic in /storage
+   - No duplicate pipelines
+   - Single source of truth
+
+2. DETERMINISTIC PROCESSING
+   - Same input = same output
+   - Full debug artifacts
+   - Auditable decisions
+
+3. SAFE AI
+   - Never hallucinate prices
+   - Never invent categories
+   - Preserve original when uncertain
+
+4. INCREMENTAL PROGRESS
+   - Daily commits with verified progress
+   - Each phase builds on previous
+   - No skipping validation
+
+================================================================================
+DAILY LOG REFERENCE
+================================================================================
+
+Day 50: Validation & Phase 8 Planning (TODAY)
+Day 49: Height-ratio line grouping fix
+Day 48: Deterministic OCR scoring
+Day 47: Multi-pass OCR improvements
+Day 46: Rotation sweep wiring
+Day 45: Orientation enforcement
+Day 44: Maintenance & diagnosis
+Day 43: OCR path audit
+Day 42: Debug stabilization
+Days 37-41: Phase 6 (Structured Imports)
+Days 32-36: Phase 5 (AI Text Surgeon)
+Days 26-31: Phase 4 (Structural OCR)
+Days 23-25: Phase 3 (Semantic Reconstruction)
+Days 20-22: Phase A (AI Cleanup)
+Days 16-19: OCR Infrastructure
+Days 1-14: Portal & Data Model
+
+================================================================================
