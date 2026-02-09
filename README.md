@@ -374,11 +374,54 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 53 — Sprint 8.1: Multi-Menu Grammar Testing & Edge Case Hardening (COMPLETE)
+
+**Multi-Menu Grammar Testing** (`uploads/3d7419be_real_pizza_menu.ocr_used_psm3.txt` — 244 lines):
+- Full restaurant menu: pizza, calzones, appetizers, wings, burgers, sandwiches, wraps
+- 100% classification rate (single-pass and multi-pass)
+- 23 heading-vs-item ambiguities resolved by contextual pass
+
+**Contextual Multi-Pass Classification** (`storage/parsers/menu_grammar.py`):
+- New `classify_menu_lines()` function with 3-pass approach
+- Pass 1: Independent line classification (existing `parse_menu_line`)
+- Pass 2: Neighbor-based heading resolution (heading followed by description → item)
+- Pass 3: Heading cluster detection (runs of 2+ non-section headings → items)
+- Resolves: FRENCH FRIES, CURLY FRIES, ONION RINGS, melts, etc. as items not headings
+
+**Broader Description Detection**:
+- Expanded ingredient vocabulary from 33 to 60+ entries (condiments, proteins, accompaniments)
+- Lowercase-start continuation heuristic for description lines
+- Word limit raised from 8 to 14 for description detection
+
+**Other Enhancements**:
+- Flavor list detection: ALL-CAPS comma-separated lists (HOT, MILD, BBQ...)
+- Option line detection: "Naked or Breaded", "White or Wheat"
+- Post-garble noise cleanup: removes mid-length garble residue and mixed-digit noise
+- W/ and Wi OCR normalization: "Wi CHEESE" → "with CHEESE"
+
+**Test Results** (244 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| Day 53 multi-menu | 86 | 100% |
+| **TOTAL** | **244** | **100%** |
+
+**Artifacts:**
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Updated grammar parser (~810 LOC)
+- [tests/test_day53_multi_menu.py](tests/test_day53_multi_menu.py) — Day 53 test suite (86 cases)
+- [docs/day53_multi_menu.md](docs/day53_multi_menu.md) — Day 53 documentation
+
+**Day 53 complete.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
 ➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS — Sprint 8.1)**
 
-Day 52: Pizza-specific grammar rules working on real OCR output. 100% classification rate on 258-line real menu. All 158 tests passing.
+Day 53: Multi-menu grammar testing complete. Contextual multi-pass classification resolves heading/item ambiguity. 100% classification on both pizza-focused (195 lines) and full-menu (188 lines) OCR. All 244 tests passing.
 
 ---
 
@@ -403,6 +446,10 @@ ServLine now has:
 - ✅ OCR garble stripping — dot-leader noise removal (Phase 8)
 - ✅ Pizza-specific grammar — CAPS split, size headers, topping lists (Phase 8)
 - ✅ Real OCR validation — 100% classification on 258-line menu (Phase 8)
+- ✅ Multi-menu grammar testing — full restaurant menu validated (Phase 8)
+- ✅ Contextual multi-pass classification — heading/item resolution (Phase 8)
+- ✅ Broader ingredient vocabulary — 60+ items for description detection (Phase 8)
+- ✅ Post-garble noise cleanup — mid-length residue removal (Phase 8)
 
 ---
 
@@ -418,8 +465,12 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Real OCR testing — 100% classification (Day 52)
 - ✅ OCR garble stripping (Day 52)
 - ✅ New line types: size_header, topping_list, info_line, price_only (Day 52)
+- ✅ Multi-menu grammar testing — full restaurant coverage (Day 53)
+- ✅ Contextual multi-pass classification (Day 53)
+- ✅ Broader description detection — 60+ ingredients, lowercase heuristic (Day 53)
+- ✅ Post-garble noise cleanup & W/ normalization (Day 53)
 - Item component detection (base, toppings, modifiers)
-- Edge case iteration on additional real menus
+- Multi-column merge detection
 
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
 - ✅ Portion detection — half, whole, family, party (Day 51)
@@ -437,4 +488,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 53 — Edge case iteration, test on additional real menus
+**Next Step:** Day 54 — Item component detection, multi-column merge handling

@@ -1,6 +1,6 @@
 # storage/parsers/menu_grammar.py
 """
-Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-52)
+Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-53)
 
 Parses OCR text lines into structured menu item components:
   - item_name: the core menu item name
@@ -27,6 +27,14 @@ Day 52 additions:
   - Orphaned price-only line detection (Step 1.7)
   - ALL CAPS name + mixed-case description split (Step 5a)
   - Multi-price text stripping enhancement (Step 2)
+
+Day 53 additions:
+  - Broader ingredient vocabulary for description detection
+  - Lowercase-start description continuation heuristic
+  - Expanded info line patterns (flavor lists, option lines, cross-references)
+  - Post-garble short noise cleanup
+  - W/ and Wi OCR normalization
+  - Contextual multi-pass classification (classify_menu_lines)
 """
 
 from __future__ import annotations
@@ -126,6 +134,86 @@ def _strip_ocr_garble(text: str) -> str:
     return cleaned
 
 
+def _strip_short_noise(text: str) -> str:
+    """Remove OCR noise fragments that survive garble stripping.
+
+    Catches:
+    - Isolated 1-3 char non-word tokens (digits/symbols/single letters)
+    - Mid-length (4-11 char) tokens with very high garble char ratios
+    - Triple-repeat 3-char fragments like 'eee', 'sss'
+    Preserves real tokens: prices, '&', 'w/', numbers, known abbreviations.
+    """
+    _KEEP_SHORT = {'&', 'w/', 'or', 'of', 'on', 'in', 'to', 'a', 'no', 'pc'}
+    parts = text.split()
+    cleaned = []
+    for tok in parts:
+        low = tok.lower().rstrip('.,;:!?)')
+        stripped = tok.strip('.,;:!?)')
+
+        # Keep price-like tokens anywhere
+        if _PRICE_RE.match(stripped) or tok.startswith('$'):
+            cleaned.append(tok)
+            continue
+
+        alpha = [c for c in tok if c.isalpha()]
+        alpha_count = len(alpha)
+
+        # Short tokens (< 4 chars)
+        if len(stripped) < 4:
+            # Keep known short words
+            if low in _KEEP_SHORT:
+                cleaned.append(tok)
+                continue
+            # Keep single real digits/numbers (but not "00")
+            digits_only = stripped.strip('.,').isdigit()
+            if digits_only and stripped.strip('.,') not in ('00', '000'):
+                cleaned.append(tok)
+                continue
+            # Drop pure symbol/digit noise
+            if alpha_count == 0:
+                continue
+            # Drop 1-char alpha fragments
+            if alpha_count <= 1 and len(stripped) <= 2:
+                continue
+            # Drop triple-repeat fragments like 'eee'
+            if alpha_count == len(stripped) and len(set(c.lower() for c in alpha)) == 1:
+                continue
+            cleaned.append(tok)
+            continue
+
+        # Mid-length tokens (4-11 chars): check for garble residue
+        if 4 <= len(stripped) <= 11:
+            # Mixed digit/letter noise like "F590", "s0s00", "25150)"
+            if alpha_count > 0 and alpha_count < len(stripped) * 0.4:
+                continue  # Drop mostly-numeric noise with some letters
+            # High garble ratio tokens (nearly all garble chars)
+            if alpha_count >= 3:
+                garble_ratio = sum(1 for c in alpha if c.lower() in _GARBLE_CHARS) / alpha_count
+                if garble_ratio >= 0.85:
+                    unique_ratio = len(set(c.lower() for c in alpha)) / alpha_count
+                    if unique_ratio < 0.65:
+                        continue  # Drop garble residue
+
+        cleaned.append(tok)
+
+    result = ' '.join(cleaned)
+    return result
+
+
+# ── W/ and Wi OCR normalization ─────────────────────
+
+def _normalize_w_slash(text: str) -> str:
+    """Normalize OCR variants of 'w/' (with) — 'W/', 'w/', 'Wi ' → 'with'.
+
+    'W/ FRIES' → 'with FRIES', 'Wi CHEESE' → 'with CHEESE'
+    """
+    # W/ or w/ followed by a word
+    text = re.sub(r'\bW/\s*', 'with ', text, flags=re.IGNORECASE)
+    # 'Wi ' before a consonant word — common OCR misread of 'W/'
+    text = re.sub(r'\bWi\s+(?=[BCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz])', 'with ', text)
+    return text
+
+
 # ── Size / portion patterns ──────────────────────────
 
 _SIZE_WORDS = {
@@ -182,6 +270,29 @@ _SEPARATOR_RE = re.compile(
 
 # ── Heading detection ────────────────────────────────
 
+# Known section heading phrases (module-level for reuse in contextual pass)
+_KNOWN_SECTION_HEADINGS = {
+    "pizza", "pizzas", "specialty pizzas", "gourmet pizzas", "gourmet pizza",
+    "appetizers", "starters", "sides",
+    "salads", "soups", "soup & salad",
+    "sandwiches", "subs", "hoagies", "wraps",
+    "burgers", "hamburgers",
+    "wings", "chicken wings", "buffalo wings", "fresh buffalo wings",
+    "pasta", "pastas", "italian classics",
+    "entrees", "dinner", "lunch",
+    "desserts", "sweets",
+    "beverages", "drinks", "cold drinks", "hot drinks",
+    "calzones", "stromboli", "calzones & stromboli",
+    "seafood", "fish",
+    "kids menu", "children's menu",
+    "specials", "daily specials",
+    "toppings", "extras", "add ons", "add-ons",
+    "club sandwiches", "melt sandwiches",
+    "wraps city", "build your own burger!",
+    "build your own calzone!", "build your own!",
+}
+
+
 def _is_heading(text: str) -> bool:
     """
     Detect if a line is a menu section heading rather than an item.
@@ -214,26 +325,9 @@ def _is_heading(text: str) -> bool:
 
     # Known heading phrases
     lower = stripped.lower()
-    _HEADING_PHRASES = {
-        "pizza", "pizzas", "specialty pizzas", "gourmet pizzas", "gourmet pizza",
-        "appetizers", "starters", "sides",
-        "salads", "soups", "soup & salad",
-        "sandwiches", "subs", "hoagies", "wraps",
-        "burgers", "hamburgers",
-        "wings", "chicken wings", "buffalo wings", "fresh buffalo wings",
-        "pasta", "pastas", "italian classics",
-        "entrees", "dinner", "lunch",
-        "desserts", "sweets",
-        "beverages", "drinks", "cold drinks", "hot drinks",
-        "calzones", "stromboli", "calzones & stromboli",
-        "seafood", "fish",
-        "kids menu", "children's menu",
-        "specials", "daily specials",
-        "toppings", "extras", "add ons", "add-ons",
-        "club sandwiches", "melt sandwiches",
-        "build your own burger!",
-    }
-    if lower in _HEADING_PHRASES:
+    # Strip trailing punctuation for matching
+    lower_clean = re.sub(r'[_!.]+$', '', lower).strip()
+    if lower in _KNOWN_SECTION_HEADINGS or lower_clean in _KNOWN_SECTION_HEADINGS:
         return True
 
     return False
@@ -273,7 +367,25 @@ _TOPPING_LIST_RE = re.compile(
     re.IGNORECASE,
 )
 _INFO_LINE_RE = re.compile(
-    r'^\s*(?:Choice of|All\s+(?:\w+\s+){1,4}(?:come|stuffed|served|include)\b|Served with|Add\s+\$)',
+    r'^\s*(?:'
+    r'Choice of\b'
+    r'|All\s+(?:\w+\s+){1,4}(?:come|stuffed|served|include)\b'
+    r'|Served with\b'
+    r'|Add\s+\$'
+    r'|Add\s+\w+\s+\$'           # "Add Bacon $1 extra"
+    r'|\w+\s+toppings?\s+same\b'  # "Calzone toppings same as pizza"
+    r')',
+    re.IGNORECASE,
+)
+
+# ALL-CAPS comma-delimited flavor/sauce list (e.g., "HOT, MILD, BBQ, HONEY BBQ")
+_FLAVOR_LIST_RE = re.compile(
+    r'^[A-Z][A-Z,;\s&]+$'
+)
+
+# Short option lines: "X or Y" with no price, 2-5 words
+_OPTION_LINE_RE = re.compile(
+    r'^\s*\w+(?:\s+\w+)?\s+or\s+\w+(?:\s+\w+)?\s*$',
     re.IGNORECASE,
 )
 
@@ -287,8 +399,17 @@ def _is_topping_or_info_line(text: str) -> tuple[bool, str]:
     if _INFO_LINE_RE.match(stripped):
         return True, "info_line"
     lower = stripped.lower()
-    if 'toppings' in lower and len(stripped.split()) <= 5 and not _PRICE_RE.search(stripped):
+    if 'toppings' in lower and len(stripped.split()) <= 8 and not _PRICE_RE.search(stripped):
         return True, "topping_list"
+    # ALL-CAPS comma-separated flavor lists (3+ commas, no price)
+    words = stripped.split()
+    if (len(words) >= 3 and _FLAVOR_LIST_RE.match(stripped)
+            and stripped.count(',') >= 2 and not _PRICE_RE.search(stripped)):
+        return True, "info_line"
+    # Short option lines: "Naked or Breaded", "White or Wheat"
+    if (_OPTION_LINE_RE.match(stripped) and len(words) <= 5
+            and not _PRICE_RE.search(stripped)):
+        return True, "info_line"
     return False, ""
 
 
@@ -365,8 +486,9 @@ def _split_caps_name_from_desc(text: str) -> tuple[str, str] | None:
 
 # ── Topping / ingredient detection ───────────────────
 
-# Common pizza/Italian toppings for recognizing description content
+# Common restaurant ingredients for recognizing description/continuation content
 _COMMON_TOPPINGS = {
+    # Pizza toppings
     "pepperoni", "sausage", "mushroom", "mushrooms", "onion", "onions",
     "pepper", "peppers", "green pepper", "green peppers",
     "olive", "olives", "black olive", "black olives",
@@ -374,11 +496,25 @@ _COMMON_TOPPINGS = {
     "pineapple", "jalapeno", "jalapenos", "banana pepper", "banana peppers",
     "tomato", "tomatoes", "spinach", "broccoli", "artichoke",
     "garlic", "basil", "oregano",
-    "mozzarella", "ricotta", "provolone", "parmesan", "cheddar", "feta",
-    "chicken", "steak", "philly steak", "grilled chicken",
     "anchovies", "shrimp", "clam", "clams",
-    "roasted red pepper", "sun dried tomato", "fresh mozzarella",
-    "buffalo chicken", "bbq chicken",
+    "roasted red pepper", "sun dried tomato",
+    "eggplant",
+    # Cheese
+    "mozzarella", "ricotta", "provolone", "parmesan", "cheddar", "feta",
+    "american cheese", "swiss", "blue cheese", "fresh mozzarella",
+    # Proteins
+    "chicken", "steak", "philly steak", "grilled chicken",
+    "buffalo chicken", "bbq chicken", "hamburger", "ground beef",
+    "turkey", "roast beef", "tuna", "corned beef", "gyro",
+    # Condiments / sauces
+    "ranch", "mayo", "mayonnaise", "mustard", "ketchup", "hot sauce",
+    "bbq sauce", "marinara", "alfredo sauce", "pesto sauce",
+    "ranch dressing", "sour cream", "salsa", "tzatziki",
+    "russian dressing", "caesar dressing", "thousand island",
+    "blue cheese base",
+    # Sides / accompaniments
+    "lettuce", "pickles", "coleslaw", "french fries", "chips",
+    "avocado", "beans", "sauerkraut",
 }
 
 
@@ -406,10 +542,16 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
 
     working = text.strip()
 
+    # ── Step 0.3: Normalize W/ and Wi OCR artifacts ──
+    working = _normalize_w_slash(working)
+
     # ── Step 0.5: Strip OCR dot-leader garble ──
     cleaned = _strip_ocr_garble(working)
     if cleaned != working:
         working = cleaned
+
+    # ── Step 0.6: Strip short noise residue ──
+    working = _strip_short_noise(working)
 
     # ── Step 0.7: Topping list / info line detection ──
     # (before heading detection so "PIZZA & CALZONE TOPPINGS" → topping_list)
@@ -520,10 +662,22 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         return result
 
     # No explicit separator — check if the line is a description-only fragment
-    if not prices and _has_topping_content(text_no_price) and len(text_no_price.split()) <= 8:
+    tnp_words = text_no_price.split()
+    if not prices and _has_topping_content(text_no_price) and len(tnp_words) <= 14:
         result.description = text_no_price
         result.line_type = "description_only"
         result.confidence = 0.60
+        return result
+
+    # Lowercase-start continuation: lines starting lowercase with commas or "and"
+    # and no price are almost always description continuations
+    if (not prices and tnp_words
+            and tnp_words[0][0:1].islower()
+            and (',' in text_no_price or ' and ' in text_no_price.lower())
+            and len(tnp_words) <= 14):
+        result.description = text_no_price
+        result.line_type = "description_only"
+        result.confidence = 0.58
         return result
 
     # Check for modifier-only lines ("Add toppings $1.50 each")
@@ -639,6 +793,104 @@ def parse_menu_block(text: str) -> ParsedMenuItem:
     result.confidence = min(0.95, 0.40 + signals * 0.15)
 
     return result
+
+
+# ── Contextual multi-pass classification ─────────────
+
+def _is_known_section_heading(name: str) -> bool:
+    """Check if a heading name matches a known section heading."""
+    lower = name.strip().lower()
+    clean = re.sub(r'[_!.]+$', '', lower).strip()
+    return lower in _KNOWN_SECTION_HEADINGS or clean in _KNOWN_SECTION_HEADINGS
+
+
+def classify_menu_lines(lines: List[str]) -> List[ParsedMenuItem]:
+    """
+    Classify a sequence of menu lines with contextual awareness.
+
+    Multi-pass approach:
+      1. First pass: classify each line independently via parse_menu_line
+      2. Second pass: resolve heading-vs-item using neighbor context
+      3. Third pass: resolve heading clusters (runs of non-section headings)
+
+    Returns list of ParsedMenuItem (same length as input, including blanks).
+    """
+    # First pass: independent classification
+    results = [parse_menu_line(line) for line in lines]
+    n = len(results)
+
+    def _get_neighbor_type(start: int, direction: int) -> Optional[str]:
+        """Find the line_type of the nearest non-empty, non-unknown neighbor."""
+        for j in range(start, max(-1, start + direction * 3) if direction < 0
+                       else min(n, start + direction * 3), direction):
+            if 0 <= j < n and results[j].raw_text.strip() and results[j].line_type != "unknown":
+                return results[j].line_type
+        return None
+
+    # Second pass: neighbor-based heading resolution
+    for i in range(n):
+        r = results[i]
+        if r.line_type != "heading":
+            continue
+        if _is_known_section_heading(r.item_name):
+            continue
+
+        next_type = _get_neighbor_type(i + 1, 1)
+        prev_type = _get_neighbor_type(i - 1, -1)
+
+        # If followed by description_only or price_only → item with split content
+        if next_type in ("description_only", "price_only"):
+            r.line_type = "menu_item"
+            r.confidence = 0.60
+
+        # If sandwiched between items/descriptions → likely an item
+        if (r.line_type == "heading"
+                and prev_type in ("menu_item", "description_only")
+                and next_type in ("menu_item", "description_only", "price_only")):
+            r.line_type = "menu_item"
+            r.confidence = 0.55
+
+    # Third pass: heading cluster resolution
+    # If 2+ consecutive non-empty lines are all "heading" and none are known
+    # section headings, they're almost certainly menu items (like a list of
+    # appetizers or melts without prices).
+    # Clusters are broken at blank lines and at known section headings.
+    i = 0
+    while i < n:
+        if results[i].line_type != "heading" or not results[i].raw_text.strip():
+            i += 1
+            continue
+        # Don't start a cluster from a known section heading
+        if _is_known_section_heading(results[i].item_name):
+            i += 1
+            continue
+
+        # Collect the run of consecutive headings
+        cluster = [i]
+        j = i + 1
+        while j < n:
+            # Blank lines break the cluster
+            if not results[j].raw_text.strip():
+                break
+            # Known section heading terminates the cluster
+            if (results[j].line_type == "heading"
+                    and _is_known_section_heading(results[j].item_name)):
+                break
+            if results[j].line_type == "heading":
+                cluster.append(j)
+                j += 1
+            else:
+                break
+
+        # If 2+ headings in a cluster → reclassify as menu items
+        if len(cluster) >= 2:
+            for k in cluster:
+                results[k].line_type = "menu_item"
+                results[k].confidence = 0.52
+
+        i = j if j > i + 1 else i + 1
+
+    return results
 
 
 # ── Batch helper ─────────────────────────────────────
