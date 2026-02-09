@@ -72,6 +72,127 @@ CATEGORY_KEYWORDS: Dict[str, Sequence[str]] = {
     ],
 }
 
+# Phase 8: Multi-word phrase patterns that score higher than single keywords.
+# These avoid false positives from single-word matches (e.g., "buffalo" alone
+# could be Wings OR Pizza; "buffalo chicken pizza" is clearly Pizza).
+# Each entry is (phrase, weight) where weight multiplies the base keyword score.
+CATEGORY_PHRASES: Dict[str, Sequence[Tuple[str, int]]] = {
+    "Pizza": [
+        ("cheese pizza", 3),
+        ("pepperoni pizza", 3),
+        ("meat lovers", 2),
+        ("meat lover", 2),
+        ("veggie pizza", 3),
+        ("supreme pizza", 3),
+        ("hawaiian pizza", 3),
+        ("bbq chicken pizza", 4),
+        ("buffalo chicken pizza", 4),
+        ("white pizza", 3),
+        ("sicilian pizza", 3),
+        ("neapolitan pizza", 3),
+        ("thin crust", 2),
+        ("deep dish", 2),
+        ("stuffed crust", 2),
+        ("ny style", 2),
+        ("new york style", 2),
+        ("build your own pizza", 3),
+        ("pizza by the slice", 3),
+        ("specialty pizza", 3),
+        ("gourmet pizza", 3),
+    ],
+    "Calzones / Stromboli": [
+        ("stuffed calzone", 3),
+        ("baked roll", 2),
+        ("stromboli roll", 3),
+    ],
+    "Subs / Sandwiches": [
+        ("cold sub", 3),
+        ("hot sub", 3),
+        ("italian sub", 3),
+        ("turkey sub", 3),
+        ("club sandwich", 3),
+        ("grilled wrap", 3),
+        ("chicken wrap", 3),
+        ("philly cheesesteak", 4),
+        ("cheesesteak sub", 4),
+        ("chicken parm sub", 4),
+        ("meatball sub", 4),
+    ],
+    "Burgers": [
+        ("bacon cheeseburger", 3),
+        ("double burger", 3),
+        ("classic burger", 3),
+        ("veggie burger", 3),
+        ("mushroom burger", 3),
+    ],
+    "Wings": [
+        ("chicken wings", 4),
+        ("buffalo wings", 4),
+        ("boneless wings", 4),
+        ("bone-in wings", 4),
+        ("wing dings", 3),
+        ("jumbo wings", 3),
+        ("honey bbq wings", 4),
+        ("garlic parm wings", 4),
+    ],
+    "Salads": [
+        ("caesar salad", 3),
+        ("garden salad", 3),
+        ("chef salad", 3),
+        ("greek salad", 3),
+        ("house salad", 3),
+        ("grilled chicken salad", 4),
+        ("tuna salad", 3),
+        ("antipasto salad", 3),
+        ("side salad", 3),
+    ],
+    "Pasta": [
+        ("baked ziti", 3),
+        ("chicken parm", 3),
+        ("chicken parmesan", 3),
+        ("eggplant parm", 3),
+        ("penne vodka", 3),
+        ("fettuccine alfredo", 3),
+        ("spaghetti and meatballs", 4),
+        ("stuffed shells", 3),
+        ("manicotti", 2),
+        ("pasta dinner", 3),
+    ],
+    "Sides / Appetizers": [
+        ("french fries", 3),
+        ("onion rings", 3),
+        ("mozzarella sticks", 4),
+        ("garlic knots", 3),
+        ("garlic bread", 3),
+        ("cheese fries", 3),
+        ("loaded fries", 3),
+        ("fried calamari", 3),
+        ("chicken fingers", 3),
+        ("chicken tenders", 3),
+        ("jalapeno poppers", 3),
+        ("potato skins", 3),
+    ],
+    "Desserts": [
+        ("ice cream", 3),
+        ("chocolate cake", 3),
+        ("lava cake", 3),
+        ("fried oreos", 3),
+        ("cheese cake", 3),
+        ("new york cheesecake", 4),
+        ("chocolate brownie", 3),
+    ],
+    "Beverages": [
+        ("2 liter", 4),
+        ("2-liter", 4),
+        ("fountain drink", 3),
+        ("bottled water", 3),
+        ("iced tea", 3),
+        ("hot chocolate", 3),
+        ("root beer", 3),
+        ("mountain dew", 3),
+    ],
+}
+
 # Very rough price bands per category (USD cents).
 CATEGORY_PRICE_BANDS: Dict[str, Tuple[int, int]] = {
     # (min_cents, max_cents)
@@ -110,6 +231,23 @@ def _keyword_score(text: str, category: str) -> int:
     for kw in CATEGORY_KEYWORDS.get(category, ()):
         if kw in text:
             score += 1
+    return score
+
+
+def _phrase_score(text: str, category: str) -> int:
+    """
+    Phase 8: Multi-word phrase scoring.
+
+    Phrases score higher than single keywords because they carry stronger
+    semantic signal (e.g., "buffalo chicken pizza" > "buffalo" alone).
+    Returns the sum of weights for all matching phrases.
+    """
+    if not text:
+        return 0
+    score = 0
+    for phrase, weight in CATEGORY_PHRASES.get(category, ()):
+        if phrase in text:
+            score += weight
     return score
 
 
@@ -195,6 +333,10 @@ def infer_category_for_text(
 
         # Description is weaker.
         score += _keyword_score(desc_norm, category) * 2
+
+        # Phase 8: phrase-level matching (stronger signal than single keywords).
+        score += _phrase_score(name_norm, category) * 3
+        score += _phrase_score(desc_norm, category) * 1
 
         # Price band (small influence).
         score += _price_band_score(price_cents, category)

@@ -57,6 +57,19 @@ _SIZE_WORD_MAP = {
     "extra large": "XL",
     "xl": "XL",
     "xxl": "XXL",
+    # Phase 8: portion keywords
+    "half": "Half",
+    "whole": "Whole",
+    "slice": "Slice",
+    "personal": "Personal",
+    "family": "Family",
+    "party": "Party",
+    "party size": "Party",
+    "family size": "Family",
+    "individual": "Personal",
+    "single": "Single",
+    "double": "Double",
+    "triple": "Triple",
 }
 
 # Wing counts / piece counts, etc.
@@ -68,13 +81,33 @@ _FLAVOR_TOKENS = {
     "garlic", "parm", "parmesan", "garlic parm", "teriyaki",
     "buffalo", "spicy", "sweet", "sour", "honey mustard",
     "lemon", "pepper", "lemon pepper",
+    # Phase 8: expanded wing/sauce flavors
+    "mango habanero", "carolina gold", "thai chili", "sweet chili",
+    "old bay", "cajun", "ranch", "blue cheese",
+    "asian zing", "korean bbq", "sriracha",
+    "plain", "naked", "original",
 }
 
 # Style / preparation – crust types, bone-in vs boneless, etc.
 _STYLE_TOKENS = {
     "bone-in", "bone in", "boneless",
-    "thin", "thin crust", "thick", "deep dish", "stuffed crust",
+    "thin", "thin crust", "thick", "thick crust", "deep dish", "stuffed crust",
     "white", "red", "red sauce", "alfredo", "pesto",
+    # Phase 8: expanded pizza crust vocabulary
+    "pan", "pan crust",
+    "hand tossed", "hand-tossed",
+    "brooklyn", "brooklyn style",
+    "sicilian", "sicilian style",
+    "neapolitan", "neapolitan style",
+    "detroit", "detroit style",
+    "new york", "ny style",
+    "flatbread",
+    "gluten free", "gluten-free", "cauliflower crust",
+    "crispy", "extra crispy",
+    # Phase 8: wing preparation styles
+    "fried", "grilled", "baked",
+    "breaded", "naked",
+    "dry rub", "tossed",
 }
 
 
