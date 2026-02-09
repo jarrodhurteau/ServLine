@@ -279,11 +279,62 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 51 — Sprint 8.1 Start: Grammar Parser & Semantic Expansion (COMPLETE)
+
+**Menu Item Grammar Parser** (`storage/parsers/menu_grammar.py` — new):
+- Decomposes OCR text lines into structured components: name, description, modifiers, sizes, prices
+- Classifies lines as `menu_item`, `heading`, `description_only`, `modifier_line`, or `unknown`
+- Pizza-first grammar with heading detection, separator parsing, and topping recognition
+- Supports single-line (`parse_menu_line`) and multi-line block (`parse_menu_block`) parsing
+
+**Phrase-Level Category Keywords** (`storage/category_infer.py`):
+- Added 90+ weighted multi-word phrase patterns across all 10 categories
+- Resolves ambiguity: "buffalo chicken pizza" now correctly scores as Pizza (not Wings)
+- Phrases score 3-4x higher than single keywords for stronger semantic signal
+
+**Expanded Variant Vocabulary** (`storage/variant_engine.py`):
+- Portions: half, whole, slice, personal, family, party, single, double, triple
+- Pizza crusts: pan, hand-tossed, brooklyn, sicilian, detroit, flatbread, cauliflower, gluten-free
+- Wing prep: fried, grilled, baked, breaded, naked, dry rub, tossed
+- Flavors: mango habanero, sweet chili, sriracha, korean bbq, carolina gold, thai chili
+
+**Improved Long-Name Splitting** (`storage/ai_cleanup.py`):
+- Parenthetical extraction runs before length check (always a strong split signal)
+- Semantic break phrases: "topped with", "served with", "comes with", "includes"
+- "with" connector splitting: "Supreme Pizza with pepperoni sausage..." splits at "with"
+- Token fallback threshold lowered from 10 to 8 words for better menu coverage
+
+**Baseline Metrics** (92 test cases):
+
+| Category | Tests | Pass Rate |
+|----------|-------|-----------|
+| Grammar parse | 18 | 100% |
+| Category inference | 26 | 100% |
+| Variant detection | 42 | 100% |
+| Long-name rescue | 6 | 100% |
+| **TOTAL** | **92** | **100%** |
+
+**Live Site Validation** (Job #187 — pizza_real.pdf):
+- Full pipeline: upload → OCR → rotation sweep (270° selected) → multipass fusion (1174 tokens) → draft
+- 22 items extracted and categorized (Pizza 7, Burgers & Sandwiches 10, Beverages 1, Wings, Salads)
+- Height ratio + horizontal gap checks actively preventing garbage merges
+- Low-confidence flagging working (1 item flagged < 65/100)
+- AI Cleanup applied to all 22 items
+
+**Artifacts:**
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Grammar parser (~310 LOC)
+- [tests/test_phase8_baseline.py](tests/test_phase8_baseline.py) — Baseline metrics test (92 cases)
+- [docs/day51_sprint8_1_start.md](docs/day51_sprint8_1_start.md) — Day 51 documentation
+
+**Day 51 complete.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS)**
+➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS — Sprint 8.1)**
 
-Phase 7 OCR hardening validated. Now advancing into semantic reasoning.
+Day 51: Grammar parser created, phrase keywords active, variant vocabulary expanded. All 92 baseline tests passing. Live site validated.
 
 ---
 
@@ -301,6 +352,10 @@ ServLine now has:
 - ✅ Price-safe, category-safe AI cleanup
 - ✅ Structured Draft Editor
 - ✅ Column mapping for structured imports
+- ✅ Menu item grammar parser (Phase 8)
+- ✅ Phrase-level category keywords (Phase 8)
+- ✅ Expanded variant vocabulary — portions, crusts, flavors (Phase 8)
+- ✅ Semantic long-name splitting (Phase 8)
 
 ---
 
@@ -309,14 +364,17 @@ ServLine now has:
 With OCR extraction stable and validated, Phase 8 focuses on semantic understanding:
 
 ### Sprint 8.1 — Core Grammar & Structure (Days 51-55)
-- Menu item grammar parser
-- Enhanced long-name parsing
+- ✅ Menu item grammar parser (Day 51)
+- ✅ Phrase-level category keywords (Day 51)
+- ✅ Enhanced long-name parsing (Day 51)
 - Item component detection (base, toppings, modifiers)
+- Test grammar on real OCR output, iterate on edge cases
 
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
-- Portion detection (half, whole, family, party)
-- Expanded crust/size vocabulary
+- ✅ Portion detection — half, whole, family, party (Day 51)
+- ✅ Expanded crust/size vocabulary (Day 51)
 - Variant price validation (S < M < L)
+- Combo/meal detection
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - Price consistency checks across similar items
@@ -325,7 +383,7 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - Geometric heading detection from OCR blocks
-- Phrase-level category matching
 - Multi-signal confidence scoring
+- Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 51 — Begin menu item grammar parser
+**Next Step:** Day 52 — Pizza-specific grammar rules, test on real OCR output
