@@ -330,11 +330,55 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 52 — Sprint 8.1: Pizza-Specific Grammar Rules & Real OCR Testing (COMPLETE)
+
+**OCR Dot-Leader Garble Stripping** (`storage/parsers/menu_grammar.py`):
+- Strips Tesseract garble noise from dot leaders: `coseeee`, `ssssvvssseecsscssssssssescstvsesneneeosees`
+- Dual-signal validation (triple repeats + garble char ratio + unique char ratio + length)
+- Real food words preserved: "pepperoni", "mozzarella", "sausage" pass safely
+
+**New Line Type Classifications**:
+- `size_header` — Size grid headers (`10"Mini 12" Sml 16"Lrg Family Size`)
+- `topping_list` — Topping section lines (`MEAT TOPPINGS: Pepperoni - Chicken...`)
+- `info_line` — Informational context (`Choice of Sauce; Red, White, Pesto...`)
+- `price_only` — Orphaned prices (`. 34.75`, `» 34,75`)
+
+**ALL CAPS Name + Mixed-Case Description Split**:
+- Detects dominant gourmet pizza pattern: `MEAT LOVERS Pepperoni, Sausage, Bacon, Ham & Hamburger`
+- Correctly splits name from description at the case boundary
+- Conservative with 1-word abbreviations (BBQ, BLT) — only splits when desc is lowercase or has commas
+
+**Other Enhancements**:
+- Comma-decimal price support (`34,75` → `34.75`)
+- Multi-price text stripping (3-4 prices per line for size grids)
+- Enhanced `parse_menu_block` for new line types
+
+**Test Results** (158 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| **TOTAL** | **158** | **100%** |
+
+**Real OCR Accuracy** (pizza_real_p01.ocr_used_psm3.txt — 258 lines):
+- Classification rate: **100%** (target was 75%)
+- 118 menu items, 31 headings, 4 size headers, 3 topping lists, 5 info lines, 16 orphaned prices
+
+**Artifacts:**
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Updated grammar parser (~610 LOC)
+- [tests/test_day52_pizza_grammar.py](tests/test_day52_pizza_grammar.py) — Day 52 test suite (66 cases)
+- [docs/day52_pizza_grammar.md](docs/day52_pizza_grammar.md) — Day 52 documentation
+
+**Day 52 complete.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
 ➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS — Sprint 8.1)**
 
-Day 51: Grammar parser created, phrase keywords active, variant vocabulary expanded. All 92 baseline tests passing. Live site validated.
+Day 52: Pizza-specific grammar rules working on real OCR output. 100% classification rate on 258-line real menu. All 158 tests passing.
 
 ---
 
@@ -356,6 +400,9 @@ ServLine now has:
 - ✅ Phrase-level category keywords (Phase 8)
 - ✅ Expanded variant vocabulary — portions, crusts, flavors (Phase 8)
 - ✅ Semantic long-name splitting (Phase 8)
+- ✅ OCR garble stripping — dot-leader noise removal (Phase 8)
+- ✅ Pizza-specific grammar — CAPS split, size headers, topping lists (Phase 8)
+- ✅ Real OCR validation — 100% classification on 258-line menu (Phase 8)
 
 ---
 
@@ -367,8 +414,12 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Menu item grammar parser (Day 51)
 - ✅ Phrase-level category keywords (Day 51)
 - ✅ Enhanced long-name parsing (Day 51)
+- ✅ Pizza-specific grammar rules (Day 52)
+- ✅ Real OCR testing — 100% classification (Day 52)
+- ✅ OCR garble stripping (Day 52)
+- ✅ New line types: size_header, topping_list, info_line, price_only (Day 52)
 - Item component detection (base, toppings, modifiers)
-- Test grammar on real OCR output, iterate on edge cases
+- Edge case iteration on additional real menus
 
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
 - ✅ Portion detection — half, whole, family, party (Day 51)
@@ -386,4 +437,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 52 — Pizza-specific grammar rules, test on real OCR output
+**Next Step:** Day 53 — Edge case iteration, test on additional real menus

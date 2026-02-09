@@ -1,6 +1,6 @@
 # storage/parsers/menu_grammar.py
 """
-Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Day 51)
+Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-52)
 
 Parses OCR text lines into structured menu item components:
   - item_name: the core menu item name
@@ -8,7 +8,9 @@ Parses OCR text lines into structured menu item components:
   - modifiers: qualifier phrases ("extra cheese", "no onions", "add bacon")
   - size_mentions: detected size/portion words in the line
   - price_mentions: detected price values in the line
-  - line_type: "menu_item" | "heading" | "modifier_line" | "description_only" | "unknown"
+  - line_type: "menu_item" | "heading" | "size_header" | "topping_list" |
+               "info_line" | "price_only" | "modifier_line" |
+               "description_only" | "unknown"
   - confidence: 0.0–1.0 parse confidence
 
 Design principles:
@@ -16,6 +18,15 @@ Design principles:
   - Pure regex + heuristic, no ML dependencies
   - Non-destructive: returns parsed structure, does not mutate input
   - Composable with existing ai_cleanup / variant_engine / category_infer
+
+Day 52 additions:
+  - OCR dot-leader garble stripping (Step 0.5)
+  - Comma-decimal price support (34,75 → 34.75)
+  - Size grid header detection (Step 1.5)
+  - Topping list / info line detection (Step 1.6)
+  - Orphaned price-only line detection (Step 1.7)
+  - ALL CAPS name + mixed-case description split (Step 5a)
+  - Multi-price text stripping enhancement (Step 2)
 """
 
 from __future__ import annotations
@@ -45,7 +56,7 @@ class ParsedMenuItem:
 _PRICE_RE = re.compile(
     r"""
     \$?\s*                    # optional dollar sign
-    (\d{1,3}\.\d{2})          # digits.cents  (e.g. 12.99)
+    (\d{1,3}[.,]\d{2})        # digits.cents  (e.g. 12.99 or 12,99)
     """,
     re.VERBOSE,
 )
@@ -54,11 +65,65 @@ _PRICE_RE = re.compile(
 _TRAILING_PRICE_RE = re.compile(
     r"""
     [\s.·…]*                  # dot leaders / whitespace before price
-    \$?\s*(\d{1,3}\.\d{2})    # the price
+    \$?\s*(\d{1,3}[.,]\d{2})  # the price
     \s*$                      # end of line
     """,
     re.VERBOSE,
 )
+
+
+def _parse_price(s: str) -> float:
+    """Parse a price string, normalizing comma decimals to dot."""
+    return float(s.replace(",", "."))
+
+
+# ── OCR dot-leader garble detection ─────────────────
+# Tesseract reads dot leaders as garbled lowercase runs like
+# "coseeee", "ssssvvssseecsscssssssssescstvsesneneeosees".
+
+_GARBLE_SPAN_RE = re.compile(r'[a-zA-Z]{5,}')
+_GARBLE_CHARS = set('secrnotvw')
+_TRIPLE_REPEAT_RE = re.compile(r'(.)\1{2,}', re.IGNORECASE)
+
+
+def _is_garble_run(span: str) -> bool:
+    """Return True if the span is OCR dot-leader noise, not a real word."""
+    alpha = [c for c in span if c.isalpha()]
+    if len(alpha) < 5:
+        return False
+
+    has_triple = bool(_TRIPLE_REPEAT_RE.search(span))
+    garble_ratio = sum(1 for c in alpha if c.lower() in _GARBLE_CHARS) / len(alpha)
+    unique_ratio = len(set(c.lower() for c in alpha)) / len(alpha)
+    is_long_run = len(span) >= 12
+
+    # Need at least 2 signals to classify as garble
+    signals = sum([
+        has_triple,
+        garble_ratio >= 0.55,
+        unique_ratio <= 0.45,
+        is_long_run,
+    ])
+    return signals >= 2
+
+
+def _strip_ocr_garble(text: str) -> str:
+    """Remove OCR dot-leader garble from text, preserving real words and prices."""
+    # Strip long dot runs (but preserve single dots in prices)
+    cleaned = re.sub(r'\.{2,}', ' ', text)
+    # Remove garble spans
+    parts: list[str] = []
+    last_end = 0
+    for m in _GARBLE_SPAN_RE.finditer(cleaned):
+        if _is_garble_run(m.group(0)):
+            parts.append(cleaned[last_end:m.start()])
+            parts.append(' ')
+            last_end = m.end()
+    parts.append(cleaned[last_end:])
+    cleaned = ''.join(parts)
+    # Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
 
 
 # ── Size / portion patterns ──────────────────────────
@@ -150,12 +215,12 @@ def _is_heading(text: str) -> bool:
     # Known heading phrases
     lower = stripped.lower()
     _HEADING_PHRASES = {
-        "pizza", "pizzas", "specialty pizzas", "gourmet pizzas",
+        "pizza", "pizzas", "specialty pizzas", "gourmet pizzas", "gourmet pizza",
         "appetizers", "starters", "sides",
         "salads", "soups", "soup & salad",
         "sandwiches", "subs", "hoagies", "wraps",
         "burgers", "hamburgers",
-        "wings", "chicken wings", "buffalo wings",
+        "wings", "chicken wings", "buffalo wings", "fresh buffalo wings",
         "pasta", "pastas", "italian classics",
         "entrees", "dinner", "lunch",
         "desserts", "sweets",
@@ -165,11 +230,137 @@ def _is_heading(text: str) -> bool:
         "kids menu", "children's menu",
         "specials", "daily specials",
         "toppings", "extras", "add ons", "add-ons",
+        "club sandwiches", "melt sandwiches",
+        "build your own burger!",
     }
     if lower in _HEADING_PHRASES:
         return True
 
     return False
+
+
+# ── Size grid header detection ──────────────────────
+
+_SIZE_HEADER_TOKEN_RE = re.compile(
+    r"""
+    \d{1,2}\s*["\u201d°]\s*\w*   |   # 10"Mini, 12"Sml, 16"lrg
+    \b(?:mini|small|sml|sm|medium|med|large|lrg|lg|family|party|personal)\b  |
+    \b\d+\s*(?:slices?|pieces?|pcs?|cuts?)\b
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _is_size_header(text: str) -> bool:
+    """Detect size grid header lines (e.g., '10" Mini  12" Sml  16" Lrg  Family Size')."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    matches = _SIZE_HEADER_TOKEN_RE.findall(stripped)
+    if len(matches) < 2:
+        return False
+    if _PRICE_RE.search(stripped):
+        return False
+    if len(stripped.split()) > 12:
+        return False
+    return True
+
+
+# ── Topping list / info line detection ──────────────
+
+_TOPPING_LIST_RE = re.compile(
+    r'^\s*(?:MEAT|VEGGIE|VEGETABLE|PIZZA|CALZONE)\s+TOPPINGS?\s*:',
+    re.IGNORECASE,
+)
+_INFO_LINE_RE = re.compile(
+    r'^\s*(?:Choice of|All\s+(?:\w+\s+){1,4}(?:come|stuffed|served|include)\b|Served with|Add\s+\$)',
+    re.IGNORECASE,
+)
+
+
+def _is_topping_or_info_line(text: str) -> tuple[bool, str]:
+    """Detect topping list and informational context lines.
+    Returns (is_match, subtype) where subtype is 'topping_list' or 'info_line'."""
+    stripped = text.strip()
+    if _TOPPING_LIST_RE.match(stripped):
+        return True, "topping_list"
+    if _INFO_LINE_RE.match(stripped):
+        return True, "info_line"
+    lower = stripped.lower()
+    if 'toppings' in lower and len(stripped.split()) <= 5 and not _PRICE_RE.search(stripped):
+        return True, "topping_list"
+    return False, ""
+
+
+# ── Price-only / orphaned price line detection ──────
+
+_PRICE_ONLY_RE = re.compile(
+    r'^[\s.\-\u2013\u2014\xbb\xb7,;:$»]*\$?\s*(\d{1,3}[.,]\d{2})\s*$'
+)
+
+
+def _is_price_only_line(text: str) -> float | None:
+    """Detect orphaned price lines. Returns the price value if matched, else None."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    m = _PRICE_ONLY_RE.match(stripped)
+    if m:
+        try:
+            return _parse_price(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+# ── ALL CAPS name + mixed-case description split ────
+
+def _split_caps_name_from_desc(text: str) -> tuple[str, str] | None:
+    """
+    Detect ALL-CAPS-name + mixed-case-description pattern.
+
+    'MEAT LOVERS Pepperoni, Sausage, Bacon' → ('MEAT LOVERS', 'Pepperoni, Sausage, Bacon')
+    Returns (name, description) or None.
+    """
+    words = text.split()
+    if len(words) < 2:
+        return None
+
+    # Find boundary: last consecutive ALL CAPS word
+    caps_end = 0
+    for i, word in enumerate(words):
+        clean = re.sub(r'[^A-Za-z]', '', word)
+        if not clean:
+            # Non-alpha token (& or number) — extend the CAPS run if we're in one
+            if caps_end > 0:
+                caps_end = i + 1
+            continue
+        if clean.isupper() and len(clean) >= 2:
+            caps_end = i + 1
+        else:
+            break
+
+    if caps_end < 1 or caps_end >= len(words):
+        return None
+
+    name_part = ' '.join(words[:caps_end])
+    desc_part = ' '.join(words[caps_end:])
+
+    # Description must have meaningful alpha content
+    desc_alpha = sum(1 for c in desc_part if c.isalpha())
+    if desc_alpha < 3:
+        return None
+
+    # When only 1 CAPS word, be conservative: abbreviations like BBQ, BLT
+    # are often part of the item name ("BBQ Chicken Pizza"), not standalone.
+    # Only split if desc starts lowercase or has early commas (topping list).
+    if caps_end == 1:
+        first_alpha = next((c for c in desc_part if c.isalpha()), '')
+        has_early_comma = ',' in desc_part[:40]
+        if first_alpha.isupper() and not has_early_comma:
+            return None
+
+    return name_part, desc_part
 
 
 # ── Topping / ingredient detection ───────────────────
@@ -215,6 +406,20 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
 
     working = text.strip()
 
+    # ── Step 0.5: Strip OCR dot-leader garble ──
+    cleaned = _strip_ocr_garble(working)
+    if cleaned != working:
+        working = cleaned
+
+    # ── Step 0.7: Topping list / info line detection ──
+    # (before heading detection so "PIZZA & CALZONE TOPPINGS" → topping_list)
+    is_info, info_type = _is_topping_or_info_line(working)
+    if is_info:
+        result.item_name = working
+        result.line_type = info_type
+        result.confidence = 0.75
+        return result
+
     # ── Step 1: Heading detection ──
     if _is_heading(working):
         result.item_name = working
@@ -222,17 +427,44 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         result.confidence = 0.85
         return result
 
+    # ── Step 1.5: Size header detection ──
+    if _is_size_header(working):
+        result.item_name = working
+        result.line_type = "size_header"
+        result.confidence = 0.80
+        for m in _SIZE_WORD_RE.finditer(working):
+            result.size_mentions.append(m.group(1))
+        for m in _NUMERIC_SIZE_RE.finditer(working):
+            result.size_mentions.append(m.group(0))
+        return result
+
+    # ── Step 1.7: Orphaned price-only line detection ──
+    orphan_price = _is_price_only_line(working)
+    if orphan_price is not None:
+        result.price_mentions = [orphan_price]
+        result.line_type = "price_only"
+        result.confidence = 0.70
+        return result
+
     # ── Step 2: Extract prices ──
     prices = []
     for m in _PRICE_RE.finditer(working):
         try:
-            prices.append(float(m.group(1)))
+            prices.append(_parse_price(m.group(1)))
         except ValueError:
             pass
     result.price_mentions = prices
 
-    # Strip trailing price to get the text content
-    text_no_price = _TRAILING_PRICE_RE.sub("", working).strip()
+    # Strip prices from text to get name/description content
+    if len(prices) > 1:
+        # Multiple prices: strip ALL price tokens
+        text_no_price = _PRICE_RE.sub('', working)
+        text_no_price = re.sub(r'[\s$,.\-]+$', '', text_no_price)
+        text_no_price = re.sub(r'\s{2,}', ' ', text_no_price).strip()
+    else:
+        # Single price: just strip trailing price
+        text_no_price = _TRAILING_PRICE_RE.sub("", working).strip()
+
     if not text_no_price:
         text_no_price = working
 
@@ -257,7 +489,6 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         modifiers.append(mod_phrase)
     for m in _MODIFIER_FLAG_RE.finditer(text_no_price):
         flag = m.group(1)
-        # Avoid duplicates with modifier phrases already captured
         if not any(flag.lower() in mod.lower() for mod in modifiers):
             modifiers.append(flag)
     result.modifiers = modifiers
@@ -269,13 +500,24 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         name_part = text_no_price[:sep_match.start()].strip()
         desc_part = text_no_price[sep_match.end():].strip()
 
-        # Validate: name should be short-ish, desc should have content
         if len(name_part.split()) >= 1 and desc_part:
             result.item_name = name_part
             result.description = desc_part
             result.line_type = "menu_item"
             result.confidence = 0.80
             return result
+
+    # ── Step 5a: ALL CAPS name + mixed-case description split ──
+    # If _split_caps_name_from_desc matches, there IS mixed-case content
+    # following the CAPS name, so this is a name+description, not a heading.
+    caps_split = _split_caps_name_from_desc(text_no_price)
+    if caps_split:
+        name_part, desc_part = caps_split
+        result.item_name = name_part
+        result.description = desc_part
+        result.line_type = "menu_item"
+        result.confidence = 0.78
+        return result
 
     # No explicit separator — check if the line is a description-only fragment
     if not prices and _has_topping_content(text_no_price) and len(text_no_price.split()) <= 8:
@@ -298,7 +540,6 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         return result
 
     # Default: treat as menu item with the whole text as the name
-    # Strip size words from the beginning/end to clean the name
     name_text = text_no_price
 
     # Remove leading size word if present (e.g., "Large Cheese Pizza")
@@ -308,7 +549,13 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
 
     result.item_name = name_text if name_text else text_no_price
     result.line_type = "menu_item"
-    result.confidence = 0.65 if prices else 0.45
+    # Multi-price is strong evidence of a real menu item
+    if len(prices) >= 3:
+        result.confidence = 0.80
+    elif prices:
+        result.confidence = 0.65
+    else:
+        result.confidence = 0.45
     return result
 
 
@@ -346,6 +593,13 @@ def parse_menu_block(text: str) -> ParsedMenuItem:
         all_prices.extend(pl.price_mentions)
         all_sizes.extend(pl.size_mentions)
         all_modifiers.extend(pl.modifiers)
+
+        # Skip metadata lines in block context
+        if pl.line_type in ("size_header", "topping_list", "info_line"):
+            continue
+        # Merge orphaned prices (already added to all_prices above)
+        if pl.line_type == "price_only":
+            continue
 
         if pl.line_type == "heading" and not name_found:
             result.item_name = pl.item_name
