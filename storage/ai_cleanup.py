@@ -48,6 +48,20 @@ _NONALNUM_BURST_RX = re.compile(r"(?<=\w)[^\w\s]{1,}(?=\w)")
 _LONG_NAME_CHAR_THRESHOLD = 80
 _LONG_NAME_WORD_THRESHOLD = 12
 
+# Phase 8: Natural break-point patterns for smarter long-name splitting
+# These phrases introduce description/topping content after the item name.
+_BREAK_PHRASES_RE = re.compile(
+    r"\b(topped with|served with|comes with|made with|includes|featuring)\b",
+    re.IGNORECASE,
+)
+# "with" as a standalone connector (not part of "without")
+_WITH_CONNECTOR_RE = re.compile(
+    r"\bwith\b(?!\s*out)",
+    re.IGNORECASE,
+)
+# Parenthetical content: "(ham, pineapple, mozzarella)"
+_PAREN_RE = re.compile(r"\s*\(([^)]{5,})\)\s*")
+
 # Short-token whitelist for descriptions (allowed to survive token-soup cleanup)
 _DESC_SHORT_WHITELIST = {
     "bbq",
@@ -535,6 +549,7 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
     Rules:
     - Only attempt when the name is long AND the existing description is empty or tiny.
     - Prefer explicit separators: " - ", " — ", " – ", ":", bullets, etc.
+    - Phase 8: Try semantic break points ("topped with", "with", parentheticals).
     - Fallback: split on comma.
     - Final fallback: keep the first ~6–8 tokens as name and push the rest into description.
     """
@@ -543,6 +558,17 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
     # If we already have a decent description, don't move text out of the name.
     if existing_desc and len(existing_desc.strip()) >= 10:
         return name, ""
+
+    # Phase 8: Parenthetical content is always a strong split signal,
+    # even on names below the length threshold.
+    paren_match = _PAREN_RE.search(name)
+    if paren_match:
+        before = name[:paren_match.start()].strip()
+        after = name[paren_match.end():].strip()
+        head = f"{before} {after}".strip() if after else before
+        tail = paren_match.group(1).strip()
+        if len(head.split()) >= 1 and len(tail.split()) >= 2:
+            return head, tail
 
     if not _looks_like_long_name(name):
         return name, ""
@@ -558,7 +584,25 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
         if len(head.split()) >= 2 and len(tail.split()) >= 3:
             return _rebalance_head_tail_connectors(head, tail)
 
-    # 2) Comma-based split
+    # 2) Phase 8: Descriptor phrases ("topped with", "served with", etc.)
+    break_match = _BREAK_PHRASES_RE.search(name)
+    if break_match:
+        head = name[:break_match.start()].strip()
+        tail = name[break_match.start():].strip()
+        if len(head.split()) >= 2 and len(tail.split()) >= 3:
+            return head, tail
+
+    # 3) Phase 8: "with" connector (e.g., "Meat Lovers Pizza with pepperoni sausage")
+    with_match = _WITH_CONNECTOR_RE.search(name)
+    if with_match:
+        head = name[:with_match.start()].strip()
+        tail = name[with_match.start():].strip()
+        # Only split if head is a reasonable item name (2+ words)
+        # and tail has enough content to be a description (3+ words)
+        if len(head.split()) >= 2 and len(tail.split()) >= 3:
+            return head, tail
+
+    # 4) Comma-based split
     idx = name.find(", ")
     if idx > 10 and idx < len(name) - 10:
         head = name[:idx].strip(", ")
@@ -566,11 +610,11 @@ def _rescue_long_name(name: str, existing_desc: str) -> Tuple[str, str]:
         if len(head.split()) >= 2 and len(tail.split()) >= 3:
             return _rebalance_head_tail_connectors(head, tail)
 
-    # 3) Token-based split (fallback for double-sandwich style lines)
+    # 5) Token-based split (fallback for double-sandwich style lines)
     tokens = name.split()
-    if len(tokens) >= 10:
+    if len(tokens) >= 8:
         # Keep the first chunk as the "true" name, push the rest into description.
-        head_tokens = tokens[: min(8, len(tokens) - 3)]
+        head_tokens = tokens[: min(6, len(tokens) - 3)]
         tail_tokens = tokens[len(head_tokens) :]
         head = " ".join(head_tokens)
         tail = " ".join(tail_tokens)
