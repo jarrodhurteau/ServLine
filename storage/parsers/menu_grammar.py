@@ -1,6 +1,6 @@
 # storage/parsers/menu_grammar.py
 """
-Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-53)
+Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-54)
 
 Parses OCR text lines into structured menu item components:
   - item_name: the core menu item name
@@ -10,8 +10,10 @@ Parses OCR text lines into structured menu item components:
   - price_mentions: detected price values in the line
   - line_type: "menu_item" | "heading" | "size_header" | "topping_list" |
                "info_line" | "price_only" | "modifier_line" |
-               "description_only" | "unknown"
+               "description_only" | "multi_column" | "unknown"
   - confidence: 0.0–1.0 parse confidence
+  - components: structured decomposition of description (toppings, sauce, etc.)
+  - column_segments: split text segments when multi-column merge detected
 
 Design principles:
   - Pizza-first grammar, expandable to other categories
@@ -35,6 +37,10 @@ Day 53 additions:
   - Post-garble short noise cleanup
   - W/ and Wi OCR normalization
   - Contextual multi-pass classification (classify_menu_lines)
+
+Day 54 additions:
+  - Item component detection (toppings, sauce, preparation, flavors)
+  - Multi-column merge detection in classify_menu_lines
 """
 
 from __future__ import annotations
@@ -44,7 +50,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import re
 
 
-# ── Result type ──────────────────────────────────────
+# ── Result types ─────────────────────────────────────
+
+@dataclass
+class ItemComponents:
+    """Structured decomposition of a menu item's description."""
+    toppings: List[str] = field(default_factory=list)
+    sauce: Optional[str] = None
+    preparation: Optional[str] = None
+    flavor_options: List[str] = field(default_factory=list)
+
 
 @dataclass
 class ParsedMenuItem:
@@ -54,9 +69,11 @@ class ParsedMenuItem:
     modifiers: List[str] = field(default_factory=list)
     size_mentions: List[str] = field(default_factory=list)
     price_mentions: List[float] = field(default_factory=list)
-    line_type: str = "unknown"  # menu_item | heading | modifier_line | description_only | unknown
+    line_type: str = "unknown"  # menu_item | heading | modifier_line | description_only | multi_column | unknown
     confidence: float = 0.0
     raw_text: str = ""
+    components: Optional[ItemComponents] = None
+    column_segments: Optional[List[str]] = None
 
 
 # ── Price regex ──────────────────────────────────────
@@ -525,6 +542,197 @@ def _has_topping_content(text: str) -> bool:
     return matches >= 2
 
 
+# ── Component detection vocabularies ─────────────────
+
+_SAUCE_TOKENS = {
+    "marinara", "marinara sauce", "alfredo", "alfredo sauce",
+    "pesto", "pesto sauce", "bbq sauce", "hot sauce",
+    "ranch", "ranch dressing", "ranch sauce",
+    "blue cheese", "blue cheese base", "bleu cheese",
+    "garlic sauce", "red sauce", "white sauce", "buffalo sauce",
+    "1000 island", "thousand island", "russian dressing",
+    "caesar dressing", "tzatziki", "mayo", "mayonnaise",
+    "tomato sauce", "olive oil", "1000 island base",
+    "salsa", "sour cream",
+}
+
+_PREPARATION_TOKENS = {
+    "fried", "grilled", "baked", "roasted", "steamed",
+    "sauteed", "braised", "breaded", "crispy", "smoked",
+    "shaved", "diced", "chopped", "sliced", "stuffed",
+    "marinated", "homemade",
+}
+
+_COMPONENT_FLAVOR_TOKENS = {
+    "hot", "mild", "medium", "honey bbq", "bbq",
+    "garlic parm", "garlic parmesan", "garlic romano",
+    "teriyaki", "buffalo", "spicy", "sweet",
+    "cajun", "lemon pepper", "mango habanero",
+    "sweet chili", "sriracha", "jack daniels bbq",
+    "plain", "naked", "original", "honey mustard",
+}
+
+# Build reverse lookup: token → category
+_INGREDIENT_CATEGORY: Dict[str, str] = {}
+for _t in _SAUCE_TOKENS:
+    _INGREDIENT_CATEGORY[_t] = "sauce"
+for _t in _PREPARATION_TOKENS:
+    _INGREDIENT_CATEGORY[_t] = "preparation"
+for _t in _COMPONENT_FLAVOR_TOKENS:
+    _INGREDIENT_CATEGORY[_t] = "flavor"
+for _t in _COMMON_TOPPINGS:
+    if _t not in _INGREDIENT_CATEGORY:
+        _INGREDIENT_CATEGORY[_t] = "topping"
+
+
+# ── Description tokenizer & component classifier ────
+
+_DESC_SPLIT_RE = re.compile(r',\s*|\s+&\s+|\s+and\s+|;\s*|\s+or\s+', re.IGNORECASE)
+_W_PREFIX_RE = re.compile(r'^(?:w/\s*|with\s+)', re.IGNORECASE)
+_W_INFIX_RE = re.compile(r'\s+w/\s*', re.IGNORECASE)
+
+
+def _tokenize_description(description: str) -> List[str]:
+    """Split a description string into individual component tokens.
+
+    Splits on: comma, ' & ', ' and ', ' or ', semicolon, ' w/ '.
+    Strips whitespace, dots, leading 'w/'/'with' from each token.
+    """
+    # First split on w/ infix (e.g., "Chicken w/ Alfredo Sauce")
+    desc = _W_INFIX_RE.sub(', ', description)
+    tokens = _DESC_SPLIT_RE.split(desc)
+    result: List[str] = []
+    for tok in tokens:
+        tok = tok.strip().strip('.')
+        tok = _W_PREFIX_RE.sub('', tok).strip()
+        if tok:
+            result.append(tok)
+    return result
+
+
+def _classify_components(tokens: List[str], item_name: str = "") -> ItemComponents:
+    """Classify each token into topping, sauce, preparation, or flavor."""
+    comp = ItemComponents()
+    sauce_found = False
+
+    # Check if this looks like a flavor-option list:
+    # ALL tokens match flavor vocabulary and there are 2+ of them
+    flavor_matches = 0
+    for tok in tokens:
+        low = tok.lower().strip()
+        if low in _COMPONENT_FLAVOR_TOKENS:
+            flavor_matches += 1
+    all_flavors = len(tokens) >= 2 and flavor_matches == len(tokens)
+
+    for tok in tokens:
+        low = tok.lower().strip()
+
+        # Try longest-match against known vocabularies
+        matched_cat = None
+        matched_key = ""
+        for known, cat in _INGREDIENT_CATEGORY.items():
+            if known in low and len(known) > len(matched_key):
+                matched_cat = cat
+                matched_key = known
+
+        # Also check if the first word is a preparation method
+        first_word = low.split()[0] if low.split() else ""
+        has_prep_prefix = first_word in _PREPARATION_TOKENS
+
+        if all_flavors and low in _COMPONENT_FLAVOR_TOKENS:
+            comp.flavor_options.append(low)
+        elif matched_cat == "sauce" and not sauce_found:
+            # Extract the sauce name (use the matched key)
+            comp.sauce = matched_key
+            if matched_key.endswith(" base"):
+                comp.sauce = matched_key[:-5].strip()
+            elif matched_key.endswith(" sauce"):
+                comp.sauce = matched_key[:-6].strip()
+            elif matched_key.endswith(" dressing"):
+                comp.sauce = matched_key[:-9].strip()
+            sauce_found = True
+        elif has_prep_prefix and comp.preparation is None:
+            # Token starts with prep word (e.g., "grilled chicken", "fried chicken")
+            comp.preparation = first_word
+            remainder = low[len(first_word):].strip()
+            if remainder:
+                comp.toppings.append(remainder)
+        elif matched_cat == "preparation" and comp.preparation is None:
+            comp.preparation = matched_key
+            remainder = low.replace(matched_key, "", 1).strip()
+            if remainder:
+                comp.toppings.append(remainder)
+        elif matched_cat == "flavor" and not all_flavors:
+            # Mixed list — individual flavor tokens become flavor_options
+            comp.flavor_options.append(low)
+        elif matched_cat == "sauce" and sauce_found:
+            # Second sauce → treat as topping
+            comp.toppings.append(tok.strip())
+        else:
+            # Default: topping/ingredient
+            comp.toppings.append(tok.strip())
+
+    return comp
+
+
+def _extract_components(description: str, item_name: str = "") -> Optional[ItemComponents]:
+    """Tokenize a description and classify into structured components."""
+    tokens = _tokenize_description(description)
+    if not tokens:
+        return None
+    return _classify_components(tokens, item_name)
+
+
+# ── Multi-column merge detection ─────────────────────
+
+_COLUMN_GAP_RE = re.compile(r'\s{5,}')
+
+
+def detect_column_merge(text: str) -> Optional[List[str]]:
+    """Detect if a line contains multi-column merged content.
+
+    Returns a list of text segments if multi-column merge detected, else None.
+    Primary signal: 5+ consecutive whitespace characters between text content.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    # Find gaps of 5+ spaces
+    gaps = list(_COLUMN_GAP_RE.finditer(stripped))
+    if not gaps:
+        return None
+
+    # Split at gaps
+    segments: List[str] = []
+    last_end = 0
+    for gap in gaps:
+        seg = stripped[last_end:gap.start()].strip().strip('.')
+        if seg:
+            segments.append(seg)
+        last_end = gap.end()
+    # Final segment after last gap
+    tail = stripped[last_end:].strip().strip('.')
+    if tail:
+        segments.append(tail)
+
+    # Filter out pure noise segments (but don't run garble detection
+    # on individual words — real words like CHEESEBURGER can false-positive)
+    clean_segments: List[str] = []
+    for seg in segments:
+        # Only strip dot runs and very short noise, not full garble detection
+        cleaned = re.sub(r'\.{2,}', ' ', seg).strip()
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        # Drop segments that are only dots, whitespace, or 1-char noise
+        alpha_count = sum(1 for c in cleaned if c.isalpha())
+        if cleaned and (alpha_count >= 2 or _PRICE_RE.search(cleaned)):
+            clean_segments.append(cleaned)
+
+    if len(clean_segments) >= 2:
+        return clean_segments
+    return None
+
+
 # ── Core parser ──────────────────────────────────────
 
 def parse_menu_line(text: str) -> ParsedMenuItem:
@@ -647,6 +855,7 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
             result.description = desc_part
             result.line_type = "menu_item"
             result.confidence = 0.80
+            result.components = _extract_components(desc_part, name_part)
             return result
 
     # ── Step 5a: ALL CAPS name + mixed-case description split ──
@@ -659,6 +868,7 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         result.description = desc_part
         result.line_type = "menu_item"
         result.confidence = 0.78
+        result.components = _extract_components(desc_part, name_part)
         return result
 
     # No explicit separator — check if the line is a description-only fragment
@@ -667,6 +877,7 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         result.description = text_no_price
         result.line_type = "description_only"
         result.confidence = 0.60
+        result.components = _extract_components(text_no_price)
         return result
 
     # Lowercase-start continuation: lines starting lowercase with commas or "and"
@@ -678,6 +889,7 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
         result.description = text_no_price
         result.line_type = "description_only"
         result.confidence = 0.58
+        result.components = _extract_components(text_no_price)
         return result
 
     # Check for modifier-only lines ("Add toppings $1.50 each")
@@ -780,6 +992,10 @@ def parse_menu_block(text: str) -> ParsedMenuItem:
     result.size_mentions = list(dict.fromkeys(all_sizes))  # dedupe, preserve order
     result.modifiers = list(dict.fromkeys(all_modifiers))
 
+    # Component detection on merged description
+    if result.description:
+        result.components = _extract_components(result.description, result.item_name)
+
     if result.line_type != "heading":
         result.line_type = "menu_item" if result.item_name else "unknown"
 
@@ -809,6 +1025,7 @@ def classify_menu_lines(lines: List[str]) -> List[ParsedMenuItem]:
     Classify a sequence of menu lines with contextual awareness.
 
     Multi-pass approach:
+      0. Pass 0: detect multi-column merges and flag them
       1. First pass: classify each line independently via parse_menu_line
       2. Second pass: resolve heading-vs-item using neighbor context
       3. Third pass: resolve heading clusters (runs of non-section headings)
@@ -818,6 +1035,17 @@ def classify_menu_lines(lines: List[str]) -> List[ParsedMenuItem]:
     # First pass: independent classification
     results = [parse_menu_line(line) for line in lines]
     n = len(results)
+
+    # Pass 0: detect multi-column merges
+    for i in range(n):
+        raw = results[i].raw_text
+        if not raw or not raw.strip():
+            continue
+        segments = detect_column_merge(raw)
+        if segments and len(segments) >= 2:
+            results[i].column_segments = segments
+            results[i].line_type = "multi_column"
+            results[i].confidence = 0.70
 
     def _get_neighbor_type(start: int, direction: int) -> Optional[str]:
         """Find the line_type of the nearest non-empty, non-unknown neighbor."""
@@ -926,6 +1154,12 @@ def parse_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "price_mentions": parsed.price_mentions,
             "line_type": parsed.line_type,
             "parse_confidence": parsed.confidence,
+            "components": {
+                "toppings": parsed.components.toppings,
+                "sauce": parsed.components.sauce,
+                "preparation": parsed.components.preparation,
+                "flavor_options": parsed.components.flavor_options,
+            } if parsed.components else None,
         }
         results.append(new_item)
 

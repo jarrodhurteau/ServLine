@@ -469,8 +469,8 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Contextual multi-pass classification (Day 53)
 - ✅ Broader description detection — 60+ ingredients, lowercase heuristic (Day 53)
 - ✅ Post-garble noise cleanup & W/ normalization (Day 53)
-- Item component detection (base, toppings, modifiers)
-- Multi-column merge detection
+- ✅ Item component detection — toppings, sauce, preparation, flavors (Day 54)
+- ✅ Multi-column merge detection — whitespace-gap heuristic (Day 54)
 
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
 - ✅ Portion detection — half, whole, family, party (Day 51)
@@ -488,4 +488,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 54 — Item component detection, multi-column merge handling
+**Next Step:** Day 55 — Sprint 8.1 wrap-up, edge case iteration, Sprint 8.2 prep
