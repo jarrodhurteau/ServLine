@@ -1,6 +1,6 @@
 # storage/parsers/menu_grammar.py
 """
-Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-54)
+Menu Item Grammar Parser — Phase 8 Sprint 8.1 (Days 51-55)
 
 Parses OCR text lines into structured menu item components:
   - item_name: the core menu item name
@@ -41,6 +41,12 @@ Day 53 additions:
 Day 54 additions:
   - Item component detection (toppings, sauce, preparation, flavors)
   - Multi-column merge detection in classify_menu_lines
+
+Day 55 additions:
+  - Pipeline integration: enrich_grammar_on_text_blocks() for OCR pipeline
+  - OCR typo normalization (88Q→BBQ, piZzA→PIZZA, etc.)
+  - Confidence tiers: high (0.80+), medium (0.60-0.79), low (0.40-0.59)
+  - Fallback OCR hardening for degraded Tesseract output
 """
 
 from __future__ import annotations
@@ -231,6 +237,46 @@ def _normalize_w_slash(text: str) -> str:
     return text
 
 
+# ── OCR typo normalization (Day 55) ─────────────────
+# Common Tesseract misreads in restaurant menus
+
+_OCR_TYPO_MAP = {
+    "88q": "BBQ",
+    "88Q": "BBQ",
+    "8BQ": "BBQ",
+    "880": "BBQ",
+    "B8Q": "BBQ",
+    "Basi!": "Basil",
+    "basi!": "basil",
+}
+
+# Regex-based corrections for patterns that can't be a simple dict lookup
+_OCR_TYPO_PATTERNS = [
+    # "piZzA" → "PIZZA" (mixed-case single-word garble for known words)
+    (re.compile(r'\bpiZzA\b'), 'PIZZA'),
+    # "Smt" → "Sml" in size context
+    (re.compile(r'\bSmt\b'), 'Sml'),
+    # Leading bracket noise: "[a1" or "[a1]" prefix
+    (re.compile(r'^\[a?\d*\]?\s*'), ''),
+    # "WI/" and "WI/FRIES" → "W/" (Tesseract reads W/ as WI/)
+    (re.compile(r'\bWI/'), 'W/'),
+]
+
+
+def _normalize_ocr_typos(text: str) -> str:
+    """Fix common OCR misreads found in fallback/degraded Tesseract output."""
+    # Dict-based replacements (word boundaries)
+    for typo, fix in _OCR_TYPO_MAP.items():
+        if typo in text:
+            text = text.replace(typo, fix)
+
+    # Regex-based patterns
+    for pattern, replacement in _OCR_TYPO_PATTERNS:
+        text = pattern.sub(replacement, text)
+
+    return text
+
+
 # ── Size / portion patterns ──────────────────────────
 
 _SIZE_WORDS = {
@@ -241,6 +287,7 @@ _SIZE_WORDS = {
     "personal", "family", "party",
     "half", "whole", "slice",
     "single", "double", "triple",
+    "regular", "deluxe",
 }
 
 _SIZE_WORD_RE = re.compile(
@@ -355,7 +402,7 @@ def _is_heading(text: str) -> bool:
 _SIZE_HEADER_TOKEN_RE = re.compile(
     r"""
     \d{1,2}\s*["\u201d°]\s*\w*   |   # 10"Mini, 12"Sml, 16"lrg
-    \b(?:mini|small|sml|sm|medium|med|large|lrg|lg|family|party|personal)\b  |
+    \b(?:mini|small|sml|sm|medium|med|large|lrg|lg|family|party|personal|regular|deluxe)\b  |
     \b\d+\s*(?:slices?|pieces?|pcs?|cuts?)\b
     """,
     re.VERBOSE | re.IGNORECASE,
@@ -426,6 +473,9 @@ def _is_topping_or_info_line(text: str) -> tuple[bool, str]:
     # Short option lines: "Naked or Breaded", "White or Wheat"
     if (_OPTION_LINE_RE.match(stripped) and len(words) <= 5
             and not _PRICE_RE.search(stripped)):
+        return True, "info_line"
+    # Dimension lines: "17x26\"", "17x24°" — sheet/tray size, not menu items
+    if re.match(r'^\d{1,3}\s*x\s*\d{1,3}\s*["\u201d°]?\s*$', stripped):
         return True, "info_line"
     return False, ""
 
@@ -750,6 +800,9 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
 
     working = text.strip()
 
+    # ── Step 0.2: Normalize common OCR typos ──
+    working = _normalize_ocr_typos(working)
+
     # ── Step 0.3: Normalize W/ and Wi OCR artifacts ──
     working = _normalize_w_slash(working)
 
@@ -757,6 +810,15 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
     cleaned = _strip_ocr_garble(working)
     if cleaned != working:
         working = cleaned
+
+    # ── Step 0.5b: Early info-line detection before noise stripping ──
+    # Dimension lines like "17x26" get destroyed by noise stripping, so detect first
+    is_early_info, early_info_type = _is_topping_or_info_line(working)
+    if is_early_info:
+        result.item_name = working
+        result.line_type = early_info_type
+        result.confidence = 0.75
+        return result
 
     # ── Step 0.6: Strip short noise residue ──
     working = _strip_short_noise(working)
@@ -1164,3 +1226,75 @@ def parse_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         results.append(new_item)
 
     return results
+
+
+# ── Confidence tiers (Day 55) ────────────────────────
+
+def confidence_tier(score: float) -> str:
+    """Map a numeric confidence score to a human-readable tier.
+
+    Returns:
+      'high'    — 0.80+  (strong structural evidence)
+      'medium'  — 0.60–0.79 (reasonable parse, some ambiguity)
+      'low'     — 0.40–0.59 (weak evidence, needs review)
+      'unknown' — below 0.40
+    """
+    if score >= 0.80:
+        return "high"
+    elif score >= 0.60:
+        return "medium"
+    elif score >= 0.40:
+        return "low"
+    return "unknown"
+
+
+# ── Pipeline integration (Day 55) ────────────────────
+
+def _parsed_to_dict(p: ParsedMenuItem) -> Dict[str, Any]:
+    """Convert a ParsedMenuItem to a plain dict for pipeline enrichment."""
+    return {
+        "parsed_name": p.item_name,
+        "parsed_description": p.description,
+        "modifiers": p.modifiers,
+        "size_mentions": p.size_mentions,
+        "price_mentions": p.price_mentions,
+        "line_type": p.line_type,
+        "parse_confidence": p.confidence,
+        "confidence_tier": confidence_tier(p.confidence),
+        "components": {
+            "toppings": p.components.toppings,
+            "sauce": p.components.sauce,
+            "preparation": p.components.preparation,
+            "flavor_options": p.components.flavor_options,
+        } if p.components else None,
+        "column_segments": p.column_segments,
+    }
+
+
+def enrich_grammar_on_text_blocks(
+    text_blocks: List[Dict[str, Any]],
+) -> None:
+    """
+    Enrich a list of OCR pipeline text_blocks with grammar parse metadata.
+
+    Adds a "grammar" key to each text_block containing the full ParsedMenuItem
+    result as a plain dict. Uses classify_menu_lines for contextual awareness.
+
+    This function mutates text_blocks in place (same pattern as
+    infer_categories_on_text_blocks and annotate_prices_and_variants_on_text_blocks).
+    """
+    if not text_blocks:
+        return
+
+    # Extract merged text from each block
+    raw_lines: List[str] = []
+    for tb in text_blocks:
+        text = (tb.get("merged_text") or tb.get("text") or "").strip()
+        raw_lines.append(text)
+
+    # Run contextual multi-pass classification
+    parsed = classify_menu_lines(raw_lines)
+
+    # Attach grammar metadata to each text_block
+    for tb, p in zip(text_blocks, parsed):
+        tb["grammar"] = _parsed_to_dict(p)

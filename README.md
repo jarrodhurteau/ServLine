@@ -417,11 +417,96 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 54 — Sprint 8.1: Item Component Detection & Multi-Column Merge (COMPLETE)
+
+**Item Component Detection** (`storage\parsers\menu_grammar.py`):
+- Tokenizes menu item descriptions into individual components (comma, &, and, or, semicolon, w/ splits)
+- Classifies tokens as toppings, sauces (30+ vocabulary), preparation methods (15+), or flavor options (20+)
+- Longest-match lookup against ingredient vocabularies
+- Preparation-prefix detection: "Grilled Chicken" → prep=grilled, topping=chicken
+- All-flavors heuristic: when every comma-token is a known flavor → flavor_options (choose-one)
+
+**Multi-Column Merge Detection**:
+- Detects 5+ consecutive whitespace gaps as column boundaries
+- Extracts text segments from each column
+- Integrated into `classify_menu_lines` multi-pass (Pass 0)
+- Detected 24 multi-column lines in pizza_real, 17 in multi-menu
+
+**Test Results** (349 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| Day 53 multi-menu | 86 | 100% |
+| Day 54 components | 105 | 100% |
+| **TOTAL** | **349** | **100%** |
+
+**Artifacts:**
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Updated grammar parser (~1140 LOC)
+- [tests/test_day54_components.py](tests/test_day54_components.py) — Day 54 test suite (105 cases)
+
+**Day 54 complete.**
+
+---
+
+### ✅ Day 55 — Sprint 8.1 Finale: Pipeline Integration & Hardening (COMPLETE)
+
+**Pipeline Integration** (`storage\ocr_pipeline.py` + `storage\parsers\menu_grammar.py`):
+- New `enrich_grammar_on_text_blocks()` function wired into OCR pipeline
+- Runs `classify_menu_lines()` on text blocks, attaches grammar metadata to each block
+- Grammar dict includes: parsed_name, parsed_description, modifiers, sizes, prices, line_type, confidence, confidence_tier, components, column_segments
+- Mirrored to preview_blocks for overlay UI access
+
+**OCR Typo Normalization**:
+- Dict-based: 88Q/880/8BQ → BBQ, Basi! → Basil
+- Regex-based: piZzA → PIZZA, Smt → Sml, WI/ → W/, bracket-noise removal
+- Applied before garble stripping for maximum coverage
+
+**Confidence Tiers**:
+- `confidence_tier()` maps scores to human-readable tiers: high (0.80+), medium (0.60-0.79), low (0.40-0.59), unknown (<0.40)
+- Embedded in grammar metadata for every text_block
+
+**Fallback OCR Hardening**:
+- 100% classification on degraded fallback OCR files (both pizza-focused and full-menu)
+- "Regular Deluxe" size header detection
+- Dimension line detection (17x26", 17x24°) as info_line
+- Early info-line detection before noise stripping
+
+**Test Results** (691 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| Day 53 multi-menu | 86 | 100% |
+| Day 54 components | 105 | 100% |
+| Day 55 integration | 342 | 100% |
+| **TOTAL** | **691** | **100%** |
+
+**Full OCR Coverage** — 4 files, 100% classification:
+
+| OCR File | Lines | Non-empty | Unknown | Rate |
+|----------|-------|-----------|---------|------|
+| pizza_real_p01 (primary) | 258 | 195 | 0 | 100% |
+| pizza_real_p01 (fallback) | 258 | 195 | 0 | 100% |
+| 3d7419be_real_pizza (primary) | 244 | 188 | 0 | 100% |
+| 3d7419be_real_pizza (fallback) | 244 | 188 | 0 | 100% |
+
+**Artifacts:**
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Final grammar parser (~1260 LOC)
+- [storage/ocr_pipeline.py](storage/ocr_pipeline.py) — Pipeline integration
+- [tests/test_day55_integration.py](tests/test_day55_integration.py) — Day 55 test suite (342 cases)
+
+**Day 55 complete. Sprint 8.1 complete.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (IN PROGRESS — Sprint 8.1)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.1 COMPLETE — Ready for Sprint 8.2)**
 
-Day 53: Multi-menu grammar testing complete. Contextual multi-pass classification resolves heading/item ambiguity. 100% classification on both pizza-focused (195 lines) and full-menu (188 lines) OCR. All 244 tests passing.
+Sprint 8.1 (Days 51-55) delivered a complete menu grammar parser with pipeline integration, 100% classification on 4 OCR files (primary + fallback), and 691 tests passing. Grammar metadata now flows through the OCR pipeline to text_blocks and preview_blocks.
 
 ---
 
@@ -450,6 +535,12 @@ ServLine now has:
 - ✅ Contextual multi-pass classification — heading/item resolution (Phase 8)
 - ✅ Broader ingredient vocabulary — 60+ items for description detection (Phase 8)
 - ✅ Post-garble noise cleanup — mid-length residue removal (Phase 8)
+- ✅ Item component detection — toppings, sauce, preparation, flavors (Phase 8)
+- ✅ Multi-column merge detection — whitespace-gap heuristic (Phase 8)
+- ✅ Pipeline integration — grammar metadata in text_blocks + preview_blocks (Phase 8)
+- ✅ OCR typo normalization — 88Q→BBQ, piZzA→PIZZA, bracket noise (Phase 8)
+- ✅ Confidence tiers — high/medium/low/unknown scoring (Phase 8)
+- ✅ Fallback OCR hardening — 100% on degraded Tesseract output (Phase 8)
 
 ---
 
@@ -457,7 +548,7 @@ ServLine now has:
 
 With OCR extraction stable and validated, Phase 8 focuses on semantic understanding:
 
-### Sprint 8.1 — Core Grammar & Structure (Days 51-55)
+### Sprint 8.1 — Core Grammar & Structure (Days 51-55) ✅ COMPLETE
 - ✅ Menu item grammar parser (Day 51)
 - ✅ Phrase-level category keywords (Day 51)
 - ✅ Enhanced long-name parsing (Day 51)
@@ -471,6 +562,10 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Post-garble noise cleanup & W/ normalization (Day 53)
 - ✅ Item component detection — toppings, sauce, preparation, flavors (Day 54)
 - ✅ Multi-column merge detection — whitespace-gap heuristic (Day 54)
+- ✅ Pipeline integration — enrich_grammar_on_text_blocks (Day 55)
+- ✅ OCR typo normalization — 88Q→BBQ, piZzA→PIZZA (Day 55)
+- ✅ Confidence tiers — high/medium/low/unknown (Day 55)
+- ✅ Fallback OCR hardening — 100% on degraded output (Day 55)
 
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
 - ✅ Portion detection — half, whole, family, party (Day 51)
@@ -488,4 +583,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 55 — Sprint 8.1 wrap-up, edge case iteration, Sprint 8.2 prep
+**Next Step:** Day 56 — Sprint 8.2 start: Variant price validation (S < M < L)

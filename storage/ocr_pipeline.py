@@ -84,6 +84,7 @@ import pytesseract
 from . import ocr_utils
 from . import category_infer
 from . import variant_engine
+from .parsers.menu_grammar import enrich_grammar_on_text_blocks
 from .ocr_types import (
     Block,
     Line,
@@ -2060,6 +2061,9 @@ def segment_document(
         # ----- Phase 3 pt.4: two-column merge on a per-page basis
         page_text_blocks = merge_two_column_rows(page_text_blocks)
 
+        # ----- Phase 8 pt.1: grammar parse enrichment (Sprint 8.1 Day 55)
+        enrich_grammar_on_text_blocks(page_text_blocks)
+
         # ----- Phase 4 pt.1: classify blocks + collapse obvious noise
         page_text_blocks = classify_and_collapse_text_blocks(page_text_blocks)
 
@@ -2110,6 +2114,10 @@ def segment_document(
                 pb["is_noise"] = tb["is_noise"]
             if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
                 pb.setdefault("meta", {})["multiline_reconstructed"] = True
+
+            # Mirror grammar parse metadata for overlay / preview JSON
+            if "grammar" in tb:
+                pb["grammar"] = tb["grammar"]
 
         all_text_blocks.extend(page_text_blocks)
         all_preview_blocks.extend(pblocks)
