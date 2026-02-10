@@ -27,10 +27,12 @@ Phase 4 pt.4:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 import re
 
 from .ocr_types import OCRVariant
+from .parsers.size_vocab import SIZE_WORD_MAP as _SIZE_WORD_MAP, normalize_size_token
 
 
 PriceLike = Union[int, float]
@@ -40,37 +42,7 @@ PriceLike = Union[int, float]
 # Heuristic tables
 # -----------------------------
 
-_SIZE_WORD_MAP = {
-    "xs": "XS",
-    "x-small": "XS",
-    "extra small": "XS",
-    "small": "S",
-    "sm": "S",
-    "sml": "S",
-    "medium": "M",
-    "med": "M",
-    "md": "M",
-    "large": "L",
-    "lg": "L",
-    "xlarge": "XL",
-    "x-large": "XL",
-    "extra large": "XL",
-    "xl": "XL",
-    "xxl": "XXL",
-    # Phase 8: portion keywords
-    "half": "Half",
-    "whole": "Whole",
-    "slice": "Slice",
-    "personal": "Personal",
-    "family": "Family",
-    "party": "Party",
-    "party size": "Party",
-    "family size": "Family",
-    "individual": "Personal",
-    "single": "Single",
-    "double": "Double",
-    "triple": "Triple",
-}
+# _SIZE_WORD_MAP imported from .parsers.size_vocab (Sprint 8.2 Day 56)
 
 # Wing counts / piece counts, etc.
 _PIECE_SUFFIXES = ("pc", "pcs", "piece", "pieces", "ct")
@@ -329,6 +301,309 @@ def normalize_variant_group(raw_variants: List[Dict[str, Any]]) -> List[OCRVaria
         out.append(v)
 
     return out
+
+
+# -----------------------------
+# Size Grid Context — Sprint 8.2 Day 56
+# -----------------------------
+
+@dataclass
+class SizeGridColumn:
+    """One column in a size grid header."""
+    raw_label: str       # e.g. '10"Mini', 'Family Size', 'Regular'
+    normalized: str      # e.g. '10" Mini', 'Family', 'Regular'
+    position: int        # 0-based column index
+
+
+@dataclass
+class SizeGridContext:
+    """Tracks the active size grid from a size_header line."""
+    columns: List[SizeGridColumn]
+    source_line_index: int
+
+    @property
+    def column_count(self) -> int:
+        return len(self.columns)
+
+    def label_for_position(self, pos: int) -> Optional[str]:
+        """Get the normalized label for a 0-based column position."""
+        if 0 <= pos < len(self.columns):
+            return self.columns[pos].normalized
+        return None
+
+
+# Regex for scanning size header tokens left-to-right (mirrors menu_grammar's
+# _SIZE_HEADER_TOKEN_RE but we define our own to avoid import cycle concerns).
+_GRID_TOKEN_RE = re.compile(
+    r"""
+    (\d{1,2})\s*(["\u201d\u00b0])([a-zA-Z]*)   |   # numeric inch + optional word: 10"Mini
+    \b(mini|small|sml|sm|medium|med|large|lrg|lg|family|party|personal|regular|deluxe)\b  |
+    \b(\d+)\s*(slices?|pieces?|pcs?|cuts?)\b
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _parse_size_header_columns(text: str) -> List[SizeGridColumn]:
+    """Parse a size header string into ordered columns left-to-right.
+
+    Two-pass approach:
+      1. Collect all regex matches with positions and type tags.
+      2. Merge adjacent numeric + word matches into single columns.
+         (Handles both '10"Mini' where the word is glued, and '12" Sml'
+         where there's a space between.)
+
+    Examples:
+        '10"Mini 12" Sml 16"lrg Family Size'
+            -> [10" Mini, 12" S, 16" L, Family]
+        'Regular Deluxe'
+            -> [Regular, Deluxe]
+        '12" Sml   16"lrg  Family Size'
+            -> [12" S, 16" L, Family]
+    """
+    # Pass 1: collect raw matches in order
+    # Each entry: (kind, raw_text, normalized, match_start, match_end)
+    raw_matches: List[Tuple[str, str, str, int, int]] = []
+
+    for m in _GRID_TOKEN_RE.finditer(text):
+        if m.group(1):
+            num = m.group(1)
+            trailing_word = (m.group(3) or "").strip()
+            if trailing_word:
+                norm_word = normalize_size_token(trailing_word)
+                raw_matches.append(
+                    ("numeric_word", m.group(0).strip(), f'{num}" {norm_word}',
+                     m.start(), m.end()))
+            else:
+                raw_matches.append(
+                    ("numeric", f'{num}{m.group(2)}', f'{num}"',
+                     m.start(), m.end()))
+        elif m.group(4):
+            word = m.group(4)
+            norm = normalize_size_token(word)
+            raw_matches.append(("word", word, norm, m.start(), m.end()))
+        elif m.group(5):
+            num = m.group(5)
+            suffix = m.group(6).lower()
+            if "slice" in suffix or "cut" in suffix:
+                continue  # slice counts are info, not columns
+            raw_matches.append(
+                ("piece", m.group(0).strip(), f"{num}pc", m.start(), m.end()))
+
+    # Words that pair with inch sizes as qualifiers (mini, sml, lrg, etc.)
+    # Standalone size names (family, regular, deluxe) stay as their own columns.
+    _INCH_QUALIFIERS = {"mini", "sm", "sml", "small", "med", "medium",
+                        "lg", "lrg", "large"}
+
+    # Pass 2: merge adjacent numeric + qualifier-word into single columns
+    columns: List[SizeGridColumn] = []
+    used: set = set()
+
+    for i, (kind, raw, norm, start, end) in enumerate(raw_matches):
+        if i in used:
+            continue
+
+        if kind == "numeric" and i + 1 < len(raw_matches):
+            next_kind, next_raw, next_norm, next_start, next_end = raw_matches[i + 1]
+            # Only merge if next is a qualifier word and there's only whitespace between
+            gap = text[end:next_start]
+            is_qualifier = next_raw.lower() in _INCH_QUALIFIERS
+            if (next_kind == "word" and (i + 1) not in used
+                    and gap.strip() == "" and is_qualifier):
+                merged_norm = f'{norm} {next_norm}'
+                merged_raw = f'{raw} {next_raw}'
+                columns.append(SizeGridColumn(
+                    raw_label=merged_raw,
+                    normalized=merged_norm,
+                    position=len(columns),
+                ))
+                used.add(i)
+                used.add(i + 1)
+                continue
+
+        if kind == "numeric_word":
+            # Already coalesced by regex (e.g. 10"Mini)
+            columns.append(SizeGridColumn(
+                raw_label=raw, normalized=norm, position=len(columns)))
+            used.add(i)
+            continue
+
+        # Standalone: numeric-only, word-only, or piece
+        columns.append(SizeGridColumn(
+            raw_label=raw, normalized=norm, position=len(columns)))
+        used.add(i)
+
+    return columns
+
+
+def _extract_size_grid(grammar: Dict[str, Any], raw_text: str,
+                       block_index: int) -> Optional[SizeGridContext]:
+    """Build a SizeGridContext from a size_header text_block.
+
+    Uses the raw text (not grammar["size_mentions"]) to preserve positional
+    order of columns left-to-right.
+    """
+    if grammar.get("line_type") != "size_header":
+        return None
+
+    columns = _parse_size_header_columns(raw_text)
+    if len(columns) < 2:
+        return None
+
+    return SizeGridContext(columns=columns, source_line_index=block_index)
+
+
+# Known section headings that expire the active grid (imported from grammar
+# vocabulary to stay in sync).
+from .parsers.menu_grammar import _KNOWN_SECTION_HEADINGS  # noqa: E402
+
+
+def _is_section_heading_name(name: str) -> bool:
+    """Check if a heading name is a known section heading (grid-expiring)."""
+    lower = name.strip().lower()
+    clean = re.sub(r'[_!.]+$', '', lower).strip()
+    return lower in _KNOWN_SECTION_HEADINGS or clean in _KNOWN_SECTION_HEADINGS
+
+
+def _build_variants_from_grid(
+    grid: SizeGridContext,
+    grammar_prices: List[float],
+    price_candidates: List[Dict[str, Any]],
+    existing_variants: List[OCRVariant],
+) -> List[OCRVariant]:
+    """Map prices to size grid columns, producing properly labeled variants.
+
+    Priority:
+    1. Use grammar_prices (float dollars) if available and count matches
+    2. Fall back to price_candidates
+    3. Fall back to existing_variants (from backward-token-walk)
+    """
+    prices_cents: List[int] = []
+    confidences: List[float] = []
+
+    if grammar_prices:
+        for p in grammar_prices:
+            cents = int(round(p * 100))
+            if cents > 0:
+                prices_cents.append(cents)
+                confidences.append(0.85)
+    elif price_candidates:
+        for pc in price_candidates:
+            cents = pc.get("price_cents")
+            if cents and cents > 0:
+                prices_cents.append(cents)
+                confidences.append(float(pc.get("confidence", 0.8)))
+    elif existing_variants:
+        for v in existing_variants:
+            cents = v.get("price_cents", 0)
+            if cents and cents > 0:
+                prices_cents.append(cents)
+                confidences.append(float(v.get("confidence", 0.8)))
+
+    if len(prices_cents) < 2:
+        return []
+
+    variants: List[OCRVariant] = []
+
+    if len(prices_cents) == grid.column_count:
+        # Perfect 1:1 mapping
+        for col_idx, (cents, conf) in enumerate(zip(prices_cents, confidences)):
+            label = grid.label_for_position(col_idx) or f"Size {col_idx + 1}"
+            variants.append({
+                "label": label,
+                "price_cents": cents,
+                "confidence": min(conf, 0.85),
+            })
+    elif len(prices_cents) < grid.column_count:
+        # Fewer prices than columns: right-align
+        # (gourmet items often skip the smallest size)
+        offset = grid.column_count - len(prices_cents)
+        for price_idx, (cents, conf) in enumerate(zip(prices_cents, confidences)):
+            col_idx = price_idx + offset
+            label = grid.label_for_position(col_idx) or f"Size {col_idx + 1}"
+            variants.append({
+                "label": label,
+                "price_cents": cents,
+                "confidence": min(conf, 0.75),  # lower for imperfect mapping
+            })
+    else:
+        # More prices than columns — don't apply grid
+        return []
+
+    return variants
+
+
+def apply_size_grid_context(text_blocks: List[Dict[str, Any]]) -> None:
+    """Bridge grammar parse results to variant creation using size grid context.
+
+    Scans text_blocks for size_header grammar types, tracks the active grid,
+    and for subsequent multi-price items, creates or improves variants by
+    mapping prices to the size grid columns positionally.
+
+    Pipeline placement: after annotate_prices_and_variants (Step 7),
+    before enrich_variants_on_text_blocks (Step 8).
+
+    Mutates text_blocks in place.
+    """
+    active_grid: Optional[SizeGridContext] = None
+
+    for i, tb in enumerate(text_blocks):
+        grammar = tb.get("grammar")
+        if not grammar:
+            continue
+
+        line_type = grammar.get("line_type", "")
+        raw_text = (tb.get("merged_text") or tb.get("text") or "").strip()
+
+        # --- Grid lifecycle ---
+
+        # New size_header replaces current grid
+        if line_type == "size_header":
+            new_grid = _extract_size_grid(grammar, raw_text, i)
+            if new_grid:
+                active_grid = new_grid
+            continue
+
+        # Known section heading expires the grid
+        if line_type == "heading":
+            parsed_name = grammar.get("parsed_name", "")
+            if parsed_name and _is_section_heading_name(parsed_name):
+                active_grid = None
+            continue
+
+        # Non-item types: skip but don't expire grid
+        if line_type in ("info_line", "topping_list", "description_only",
+                         "price_only", "noise", "garble"):
+            continue
+
+        # --- Apply grid to menu items ---
+
+        if active_grid is None:
+            continue
+
+        if line_type != "menu_item":
+            continue
+
+        # Collect price sources
+        grammar_prices = grammar.get("price_mentions", [])
+        existing_variants = tb.get("variants", [])
+        price_candidates = tb.get("price_candidates", [])
+
+        # Only apply grid when there are multiple prices
+        price_count = (len(grammar_prices) if grammar_prices
+                       else len(price_candidates) if price_candidates
+                       else len(existing_variants))
+        if price_count < 2:
+            continue
+
+        grid_variants = _build_variants_from_grid(
+            active_grid, grammar_prices, price_candidates, existing_variants
+        )
+
+        if grid_variants:
+            tb["variants"] = grid_variants
+            tb.setdefault("meta", {})["size_grid_applied"] = True
+            tb["meta"]["size_grid_source"] = active_grid.source_line_index
 
 
 # -----------------------------

@@ -277,28 +277,11 @@ def _normalize_ocr_typos(text: str) -> str:
     return text
 
 
-# ── Size / portion patterns ──────────────────────────
-
-_SIZE_WORDS = {
-    "small", "sm", "sml",
-    "medium", "med", "md",
-    "large", "lg", "lrg",
-    "x-large", "xlarge", "xl", "extra large",
-    "personal", "family", "party",
-    "half", "whole", "slice",
-    "single", "double", "triple",
-    "regular", "deluxe",
-}
-
-_SIZE_WORD_RE = re.compile(
-    r"\b(" + "|".join(re.escape(w) for w in sorted(_SIZE_WORDS, key=len, reverse=True)) + r")\b",
-    re.IGNORECASE,
-)
-
-# Numeric sizes: 10", 14 inch, 16in, 6pc, 12 pieces
-_NUMERIC_SIZE_RE = re.compile(
-    r'\b(\d{1,2})\s*(?:["\u201d]|in(?:ch(?:es)?)?|pc|pcs|piece|pieces|ct)\b',
-    re.IGNORECASE,
+# ── Size / portion patterns (shared vocabulary — Sprint 8.2 Day 56) ──
+from .size_vocab import (
+    SIZE_WORDS as _SIZE_WORDS,
+    SIZE_WORD_RE as _SIZE_WORD_RE,
+    NUMERIC_SIZE_RE as _NUMERIC_SIZE_RE,
 )
 
 
@@ -1102,6 +1085,9 @@ def classify_menu_lines(lines: List[str]) -> List[ParsedMenuItem]:
     for i in range(n):
         raw = results[i].raw_text
         if not raw or not raw.strip():
+            continue
+        # Don't override size_header — they naturally have column gaps
+        if results[i].line_type == "size_header":
             continue
         segments = detect_column_merge(raw)
         if segments and len(segments) >= 2:

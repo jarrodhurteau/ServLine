@@ -125,7 +125,7 @@ TESSERACT_CMD = os.getenv("TESSERACT_CMD")
 POPPLER_PATH = os.getenv("POPPLER_PATH") or None
 # Allow tuning Tesseract without code changes
 TESSERACT_LANG = os.getenv("TESSERACT_LANG") or "eng"
-TESSERACT_CONFIG = os.getenv("TESSERACT_CONFIG") or "--oem 1 --psm 6"
+TESSERACT_CONFIG = os.getenv("TESSERACT_CONFIG") or "--oem 1 --psm 3"
 
 # Day 20 — Canonical taxonomy seed (editable)
 TAXONOMY_SEED = [
@@ -1414,8 +1414,12 @@ def _save_draft_json(job_id: int, draft: dict) -> str:
 # --- OCR helpers: image/PDF → text, then text → draft -----------------
 def _ocr_image_to_text(img_path: Path) -> str:
     try:
+        from PIL import Image, ImageOps, ImageFilter
+        img = Image.open(str(img_path)).convert("L")
+        img = ImageOps.autocontrast(img)
+        img = img.filter(ImageFilter.SHARPEN)
         return pytesseract.image_to_string(
-            str(img_path),
+            img,
             lang=TESSERACT_LANG,
             config=TESSERACT_CONFIG
         ) or ""

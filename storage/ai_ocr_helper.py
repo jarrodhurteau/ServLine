@@ -55,8 +55,12 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 # --- Variant & Category Hierarchy — Phase 4 pt.3–4 ---
-from storage.variant_engine import classify_raw_variant, normalize_variant_group
+from storage.variant_engine import (
+    classify_raw_variant, normalize_variant_group,
+    _parse_size_header_columns, _is_section_heading_name, SizeGridContext,
+)
 from .category_hierarchy import infer_category_hierarchy
+from .parsers.menu_grammar import classify_menu_lines
 
 # ---------- light header normalizer ----------
 _SECTION_FIXES = {
@@ -431,18 +435,42 @@ def analyze_ocr_text(
     restaurant_profile: Optional[Any] = None,
 ) -> Dict[str, Any]:
     lines = [l.rstrip() for l in (raw_text or "").splitlines()]
+
+    # --- Sprint 8.2: Grammar pre-classification for size grid bridge ---
+    _grammar_results = classify_menu_lines(lines)
+    _active_grid: Optional[SizeGridContext] = None
+    _grid_map: Dict[int, Optional[SizeGridContext]] = {}
+    for _gi, _gr in enumerate(_grammar_results):
+        if _gr.line_type == "size_header":
+            cols = _parse_size_header_columns(_gr.raw_text)
+            if len(cols) >= 2:
+                _active_grid = SizeGridContext(columns=cols, source_line_index=_gi)
+            _grid_map[_gi] = None  # don't apply grid to the header line itself
+            continue
+        elif _gr.line_type == "heading" and _gr.item_name and _is_section_heading_name(_gr.item_name):
+            _active_grid = None
+        _grid_map[_gi] = _active_grid
+
     blocks: List[Dict[str, Any]] = []
-    cur = {"id": str(uuid.uuid4()), "header_text": None, "lines": []}
+    cur: Dict[str, Any] = {"id": str(uuid.uuid4()), "header_text": None, "lines": [], "_li": []}
 
     def _push():
         if cur["lines"]:
             blocks.append(cur.copy())
 
-    for l in lines:
+    for _li_idx, l in enumerate(lines):
         raw = l or ""
         t = _basic_clean(raw)
         if not t:
             continue
+
+        # --- Sprint 8.2: Grammar-aware block building ---
+        _gt = _grammar_results[_li_idx].line_type if _li_idx < len(_grammar_results) else "unknown"
+
+        # Skip size_header lines entirely (grid metadata, not items)
+        if _gt == "size_header":
+            continue
+
         just_letters = re.sub(r"[^A-Za-z& ]", "", t)
         all_capsish = just_letters and (
             sum(c.isupper() for c in just_letters if c.isalpha())
@@ -450,17 +478,26 @@ def analyze_ocr_text(
         )
         shortish = len(just_letters.split()) <= 5
         has_kw = any(h in t.lower() for h in _HEADER_WORDS)
-        if (all_capsish and shortish and _alpha_ratio(t) >= 0.5) or has_kw:
+        looks_like_header = (all_capsish and shortish and _alpha_ratio(t) >= 0.5) or has_kw
+
+        # Grammar override: menu_item lines should NOT become headers even if
+        # they look like headers (ALL-CAPS short names like "COMBINATION", "HAWAIIAN")
+        if looks_like_header and _gt == "menu_item":
+            looks_like_header = False
+
+        if looks_like_header:
             _push()
-            cur = {"id": str(uuid.uuid4()), "header_text": _normalize_header(t), "lines": []}
+            cur = {"id": str(uuid.uuid4()), "header_text": _normalize_header(t), "lines": [], "_li": []}
         else:
             cur["lines"].append(t)
+            cur["_li"].append(_li_idx)
     _push()
 
     items: List[Dict[str, Any]] = []
     for b in blocks:
         header = _normalize_header(b.get("header_text") or "") if b.get("header_text") else None
         fallback_cat = header or "Uncategorized"
+        _gli_map = b.get("_li", [])  # global line indices for this block
 
         # Pre-tokenize block into "chunks with index" so we can look ahead for next-line prices
         raw_chunks: List[Tuple[int, str]] = []
@@ -475,7 +512,8 @@ def analyze_ocr_text(
         carry_item: Optional[Dict[str, Any]] = None
 
         while i < len(raw_chunks):
-            _, chunk = raw_chunks[i]
+            _bidx, chunk = raw_chunks[i]
+            _gli = _gli_map[_bidx] if _bidx < len(_gli_map) else -1
             chunk_strip = (chunk or "").strip()
 
             # drop obvious header fragments that slipped as lines
@@ -555,6 +593,7 @@ def analyze_ocr_text(
                         "confidence": _price_conf_bump(price_candidates) if price_candidates else 0.75,
                         "variants": variants,
                         "provenance": {"block_id": b["id"], "matched_rule": "dot_leader"},
+                        "_line_idx": _gli,
                     }
                 )
                 carry_item = None
@@ -576,11 +615,15 @@ def analyze_ocr_text(
             if prices or has_sizes:
                 carry_item = None
                 base_price = prices[0] if prices else (sizes_here[0][1] if has_sizes else 0.0)
-                variants = (
-                    [{"label": "Alt", "price": round(prices[1], 2)}]
-                    if (len(prices) > 1 and prices[1] >= max(_PRICE_MIN, base_price * 0.5))
-                    else []
-                )
+                if len(prices) >= 3:
+                    # Multiple prices: capture ALL as variants (ascending for grid mapping)
+                    sorted_p = sorted(prices)
+                    variants = [{"label": f"Price {j+1}", "price": round(p, 2)}
+                                for j, p in enumerate(sorted_p)]
+                elif len(prices) > 1 and prices[1] >= max(_PRICE_MIN, base_price * 0.5):
+                    variants = [{"label": "Alt", "price": round(prices[1], 2)}]
+                else:
+                    variants = []
                 if has_sizes:
                     variants = [{"label": lbl, "price": round(val, 2)} for (lbl, val) in sizes_here]
 
@@ -619,6 +662,7 @@ def analyze_ocr_text(
                         "confidence": conf,
                         "variants": variants,
                         "provenance": {"block_id": b["id"], "matched_rule": rule},
+                        "_line_idx": _gli,
                     }
                 )
                 i += 1
@@ -666,6 +710,7 @@ def analyze_ocr_text(
                             "confidence": _price_conf_bump(pc),
                             "variants": variants,
                             "provenance": {"block_id": b["id"], "matched_rule": rule},
+                            "_line_idx": _gli,
                         }
                     )
                     i += 2
@@ -697,6 +742,7 @@ def analyze_ocr_text(
                     "confidence": 0.6,
                     "variants": [],
                     "provenance": {"block_id": b["id"], "matched_rule": "name_only"},
+                    "_line_idx": _gli,
                 }
                 items.append(ni)
                 carry_item = ni
@@ -839,6 +885,48 @@ def analyze_ocr_text(
 
         repaired.append(it)
     items = repaired
+
+    # --- Sprint 8.2 Day 56: Grammar-aware size grid bridge ---
+    for it in items:
+        gli = it.pop("_line_idx", -1)
+        grid = _grid_map.get(gli) if gli >= 0 else None
+        if not grid:
+            continue
+        existing_v = it.get("variants") or []
+        # Only apply grid to items with generic/missing variant labels
+        has_generic = any(
+            v.get("label", "").startswith(("Alt", "Price ")) for v in existing_v
+        )
+        if not (has_generic or len(existing_v) == 0):
+            continue
+        # Collect all prices from variants or price_candidates (ascending)
+        all_prices: List[float] = []
+        if existing_v:
+            all_prices = sorted(v.get("price", 0) for v in existing_v)
+        else:
+            all_prices = sorted(
+                pc.get("value", 0) for pc in (it.get("price_candidates") or [])
+            )
+        all_prices = [p for p in all_prices if p > 0]
+        if len(all_prices) < 2:
+            continue
+        # Map prices to grid columns
+        n_cols = grid.column_count
+        n_prices = len(all_prices)
+        new_v: List[Dict[str, Any]] = []
+        if n_prices == n_cols:
+            for col_idx, price in enumerate(all_prices):
+                label = grid.label_for_position(col_idx) or f"Size {col_idx + 1}"
+                new_v.append({"label": label, "price": round(price, 2)})
+        elif n_prices < n_cols:
+            # Fewer prices than columns: right-align (gourmet items skip smallest)
+            offset = n_cols - n_prices
+            for price_idx, price in enumerate(all_prices):
+                col_idx = price_idx + offset
+                label = grid.label_for_position(col_idx) or f"Size {col_idx + 1}"
+                new_v.append({"label": label, "price": round(price, 2)})
+        if new_v:
+            it["variants"] = new_v
 
     # --- Phase 4 pt.3–4: Variant normalization + Category Hierarchy ---
     # Normalize any AI variants into stable size/flavor/style groups

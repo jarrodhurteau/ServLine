@@ -2121,6 +2121,9 @@ def segment_document(
         # ----- Phase 3 pt.6: price + base variant extraction on merged text blocks
         annotate_prices_and_variants_on_text_blocks(page_text_blocks)
 
+        # ----- Phase 8 pt.2: grammar-to-variant bridge (Sprint 8.2 Day 56)
+        variant_engine.apply_size_grid_context(page_text_blocks)
+
         # ----- Phase 4 pt.3: enrich variants with size/flavor intelligence
         variant_engine.enrich_variants_on_text_blocks(page_text_blocks)
 

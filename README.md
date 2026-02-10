@@ -502,11 +502,67 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 56 — Sprint 8.2 Start: Size Grid Context & Grammar-to-Variant Bridge (COMPLETE)
+
+**Shared Size Vocabulary** (`storage/parsers/size_vocab.py` — new):
+- Single source of truth for size/portion word detection and normalization
+- Merges grammar parser's `_SIZE_WORDS` + variant engine's `_SIZE_WORD_MAP` into one canonical `SIZE_WORD_MAP` (~35 entries)
+- Exports: `SIZE_WORD_MAP`, `SIZE_WORDS`, `SIZE_WORD_RE`, `NUMERIC_SIZE_RE`, `normalize_size_token()`
+- Both `menu_grammar.py` and `variant_engine.py` now import from this shared module
+
+**Size Grid Context Propagation** (`storage/variant_engine.py`):
+- New `SizeGridContext` / `SizeGridColumn` dataclasses for tracking active column headers
+- `_parse_size_header_columns()` scans size header text left-to-right, coalesces adjacent numeric+qualifier tokens (e.g., `10"` + `Mini` → `10" Mini`)
+- `apply_size_grid_context()` — new pipeline Step 7.5 between price annotation and variant enrichment
+- Grid lifecycle: starts at `size_header`, expires at known section headings, replaces on new `size_header`, survives info/topping/description lines
+- Right-alignment for fewer prices: gourmet items with 3 prices in a 4-column grid skip the smallest size
+
+**Grammar-to-Website Bridge** (`storage/ai_ocr_helper.py`):
+- Grammar pre-scan: runs `classify_menu_lines()` on raw OCR text to build `_grid_map` (line index → active grid)
+- Grammar-aware block building: `size_header` lines skipped entirely (grid metadata, not items); grammar-classified `menu_item` lines never treated as section headers even if ALL CAPS
+- Grid post-pass: replaces generic "Price 1/2/3" or "Alt" variant labels with grid-mapped size labels (`10" Mini`, `12" S`, `16" L`, `Family`)
+
+**Critical Bug Fixes**:
+- **multi_column overwriting size_header** — Pass 0 in `classify_menu_lines()` unconditionally overwrote `size_header` to `multi_column` for lines with ≥5 space gaps. Size headers naturally have column gaps. Fix: skip `size_header` lines in multi-column merge pass.
+- **ALL-CAPS menu items swallowed as headers** — Items like "COMBINATION", "HAWAIIAN", "ALFREDO PIZZA" treated as section headers on the website. Fix: grammar classification overrides header detection.
+- **Multi-price data loss** — Old `ai_ocr_helper.py` only kept 2 of N prices. Fixed to capture ALL prices as `Price 1/2/3/...` variants when 3+ prices detected.
+- **Website OCR quality** — Changed Tesseract config from `--psm 6` to `--psm 3` + preprocessing (grayscale, autocontrast, sharpen). psm 6 merged columns into 67 garbled lines; psm 3 produces 184 cleaner lines.
+
+**Test Results** (946 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| Day 53 multi-menu | 86 | 100% |
+| Day 54 components | 105 | 100% |
+| Day 55 integration | 342 | 100% |
+| Day 56 variants | 237 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **946** | **100%** |
+
+**Live Site Validation** (Import #197 — pizza_real.pdf):
+- Items: 20 → 35 (75% improvement) after grammar-aware block building
+- Categories detected: Pizza, Beverages, Burgers & Sandwiches, Sides & Apps
+- Grid bridge working: items with multiple prices get size-labeled variants
+- Previously swallowed items now visible: GRILLED CHICKEN BACON RANCH, ALFREDO, CHICKEN PARM, POTATO BACON
+
+**Artifacts:**
+- [storage/parsers/size_vocab.py](storage/parsers/size_vocab.py) — Shared size vocabulary (~95 LOC)
+- [storage/variant_engine.py](storage/variant_engine.py) — Size grid bridge (~550 LOC)
+- [storage/ai_ocr_helper.py](storage/ai_ocr_helper.py) — Grammar-aware website pipeline
+- [storage/parsers/menu_grammar.py](storage/parsers/menu_grammar.py) — Updated grammar parser (~1265 LOC)
+- [tests/test_day56_variants.py](tests/test_day56_variants.py) — Day 56 test suite (237 cases)
+
+**Day 56 complete. Sprint 8.2 underway.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.1 COMPLETE — Ready for Sprint 8.2)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 56 Complete)**
 
-Sprint 8.1 (Days 51-55) delivered a complete menu grammar parser with pipeline integration, 100% classification on 4 OCR files (primary + fallback), and 691 tests passing. Grammar metadata now flows through the OCR pipeline to text_blocks and preview_blocks.
+Sprint 8.2 (Variant & Portion Logic) is underway. Day 56 delivered the grammar-to-variant bridge — size grid headers now propagate through both the background pipeline and the website's AI preview. Grammar-aware block building on the website prevents ALL-CAPS menu items from being swallowed as section headers. 946 tests passing across all suites.
 
 ---
 
@@ -541,6 +597,12 @@ ServLine now has:
 - ✅ OCR typo normalization — 88Q→BBQ, piZzA→PIZZA, bracket noise (Phase 8)
 - ✅ Confidence tiers — high/medium/low/unknown scoring (Phase 8)
 - ✅ Fallback OCR hardening — 100% on degraded Tesseract output (Phase 8)
+- ✅ Shared size vocabulary — single source of truth for size detection (Phase 8)
+- ✅ Size grid context propagation — headers map to item variants (Phase 8)
+- ✅ Grammar-to-variant bridge — pipeline + website paths connected (Phase 8)
+- ✅ Grammar-aware block building — prevents ALL-CAPS items becoming headers (Phase 8)
+- ✅ Multi-price capture — all prices preserved, not just first two (Phase 8)
+- ✅ Website OCR quality — psm 3 + preprocessing for cleaner extraction (Phase 8)
 
 ---
 
@@ -570,8 +632,16 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 ### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
 - ✅ Portion detection — half, whole, family, party (Day 51)
 - ✅ Expanded crust/size vocabulary (Day 51)
-- Variant price validation (S < M < L)
-- Combo/meal detection
+- ✅ Shared size vocabulary — single source of truth (Day 56)
+- ✅ Size grid context propagation — header → item variant mapping (Day 56)
+- ✅ Grammar-to-variant bridge — pipeline + website integration (Day 56)
+- ✅ Grammar-aware block building — ALL-CAPS item rescue (Day 56)
+- ✅ Multi-price capture — all N prices preserved (Day 56)
+- ✅ Website OCR quality — psm 3 + image preprocessing (Day 56)
+- Variant price validation (S < M < L) (Day 57)
+- Portion-aware price rules — half < whole, slice < pie (Day 57)
+- Combo/meal detection (Day 58)
+- Cross-variant consistency checks (Day 59-60)
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - Price consistency checks across similar items
@@ -583,4 +653,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 56 — Sprint 8.2 start: Variant price validation (S < M < L)
+**Next Step:** Day 57 — Variant price validation (S < M < L) and portion-aware price rules
