@@ -998,24 +998,25 @@ def run_rotation_multipass_candidates(
 
 def score_rotation_fused_data(data: Dict[str, List]) -> Dict[str, Any]:
     """
-    Day 47 — Phase 7 pt.10
+    Day 47 — Phase 7 pt.10, updated pt10-v2
 
     Deterministic scoring inputs for a rotation's fused output.
     Returns a dict so we can persist richer metadata than a single float.
 
-    Output:
-      {
-        "score": float,
-        "usable_tokens": int,
-        "total_conf": float,
-        "avg_conf": float
-      }
+    v2 changes: fragmentation-aware scoring — penalizes rotations where
+    OCR fragments text into many short tokens (wrong-rotation signal).
+    Wrong rotations produce many single-char fragments with high confidence,
+    inflating both usable_tokens and total_conf. The v2 formula uses:
+      - avg_conf: per-token quality (not total)
+      - coherence: min(avg_chars_per_token / 4.0, 1.5) — penalizes fragments
+      - sqrt(usable): diminishing returns on token count
     """
     texts = data.get("text", []) or []
     confs = data.get("conf", []) or []
 
     usable = 0
     total_conf = 0.0
+    total_chars = 0
 
     n = len(texts)
     for i in range(n):
@@ -1031,19 +1032,28 @@ def score_rotation_fused_data(data: Dict[str, List]) -> Dict[str, Any]:
 
         usable += 1
         total_conf += c
+        total_chars += len(t)
 
     avg_conf = (total_conf / float(usable)) if usable > 0 else 0.0
+    avg_chars_per_token = (total_chars / float(usable)) if usable > 0 else 0.0
 
-    # Deterministic combined score:
-    #   - primary: usable token count
-    #   - secondary: total confidence
-    score = float(usable) * 10.0 + float(total_conf)
+    # v2: fragmentation-aware score
+    # coherence: rewards multi-char words, penalizes 1-2 char fragments
+    #   1.0 at avg 4 chars, caps at 1.5 for avg >= 6 chars
+    coherence = min(avg_chars_per_token / 4.0, 1.5) if usable > 0 else 0.0
+    # content: sqrt dampens raw token count so fragmentation can't dominate
+    content = float(usable) ** 0.5
+
+    score = avg_conf * coherence * content
 
     return {
         "score": float(score),
         "usable_tokens": int(usable),
         "total_conf": float(total_conf),
         "avg_conf": float(avg_conf),
+        "total_chars": int(total_chars),
+        "avg_chars_per_token": float(avg_chars_per_token),
+        "coherence": float(coherence),
     }
 
 
@@ -1079,7 +1089,7 @@ def run_multipass_ocr(
             meta_out["selected_rotation"] = 0
             meta_out["selected_psms"] = []
             meta_out["rotation_scores"] = {0: {"score": 0.0, "usable_tokens": 0, "total_conf": 0.0, "avg_conf": 0.0}}
-            meta_out["scoring_version"] = "pt10-v1"
+            meta_out["scoring_version"] = "pt10-v2"
         return data
 
     candidates = run_rotation_multipass_candidates(
@@ -1089,13 +1099,10 @@ def run_multipass_ocr(
         rotations=rotations,
     )
 
-    best_rotation: Optional[int] = None
-    best_score: Optional[float] = None
-    best_fused: Optional[Dict[str, List]] = None
-
     rotation_scores: Dict[int, Dict[str, Any]] = {}
     rotation_token_counts: Dict[int, int] = {}
 
+    # Phase 1: Score all rotations
     for rotation, obj in candidates.items():
         fused_rot = obj.get("fused") or {}
         score_obj = score_rotation_fused_data(fused_rot)
@@ -1107,20 +1114,58 @@ def run_multipass_ocr(
         print(
             f"[Pt10-RotationScore] page={page_index} col={column_index} "
             f"rotation={int(rotation)} fused_tokens={tokens} score={float(score_obj['score']):.2f} "
-            f"usable_tokens={int(score_obj['usable_tokens'])} avg_conf={float(score_obj['avg_conf']):.2f}"
+            f"usable_tokens={int(score_obj['usable_tokens'])} avg_conf={float(score_obj['avg_conf']):.2f} "
+            f"avg_chars={float(score_obj.get('avg_chars_per_token', 0)):.2f} "
+            f"coherence={float(score_obj.get('coherence', 0)):.3f}"
         )
+
+    # Phase 2: Cross-rotation outlier penalty (pt10-v2)
+    # Wrong rotations can produce wildly more tokens (e.g. 4-5x) because
+    # Tesseract reads rotated text as overlapping/duplicate word detections.
+    # Detect outlier token counts and penalize their scores.
+    adjusted_scores: Dict[int, float] = {}
+    if len(rotation_scores) >= 3:
+        token_list = sorted(
+            rotation_scores[r]["usable_tokens"] for r in rotation_scores
+        )
+        median_tokens = token_list[len(token_list) // 2]
+
+        for rot in rotation_scores:
+            raw_score = float(rotation_scores[rot]["score"])
+            usable = rotation_scores[rot]["usable_tokens"]
+            if median_tokens > 0 and usable > median_tokens * 2.5:
+                # Squared penalty: 4x median tokens → score / 16
+                ratio = float(median_tokens) / float(usable)
+                penalty = ratio * ratio  # squared
+                adjusted = raw_score * penalty
+                print(
+                    f"[Pt10-OutlierPenalty] page={page_index} col={column_index} "
+                    f"rotation={rot} usable={usable} median={median_tokens} "
+                    f"ratio={ratio:.3f} raw_score={raw_score:.2f} adjusted={adjusted:.2f}"
+                )
+                adjusted_scores[rot] = adjusted
+            else:
+                adjusted_scores[rot] = raw_score
+    else:
+        for rot in rotation_scores:
+            adjusted_scores[rot] = float(rotation_scores[rot]["score"])
+
+    # Phase 3: Select best rotation using adjusted scores
+    best_rotation: Optional[int] = None
+    best_score: Optional[float] = None
+    best_fused: Optional[Dict[str, List]] = None
+
+    for rotation in sorted(adjusted_scores.keys()):
+        cur_score = adjusted_scores[rotation]
+        fused_rot = candidates[rotation].get("fused") or {}
 
         if best_rotation is None:
             best_rotation = int(rotation)
-            best_score = float(score_obj["score"])
+            best_score = cur_score
             best_fused = fused_rot
             continue
 
-        cur_score = float(score_obj["score"])
-        if best_score is None:
-            best_score = cur_score
-
-        # Primary: higher score wins
+        # Primary: higher adjusted score wins
         if cur_score > float(best_score) + 0.01:
             best_rotation = int(rotation)
             best_score = cur_score
@@ -1142,7 +1187,7 @@ def run_multipass_ocr(
             meta_out["selected_psms"] = MULTIPASS_PSMS[:]
             meta_out["rotation_scores"] = rotation_scores
             meta_out["rotation_token_counts"] = rotation_token_counts
-            meta_out["scoring_version"] = "pt10-v1"
+            meta_out["scoring_version"] = "pt10-v2"
         return data
 
     tokens_best = len(best_fused.get("text", []) or [])
@@ -1163,7 +1208,7 @@ def run_multipass_ocr(
         meta_out["selected_psms"] = MULTIPASS_PSMS[:]
         meta_out["rotation_scores"] = rotation_scores
         meta_out["rotation_token_counts"] = rotation_token_counts
-        meta_out["scoring_version"] = "pt10-v1"
+        meta_out["scoring_version"] = "pt10-v2"
 
     return best_fused
 
