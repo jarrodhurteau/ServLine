@@ -60,7 +60,8 @@ from storage.variant_engine import (
     _parse_size_header_columns, _is_section_heading_name, SizeGridContext,
 )
 from .category_hierarchy import infer_category_hierarchy
-from .parsers.menu_grammar import classify_menu_lines
+from .parsers.menu_grammar import classify_menu_lines, _normalize_w_slash
+from .parsers.combo_vocab import extract_combo_hints
 
 # ---------- light header normalizer ----------
 _SECTION_FIXES = {
@@ -187,7 +188,8 @@ _MULTI_LEADER_RX = re.compile(
 )
 
 # Size tokens and pairs (Small/Large, S/M/L, inches like 12")
-_SIZE_TOKEN = r'(?:XS|S|SM|M|MD|L|LG|XL|XXL|Kids|Kid|Junior|Large|Small|Medium|12"|14"|16"|18"|20"|10"|8")'
+# Day 58 fix: add \b word boundaries to prevent matching S inside FRIES/PCS etc.
+_SIZE_TOKEN = r'(?:\b(?:XS|S|SM|M|MD|L|LG|XL|XXL|Kids|Kid|Junior|Large|Small|Medium)\b|(?:12|14|16|18|20|10|8)")'
 _SIZE_PAIR_RX = re.compile(
     rf"(?P<left>{_SIZE_TOKEN})\s*(?P<lp>\$?\s*\d{{1,3}}(?:[.,]\d{{1,2}})?)\s*(?:[\/,;]\s*|\s{{2,}})"
     rf"(?P<right>{_SIZE_TOKEN})\s*(?P<rp>\$?\s*\d{{1,3}}(?:[.,]\d{{1,2}})?)",
@@ -615,13 +617,22 @@ def analyze_ocr_text(
             if prices or has_sizes:
                 carry_item = None
                 base_price = prices[0] if prices else (sizes_here[0][1] if has_sizes else 0.0)
+                # Day 58: check for combo modifier patterns (W/FRIES, WIFRIES, etc.)
+                _norm_chunk = _normalize_w_slash(chunk)
+                _combo_hints = extract_combo_hints(_norm_chunk)
+
                 if len(prices) >= 3:
                     # Multiple prices: capture ALL as variants (ascending for grid mapping)
                     sorted_p = sorted(prices)
                     variants = [{"label": f"Price {j+1}", "price": round(p, 2)}
                                 for j, p in enumerate(sorted_p)]
                 elif len(prices) > 1 and prices[1] >= max(_PRICE_MIN, base_price * 0.5):
-                    variants = [{"label": "Alt", "price": round(prices[1], 2)}]
+                    if _combo_hints:
+                        # Day 58: combo modifier detected — label properly
+                        food = _combo_hints[0].title()
+                        variants = [{"label": f"W/{food}", "price": round(prices[1], 2)}]
+                    else:
+                        variants = [{"label": "Alt", "price": round(prices[1], 2)}]
                 else:
                     variants = []
                 if has_sizes:

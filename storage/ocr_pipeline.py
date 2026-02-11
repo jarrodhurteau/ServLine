@@ -85,6 +85,7 @@ from . import ocr_utils
 from . import category_infer
 from . import variant_engine
 from .parsers.menu_grammar import enrich_grammar_on_text_blocks
+from .parsers.combo_vocab import is_combo_food
 from .ocr_types import (
     Block,
     Line,
@@ -457,17 +458,48 @@ _CONNECTOR_TOKENS = {
 }
 
 
+# Day 58: detect raw OCR tokens like "WIFRIES", "WICHEESE" that were not
+# normalized because the grammar parser works on a separate text copy.
+from .parsers.combo_vocab import COMBO_FOODS as _COMBO_FOODS_SET
+
+_WI_COMBO_ALTS = "|".join(
+    re.escape(f) for f in sorted(
+        (f for f in _COMBO_FOODS_SET if " " not in f),
+        key=len, reverse=True,
+    )
+)
+_WI_COMBO_RE = re.compile(
+    r"^wi/?(" + _WI_COMBO_ALTS + r")$",
+    re.IGNORECASE,
+)
+
+
+def _extract_wi_combo(token_lower: str) -> Optional[str]:
+    """If *token_lower* looks like 'wifries' or 'wi/fries', return the food part."""
+    m = _WI_COMBO_RE.match(token_lower)
+    return m.group(1).lower() if m else None
+
+
 def _build_variants_from_text(
     text: str,
     priced: List[Tuple[OCRPriceCandidate, int]],
+    grammar: Optional[Dict[str, Any]] = None,
 ) -> List[OCRVariant]:
     """
     Infer variant labels (e.g., 'Sm', 'Lg', '16"') from tokens immediately
     preceding each price. Returns OCRVariant list; intended mostly for 2+ prices.
+
+    Day 58: Detects combo modifier patterns (w/ FRIES) and preserves
+    the "with FOOD" label structure, applying kind_hint="combo".
     """
     variants: List[OCRVariant] = []
     if not text or not priced:
         return variants
+
+    # Combo hints from grammar parse (Day 58)
+    combo_hints: List[str] = []
+    if grammar:
+        combo_hints = grammar.get("combo_hints", [])
 
     # Tokenize while preserving char positions
     tokens: List[Tuple[str, int, int]] = []
@@ -479,6 +511,7 @@ def _build_variants_from_text(
         # Collect tokens ending before the price
         prior_tokens = [t for t in tokens if t[2] <= price_start]
         label_parts: List[str] = []
+        is_combo = False
 
         for tok, ts, te in reversed(prior_tokens):
             stripped = tok.strip(".,;:-")
@@ -489,14 +522,51 @@ def _build_variants_from_text(
             # Skip if this token itself looks like a price
             if _PRICE_RE.fullmatch(stripped):
                 continue
+
+            # Day 58: detect WI+FOOD tokens (e.g., "WIFRIES") in raw OCR text
+            wi_food = _extract_wi_combo(low)
+            if wi_food:
+                label_parts.append(f"W/{wi_food.title()}")
+                is_combo = True
+                break
+
+            # Day 58: combo food detection — preserve "with + food" pairs
+            if is_combo_food(low):
+                if label_parts and label_parts[-1].lower() in ("with", "w/"):
+                    # Combine: collected "with" + this food -> "W/Food"
+                    label_parts.pop()
+                    label_parts.append(f"W/{stripped.title()}")
+                    is_combo = True
+                    break
+                elif combo_hints and low in combo_hints:
+                    # Grammar confirms combo context -> prefix with "W/"
+                    label_parts.append(f"W/{stripped.title()}")
+                    is_combo = True
+                    break
+                else:
+                    # Standalone food, no combo context — use raw name
+                    label_parts.append(stripped)
+                    is_combo = True
+                    break
+
+            # Connector tokens: keep "with"/"w/" tentatively for combo building
             if low in _CONNECTOR_TOKENS:
+                if low in ("with", "w/"):
+                    label_parts.append(low)
+                    if len(label_parts) >= 2:
+                        break
                 continue
 
             label_parts.append(stripped)
             if len(label_parts) >= 2:
                 break
 
+        # Build final label
         label = " ".join(reversed(label_parts)).strip()
+
+        # Clean up: bare "with" or "w/" with no food following is incomplete
+        if label.lower() in ("with", "w/"):
+            label = ""
 
         price_cents = cand.get("price_cents")
         if price_cents is None:
@@ -505,13 +575,14 @@ def _build_variants_from_text(
             # If we truly can't parse, skip this as a variant; the raw candidate still exists.
             continue
 
-        variants.append(
-            {
-                "label": label,
-                "price_cents": price_cents,
-                "confidence": float(cand["confidence"]),
-            }
-        )
+        variant: OCRVariant = {
+            "label": label,
+            "price_cents": price_cents,
+            "confidence": float(cand["confidence"]),
+        }
+        if is_combo:
+            variant["kind_hint"] = "combo"
+        variants.append(variant)
 
     # Only treat as variants if we actually got 2+ prices parsed
     if len(variants) < 2:
@@ -541,7 +612,7 @@ def annotate_prices_and_variants_on_text_blocks(text_blocks: List[Dict[str, Any]
         tb["price_candidates"] = [c for (c, _pos) in priced]
 
         # Try to build variants; only keep if we got a plausible list
-        variants = _build_variants_from_text(merged, priced)
+        variants = _build_variants_from_text(merged, priced, tb.get("grammar"))
         if variants:
             tb["variants"] = variants
 

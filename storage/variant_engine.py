@@ -6,7 +6,7 @@ Phase 4 pt.3:
     Takes the coarse OCRVariant list per text block (built in ocr_pipeline.py)
     and enriches each variant with:
 
-    - kind: "size" | "flavor" | "style" | "other"
+    - kind: "size" | "flavor" | "style" | "combo" | "other"
     - normalized_size: canonical string for sizes/counts ("10in", "14in",
       "6pc", "24pc", "S", "M", "L", ... )
     - group_key: stable key so downstream export can easily cluster variants
@@ -38,6 +38,7 @@ from .parsers.size_vocab import (
     size_ordinal,
     size_track,
 )
+from .parsers.combo_vocab import is_combo_food
 
 
 PriceLike = Union[int, float]
@@ -161,14 +162,26 @@ def _infer_variant_kind_and_normalized_size(label: str) -> Tuple[str, Optional[s
     High-level classifier for a variant label.
 
     Returns (kind, normalized_size):
-      - kind: "size" | "flavor" | "style" | "other"
+      - kind: "size" | "flavor" | "style" | "combo" | "other"
       - normalized_size: canonical size/count string, only for kind == "size"
     """
     kind, norm_size = _normalize_size_from_label(label)
     if kind == "size":
         return "size", norm_size
 
-    # Not clearly a size; maybe flavor or style
+    # Day 58: Check for combo pattern — "W/Fries", "with Cheese", etc.
+    stripped = label.strip()
+    combo_match = re.match(r'^(?:w/\s*|with\s+)(.+)$', stripped, re.IGNORECASE)
+    if combo_match:
+        food = combo_match.group(1).strip()
+        if is_combo_food(food):
+            return "combo", None
+
+    # Standalone combo food used as a variant label (e.g., "Fries")
+    if is_combo_food(stripped):
+        return "combo", None
+
+    # Not clearly a size or combo; maybe flavor or style
     fs_kind = _infer_flavor_or_style(label)
     if fs_kind is not None:
         return fs_kind, None
@@ -188,7 +201,7 @@ def _build_group_key(kind: str, label: str, normalized_size: Optional[str]) -> O
     """
     if kind == "size" and normalized_size:
         return f"size:{normalized_size}"
-    if kind in ("flavor", "style"):
+    if kind in ("flavor", "style", "combo"):
         return f"{kind}:{label.strip().lower()}"
     return None
 
@@ -196,13 +209,21 @@ def _build_group_key(kind: str, label: str, normalized_size: Optional[str]) -> O
 def _enrich_variant(v: OCRVariant) -> None:
     """
     Mutate a single OCRVariant in-place with kind/normalized_size/group_key.
+
+    Day 58: respects ``kind_hint`` set during variant building (e.g., "combo").
     """
     label = (v.get("label") or "").strip()
     if not label:
-        v["kind"] = "other"
+        v["kind"] = v.get("kind_hint", "other")
         return
 
     kind, norm_size = _infer_variant_kind_and_normalized_size(label)
+
+    # Day 58: honour kind_hint from variant building when inference is ambiguous
+    hint = v.get("kind_hint")
+    if hint == "combo" and kind == "other":
+        kind = "combo"
+
     v["kind"] = kind
     if norm_size is not None:
         v["normalized_size"] = norm_size

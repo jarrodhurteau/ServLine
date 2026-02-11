@@ -47,6 +47,10 @@ Day 55 additions:
   - OCR typo normalization (88Q→BBQ, piZzA→PIZZA, etc.)
   - Confidence tiers: high (0.80+), medium (0.60-0.79), low (0.40-0.59)
   - Fallback OCR hardening for degraded Tesseract output
+
+Day 58 additions:
+  - Combo modifier detection: "W/FRIES", "with CHEESE" → combo_hints
+  - No-space OCR normalization: WIFRIES → with FRIES
 """
 
 from __future__ import annotations
@@ -54,6 +58,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 import re
+
+from .combo_vocab import COMBO_FOODS, extract_combo_hints
 
 
 # ── Result types ─────────────────────────────────────
@@ -73,6 +79,7 @@ class ParsedMenuItem:
     item_name: str = ""
     description: str = ""
     modifiers: List[str] = field(default_factory=list)
+    combo_hints: List[str] = field(default_factory=list)
     size_mentions: List[str] = field(default_factory=list)
     price_mentions: List[float] = field(default_factory=list)
     line_type: str = "unknown"  # menu_item | heading | modifier_line | description_only | multi_column | unknown
@@ -226,15 +233,38 @@ def _strip_short_noise(text: str) -> str:
 # ── W/ and Wi OCR normalization ─────────────────────
 
 def _normalize_w_slash(text: str) -> str:
-    """Normalize OCR variants of 'w/' (with) — 'W/', 'w/', 'Wi ' → 'with'.
+    """Normalize OCR variants of 'w/' (with) — 'W/', 'w/', 'Wi ', 'WIFOOD' → 'with'.
 
     'W/ FRIES' → 'with FRIES', 'Wi CHEESE' → 'with CHEESE'
+    Day 58: 'WIFRIES' → 'with FRIES' (no-space OCR pattern)
     """
     # W/ or w/ followed by a word
     text = re.sub(r'\bW/\s*', 'with ', text, flags=re.IGNORECASE)
+    # 'WI/' — OCR often reads 'W/' as 'WI/' (extra I before slash)
+    text = re.sub(r'\bWI/\s*', 'with ', text, flags=re.IGNORECASE)
     # 'Wi ' before a consonant word — common OCR misread of 'W/'
     text = re.sub(r'\bWi\s+(?=[BCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz])', 'with ', text)
+    # Day 58: No-space pattern — WIFRIES, WICHEESE, etc.
+    text = _WI_NOSPACE_RE.sub(_wi_nospace_repl, text)
     return text
+
+
+# Pre-compiled regex for no-space Wi+FOOD patterns (Day 58).
+# Only single-word combo foods are matchable without a space.
+_WI_NOSPACE_ALTS = "|".join(
+    re.escape(f) for f in sorted(
+        (f for f in COMBO_FOODS if " " not in f),
+        key=len, reverse=True,
+    )
+)
+_WI_NOSPACE_RE = re.compile(
+    r"\bWI(" + _WI_NOSPACE_ALTS + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _wi_nospace_repl(m: re.Match) -> str:
+    return f"with {m.group(1)}"
 
 
 # ── OCR typo normalization (Day 55) ─────────────────
@@ -876,6 +906,9 @@ def parse_menu_line(text: str) -> ParsedMenuItem:
             sizes.append(f'{num}"')
     result.size_mentions = sizes
 
+    # ── Step 3.5: Extract combo hints (Day 58) ──
+    result.combo_hints = extract_combo_hints(text_no_price)
+
     # ── Step 4: Extract modifiers ──
     modifiers = []
     for m in _MODIFIER_RE.finditer(text_no_price):
@@ -1242,6 +1275,7 @@ def _parsed_to_dict(p: ParsedMenuItem) -> Dict[str, Any]:
         "parsed_name": p.item_name,
         "parsed_description": p.description,
         "modifiers": p.modifiers,
+        "combo_hints": p.combo_hints,
         "size_mentions": p.size_mentions,
         "price_mentions": p.price_mentions,
         "line_type": p.line_type,
