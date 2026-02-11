@@ -2127,6 +2127,9 @@ def segment_document(
         # ----- Phase 4 pt.3: enrich variants with size/flavor intelligence
         variant_engine.enrich_variants_on_text_blocks(page_text_blocks)
 
+        # ----- Sprint 8.2 Day 57: validate variant price ordering
+        variant_engine.validate_variant_prices(page_text_blocks)
+
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for tb, pb in zip(page_text_blocks, pblocks):
@@ -2160,6 +2163,8 @@ def segment_document(
                 pb["is_heading"] = tb["is_heading"]
             if "is_noise" in tb:
                 pb["is_noise"] = tb["is_noise"]
+            if "price_flags" in tb:
+                pb["price_flags"] = tb["price_flags"]
             if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
                 pb.setdefault("meta", {})["multiline_reconstructed"] = True
 

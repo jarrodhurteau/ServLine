@@ -32,7 +32,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import re
 
 from .ocr_types import OCRVariant
-from .parsers.size_vocab import SIZE_WORD_MAP as _SIZE_WORD_MAP, normalize_size_token
+from .parsers.size_vocab import (
+    SIZE_WORD_MAP as _SIZE_WORD_MAP,
+    normalize_size_token,
+    size_ordinal,
+    size_track,
+)
 
 
 PriceLike = Union[int, float]
@@ -636,3 +641,82 @@ def enrich_variants_on_text_blocks(text_blocks: List[Dict[str, Any]]) -> None:
         if has_size:
             meta = tb.setdefault("meta", {})
             meta["has_size_variants"] = True
+
+
+# ---------------------------------------------------------------------------
+# Variant price validation — Sprint 8.2 Day 57
+# ---------------------------------------------------------------------------
+
+def validate_variant_prices(text_blocks: List[Dict[str, Any]]) -> None:
+    """Validate that size variant prices are monotonically non-decreasing.
+
+    For each text_block with 2+ size-typed variants on the same size track,
+    sorts by canonical size ordinal and checks that prices do not decrease
+    as size increases.  Equal prices are allowed (some menus charge the
+    same for adjacent sizes).
+
+    Attaches ``price_flags`` to text_blocks where inversions are found.
+
+    Pipeline placement: after enrich_variants_on_text_blocks (Step 8),
+    as Step 8.5.  Mutates text_blocks in place.
+    """
+    for tb in text_blocks:
+        variants: List[OCRVariant] = tb.get("variants") or []  # type: ignore[assignment]
+        if len(variants) < 2:
+            continue
+
+        # Collect size variants with valid ordinals
+        sized: List[Tuple[str, int, int, str]] = []  # (norm, ordinal, cents, track)
+        for v in variants:
+            if v.get("kind") != "size":
+                continue
+            ns = v.get("normalized_size")
+            pc = v.get("price_cents", 0)
+            if not ns or not pc or pc <= 0:
+                continue
+            ordi = size_ordinal(ns)
+            trk = size_track(ns)
+            if ordi is None or trk is None:
+                continue
+            sized.append((ns, ordi, pc, trk))
+
+        if len(sized) < 2:
+            continue
+
+        # Group by track — only validate within same track
+        tracks: Dict[str, List[Tuple[str, int, int, str]]] = {}
+        for entry in sized:
+            tracks.setdefault(entry[3], []).append(entry)
+
+        for track_name, track_entries in tracks.items():
+            if len(track_entries) < 2:
+                continue
+
+            # Sort by ordinal (canonical size order)
+            sorted_entries = sorted(track_entries, key=lambda e: e[1])
+
+            # Check monotonic non-decreasing prices
+            inversions = []
+            for i in range(len(sorted_entries) - 1):
+                ns_small, _, price_small, _ = sorted_entries[i]
+                ns_large, _, price_large, _ = sorted_entries[i + 1]
+                if price_large < price_small:
+                    inversions.append({
+                        "smaller_size": ns_small,
+                        "smaller_price_cents": price_small,
+                        "larger_size": ns_large,
+                        "larger_price_cents": price_large,
+                    })
+
+            if inversions:
+                flags = tb.setdefault("price_flags", [])
+                flags.append({
+                    "severity": "warn",
+                    "reason": "variant_price_inversion",
+                    "details": {
+                        "track": track_name,
+                        "inversions": inversions,
+                        "expected_order": [e[0] for e in sorted_entries],
+                        "actual_prices_cents": [e[2] for e in sorted_entries],
+                    },
+                })

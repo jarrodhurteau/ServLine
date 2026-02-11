@@ -23,14 +23,17 @@ SIZE_WORD_MAP: Dict[str, str] = {
     "small": "S",
     "sm": "S",
     "sml": "S",
+    "s": "S",
     # M
     "medium": "M",
     "med": "M",
     "md": "M",
+    "m": "M",
     # L
     "large": "L",
     "lg": "L",
     "lrg": "L",
+    "l": "L",
     # XL
     "x-large": "XL",
     "xlarge": "XL",
@@ -104,3 +107,85 @@ def normalize_size_token(raw: str) -> str:
 
     # Passthrough
     return raw.strip()
+
+
+# ---------------------------------------------------------------------------
+# Size Ordering — Sprint 8.2 Day 57
+#
+# Canonical ordinal positions for all normalized_size values.
+# Used by variant_engine.validate_variant_prices() to check monotonic pricing.
+#
+# Three independent ordinal tracks (non-overlapping ranges):
+#   - Word sizes:     10-55   (XS < Mini < S < ... < XXL)
+#   - Portions:       110-150 (Slice < Half < Whole < Family < Party)
+#   - Multiplicities: 210-230 (Single < Double < Triple)
+#   - Numeric inches use their natural value (6-30)
+#   - Piece counts use 300+count (306, 312, 324, 350)
+# ---------------------------------------------------------------------------
+
+_WORD_SIZE_ORDER: Dict[str, int] = {
+    "XS": 10, "Mini": 15, "S": 20, "Personal": 25, "Regular": 30,
+    "M": 35, "L": 40, "Deluxe": 45, "XL": 50, "XXL": 55,
+}
+
+_PORTION_ORDER: Dict[str, int] = {
+    "Slice": 110, "Half": 120, "Whole": 130, "Family": 140, "Party": 150,
+}
+
+_MULTIPLICITY_ORDER: Dict[str, int] = {
+    "Single": 210, "Double": 220, "Triple": 230,
+}
+
+
+def size_ordinal(normalized_size: str) -> Optional[int]:
+    """Return an ordinal position for a normalized_size value.
+
+    Numeric inches (e.g. '10in') and piece counts (e.g. '6pc') use their
+    natural numeric value (offset into dedicated ranges).
+    Word sizes, portions, and multiplicities use lookup tables.
+
+    Returns None if the size is not recognized.
+    """
+    if not normalized_size:
+        return None
+
+    # Numeric inches: "10in" -> 10
+    m = re.match(r"^(\d+)in$", normalized_size)
+    if m:
+        return int(m.group(1))
+
+    # Piece counts: "6pc" -> 306
+    m = re.match(r"^(\d+)pc$", normalized_size)
+    if m:
+        return 300 + int(m.group(1))
+
+    # Word-based lookups
+    if normalized_size in _WORD_SIZE_ORDER:
+        return _WORD_SIZE_ORDER[normalized_size]
+    if normalized_size in _PORTION_ORDER:
+        return _PORTION_ORDER[normalized_size]
+    if normalized_size in _MULTIPLICITY_ORDER:
+        return _MULTIPLICITY_ORDER[normalized_size]
+
+    return None
+
+
+def size_track(normalized_size: str) -> Optional[str]:
+    """Determine which ordering track a normalized_size belongs to.
+
+    Returns 'inch', 'piece', 'word', 'portion', 'multiplicity', or None.
+    Only variants on the same track are compared for price ordering.
+    """
+    if not normalized_size:
+        return None
+    if re.match(r"^\d+in$", normalized_size):
+        return "inch"
+    if re.match(r"^\d+pc$", normalized_size):
+        return "piece"
+    if normalized_size in _WORD_SIZE_ORDER:
+        return "word"
+    if normalized_size in _PORTION_ORDER:
+        return "portion"
+    if normalized_size in _MULTIPLICITY_ORDER:
+        return "multiplicity"
+    return None

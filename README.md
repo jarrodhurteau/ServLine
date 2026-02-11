@@ -558,11 +558,54 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 57 — Variant Price Validation & Portion-Aware Rules (COMPLETE)
+
+**Canonical Size Ordering** (`storage/parsers/size_vocab.py`):
+- `size_ordinal()` returns ordinal positions for all normalized size values
+- Non-overlapping ordinal ranges: inches (6-30), word sizes (10-55), portions (110-150), multiplicities (210-230), piece counts (300+)
+- `size_track()` classifies sizes into tracks: "inch", "word", "portion", "piece", "multiplicity"
+- Only variants on the same track are compared — items with mixed tracks validate each independently
+
+**Variant Price Validation** (`storage/variant_engine.py`):
+- `validate_variant_prices()` — new pipeline Step 8.5 after variant enrichment
+- For each item with 2+ size variants: sort by canonical ordinal, check monotonic non-decreasing prices
+- Flag-only (no auto-correct) — inversions produce `price_flags` with `severity="warn"`, `reason="variant_price_inversion"`
+- Equal prices allowed (S=$10, M=$10, L=$14 is valid); only strict inversions flagged
+- Wired into both `ocr_pipeline.py` (background) and `ai_ocr_helper.py` (website)
+- `price_flags` mirrored to preview blocks for future UI display
+
+**SIZE_WORD_MAP Gap Fix** (`storage/parsers/size_vocab.py`):
+- Grid normalizes "Small" → "S", but enrichment couldn't recognize "S" back as a size
+- Added canonical short forms ("s"→"S", "m"→"M", "l"→"L") — unambiguous in menu context
+
+**Test Results** (1,188 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51 baseline | 92 | 100% |
+| Day 52 pizza grammar | 66 | 100% |
+| Day 53 multi-menu | 86 | 100% |
+| Day 54 components | 105 | 100% |
+| Day 55 integration | 342 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,188** | **100%** |
+
+**Artifacts:**
+- [storage/parsers/size_vocab.py](storage/parsers/size_vocab.py) — Size vocabulary + ordinal ordering (~170 LOC)
+- [storage/variant_engine.py](storage/variant_engine.py) — Variant engine + price validation (~720 LOC)
+- [tests/test_day57_price_validation.py](tests/test_day57_price_validation.py) — Day 57 test suite (242 cases)
+
+**Day 57 complete.**
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 56 Complete)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 57 Complete)**
 
-Sprint 8.2 (Variant & Portion Logic) is underway. Day 56 delivered the grammar-to-variant bridge — size grid headers now propagate through both the background pipeline and the website's AI preview. Grammar-aware block building on the website prevents ALL-CAPS menu items from being swallowed as section headers. 946 tests passing across all suites.
+Sprint 8.2 (Variant & Portion Logic) continues. Day 57 added within-item variant price validation — size variants are checked for monotonic price ordering (S < M < L), with track separation ensuring inches, word sizes, portions, and piece counts are validated independently. Price inversions from OCR errors are flagged for human review. 1,188 tests passing across all suites.
 
 ---
 
@@ -638,8 +681,9 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Grammar-aware block building — ALL-CAPS item rescue (Day 56)
 - ✅ Multi-price capture — all N prices preserved (Day 56)
 - ✅ Website OCR quality — psm 3 + image preprocessing (Day 56)
-- Variant price validation (S < M < L) (Day 57)
-- Portion-aware price rules — half < whole, slice < pie (Day 57)
+- ✅ Variant price validation (S < M < L) — flag-only, track-separated (Day 57)
+- ✅ Portion-aware price rules — half < whole, slice < pie (Day 57)
+- ✅ Canonical size ordering — ordinal positions for all size types (Day 57)
 - Combo/meal detection (Day 58)
 - Cross-variant consistency checks (Day 59-60)
 
@@ -653,4 +697,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence tiers (high/medium/low/unknown)
 
-**Next Step:** Day 57 — Variant price validation (S < M < L) and portion-aware price rules
+**Next Step:** Day 58 — Combo/meal detection
