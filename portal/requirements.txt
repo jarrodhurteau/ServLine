@@ -17,5 +17,8 @@ openpyxl==3.1.5     # Excel (XLSX) export
 pandas==2.2.2; platform_machine == "AMD64" and python_version < "3.13"
 scikit-learn==1.5.1; platform_machine == "AMD64" and python_version < "3.13"
 
+# --- AI extraction (Claude API) ---
+anthropic>=0.79.0
+
 # --- Utils ---
 python-dotenv==1.0.1  # load .env for TESSERACT_CMD, POPPLER_PATH, secrets

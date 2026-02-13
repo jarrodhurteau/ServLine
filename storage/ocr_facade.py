@@ -369,6 +369,7 @@ def extract_menu_from_pdf(path: str) -> Tuple[StructuredMenuPayload, Dict[str, A
         "preview_blocks": preview_blocks,
         "text_blocks": text_blocks,
         "blocks": text_blocks,
+        "raw_ocr_text": raw_text,
         "orientation": orientation_meta,
         "notes": [
             "phase-4 segmentation",

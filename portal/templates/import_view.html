@@ -303,6 +303,9 @@
     // live status poller
     const terminal = new Set(['done','approved','published','discarded','failed','error']);
     const pollMs = 1500;
+    const initialStatus = '{{ (job.status or "")|lower }}';
+    // Only auto-redirect if we started in a non-terminal state (i.e. we were waiting)
+    const shouldAutoRedirect = !terminal.has(initialStatus);
 
     async function pollStatus(){
       try{
@@ -331,6 +334,15 @@
         // when draft becomes ready, refresh preview (bust cache) once
         if (data.draft_ready && !imgReady){
           showPreview(cacheBust(previewURL));
+        }
+
+        // auto-redirect to draft editor when processing completes
+        if (st === 'done' && shouldAutoRedirect){
+          const editorBtn = document.getElementById('open-editor-btn');
+          if (editorBtn && editorBtn.href){
+            window.location.href = editorBtn.href;
+            return;
+          }
         }
 
         // stop polling on terminal states

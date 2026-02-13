@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from storage import import_jobs as import_jobs_store  # <-- NEW: structured import helpers
-from storage.ocr_pipeline import segment_document
+# segment_document import removed — facade provides layout data; no need for duplicate call
 
 
 # --- Forward decls for type checkers (real implementations appear later) ---
@@ -1782,6 +1782,52 @@ def _draft_items_from_draft_json(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _draft_items_from_ai_preview(ai_items: list) -> list:
+    """Convert analyze_ocr_text() items directly to draft DB rows.
+
+    Bypasses the triple-transformation chain (group->helper->json) that loses
+    prices, confidence, and categories.  Same logic as imports_ai_commit()
+    but reusable for background imports.
+    """
+    def _to_cents(v) -> int:
+        try:
+            return int(round(float(v) * 100))
+        except Exception:
+            return 0
+
+    out: List[Dict[str, Any]] = []
+    pos = 1
+    for it in ai_items:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        desc = (it.get("description") or "").strip() or None
+        cat = it.get("category") or None
+        conf = it.get("confidence")
+        pcs = it.get("price_candidates") or []
+
+        price_cents = 0
+        if pcs:
+            try:
+                price_cents = _to_cents(pcs[0].get("value"))
+            except Exception:
+                pass
+
+        price_text = _build_price_text(it)
+
+        out.append({
+            "name": name,
+            "description": desc,
+            "price_cents": int(price_cents),
+            "price_text": price_text,
+            "category": cat,
+            "position": pos,
+            "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf,
+        })
+        pos += 1
+    return out
+
+
 def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convert the ocr_worker draft object into the on-disk draft JSON format expected by the rest of the app.
@@ -1868,30 +1914,9 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 else:
                     engine = "ocr_helper+tesseract"
 
-                # NEW: For PDFs, also generate layout_debug from the Phase-3+ pipeline
-                # IMPORTANT: avoid running segment_document twice (facade often already did it)
-                try:
-                    suffix = saved_file_path.suffix.lower()
-                    if suffix == ".pdf":
-                        # Ensure debug_payload is a dict so we can attach layout_debug
-                        if debug_payload is None:
-                            debug_payload = {}
-                        if isinstance(debug_payload, dict):
-                            # Only compute if not already provided by the facade
-                            if "layout_debug" not in debug_payload:
-                                seg = segment_document(pdf_path=str(saved_file_path), dpi=400)
-                                ld = seg.get("layout_debug")
-                                if ld is None:
-                                    ld = {
-                                        "ok": True,
-                                        "pages": seg.get("pages"),
-                                        "dpi": seg.get("dpi"),
-                                        "preview_blocks": seg.get("preview_blocks") or [],
-                                        "meta": seg.get("meta") or {},
-                                    }
-                                debug_payload["layout_debug"] = ld
-                except Exception:
-                    pass
+                # NOTE: segment_document was previously called here for layout_debug
+                # but it re-runs the full OCR pipeline (~3min), doubling processing time.
+                # The facade already provides text_blocks/preview_blocks which is sufficient.
 
 
             except Exception as e:
@@ -1956,6 +1981,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
         rel_draft_path = _save_draft_json(job_id, draft)
 
+        # Save draft_path to DB NOW so _get_or_create_draft_for_job can find it.
+        # status="done" is set later, after items are in the DB.
+        update_import_job(job_id, draft_path=rel_draft_path)
+
         try:
             raw_dump = f"(engine={engine})\n"
             if helper_error:
@@ -1964,15 +1993,66 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         except Exception:
             pass
 
-        update_import_job(job_id, status="done", draft_path=rel_draft_path)
+        # =====================================================================
+        # THREE-STRATEGY ITEM EXTRACTION
+        # Get clean OCR text (same path as /ai/preview), then try:
+        #   1. Claude API extraction (best quality)
+        #   2. Heuristic AI (analyze_ocr_text — same as /ai/preview)
+        #   3. Legacy draft JSON parsing (last resort)
+        # =====================================================================
+        items = []
+        extraction_strategy = "none"
+
+        # Get clean OCR text via simple Tesseract (same path as /ai/preview)
+        clean_ocr_text = ""
+        try:
+            _suffix = saved_file_path.suffix.lower()
+            if _suffix == ".pdf":
+                clean_ocr_text = _pdf_to_text(saved_file_path)
+            elif _suffix in (".png", ".jpg", ".jpeg"):
+                clean_ocr_text = _ocr_image_to_text(src_for_ocr)
+            print(f"[Draft] Clean OCR text: {len(clean_ocr_text)} chars")
+        except Exception as _ocr_err:
+            print(f"[Draft] Clean OCR failed: {_ocr_err}")
+
+        # Strategy 1: Claude API extraction
+        if clean_ocr_text and not items:
+            try:
+                from storage.ai_menu_extract import extract_menu_items_via_claude, claude_items_to_draft_rows
+                claude_items = extract_menu_items_via_claude(clean_ocr_text)
+                if claude_items:
+                    items = claude_items_to_draft_rows(claude_items)
+                    extraction_strategy = "claude_api"
+                    print(f"[Draft] Strategy 1 (Claude API): {len(items)} items")
+            except Exception as _claude_err:
+                print(f"[Draft] Strategy 1 (Claude API) failed: {_claude_err}")
+
+        # Strategy 2: Heuristic AI (same as /ai/preview endpoint)
+        if clean_ocr_text and not items:
+            try:
+                doc = analyze_ocr_text(clean_ocr_text, layout=None, taxonomy=None, restaurant_profile=None)
+                ai_items = (doc or {}).get("items") or []
+                if ai_items:
+                    items = _draft_items_from_ai_preview(ai_items)
+                    extraction_strategy = "heuristic_ai"
+                    print(f"[Draft] Strategy 2 (Heuristic AI): {len(items)} items")
+            except Exception as _ai_err:
+                print(f"[Draft] Strategy 2 (Heuristic AI) failed: {_ai_err}")
+
+        # Strategy 3: Legacy draft JSON parsing (last resort)
+        if not items:
+            items = _draft_items_from_draft_json(draft if isinstance(draft, dict) else {})
+            extraction_strategy = "legacy_draft_json"
+            print(f"[Draft] Strategy 3 (Legacy JSON): {len(items)} items")
 
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
+        # status="done" is set AFTER items are in the DB so auto-redirect
+        # lands on a populated editor.
         try:
             if drafts_store is not None:
                 draft_id = _get_or_create_draft_for_job(job_id, allow_create=True)
 
                 if draft_id and hasattr(drafts_store, "upsert_draft_items"):
-                    items = _draft_items_from_draft_json(draft if isinstance(draft, dict) else {})
                     if items:
                         drafts_store.upsert_draft_items(draft_id, items)
 
@@ -1981,9 +2061,15 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     payload.setdefault("import_job_id", int(job_id))
                     payload.setdefault("pipeline", engine or "unknown")
                     payload.setdefault("bridge", "run_ocr_and_make_draft")
+                    payload["extraction_strategy"] = extraction_strategy
+                    payload["clean_ocr_chars"] = len(clean_ocr_text)
                     drafts_store.save_ocr_debug(draft_id, payload)
-        except Exception:
-            pass
+        except Exception as _draft_err:
+            print(f"[Draft] ERROR creating draft items: {_draft_err}")
+            import traceback; traceback.print_exc()
+
+        # Mark done AFTER items are in DB so auto-redirect shows populated editor
+        update_import_job(job_id, status="done")
 
 
     except Exception as e:
@@ -5005,44 +5091,7 @@ def imports_ai_commit(job_id: int):
     # Run heuristics
     doc = analyze_ocr_text(raw_text, layout=None, taxonomy=TAXONOMY_SEED, restaurant_profile=None)
     items_ai = (doc or {}).get("items") or []
-
-    # Map AI preview items -> draft_items schema (name, description, price_cents, category, confidence)
-    def _to_cents(v) -> int:
-        try:
-            return int(round(float(v) * 100))
-        except Exception:
-            return 0
-
-    new_items = []
-    for it in items_ai:
-        name = (it.get("name") or "").strip()
-        if not name:
-            continue
-        desc = (it.get("description") or "") or ""
-        cat = (it.get("category") or "") or None
-        conf = it.get("confidence")
-        pcs = it.get("price_candidates") or []
-
-        # Primary price: keep existing behavior (first price_candidate)
-        price_cents = 0
-        if pcs:
-            try:
-                price_cents = _to_cents(pcs[0].get("value"))
-            except Exception:
-                price_cents = 0
-
-        # NEW: carry all variant/size info into price_text for the Draft Editor
-        price_text = _build_price_text(it)
-
-        new_items.append({
-            "name": name,
-            "description": desc.strip() or None,
-            "price_cents": int(price_cents),
-            "price_text": price_text,
-            "category": cat,
-            "position": None,
-            "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf
-        })
+    new_items = _draft_items_from_ai_preview(items_ai)
 
     # Replace items in the draft for this job
     _require_drafts_storage()
