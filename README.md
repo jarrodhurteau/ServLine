@@ -601,11 +601,79 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 58 — Combo Modifier Detection & Variant Labeling (COMPLETE)
+
+**Combo Food Vocabulary** (`storage/parsers/combo_vocab.py` — new):
+- ~35 side items (fries, chips, coleslaw, cheese, drink, etc.)
+- Single source of truth for combo detection, mirrors `size_vocab.py` pattern
+- Exports: `COMBO_FOODS`, `is_combo_food()`, `extract_combo_hints()`
+
+**"WIFRIES" / "WI/FRIES" Normalization** (`storage/parsers/menu_grammar.py`):
+- OCR patterns like "WIFRIES" → "with FRIES", "WI/FRIES" → "with FRIES"
+- Built regex from single-word combo food entries
+- OCR truncation tolerance: "FRIE", "CHIP" accepted as truncated forms
+
+**Combo Kind Classification** (`storage/variant_engine.py`):
+- New `kind="combo"` alongside size/flavor/style/other
+- Detects "W/Food" labels and standalone food items
+- Context-aware variant building with `combo_hints` from grammar parse
+- Labels normalized to "W/Food" format
+
+**Test Results** (1,463 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,463** | **100%** |
+
+**Artifacts:**
+- [storage/parsers/combo_vocab.py](storage/parsers/combo_vocab.py) — Combo food vocabulary (~80 LOC)
+- [storage/variant_engine.py](storage/variant_engine.py) — Variant engine + combo detection (~720 LOC)
+- [tests/test_day58_combo_modifiers.py](tests/test_day58_combo_modifiers.py) — Day 58 test suite (275 cases)
+
+**Day 58 complete.**
+
+---
+
+### ✅ Claude API Extraction Pipeline (COMPLETE)
+
+**Problem:** Background imports used `segment_document()` which produced only ~762 chars of fragmented OCR text, resulting in 18 garbled items ("OLVLOd", "YSal", "3ma") in a single "Vals" category.
+
+**Root Cause:** Two separate OCR paths — the `/ai/preview` endpoint used simple `pytesseract.image_to_string()` (full text, 7,736 chars) while the background import used the complex `segment_document()` pipeline (word-level fragments).
+
+**Solution — Three-Strategy Item Extraction:**
+1. **Claude API** (primary): Sends clean OCR text to Claude Sonnet for structured extraction. Produces 106 items with proper names, descriptions, prices, and categories at 90% confidence.
+2. **Heuristic AI** (fallback): Uses `analyze_ocr_text()` on clean text — same path as `/ai/preview` endpoint.
+3. **Legacy JSON** (last resort): Parses facade's structured output via `_draft_items_from_draft_json()`.
+
+**Bug Fixes:**
+- Removed duplicate `segment_document()` call that doubled processing time (~3 min wasted)
+- Fixed draft_path timing: save to DB before `status="done"` so auto-redirect finds populated editor
+- Added error visibility to bare `except: pass` blocks in draft creation
+- Extracted `_draft_items_from_ai_preview()` helper, deduplicated `imports_ai_commit()`
+
+**Results:**
+- 115 items extracted from full restaurant menu (was 18 garbled)
+- Proper categories: Pizza, Appetizers, Calzones, Burgers, Wings, Wraps, Sandwiches, Beverages
+- All items have prices, descriptions, and 90% confidence scores
+- Auto-redirect from import view to draft editor on completion
+
+**New Files:**
+- [storage/ai_menu_extract.py](storage/ai_menu_extract.py) — Claude API extraction module (~260 LOC)
+- `anthropic>=0.79.0` added to requirements
+- `ANTHROPIC_API_KEY` added to `.env.example`
+
+---
+
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 57 Complete)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 58 Complete)**
 
-Sprint 8.2 (Variant & Portion Logic) continues. Day 57 added within-item variant price validation — size variants are checked for monotonic price ordering (S < M < L), with track separation ensuring inches, word sizes, portions, and piece counts are validated independently. Price inversions from OCR errors are flagged for human review. 1,188 tests passing across all suites.
+Sprint 8.2 (Variant & Portion Logic) Day 58 added combo modifier detection ("W/FRIES", "WIFRIES" → combo variants) and the Claude API extraction pipeline. Background imports now use a three-strategy approach: (1) Claude API on clean OCR text, (2) heuristic AI fallback, (3) legacy JSON parsing. Real-world test: **115 items extracted from a full restaurant menu** (106 via Claude API at 90% confidence), up from 18 garbled items. 1,463 tests passing across all suites.
 
 ---
 
@@ -613,39 +681,38 @@ Sprint 8.2 (Variant & Portion Logic) continues. Day 57 added within-item variant
 
 ServLine now has:
 
-- ✅ Unified OCR brain
+**Core Infrastructure:**
+- ✅ Unified OCR brain (One Brain architecture)
 - ✅ Stable import flow (PDF/Image/CSV/XLSX/JSON)
-- ✅ Deterministic orientation handling
-- ✅ Rotation sweep for mis-rotated uploads
-- ✅ Deterministic OCR scoring & selection
-- ✅ Height-ratio line grouping (validated)
-- ✅ Full debug artifacts and metadata
-- ✅ Price-safe, category-safe AI cleanup
-- ✅ Structured Draft Editor
+- ✅ Structured Draft Editor with inline editing
 - ✅ Column mapping for structured imports
-- ✅ Menu item grammar parser (Phase 8)
-- ✅ Phrase-level category keywords (Phase 8)
-- ✅ Expanded variant vocabulary — portions, crusts, flavors (Phase 8)
-- ✅ Semantic long-name splitting (Phase 8)
-- ✅ OCR garble stripping — dot-leader noise removal (Phase 8)
-- ✅ Pizza-specific grammar — CAPS split, size headers, topping lists (Phase 8)
-- ✅ Real OCR validation — 100% classification on 258-line menu (Phase 8)
-- ✅ Multi-menu grammar testing — full restaurant menu validated (Phase 8)
-- ✅ Contextual multi-pass classification — heading/item resolution (Phase 8)
-- ✅ Broader ingredient vocabulary — 60+ items for description detection (Phase 8)
-- ✅ Post-garble noise cleanup — mid-length residue removal (Phase 8)
-- ✅ Item component detection — toppings, sauce, preparation, flavors (Phase 8)
-- ✅ Multi-column merge detection — whitespace-gap heuristic (Phase 8)
-- ✅ Pipeline integration — grammar metadata in text_blocks + preview_blocks (Phase 8)
-- ✅ OCR typo normalization — 88Q→BBQ, piZzA→PIZZA, bracket noise (Phase 8)
-- ✅ Confidence tiers — high/medium/low/unknown scoring (Phase 8)
-- ✅ Fallback OCR hardening — 100% on degraded Tesseract output (Phase 8)
-- ✅ Shared size vocabulary — single source of truth for size detection (Phase 8)
-- ✅ Size grid context propagation — headers map to item variants (Phase 8)
-- ✅ Grammar-to-variant bridge — pipeline + website paths connected (Phase 8)
-- ✅ Grammar-aware block building — prevents ALL-CAPS items becoming headers (Phase 8)
-- ✅ Multi-price capture — all prices preserved, not just first two (Phase 8)
-- ✅ Website OCR quality — psm 3 + preprocessing for cleaner extraction (Phase 8)
+- ✅ Full debug artifacts and metadata
+
+**OCR & Vision (Phase 7):**
+- ✅ Deterministic orientation handling
+- ✅ Rotation sweep for mis-rotated uploads (0°/90°/180°/270°)
+- ✅ Deterministic OCR scoring & selection (outlier penalty for token inflation)
+- ✅ Height-ratio line grouping (validated on 4 real menus)
+- ✅ Website OCR quality — psm 3 + preprocessing for cleaner extraction
+
+**AI & Extraction:**
+- ✅ Claude API menu extraction — 106 items from single menu, 90% confidence
+- ✅ Three-strategy extraction: Claude API → Heuristic AI → Legacy JSON
+- ✅ Clean OCR text path (7,736 chars via image_to_string vs 762 chars fragmented)
+- ✅ Price-safe, category-safe AI cleanup (non-hallucinating text surgeon)
+- ✅ Auto-redirect from import view to draft editor on completion
+
+**Semantic Intelligence (Phase 8):**
+- ✅ Menu item grammar parser — multi-pass classification, 100% on real menus
+- ✅ Phrase-level category keywords — 90+ weighted patterns
+- ✅ OCR garble stripping — dot-leader noise, typo normalization (88Q→BBQ)
+- ✅ Item component detection — toppings, sauces, preparation, flavors
+- ✅ Shared size vocabulary — single source of truth for size detection
+- ✅ Size grid context propagation — headers map to item variants
+- ✅ Grammar-to-variant bridge — pipeline + website paths connected
+- ✅ Variant price validation — S < M < L monotonic check, track-separated
+- ✅ Combo modifier detection — "W/FRIES", "WIFRIES" → combo variants
+- ✅ Confidence tiers — high/medium/low/unknown scoring
 
 ---
 
@@ -684,7 +751,13 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Variant price validation (S < M < L) — flag-only, track-separated (Day 57)
 - ✅ Portion-aware price rules — half < whole, slice < pie (Day 57)
 - ✅ Canonical size ordering — ordinal positions for all size types (Day 57)
-- Combo/meal detection (Day 58)
+- ✅ Combo modifier detection — "W/FRIES", "WIFRIES" normalization (Day 58)
+- ✅ Combo food vocabulary — ~35 side items, truncation tolerance (Day 58)
+- ✅ Combo kind classification — context-aware variant building (Day 58)
+- ✅ Claude API extraction pipeline — 106 items at 90% confidence (Day 58)
+- ✅ Three-strategy extraction — Claude → Heuristic AI → Legacy JSON (Day 58)
+- ✅ Clean OCR text path — 7,736 chars via image_to_string (Day 58)
+- ✅ Auto-redirect from import view to draft editor (Day 58)
 - Cross-variant consistency checks (Day 59-60)
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
@@ -695,6 +768,6 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - Geometric heading detection from OCR blocks
 - Multi-signal confidence scoring
-- Confidence tiers (high/medium/low/unknown)
+- Confidence-based auto-review flagging
 
-**Next Step:** Day 58 — Combo/meal detection
+**Next Step:** Day 59 — Cross-variant consistency checks
