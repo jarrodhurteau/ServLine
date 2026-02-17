@@ -128,9 +128,15 @@ class OCRVariant(TypedDict):
     confidence: float              # 0.0–1.0 for this variant
 
     # NEW in Phase 4 pt.3 — richer variant intelligence (all optional, BC-safe):
-    kind: NotRequired[str]                 # "size" | "flavor" | "style" | "other"
+    kind: NotRequired[str]                 # "size" | "flavor" | "style" | "combo" | "other"
     normalized_size: NotRequired[str]      # e.g. "10in", "14in", "6pc", "12pc"
     group_key: NotRequired[str]            # family key for clustering variants for an item
+
+    # Sprint 8.2 Day 58 — combo hint from variant building:
+    kind_hint: NotRequired[str]            # "combo" when building detected combo context
+
+    # Sprint 8.2 Day 60 — multi-signal confidence scoring:
+    confidence_details: NotRequired[Dict[str, float]]  # audit trail: base, label_mod, etc.
 
 
 # ────────────────────────────────────────────────

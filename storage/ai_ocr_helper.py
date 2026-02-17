@@ -57,7 +57,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # --- Variant & Category Hierarchy — Phase 4 pt.3–4 ---
 from storage.variant_engine import (
     classify_raw_variant, normalize_variant_group, validate_variant_prices,
-    check_variant_consistency,
+    check_variant_consistency, score_variant_confidence,
     _parse_size_header_columns, _is_section_heading_name, SizeGridContext,
 )
 from .category_hierarchy import infer_category_hierarchy
@@ -954,6 +954,9 @@ def analyze_ocr_text(
 
     # Sprint 8.2 Day 59: cross-variant consistency checks
     check_variant_consistency(items)
+
+    # Sprint 8.2 Day 60: variant confidence scoring
+    score_variant_confidence(items)
 
     # Infer per-category subcategories (e.g., Gourmet Pizza, Cold Subs)
     hierarchy_map = infer_category_hierarchy(items)

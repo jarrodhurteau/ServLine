@@ -966,3 +966,141 @@ def check_variant_consistency(text_blocks: List[Dict[str, Any]]) -> None:
 
     # Cross-item check requires full list
     _check_grid_count_consistency(text_blocks)
+
+
+# ---------------------------------------------------------------------------
+# Variant Confidence Scoring — Sprint 8.2 Day 60
+# ---------------------------------------------------------------------------
+
+def _variant_in_inversion(v: OCRVariant, flag: Dict[str, Any]) -> bool:
+    """Check if *this* variant's normalized_size appears in a price-inversion pair."""
+    ns = v.get("normalized_size")
+    if not ns:
+        return False
+    for inv in flag.get("details", {}).get("inversions", []):
+        if ns in (inv.get("smaller_size"), inv.get("larger_size")):
+            return True
+    return False
+
+
+def _variant_is_duplicate(v: OCRVariant, flag: Dict[str, Any]) -> bool:
+    """Check if *this* variant's group_key is among the duplicated keys."""
+    gk = v.get("group_key")
+    if not gk:
+        return False
+    return gk in (flag.get("details", {}).get("duplicated_keys") or [])
+
+
+def _score_single_variant(
+    v: OCRVariant,
+    tb: Dict[str, Any],
+) -> Dict[str, float]:
+    """Score a single variant using multi-signal aggregation.
+
+    Returns a details dict with keys:
+      base, label_mod, grammar_mod, grid_mod, flag_penalty, final
+    """
+    base = v.get("confidence", 0.80)
+
+    # ── Signal 1: Label clarity ──────────────────────────
+    kind = v.get("kind") or "other"
+    label = v.get("label", "").strip()
+
+    if not label:
+        label_mod = -0.20
+    elif kind == "size" and v.get("normalized_size"):
+        label_mod = 0.05
+    elif kind == "combo":
+        label_mod = 0.03
+    elif kind in ("flavor", "style"):
+        label_mod = 0.02
+    elif kind == "other":
+        label_mod = -0.10
+    else:
+        # kind is "size" but no normalized_size
+        label_mod = 0.0
+
+    # ── Signal 2: Grammar context ────────────────────────
+    grammar = tb.get("grammar") or {}
+    parse_conf = grammar.get("parse_confidence")
+    if parse_conf is not None:
+        if parse_conf < 0.50:
+            grammar_mod = -0.10 * (1.0 - parse_conf / 0.50)
+        elif parse_conf >= 0.80:
+            grammar_mod = 0.03
+        else:
+            grammar_mod = 0.0
+    else:
+        grammar_mod = 0.0
+
+    # ── Signal 3: Grid context ───────────────────────────
+    meta = tb.get("meta") or {}
+    grid_mod = 0.05 if meta.get("size_grid_applied") else 0.0
+
+    # ── Signal 4: Price flag penalties ───────────────────
+    flag_penalty = 0.0
+    seen_reasons: set = set()
+    for flag in tb.get("price_flags") or []:
+        reason = flag.get("reason", "")
+        severity = flag.get("severity", "info")
+
+        if reason == "variant_price_inversion" and _variant_in_inversion(v, flag):
+            if reason not in seen_reasons:
+                flag_penalty -= 0.12
+                seen_reasons.add(reason)
+        elif reason == "duplicate_variant" and _variant_is_duplicate(v, flag):
+            if reason not in seen_reasons:
+                flag_penalty -= 0.15
+                seen_reasons.add(reason)
+        elif reason == "zero_price_variant" and v.get("price_cents", 0) == 0:
+            if reason not in seen_reasons:
+                flag_penalty -= 0.20
+                seen_reasons.add(reason)
+        elif reason == "mixed_variant_kinds" and severity == "warn":
+            if reason not in seen_reasons:
+                flag_penalty -= 0.05
+                seen_reasons.add(reason)
+        elif reason in ("size_gap", "grid_incomplete", "grid_count_outlier"):
+            if reason not in seen_reasons:
+                flag_penalty -= 0.03
+                seen_reasons.add(reason)
+
+    # ── Combine ──────────────────────────────────────────
+    raw = base + label_mod + grammar_mod + grid_mod + flag_penalty
+    final = max(0.05, min(1.0, round(raw, 4)))
+
+    return {
+        "base": round(base, 4),
+        "label_mod": round(label_mod, 4),
+        "grammar_mod": round(grammar_mod, 4),
+        "grid_mod": round(grid_mod, 4),
+        "flag_penalty": round(flag_penalty, 4),
+        "final": final,
+    }
+
+
+def score_variant_confidence(text_blocks: List[Dict[str, Any]]) -> None:
+    """Score per-variant confidence using multi-signal aggregation.
+
+    Signals consumed (read-only):
+      - variant confidence (base from price parsing)
+      - variant kind / normalized_size / label (from enrichment)
+      - tb grammar parse_confidence (line-level grammar confidence)
+      - tb meta size_grid_applied (grid extraction flag)
+      - tb price_flags (from Day 57/59 validation + consistency checks)
+
+    Updates (in-place):
+      - variant confidence (overwritten with scored value)
+      - variant confidence_details (new audit dict)
+
+    Pipeline placement: Step 8.7, after check_variant_consistency (Step 8.6).
+    """
+    for tb in text_blocks:
+        variants: List[OCRVariant] = tb.get("variants") or []  # type: ignore[assignment]
+        if not variants:
+            continue
+
+        for v in variants:
+            details = _score_single_variant(v, tb)
+            v["confidence"] = details["final"]
+            v["confidence_details"] = details  # type: ignore[typeddict-unknown-key]

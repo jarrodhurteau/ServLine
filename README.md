@@ -639,6 +639,41 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 60 — Variant Confidence Scoring + Sprint 8.2 Complete (COMPLETE)
+
+Multi-signal per-variant confidence scoring (Pipeline Step 8.7). Each variant's confidence is now computed from 4 signal categories instead of inheriting a single price-parsing default:
+
+| Signal | Modifier | Rationale |
+|--------|----------|-----------|
+| Label clarity | +0.05 (size), +0.03 (combo), +0.02 (flavor/style), -0.10 (other), -0.20 (empty) | Known vocabulary = higher confidence |
+| Grammar context | +0.03 (high), 0 (medium), up to -0.10 (low) | Line parse quality affects variant reliability |
+| Grid context | +0.05 when grid-applied | Structured column extraction is more reliable |
+| Price flags | -0.12 (inversion), -0.15 (duplicate), -0.20 (zero price), -0.05 (mixed kinds), -0.03 (info flags) | Targeted to specific variant involved |
+
+Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar_mod, grid_mod, flag_penalty, final}`.
+
+**Test Results** (1,682 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,682** | **100%** |
+
+**Artifacts:**
+- [storage/variant_engine.py](storage/variant_engine.py) — `score_variant_confidence()` + 3 helpers (~110 LOC added)
+- [storage/ocr_types.py](storage/ocr_types.py) — `confidence_details` and `kind_hint` fields on OCRVariant
+- [tests/test_day60_variant_confidence.py](tests/test_day60_variant_confidence.py) — Day 60 test suite (106 cases)
+
+**Day 60 complete. Sprint 8.2 complete.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -653,23 +688,6 @@ Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
 | Grid count outlier | info | Item has far fewer variants than its grid group |
 
 Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regular/Deluxe) sub-chains to avoid false gap positives. Inch/piece tracks skipped for gaps (naturally sparse).
-
-**Test Results** (1,576 total — 100%):
-
-| Suite | Tests | Pass Rate |
-|-------|-------|-----------|
-| Day 51-55 (Sprint 8.1) | 691 | 100% |
-| Day 56 variants | 237 | 100% |
-| Day 57 price validation | 242 | 100% |
-| Day 58 combo modifiers | 275 | 100% |
-| Day 59 consistency | 113 | 100% |
-| Rotation scoring | 18 | 100% |
-| **TOTAL** | **1,576** | **100%** |
-
-**Artifacts:**
-- [storage/variant_engine.py](storage/variant_engine.py) — +6 helpers + orchestrator (~150 LOC added)
-- [storage/parsers/size_vocab.py](storage/parsers/size_vocab.py) — Gap-detection chain constants
-- [tests/test_day59_variant_consistency.py](tests/test_day59_variant_consistency.py) — Day 59 test suite (113 cases)
 
 **Day 59 complete.**
 
@@ -707,9 +725,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 59 Complete)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 COMPLETE — Starting Sprint 8.3)**
 
-Sprint 8.2 (Variant & Portion Logic) Day 59 added cross-variant consistency checks — 6 validators detecting duplicates, zero prices, mixed kinds, size gaps, grid incompleteness, and grid count outliers. All flag-only (no auto-correction). Word sizes split into abbreviated/named sub-chains for accurate gap detection. 1,576 tests passing across all suites.
+Sprint 8.2 (Variant & Portion Logic) is complete. Day 60 added multi-signal per-variant confidence scoring — each variant now carries a scored confidence from label clarity, grammar context, grid context, and price flag penalties, with a `confidence_details` audit trail. 1,682 tests passing across all suites. Next: Sprint 8.3 (Cross-Item Consistency).
 
 ---
 
@@ -795,7 +813,7 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Clean OCR text path — 7,736 chars via image_to_string (Day 58)
 - ✅ Auto-redirect from import view to draft editor (Day 58)
 - ✅ Cross-variant consistency checks — 6 validators, flag-only (Day 59)
-- Variant confidence scoring + Sprint 8.2 polish (Day 60)
+- ✅ Variant confidence scoring — multi-signal per-variant scoring (Day 60)
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - Price consistency checks across similar items
@@ -807,4 +825,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 59 — Cross-variant consistency checks
+**Next Step:** Day 61 — Sprint 8.3 start (Cross-Item Consistency)

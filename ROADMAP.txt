@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 59 (February 17, 2026) — Cross-variant consistency checks
+Last Updated: Day 60 (February 17, 2026) — Variant confidence scoring + Sprint 8.2 complete
 
 ================================================================================
 PROJECT MISSION
@@ -81,7 +81,7 @@ Sprint 8.1 — Core Grammar & Structure (Days 51-55) *** COMPLETE ***
     Test suite: 691 cases, 100% pass rate
     Real OCR: 100% classification on 4 menu files (766 non-empty lines)
 
-Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** IN PROGRESS ***
+Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** COMPLETE ***
 ----------------------------------------------------------------------
 [x] Shared size vocabulary — single source of truth (size_vocab.py)
 [x] Size grid context propagation — header -> item variant mapping
@@ -102,9 +102,10 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** IN PROGRESS ***
 [x] Bug fixes: duplicate OCR removal, draft_path timing, error visibility
 [x] Cross-variant consistency checks — duplicate, zero-price, mixed-kind,
     size-gap, grid-completeness, grid-count-outlier (Day 59)
-[ ] Variant confidence scoring + Sprint 8.2 polish (Day 60)
+[x] Variant confidence scoring — multi-signal per-variant scoring with
+    label clarity, grammar context, grid boost, flag penalties (Day 60)
 
-    Test suite: 1,576 cases, 100% pass rate
+    Test suite: 1,682 cases, 100% pass rate
     Real import: 115 items from full restaurant menu (was 18 garbled)
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65)
@@ -347,6 +348,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 60: Variant confidence scoring + Sprint 8.2 complete (106 tests)
 Day 59: Cross-variant consistency checks (6 validators, 113 tests)
 Day 58: Combo modifiers + Claude API extraction pipeline (115 items!)
 Day 57: Variant price validation (S < M < L)
@@ -406,7 +408,8 @@ Tests:
 - tests/test_day57_price_validation.py  — 242 cases (Day 57)
 - tests/test_day58_combo_modifiers.py   — 275 cases (Day 58)
 - tests/test_day59_variant_consistency.py — 113 cases (Day 59)
+- tests/test_day60_variant_confidence.py — 106 cases (Day 60)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 1,576 tests, all passing
+- TOTAL: 1,682 tests, all passing
 
 ================================================================================
