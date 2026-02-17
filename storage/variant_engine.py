@@ -27,6 +27,7 @@ Phase 4 pt.4:
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 import re
@@ -37,6 +38,9 @@ from .parsers.size_vocab import (
     normalize_size_token,
     size_ordinal,
     size_track,
+    WORD_CHAIN,
+    PORTION_CHAIN,
+    MULTIPLICITY_CHAIN,
 )
 from .parsers.combo_vocab import is_combo_food
 
@@ -630,6 +634,7 @@ def apply_size_grid_context(text_blocks: List[Dict[str, Any]]) -> None:
             tb["variants"] = grid_variants
             tb.setdefault("meta", {})["size_grid_applied"] = True
             tb["meta"]["size_grid_source"] = active_grid.source_line_index
+            tb["meta"]["size_grid_column_count"] = active_grid.column_count
 
 
 # -----------------------------
@@ -741,3 +746,223 @@ def validate_variant_prices(text_blocks: List[Dict[str, Any]]) -> None:
                         "actual_prices_cents": [e[2] for e in sorted_entries],
                     },
                 })
+
+
+# -----------------------------
+# Cross-Variant Consistency — Sprint 8.2 Day 59
+# -----------------------------
+
+# Gap-detection chains.
+# Inch and piece tracks are naturally sparse, so no gap detection for them.
+# Word track is split into two sub-chains: abbreviated (S/M/L) and named
+# (Mini/Personal/Regular/Deluxe) — a menu using S/M/L should not be flagged
+# for missing Personal or Regular.
+_WORD_ABBREVIATED_CHAIN: List[str] = ["XS", "S", "M", "L", "XL", "XXL"]
+_WORD_NAMED_CHAIN: List[str] = ["Mini", "Personal", "Regular", "Deluxe"]
+_GAP_CHAINS: Dict[str, List[List[str]]] = {
+    "word": [_WORD_ABBREVIATED_CHAIN, _WORD_NAMED_CHAIN],
+    "portion": [PORTION_CHAIN],
+    "multiplicity": [MULTIPLICITY_CHAIN],
+}
+
+
+def _check_duplicate_variants(
+    tb: Dict[str, Any], variants: List[OCRVariant],
+) -> None:
+    """Flag items with duplicate group_key values."""
+    keys: List[Optional[str]] = [v.get("group_key") for v in variants]
+    non_none = [k for k in keys if k is not None]
+    if len(non_none) < 2:
+        return
+    counts = Counter(non_none)
+    duped = [k for k, c in counts.items() if c > 1]
+    if duped:
+        tb.setdefault("price_flags", []).append({
+            "severity": "warn",
+            "reason": "duplicate_variant",
+            "details": {
+                "duplicated_keys": sorted(duped),
+                "variant_count": len(variants),
+            },
+        })
+
+
+def _check_zero_price_variants(
+    tb: Dict[str, Any], variants: List[OCRVariant],
+) -> None:
+    """Flag variants with price_cents == 0 when other variants are nonzero."""
+    zero_labels: List[str] = []
+    nonzero_count = 0
+    for v in variants:
+        pc = v.get("price_cents", -1)
+        if pc == 0:
+            zero_labels.append(v.get("label", ""))
+        elif pc > 0:
+            nonzero_count += 1
+    if zero_labels and nonzero_count > 0:
+        tb.setdefault("price_flags", []).append({
+            "severity": "warn",
+            "reason": "zero_price_variant",
+            "details": {
+                "zero_labels": zero_labels,
+                "nonzero_count": nonzero_count,
+            },
+        })
+
+
+def _check_mixed_kinds(
+    tb: Dict[str, Any], variants: List[OCRVariant],
+) -> None:
+    """Flag items with unusual mixes of variant kinds."""
+    kinds = {v.get("kind") for v in variants if v.get("kind") not in (None, "other")}
+    if len(kinds) < 2:
+        return
+    severity = "warn" if len(kinds) >= 3 else "info"
+    tb.setdefault("price_flags", []).append({
+        "severity": severity,
+        "reason": "mixed_variant_kinds",
+        "details": {
+            "kinds_found": sorted(kinds),
+            "variant_count": len(variants),
+        },
+    })
+
+
+def _check_size_gaps(
+    tb: Dict[str, Any], variants: List[OCRVariant],
+) -> None:
+    """Flag missing intermediate sizes in word/portion/multiplicity tracks."""
+    # Collect size variants grouped by track
+    by_track: Dict[str, List[str]] = {}
+    for v in variants:
+        if v.get("kind") != "size":
+            continue
+        ns = v.get("normalized_size")
+        trk = size_track(ns) if ns else None
+        if trk and trk in _GAP_CHAINS:
+            by_track.setdefault(trk, []).append(ns)  # type: ignore[arg-type]
+
+    for track_name, present in by_track.items():
+        if len(present) < 2:
+            continue
+        sub_chains = _GAP_CHAINS[track_name]
+        # Pick the sub-chain with the most matches to present sizes
+        best_chain: Optional[List[str]] = None
+        best_hits = 0
+        for sc in sub_chains:
+            hits = sum(1 for s in present if s in sc)
+            if hits > best_hits:
+                best_hits = hits
+                best_chain = sc
+        if best_chain is None or best_hits < 2:
+            continue
+        chain = best_chain
+        # Find positions in the chain
+        positions = []
+        for s in present:
+            if s in chain:
+                positions.append(chain.index(s))
+        if len(positions) < 2:
+            continue
+        lo, hi = min(positions), max(positions)
+        # Everything between lo and hi that's absent
+        missing = [chain[i] for i in range(lo + 1, hi) if chain[i] not in present]
+        if missing:
+            tb.setdefault("price_flags", []).append({
+                "severity": "info",
+                "reason": "size_gap",
+                "details": {
+                    "track": track_name,
+                    "present_sizes": sorted(
+                        [s for s in present if s in chain],
+                        key=lambda s: chain.index(s),
+                    ),
+                    "missing_sizes": missing,
+                },
+            })
+
+
+def _check_grid_completeness(
+    tb: Dict[str, Any], variants: List[OCRVariant],
+) -> None:
+    """Flag items under a grid that have significantly fewer variants than grid columns."""
+    meta = tb.get("meta") or {}
+    if not meta.get("size_grid_applied"):
+        return
+    col_count = meta.get("size_grid_column_count")
+    if not col_count or col_count < 2:
+        return
+    var_count = len(variants)
+    missing = col_count - var_count
+    # 1 missing is normal (gourmet right-alignment), 2+ is suspicious
+    if missing >= 2:
+        tb.setdefault("price_flags", []).append({
+            "severity": "info",
+            "reason": "grid_incomplete",
+            "details": {
+                "grid_column_count": col_count,
+                "variant_count": var_count,
+                "missing_count": missing,
+                "grid_source_line": meta.get("size_grid_source"),
+            },
+        })
+
+
+def _check_grid_count_consistency(text_blocks: List[Dict[str, Any]]) -> None:
+    """Flag items whose variant count is an outlier within their grid group."""
+    # Group items by grid source
+    grid_groups: Dict[int, List[Dict[str, Any]]] = {}
+    for tb in text_blocks:
+        meta = tb.get("meta") or {}
+        if not meta.get("size_grid_applied"):
+            continue
+        src = meta.get("size_grid_source")
+        if src is not None:
+            grid_groups.setdefault(src, []).append(tb)
+
+    for src, group in grid_groups.items():
+        if len(group) < 2:
+            continue
+        counts = [len(t.get("variants") or []) for t in group]
+        mode_count = Counter(counts).most_common(1)[0][0]
+        for tb in group:
+            var_count = len(tb.get("variants") or [])
+            if mode_count - var_count >= 2:
+                tb.setdefault("price_flags", []).append({
+                    "severity": "info",
+                    "reason": "grid_count_outlier",
+                    "details": {
+                        "grid_source_line": src,
+                        "item_variant_count": var_count,
+                        "group_mode_count": mode_count,
+                        "group_size": len(group),
+                    },
+                })
+
+
+def check_variant_consistency(text_blocks: List[Dict[str, Any]]) -> None:
+    """Check cross-variant consistency within and across items.
+
+    Six categories of checks:
+      1. Duplicate variant detection (same group_key)
+      2. Zero-price variant detection ($0.00 when siblings are nonzero)
+      3. Mixed kind detection (unusual kind combinations)
+      4. Size gap detection (missing intermediate sizes)
+      5. Grid completeness (fewer variants than grid columns)
+      6. Grid consistency across items (outlier variant counts)
+
+    Pipeline placement: after validate_variant_prices (Step 8.5),
+    as Step 8.6.  Mutates text_blocks in place.
+    """
+    for tb in text_blocks:
+        variants: List[OCRVariant] = tb.get("variants") or []  # type: ignore[assignment]
+        if not variants:
+            continue
+        _check_duplicate_variants(tb, variants)
+        _check_zero_price_variants(tb, variants)
+        _check_mixed_kinds(tb, variants)
+        _check_size_gaps(tb, variants)
+        _check_grid_completeness(tb, variants)
+
+    # Cross-item check requires full list
+    _check_grid_count_consistency(text_blocks)

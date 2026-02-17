@@ -639,6 +639,42 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ---
 
+### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
+
+Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
+
+| Check | Severity | Catches |
+|-------|----------|---------|
+| Duplicate variants | warn | Same group_key on multiple variants (OCR duplication) |
+| Zero-price variants | warn | $0.00 variant when siblings have real prices |
+| Mixed kinds | info/warn | Unusual mixes like size + combo on same item |
+| Size gaps | info | S and L present but M missing |
+| Grid incomplete | info | Item has 2 variants under a 4-column grid |
+| Grid count outlier | info | Item has far fewer variants than its grid group |
+
+Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regular/Deluxe) sub-chains to avoid false gap positives. Inch/piece tracks skipped for gaps (naturally sparse).
+
+**Test Results** (1,576 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,576** | **100%** |
+
+**Artifacts:**
+- [storage/variant_engine.py](storage/variant_engine.py) — +6 helpers + orchestrator (~150 LOC added)
+- [storage/parsers/size_vocab.py](storage/parsers/size_vocab.py) — Gap-detection chain constants
+- [tests/test_day59_variant_consistency.py](tests/test_day59_variant_consistency.py) — Day 59 test suite (113 cases)
+
+**Day 59 complete.**
+
+---
+
 ### ✅ Claude API Extraction Pipeline (COMPLETE)
 
 **Problem:** Background imports used `segment_document()` which produced only ~762 chars of fragmented OCR text, resulting in 18 garbled items ("OLVLOd", "YSal", "3ma") in a single "Vals" category.
@@ -671,9 +707,9 @@ Phase 7 focused on eliminating OCR unpredictability and hardening the system so 
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 58 Complete)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 IN PROGRESS — Day 59 Complete)**
 
-Sprint 8.2 (Variant & Portion Logic) Day 58 added combo modifier detection ("W/FRIES", "WIFRIES" → combo variants) and the Claude API extraction pipeline. Background imports now use a three-strategy approach: (1) Claude API on clean OCR text, (2) heuristic AI fallback, (3) legacy JSON parsing. Real-world test: **115 items extracted from a full restaurant menu** (106 via Claude API at 90% confidence), up from 18 garbled items. 1,463 tests passing across all suites.
+Sprint 8.2 (Variant & Portion Logic) Day 59 added cross-variant consistency checks — 6 validators detecting duplicates, zero prices, mixed kinds, size gaps, grid incompleteness, and grid count outliers. All flag-only (no auto-correction). Word sizes split into abbreviated/named sub-chains for accurate gap detection. 1,576 tests passing across all suites.
 
 ---
 
@@ -758,7 +794,8 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Three-strategy extraction — Claude → Heuristic AI → Legacy JSON (Day 58)
 - ✅ Clean OCR text path — 7,736 chars via image_to_string (Day 58)
 - ✅ Auto-redirect from import view to draft editor (Day 58)
-- Cross-variant consistency checks (Day 59-60)
+- ✅ Cross-variant consistency checks — 6 validators, flag-only (Day 59)
+- Variant confidence scoring + Sprint 8.2 polish (Day 60)
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - Price consistency checks across similar items

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 58 (February 13, 2026)
+Last Updated: Day 59 (February 17, 2026) — Cross-variant consistency checks
 
 ================================================================================
 PROJECT MISSION
@@ -100,9 +100,11 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** IN PROGRESS ***
 [x] Clean OCR text path — 7,736 chars via image_to_string
 [x] Auto-redirect from import view to draft editor
 [x] Bug fixes: duplicate OCR removal, draft_path timing, error visibility
-[ ] Cross-variant consistency checks (Day 59-60)
+[x] Cross-variant consistency checks — duplicate, zero-price, mixed-kind,
+    size-gap, grid-completeness, grid-count-outlier (Day 59)
+[ ] Variant confidence scoring + Sprint 8.2 polish (Day 60)
 
-    Test suite: 1,463 cases, 100% pass rate
+    Test suite: 1,576 cases, 100% pass rate
     Real import: 115 items from full restaurant menu (was 18 garbled)
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65)
@@ -132,15 +134,143 @@ Success Metrics (Day 58 actuals vs targets):
 FUTURE PHASES (Tentative)
 ================================================================================
 
-Phase 9 — Export & Integration (Days 71-80)
--------------------------------------------
-[ ] POS-specific export formats (Square, Toast, Clover)
-[ ] API endpoints for third-party integration
-[ ] Webhook support for menu updates
-[ ] Bulk export capabilities
-[ ] Export validation and preview
+Phase 9 — Structured Variants & Export (Days 71-85)
+----------------------------------------------------
 
-Phase 10 — Multi-Menu & Versioning (Days 81-90)
+  PROBLEM STATEMENT:
+  Claude API extracts structured size/variant data (e.g., [{label:"Small",price:10.00},
+  {label:"Large",price:20.00}]), but claude_items_to_draft_rows() flattens it into a
+  single price_cents integer. The draft_items table has no child structure for variants.
+  Variant info is lost between extraction and the editor, making POS export impossible
+  without re-parsing ephemeral price_text strings.
+
+  SOLUTION:
+  Add a draft_item_variants child table, preserve structured variant data end-to-end
+  (extraction -> storage -> editor -> export), and redesign the editor to show
+  size/combo sub-rows under each item.
+
+Sprint 9.1 — Structured Variant Storage (Days 71-73)
+.....................................................
+
+  Day 71: Database Schema & Migration
+  ------------------------------------
+  [ ] New draft_item_variants table:
+        id          INTEGER PRIMARY KEY AUTOINCREMENT
+        item_id     INTEGER NOT NULL (FK -> draft_items.id ON DELETE CASCADE)
+        label       TEXT NOT NULL        -- "Small", "Large", "W/Fries"
+        price_cents INTEGER NOT NULL DEFAULT 0
+        kind        TEXT DEFAULT 'size'  -- size/combo/flavor/style/other
+        position    INTEGER DEFAULT 0    -- ordering within parent item
+        created_at  TEXT NOT NULL
+        updated_at  TEXT NOT NULL
+  [ ] Auto-migration in drafts.py (detect table, create if missing)
+  [ ] CRUD functions: insert_variants(), update_variant(), delete_variant()
+  [ ] Update get_draft_items() to LEFT JOIN and group variants by item
+  [ ] Index: idx_variants_item on (item_id)
+
+  Day 72: Extraction Pipeline -> Structured Variants
+  ---------------------------------------------------
+  [ ] Update claude_items_to_draft_rows() to return variants alongside items
+      - Currently flattens sizes[] into pipe-delimited price_text string
+      - New: return [{item: {...}, variants: [{label, price_cents, kind}]}]
+  [ ] Update _draft_items_from_ai_preview() to preserve variant structure
+  [ ] Update upsert_draft_items() to accept + insert child variant rows
+  [ ] Update heuristic AI path (Strategy 2) to preserve size data
+  [ ] Backfill logic: parse existing "Name (Size)" patterns into variant rows
+  [ ] Test: upload menu -> verify variants stored in new table
+
+  Day 73: Migration & Backward Compatibility
+  -------------------------------------------
+  [ ] Existing drafts with no variants continue to work (0 variant rows = single price)
+  [ ] price_cents on parent item = base/lowest price (unchanged)
+  [ ] Publish flow: if variants exist, use structured data; else use price_cents
+  [ ] Test: old drafts load cleanly, new drafts have variant rows
+
+Sprint 9.2 — Editor Redesign (Days 74-77)
+..........................................
+
+  Day 74: Variant Sub-Row UI
+  --------------------------
+  [ ] Update draft_editor.html table layout:
+        Parent row:  Name | Description | Base Price | Category | Position | Actions
+        Variant row: (indented) Label | Price | Kind | [Delete]
+  [ ] Collapse/expand toggle per item (default: collapsed for items with variants)
+  [ ] "Add Variant" button per item (adds blank sub-row)
+  [ ] Variant kind dropdown: size / combo / flavor / style / other
+  [ ] CSS: indented sub-rows, visual grouping with parent
+
+  Day 75: Editor JavaScript
+  -------------------------
+  [ ] Render variant sub-rows from loaded data
+  [ ] Inline editing: variant label, price (currency formatted), kind
+  [ ] Add/delete variant sub-rows dynamically (no page reload)
+  [ ] Update sidebar outline to use structured variants (remove regex parsing)
+  [ ] Drag-to-reorder variant sub-rows within a parent item
+
+  Day 76: Save/Load with Variants
+  --------------------------------
+  [ ] Update save payload: items[].variants[] nested array
+  [ ] Update /drafts/<id>/save endpoint:
+      - Insert new variants (no id)
+      - Update existing variants (has id)
+      - Delete removed variants (deleted_variant_ids[])
+  [ ] Update load to return variants grouped by item_id
+  [ ] Test: edit variants -> save -> reload -> verify persistence
+
+  Day 77: Low-Confidence & Bulk Operations
+  -----------------------------------------
+  [ ] Low-confidence panel shows variant info for flagged items
+  [ ] Bulk category change preserves variants
+  [ ] Duplicate item copies variants
+  [ ] Delete item cascades variant deletion (FK constraint)
+  [ ] Filter/search includes variant labels
+
+Sprint 9.3 — Export Formats (Days 78-82)
+.........................................
+
+  Day 78: CSV & JSON Export with Variants
+  ----------------------------------------
+  [ ] JSON export: items[].variants[] nested array
+        {name, description, price_cents, category, variants: [{label, price_cents, kind}]}
+  [ ] CSV export option A (sub-rows): parent row + indented variant rows
+  [ ] CSV export option B (columns): one row per item, size prices as extra columns
+        name, description, category, price_small, price_medium, price_large
+  [ ] User toggle in export UI to choose format
+
+  Day 79: Excel Export with Variants
+  -----------------------------------
+  [ ] XLSX: variant sub-rows with indented formatting
+  [ ] Column headers: auto-generate from actual size labels found in draft
+  [ ] Color coding: parent rows bold, variant rows gray/indented
+  [ ] Sheet per category option
+
+  Day 80: POS Export Templates
+  ----------------------------
+  [ ] Square CSV format: item + modifier groups
+  [ ] Toast import format: parent/child structure
+  [ ] Generic POS JSON: universal item/variant/modifier schema
+  [ ] Export preview: show formatted output before download
+  [ ] Validation: warn if items missing prices, categories
+
+  Day 81-82: Export Validation & Testing
+  ---------------------------------------
+  [ ] End-to-end test: upload menu -> extract -> edit variants -> export
+  [ ] Verify export files can be imported by target POS systems
+  [ ] Edge cases: items with 0 variants, items with 10+ variants
+  [ ] Export metrics: item count, variant count, category breakdown
+
+Sprint 9.4 — API & Integration (Days 83-85)
+............................................
+[ ] REST API endpoints for programmatic access
+    - GET  /api/drafts/<id>/items (with variants)
+    - POST /api/drafts/<id>/items (create with variants)
+    - PUT  /api/drafts/<id>/items/<item_id> (update with variants)
+[ ] Webhook support for menu update notifications
+[ ] API key authentication
+[ ] Rate limiting per API key
+[ ] API documentation page
+
+Phase 10 — Multi-Menu & Versioning (Days 86-95)
 ------------------------------------------------
 [ ] Multiple menu support per restaurant
 [ ] Menu versioning and history
@@ -148,7 +278,7 @@ Phase 10 — Multi-Menu & Versioning (Days 81-90)
 [ ] Seasonal menu management
 [ ] Menu scheduling (breakfast/lunch/dinner)
 
-Phase 11 — Advanced AI Features (Days 91-100)
+Phase 11 — Advanced AI Features (Days 96-105)
 ----------------------------------------------
 [ ] Allergen detection and tagging
 [ ] Nutritional estimation
@@ -156,7 +286,7 @@ Phase 11 — Advanced AI Features (Days 91-100)
 [ ] Smart category suggestions
 [ ] Description generation assistance
 
-Phase 12 — Production Hardening (Days 101-110)
+Phase 12 — Production Hardening (Days 106-115)
 -----------------------------------------------
 [ ] Performance optimization
 [ ] Caching layer
@@ -165,7 +295,7 @@ Phase 12 — Production Hardening (Days 101-110)
 [ ] Monitoring and alerting
 [ ] Load testing
 
-Phase 13 — User Experience Polish (Days 111-120)
+Phase 13 — User Experience Polish (Days 116-125)
 -------------------------------------------------
 [ ] Drag-and-drop menu reordering
 [ ] Inline editing improvements
@@ -217,6 +347,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 59: Cross-variant consistency checks (6 validators, 113 tests)
 Day 58: Combo modifiers + Claude API extraction pipeline (115 items!)
 Day 57: Variant price validation (S < M < L)
 Day 56: Size grid context + grammar-to-variant bridge
@@ -274,7 +405,8 @@ Tests:
 - tests/test_day56_variants.py          — 237 cases (Day 56)
 - tests/test_day57_price_validation.py  — 242 cases (Day 57)
 - tests/test_day58_combo_modifiers.py   — 275 cases (Day 58)
+- tests/test_day59_variant_consistency.py — 113 cases (Day 59)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 1,463 tests, all passing
+- TOTAL: 1,576 tests, all passing
 
 ================================================================================

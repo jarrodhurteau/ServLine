@@ -137,6 +137,15 @@ _MULTIPLICITY_ORDER: Dict[str, int] = {
 }
 
 
+# Canonical size chains for gap detection — Sprint 8.2 Day 59
+# Ordered sequences of normalized sizes within each track.
+# Used by check_variant_consistency() to find missing intermediate sizes.
+WORD_CHAIN: list[str] = ["XS", "Mini", "S", "Personal", "Regular",
+                         "M", "L", "Deluxe", "XL", "XXL"]
+PORTION_CHAIN: list[str] = ["Slice", "Half", "Whole", "Family", "Party"]
+MULTIPLICITY_CHAIN: list[str] = ["Single", "Double", "Triple"]
+
+
 def size_ordinal(normalized_size: str) -> Optional[int]:
     """Return an ordinal position for a normalized_size value.
 

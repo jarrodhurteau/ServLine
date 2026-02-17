@@ -2201,6 +2201,9 @@ def segment_document(
         # ----- Sprint 8.2 Day 57: validate variant price ordering
         variant_engine.validate_variant_prices(page_text_blocks)
 
+        # ----- Sprint 8.2 Day 59: cross-variant consistency checks
+        variant_engine.check_variant_consistency(page_text_blocks)
+
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for tb, pb in zip(page_text_blocks, pblocks):
