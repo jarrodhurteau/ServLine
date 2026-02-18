@@ -353,6 +353,13 @@ Phase 12 — Production Hardening (Days 106-115)
 [ ] Error recovery and retry logic
 [ ] Monitoring and alerting
 [ ] Load testing
+[ ] OCR garble filtering — suppress reject-tier items before draft insertion
+    - Background segment_document() path produces fragmented word-level output
+      that creates garbled items (e.g., "3ma", "OLVLOd", "YSal") under junk categories
+    - Use semantic_tier == "reject" to gate items out of upsert_draft_items()
+    - Auto-suppress categories where majority of items are reject-tier
+    - Option to unify OCR paths (background import → image_to_string instead of
+      segment_document) for root-cause fix
 
 Phase 13 — User Experience Polish (Days 116-125)
 -------------------------------------------------
