@@ -84,6 +84,7 @@ import pytesseract
 from . import ocr_utils
 from . import category_infer
 from . import variant_engine
+from . import cross_item
 from .parsers.menu_grammar import enrich_grammar_on_text_blocks
 from .parsers.combo_vocab import is_combo_food
 from .ocr_types import (
@@ -2206,6 +2207,9 @@ def segment_document(
 
         # ----- Sprint 8.2 Day 60: variant confidence scoring
         variant_engine.score_variant_confidence(page_text_blocks)
+
+        # ----- Sprint 8.3 Day 61: cross-item consistency checks
+        cross_item.check_cross_item_consistency(page_text_blocks)
 
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)

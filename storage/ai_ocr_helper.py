@@ -61,6 +61,7 @@ from storage.variant_engine import (
     _parse_size_header_columns, _is_section_heading_name, SizeGridContext,
 )
 from .category_hierarchy import infer_category_hierarchy
+from .cross_item import check_cross_item_consistency
 from .parsers.menu_grammar import classify_menu_lines, _normalize_w_slash
 from .parsers.combo_vocab import extract_combo_hints
 
@@ -957,6 +958,9 @@ def analyze_ocr_text(
 
     # Sprint 8.2 Day 60: variant confidence scoring
     score_variant_confidence(items)
+
+    # Sprint 8.3 Day 61: cross-item consistency checks
+    check_cross_item_consistency(items)
 
     # Infer per-category subcategories (e.g., Gourmet Pizza, Cold Subs)
     hierarchy_map = infer_category_hierarchy(items)

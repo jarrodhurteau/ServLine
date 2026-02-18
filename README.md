@@ -674,6 +674,51 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 61 — Cross-Item Consistency Foundation (Sprint 8.3 Start) (COMPLETE)
+
+**New Module: `storage/cross_item.py`** (~200 LOC):
+- Three cross-item checks comparing items ACROSS the menu (per-item checks can't catch these)
+- Entry function: `check_cross_item_consistency(text_blocks)` — Pipeline Step 9.1
+
+**Check 1: Duplicate Name Detection:**
+- Normalizes names (lowercase, strip "The"/"Our"/"Fresh"/"Homemade"/"Classic" prefixes, collapse whitespace)
+- Groups by normalized name; min 3 chars to avoid false positives
+- Same name + different prices → `cross_item_duplicate_name` (warn)
+- Same name + same prices → `cross_item_exact_duplicate` (info)
+
+**Check 2: Category Price Outlier Detection (MAD-based):**
+- Groups items by category (3+ priced items required)
+- Uses MAD (median absolute deviation) — robust to outliers unlike IQR
+- Threshold: 3 × MAD_effective (floor: 10% of median)
+- Flags: `cross_item_category_price_outlier` (warn) with direction (above/below)
+
+**Check 3: Category Isolation Detection:**
+- Linear walk with ±2 neighbor window
+- Flags items whose category differs from ALL categorized neighbors (need 2+)
+- Flags: `cross_item_category_isolated` (info) with dominant neighbor suggestion
+
+**Test Results** (1,791 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,791** | **100%** |
+
+**Artifacts:**
+- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (~200 LOC)
+- [tests/test_day61_cross_item.py](tests/test_day61_cross_item.py) — Day 61 test suite (109 cases)
+
+**Day 61 complete.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -725,9 +770,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.2 COMPLETE — Starting Sprint 8.3)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.3 in progress)**
 
-Sprint 8.2 (Variant & Portion Logic) is complete. Day 60 added multi-signal per-variant confidence scoring — each variant now carries a scored confidence from label clarity, grammar context, grid context, and price flag penalties, with a `confidence_details` audit trail. 1,682 tests passing across all suites. Next: Sprint 8.3 (Cross-Item Consistency).
+Day 61 started Sprint 8.3 (Cross-Item Consistency) with a new `storage/cross_item.py` module providing three cross-item checks: duplicate name detection, category price outlier detection (MAD-based), and category isolation detection. Wired as pipeline Step 9.1 into both code paths. 1,791 tests passing across all suites.
 
 ---
 
@@ -816,13 +861,14 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Variant confidence scoring — multi-signal per-variant scoring (Day 60)
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
-- Price consistency checks across similar items
-- Category consistency validation
-- Duplicate detection with price conflicts
+- ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
+- Fuzzy name matching (edit distance / n-gram similarity)
+- Category reassignment suggestions (neighbor-based smoothing)
+- Cross-category price coherence (sides < entrees)
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - Geometric heading detection from OCR blocks
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 61 — Sprint 8.3 start (Cross-Item Consistency)
+**Next Step:** Day 62 — Sprint 8.3 continued (Fuzzy Name Matching)
