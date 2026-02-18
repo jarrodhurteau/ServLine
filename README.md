@@ -786,6 +786,52 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 64 — Cross-Category Price Coherence (COMPLETE)
+
+**Cross-Category Price Ordering** (`storage/cross_item.py`):
+- 5th cross-item check: detects items that violate expected price relationships between categories
+- 16 directional rules encoding near-universal pricing expectations:
+  - Beverages < {Sides, Salads, Wings, Subs, Burgers, Pizza, Pasta, Calzones}
+  - Sides/Appetizers < {Subs, Burgers, Pizza, Pasta, Calzones}
+  - Desserts < {Pizza, Pasta, Calzones}
+
+**Algorithm:**
+1. Compute per-category median prices from actual menu data (need 2+ priced items per category)
+2. For each rule: check that medians have 30%+ gap (otherwise categories overlap in this menu)
+3. Flag cheap-cat items priced above expensive-cat median → `cross_category_price_above` (warn)
+4. Flag expensive-cat items priced below cheap-cat median → `cross_category_price_below` (warn)
+5. Deduplication: each item gets at most one flag per direction (most dramatic violation kept)
+
+**Catches:**
+- OCR price errors: fries at $15.99 when pizza median is $13.99
+- Miscategorization: pizza labeled as "Beverages" at $12.99
+- Data entry errors: pasta at $3.99 when sides median is $6.99
+
+**Test Results** (2,013 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Day 64 cross-cat coherence | 75 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **2,013** | **100%** |
+
+**Artifacts:**
+- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (~640 LOC, +100 from Day 63)
+- [tests/test_day64_cross_category_coherence.py](tests/test_day64_cross_category_coherence.py) — Day 64 test suite (75 cases)
+
+**Day 64 complete.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -839,7 +885,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.3 in progress)**
 
-Day 63 added category reassignment suggestions to `storage/cross_item.py` — when an item appears miscategorized based on neighbor context, suggests which category it should move to with a multi-signal confidence score. Four signals: neighbor agreement (+-3 window), keyword fit, price band, original confidence. Keyword guard prevents false suggestions for clearly categorized items. 1,938 tests passing across all suites.
+Day 64 added cross-category price coherence to `storage/cross_item.py` — detects when a cheap-category item (side, beverage, dessert) costs more than the typical expensive-category item (pizza, pasta, burger), or vice versa. Uses 16 directional rules (e.g., Beverages < Pizza, Sides < Pasta), data-driven median comparison, and 30% minimum gap guard to avoid false positives. Each item gets at most one "above" and one "below" flag (most dramatic violation kept). 2,013 tests passing across all suites.
 
 ---
 
@@ -931,11 +977,12 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
 - ✅ Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
 - ✅ Category reassignment suggestions — 4-signal neighbor smoothing (Day 63)
-- Cross-category price coherence (sides < entrees)
+- ✅ Cross-category price coherence — 16 directional rules, median-based (Day 64)
+- Cross-item variant pattern enforcement
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - Geometric heading detection from OCR blocks
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 64 — Sprint 8.3 continued (Cross-Category Price Coherence)
+**Next Step:** Day 65 — Sprint 8.3 finale (Cross-Item Variant Pattern Enforcement)

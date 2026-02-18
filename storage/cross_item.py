@@ -1,5 +1,5 @@
 """
-Cross-Item Consistency Checks -- Sprint 8.3 Days 61-63
+Cross-Item Consistency Checks -- Sprint 8.3 Days 61-64
 
 Compares items ACROSS the menu to detect anomalies that per-item
 checks cannot catch:
@@ -8,12 +8,17 @@ checks cannot catch:
   2. Category price outlier detection (MAD-based)
   3. Category isolation detection (lone miscategorized items)
   4. Category reassignment suggestions (neighbor-based smoothing)
+  5. Cross-category price coherence (sides < entrees)
 
 Day 62 additions: Fuzzy name matching via SequenceMatcher to catch
 OCR typos like "BUFALO" vs "BUFFALO", "MARGARITA" vs "MARGHERITA".
 
 Day 63 additions: Multi-signal category suggestion using neighbor
 agreement, keyword fit, price band, and original confidence.
+
+Day 64 additions: Cross-category price coherence — detect when a
+cheap-category item (side, beverage) costs more than the typical
+expensive-category item (pizza, pasta), or vice versa.
 
 Entry function: check_cross_item_consistency(text_blocks)
 Mutates in place by appending to each item's price_flags list.
@@ -521,6 +526,130 @@ def _check_category_suggestions(text_blocks: List[Dict[str, Any]]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check 5: Cross-category price coherence (Day 64)
+# ---------------------------------------------------------------------------
+
+# Expected ordering: (cheaper_category, more_expensive_category).
+# Only encodes strong, near-universal relationships.
+_CROSS_CAT_PRICE_RULES: List[Tuple[str, str]] = [
+    # Beverages are almost always cheapest
+    ("Beverages", "Sides / Appetizers"),
+    ("Beverages", "Salads"),
+    ("Beverages", "Wings"),
+    ("Beverages", "Subs / Sandwiches"),
+    ("Beverages", "Burgers"),
+    ("Beverages", "Pizza"),
+    ("Beverages", "Pasta"),
+    ("Beverages", "Calzones / Stromboli"),
+    # Sides/appetizers cheaper than main entrees
+    ("Sides / Appetizers", "Subs / Sandwiches"),
+    ("Sides / Appetizers", "Burgers"),
+    ("Sides / Appetizers", "Pizza"),
+    ("Sides / Appetizers", "Pasta"),
+    ("Sides / Appetizers", "Calzones / Stromboli"),
+    # Desserts cheaper than main entrees
+    ("Desserts", "Pizza"),
+    ("Desserts", "Pasta"),
+    ("Desserts", "Calzones / Stromboli"),
+]
+
+_CROSS_CAT_MIN_ITEMS = 2       # Need >= 2 items per category to compute median
+_CROSS_CAT_MIN_GAP_RATIO = 1.3  # Medians must differ by 30%+ to activate rule
+
+
+def _check_cross_category_coherence(text_blocks: List[Dict[str, Any]]) -> None:
+    """Flag items whose price violates cross-category ordering expectations.
+
+    For each (cheap_cat, expensive_cat) rule:
+      - If a cheap_cat item costs MORE than the expensive_cat median → flag
+      - If an expensive_cat item costs LESS than the cheap_cat median → flag
+
+    Guards:
+      - Both categories need >= 2 priced items.
+      - Medians must have a 30%+ gap (otherwise categories overlap in this menu).
+      - Each item gets at most one "above" flag and one "below" flag (most
+        dramatic violation kept).
+    """
+    # --- Step 1: Group items by category with prices ---
+    cat_items: Dict[str, List[Tuple[int, int]]] = {}  # cat -> [(idx, price_cents)]
+    for idx, tb in enumerate(text_blocks):
+        cat = tb.get("category")
+        if not cat:
+            continue
+        price = _extract_primary_price_cents(tb)
+        if price <= 0:
+            continue
+        cat_items.setdefault(cat, []).append((idx, price))
+
+    # --- Step 2: Compute per-category medians ---
+    cat_medians: Dict[str, float] = {}
+    for cat, members in cat_items.items():
+        if len(members) >= _CROSS_CAT_MIN_ITEMS:
+            prices = [p for (_, p) in members]
+            cat_medians[cat] = statistics.median(prices)
+
+    # --- Step 3: Collect potential flags per item ---
+    # For each item, keep only the most dramatic violation (largest gap).
+    # Key: item index  Value: (details_dict, gap_cents)
+    best_above: Dict[int, Tuple[Dict[str, Any], int]] = {}
+    best_below: Dict[int, Tuple[Dict[str, Any], int]] = {}
+
+    for cheap_cat, exp_cat in _CROSS_CAT_PRICE_RULES:
+        if cheap_cat not in cat_medians or exp_cat not in cat_medians:
+            continue
+
+        cheap_med = cat_medians[cheap_cat]
+        exp_med = cat_medians[exp_cat]
+
+        # Skip if medians don't have a meaningful gap
+        if exp_med < cheap_med * _CROSS_CAT_MIN_GAP_RATIO:
+            continue
+
+        # Cheap-cat items priced above expensive-cat median
+        for (idx, price) in cat_items.get(cheap_cat, []):
+            if price > exp_med:
+                gap = price - int(exp_med)
+                prev = best_above.get(idx)
+                if prev is None or gap > prev[1]:
+                    best_above[idx] = ({
+                        "item_category": cheap_cat,
+                        "item_price_cents": price,
+                        "compared_category": exp_cat,
+                        "compared_median_cents": int(exp_med),
+                        "own_median_cents": int(cheap_med),
+                    }, gap)
+
+        # Expensive-cat items priced below cheap-cat median
+        for (idx, price) in cat_items.get(exp_cat, []):
+            if price < cheap_med:
+                gap = int(cheap_med) - price
+                prev = best_below.get(idx)
+                if prev is None or gap > prev[1]:
+                    best_below[idx] = ({
+                        "item_category": exp_cat,
+                        "item_price_cents": price,
+                        "compared_category": cheap_cat,
+                        "compared_median_cents": int(cheap_med),
+                        "own_median_cents": int(exp_med),
+                    }, gap)
+
+    # --- Step 4: Emit flags (one per item per direction) ---
+    for idx, (details, _gap) in best_above.items():
+        text_blocks[idx]["price_flags"].append({
+            "severity": "warn",
+            "reason": "cross_category_price_above",
+            "details": details,
+        })
+
+    for idx, (details, _gap) in best_below.items():
+        text_blocks[idx]["price_flags"].append({
+            "severity": "warn",
+            "reason": "cross_category_price_below",
+            "details": details,
+        })
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -540,3 +669,4 @@ def check_cross_item_consistency(text_blocks: List[Dict[str, Any]]) -> None:
     _check_category_price_outliers(text_blocks)
     _check_category_isolation(text_blocks)
     _check_category_suggestions(text_blocks)
+    _check_cross_category_coherence(text_blocks)

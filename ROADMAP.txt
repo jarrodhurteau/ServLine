@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 63 (February 18, 2026) — Category reassignment suggestions (Sprint 8.3)
+Last Updated: Day 64 (February 18, 2026) — Cross-category price coherence (Sprint 8.3)
 
 ================================================================================
 PROJECT MISSION
@@ -111,7 +111,8 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** COMPLETE ***
     Day 61 test suite: 109 cases, 100% pass rate
     Day 62 test suite: 96 cases, 100% pass rate
     Day 63 test suite: 51 cases, 100% pass rate
-    Total: 1,938 tests, all passing
+    Day 64 test suite: 75 cases, 100% pass rate
+    Total: 2,013 tests, all passing
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 -------------------------------------------------
@@ -130,7 +131,11 @@ Sprint 8.3 — Cross-Item Consistency (Days 61-65)
     - Keyword guard: 2+ keyword matches for current category suppresses suggestion
     - Minimum 0.30 confidence to emit flag; severity always "info"
     - Reuses CATEGORY_KEYWORDS and CATEGORY_PRICE_BANDS from category_infer.py
-[ ] Cross-category price coherence (sides < entrees)
+[x] Cross-category price coherence — 16 directional rules, median-based (Day 64)
+    - Beverages < Sides/Salads/Wings/Subs/Burgers/Pizza/Pasta/Calzones
+    - Sides < Subs/Burgers/Pizza/Pasta/Calzones; Desserts < Pizza/Pasta/Calzones
+    - 30% minimum gap guard; dedup to 1 flag per item per direction
+    - Catches OCR price errors, miscategorization, data entry errors
 [ ] Cross-item variant pattern enforcement
 
 Sprint 8.4 — Semantic Confidence (Days 66-70)
@@ -365,6 +370,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 64: Cross-category price coherence — 16 directional rules, median-based (75 tests)
 Day 63: Category reassignment suggestions — 4-signal neighbor smoothing (51 tests)
 Day 62: Fuzzy name matching — SequenceMatcher near-duplicate detection (96 tests)
 Day 61: Cross-item consistency foundation — 3 checks, new module (109 tests)
@@ -432,7 +438,8 @@ Tests:
 - tests/test_day61_cross_item.py        — 109 cases (Day 61)
 - tests/test_day62_fuzzy_names.py       — 96 cases (Day 62)
 - tests/test_day63_category_suggestions.py — 51 cases (Day 63)
+- tests/test_day64_cross_category_coherence.py — 75 cases (Day 64)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 1,938 tests, all passing
+- TOTAL: 2,013 tests, all passing
 
 ================================================================================
