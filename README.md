@@ -879,6 +879,68 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 66 — Semantic Confidence Foundation (Sprint 8.4 Start) (COMPLETE)
+
+**New Module: `storage/semantic_confidence.py`** (~200 LOC):
+- Unified per-item `semantic_confidence` score (0.0-1.0) aggregating 5 independent signal sources
+- Entry function: `score_semantic_confidence(items)` — Pipeline Step 9.2
+
+**Five Weighted Signals:**
+
+| Signal | Weight | Source | Default |
+|--------|--------|--------|---------|
+| Grammar/parse confidence | 0.30 | `grammar.parse_confidence` → item `confidence` fallback | 0.5 |
+| Name quality | 0.20 | Length tiers + garble detection + all-caps penalty | varies |
+| Price presence | 0.20 | Any positive price in variants/candidates/direct | 0.3 |
+| Variant quality | 0.15 | Average variant confidence across all variants | 0.5 |
+| Flag penalty | 0.15 | Severity-weighted: warn -0.15, info -0.05, auto_fix -0.02 | 1.0 |
+
+**Name Quality Sub-Score (new logic):**
+- Length: <3 chars → 0.3, 3-5 → 0.6, 6+ → 1.0
+- Garble: inline triple-repeat + garble-char ratio + unique ratio detection (signals >= 2)
+- All-caps: 0.9 penalty (OCR often produces all-caps; small ding, not a problem)
+- Combined via `min()` (weakest-link model)
+
+**Full Audit Trail:**
+- Each item gets `semantic_confidence_details` dict with all 5 signals' raw values, weights, and weighted contributions
+- Follows same pattern as variant `confidence_details` from Day 60
+
+**Polymorphic Design:**
+- Works with both Path A (text_block dicts from `ocr_pipeline.py`) and Path B (flat item dicts from `ai_ocr_helper.py`)
+- All field access via `.get()` with graceful defaults — no KeyError on missing fields
+
+**Pipeline Wiring:**
+- Path B: after `check_cross_item_consistency()` in `ai_ocr_helper.py`
+- Path A: after `check_cross_item_consistency()` in `ocr_pipeline.py`
+- Preview blocks: `semantic_confidence` + `semantic_confidence_details` mirrored for overlay UI
+
+**Test Results** (2,181 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Day 64 cross-cat coherence | 75 | 100% |
+| Day 65 variant patterns | 75 | 100% |
+| Day 66 semantic confidence | 93 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **2,181** | **100%** |
+
+**Artifacts:**
+- [storage/semantic_confidence.py](storage/semantic_confidence.py) — Semantic confidence scoring module (~200 LOC)
+- [tests/test_day66_semantic_confidence.py](tests/test_day66_semantic_confidence.py) — Day 66 test suite (93 cases)
+
+**Day 66 complete. Sprint 8.4 underway.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -930,9 +992,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 next)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 in progress)**
 
-Day 65 completed Sprint 8.3 with cross-item variant pattern enforcement — three category-level checks in `storage/cross_item.py`: (1) variant count consistency (MODE-based, gap >= 2 to flag), (2) variant label set consistency (dominant set with subset/superset tolerance), (3) price step consistency (MAD-based outlier detection). Sprint 8.3 now has 8 cross-item checks total. 2,088 tests passing across all suites.
+Day 66 started Sprint 8.4 (Semantic Confidence) with a unified per-item `semantic_confidence` score in `storage/semantic_confidence.py`. Five weighted signals (grammar 0.30, name quality 0.20, price presence 0.20, variant quality 0.15, flag penalty 0.15) aggregated into a single 0.0-1.0 score with full audit trail. Polymorphic design works with both pipeline paths. 2,181 tests passing across all suites.
 
 ---
 
@@ -972,6 +1034,7 @@ ServLine now has:
 - ✅ Variant price validation — S < M < L monotonic check, track-separated
 - ✅ Combo modifier detection — "W/FRIES", "WIFRIES" → combo variants
 - ✅ Confidence tiers — high/medium/low/unknown scoring
+- ✅ Semantic confidence scoring — unified per-item score, 5 weighted signals
 
 ---
 
@@ -1028,8 +1091,8 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Cross-item variant pattern enforcement — 3 category-level checks (Day 65)
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
+- ✅ Unified semantic confidence scoring — 5 weighted signals, audit trail (Day 66)
 - Geometric heading detection from OCR blocks
-- Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 66 — Sprint 8.4 start (Semantic Confidence)
+**Next Step:** Day 67 — Sprint 8.4 continues (Semantic Confidence)

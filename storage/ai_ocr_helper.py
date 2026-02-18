@@ -62,6 +62,7 @@ from storage.variant_engine import (
 )
 from .category_hierarchy import infer_category_hierarchy
 from .cross_item import check_cross_item_consistency
+from .semantic_confidence import score_semantic_confidence
 from .parsers.menu_grammar import classify_menu_lines, _normalize_w_slash
 from .parsers.combo_vocab import extract_combo_hints
 
@@ -961,6 +962,9 @@ def analyze_ocr_text(
 
     # Sprint 8.3 Day 61: cross-item consistency checks
     check_cross_item_consistency(items)
+
+    # Sprint 8.4 Day 66: semantic confidence scoring
+    score_semantic_confidence(items)
 
     # Infer per-category subcategories (e.g., Gourmet Pizza, Cold Subs)
     hierarchy_map = infer_category_hierarchy(items)

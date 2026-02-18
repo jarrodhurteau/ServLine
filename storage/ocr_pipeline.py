@@ -85,6 +85,7 @@ from . import ocr_utils
 from . import category_infer
 from . import variant_engine
 from . import cross_item
+from . import semantic_confidence
 from .parsers.menu_grammar import enrich_grammar_on_text_blocks
 from .parsers.combo_vocab import is_combo_food
 from .ocr_types import (
@@ -2211,6 +2212,9 @@ def segment_document(
         # ----- Sprint 8.3 Day 61: cross-item consistency checks
         cross_item.check_cross_item_consistency(page_text_blocks)
 
+        # ----- Sprint 8.4 Day 66: semantic confidence scoring
+        semantic_confidence.score_semantic_confidence(page_text_blocks)
+
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for tb, pb in zip(page_text_blocks, pblocks):
@@ -2246,6 +2250,10 @@ def segment_document(
                 pb["is_noise"] = tb["is_noise"]
             if "price_flags" in tb:
                 pb["price_flags"] = tb["price_flags"]
+            if "semantic_confidence" in tb:
+                pb["semantic_confidence"] = tb["semantic_confidence"]
+            if "semantic_confidence_details" in tb:
+                pb["semantic_confidence_details"] = tb["semantic_confidence_details"]
             if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
                 pb.setdefault("meta", {})["multiline_reconstructed"] = True
 
