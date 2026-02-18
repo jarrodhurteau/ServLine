@@ -1,6 +1,6 @@
 # storage/semantic_confidence.py
 """
-Semantic Confidence Scoring -- Sprint 8.4 Days 66-67
+Semantic Confidence Scoring -- Sprint 8.4 Days 66-68
 
 Day 66: Computes a unified per-item semantic_confidence score (0.0-1.0) by
 aggregating five independent signal sources:
@@ -16,21 +16,27 @@ Day 67: Confidence tier classification + menu-level aggregation:
   - compute_menu_confidence_summary(items): menu-wide statistics, tier
     distribution, category breakdowns, and overall quality grade
 
+Day 68: Confidence-driven auto-repair recommendations:
+  - generate_repair_recommendations(items): per-item actionable repair
+    suggestions driven by confidence signal breakdowns and existing flags
+  - compute_repair_summary(items): menu-level repair statistics
+
 Polymorphic: works with both Path A (text_block dicts from ocr_pipeline)
 and Path B (flat item dicts from ai_ocr_helper).
 
 Entry functions:
-  score_semantic_confidence(items)  — Step 9.2
-  classify_confidence_tiers(items)  — Step 9.3
+  score_semantic_confidence(items)        — Step 9.2
+  classify_confidence_tiers(items)        — Step 9.3
+  generate_repair_recommendations(items)  — Step 9.4
 
-Pipeline placement: Steps 9.2-9.3, after check_cross_item_consistency (9.1).
+Pipeline placement: Steps 9.2-9.4, after check_cross_item_consistency (9.1).
 """
 
 from __future__ import annotations
 
 import re
 import statistics
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +80,37 @@ _TIER_LOW = 0.40
 _GRADE_A_THRESHOLD = 0.80  # ≥80% high
 _GRADE_B_THRESHOLD = 0.60  # ≥60% high
 _GRADE_C_THRESHOLD = 0.40  # ≥40% high
+
+# Day 68: Repair recommendation constants
+_REPAIR_THRESHOLD_NAME_QUALITY = 0.60
+_REPAIR_THRESHOLD_PRICE_SCORE = 0.50
+_REPAIR_THRESHOLD_VARIANT_SCORE = 0.50
+_REPAIR_THRESHOLD_FLAG_PENALTY = 0.70
+
+_TIER_TO_PRIORITY = {
+    "reject": "critical",
+    "low": "important",
+    "medium": "suggested",
+    "high": None,  # No recommendations for high-tier items
+}
+
+_PRIORITY_ORDER = {"critical": 0, "important": 1, "suggested": 2}
+
+# Variant-related flag reasons for specific messages
+_VARIANT_FLAG_MESSAGES = {
+    "variant_price_inversion": "Size prices are out of order. Verify pricing.",
+    "duplicate_variant": "Duplicate variant labels detected. Remove duplicates.",
+    "zero_price_variant": "Some size variants have $0.00 price. Add missing prices.",
+    "mixed_variant_kinds": "Item has mixed variant types. Verify variant structure.",
+    "size_gap": "Missing intermediate size variant.",
+    "grid_incomplete": "Variant grid is incomplete for this item.",
+    "grid_count_outlier": "Variant count differs from similar items.",
+    "cross_item_variant_count_outlier": "Fewer variants than category norm.",
+    "cross_item_variant_label_mismatch": "Variant labels differ from category standard.",
+}
+
+# Minimum suggestion confidence to promote category suggestion to recommendation
+_MIN_CATEGORY_SUGGESTION_CONFIDENCE = 0.40
 
 
 # ---------------------------------------------------------------------------
@@ -402,4 +439,358 @@ def compute_menu_confidence_summary(items: list) -> Dict[str, Any]:
         "needs_review_count": review_count,
         "quality_grade": grade,
         "category_summary": category_summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 68: Confidence-driven auto-repair recommendations
+# ---------------------------------------------------------------------------
+
+def _try_ocr_correction(name: str) -> Optional[str]:
+    """Attempt OCR correction via menu_corrections; return corrected or None."""
+    try:
+        from .menu_corrections import correct_menu_item
+        corrected = correct_menu_item(name)
+        if corrected and corrected != name:
+            return corrected
+    except Exception:
+        pass
+    return None
+
+
+def _build_name_recommendations(
+    item: Dict[str, Any],
+    priority: str,
+    details: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Build name-quality repair recommendations."""
+    name_score = details.get("name_quality_score", 1.0)
+    if name_score >= _REPAIR_THRESHOLD_NAME_QUALITY:
+        return []
+
+    name = _extract_name(item)
+    recs: List[Dict[str, Any]] = []
+
+    if not name:
+        recs.append({
+            "type": "garbled_name",
+            "priority": priority,
+            "message": "No item name found. Manual entry required.",
+            "auto_fixable": False,
+            "source_signal": "name_quality_score",
+        })
+        return recs
+
+    # Check garble first (most severe)
+    if _is_name_garbled(name):
+        # Try OCR correction
+        corrected = _try_ocr_correction(name)
+        if corrected:
+            recs.append({
+                "type": "garbled_name",
+                "priority": priority,
+                "message": f"Name appears garbled: '{name}'. Suggested correction: '{corrected}'.",
+                "auto_fixable": True,
+                "proposed_fix": corrected,
+                "source_signal": "name_quality_score",
+            })
+        else:
+            recs.append({
+                "type": "garbled_name",
+                "priority": priority,
+                "message": f"Name appears garbled: '{name}'. Manual rename recommended.",
+                "auto_fixable": False,
+                "source_signal": "name_quality_score",
+            })
+        return recs
+
+    # Short name
+    if len(name) < _NAME_SHORT_THRESHOLD:
+        recs.append({
+            "type": "name_quality",
+            "priority": priority,
+            "message": f"Name is very short ({len(name)} chars): '{name}'. Consider expanding or verifying.",
+            "auto_fixable": False,
+            "source_signal": "name_quality_score",
+        })
+
+    # All-caps (less severe — downgrade priority one step)
+    if name == name.upper() and len(name) > 2:
+        downgraded = "suggested" if priority in ("critical", "important") else priority
+        recs.append({
+            "type": "name_quality",
+            "priority": downgraded,
+            "message": f"Name is all-caps: '{name}'. Consider title-casing for readability.",
+            "auto_fixable": True,
+            "proposed_fix": name.title(),
+            "source_signal": "name_quality_score",
+        })
+
+    # If nothing specific but score is still low, try OCR correction
+    if not recs:
+        corrected = _try_ocr_correction(name)
+        if corrected:
+            recs.append({
+                "type": "name_quality",
+                "priority": priority,
+                "message": f"Possible OCR error in name: '{name}'. Suggested: '{corrected}'.",
+                "auto_fixable": True,
+                "proposed_fix": corrected,
+                "source_signal": "name_quality_score",
+            })
+
+    return recs
+
+
+def _build_price_recommendation(
+    item: Dict[str, Any],
+    priority: str,
+    details: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build price-missing repair recommendation."""
+    price_score = details.get("price_score", 1.0)
+    if price_score >= _REPAIR_THRESHOLD_PRICE_SCORE:
+        return None
+    return {
+        "type": "price_missing",
+        "priority": priority,
+        "message": "No price found for this item. Manual price entry recommended.",
+        "auto_fixable": False,
+        "source_signal": "price_score",
+    }
+
+
+def _build_category_recommendation(
+    item: Dict[str, Any],
+    priority: str,
+) -> Optional[Dict[str, Any]]:
+    """Promote strongest category suggestion flag to repair recommendation."""
+    flags = item.get("price_flags") or []
+    best_flag = None
+    best_conf = -1.0
+    for flag in flags:
+        if flag.get("reason") != "cross_item_category_suggestion":
+            continue
+        d = flag.get("details") or {}
+        conf = d.get("suggestion_confidence", d.get("confidence", 0.0))
+        if conf >= _MIN_CATEGORY_SUGGESTION_CONFIDENCE and conf > best_conf:
+            best_conf = conf
+            best_flag = flag
+
+    if best_flag is None:
+        return None
+
+    d = best_flag.get("details") or {}
+    current = d.get("current_category", "Unknown")
+    suggested = d.get("suggested_category", "Unknown")
+    signals = d.get("signals") or []
+    signal_str = "; ".join(signals[:3]) if signals else "neighbor analysis"
+
+    return {
+        "type": "category_reassignment",
+        "priority": priority,
+        "message": f"Consider moving from '{current}' to '{suggested}' ({best_conf:.0%} confidence). Signals: {signal_str}.",
+        "auto_fixable": True,
+        "proposed_fix": {"category": suggested},
+        "source_signal": "category_suggestion_flag",
+    }
+
+
+def _build_variant_recommendations(
+    item: Dict[str, Any],
+    priority: str,
+    details: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Build variant standardization recommendations."""
+    variant_score = details.get("variant_score", 1.0)
+    if variant_score >= _REPAIR_THRESHOLD_VARIANT_SCORE:
+        return []
+
+    flags = item.get("price_flags") or []
+    recs: List[Dict[str, Any]] = []
+    seen_types: set = set()
+
+    for flag in flags:
+        reason = flag.get("reason", "")
+        msg = _VARIANT_FLAG_MESSAGES.get(reason)
+        if msg and reason not in seen_types:
+            seen_types.add(reason)
+            recs.append({
+                "type": "variant_standardization",
+                "priority": priority,
+                "message": msg,
+                "auto_fixable": False,
+                "source_signal": "variant_score",
+            })
+
+    # Generic fallback if no specific variant flags found
+    if not recs:
+        recs.append({
+            "type": "variant_standardization",
+            "priority": priority,
+            "message": "Variant quality is low. Review variant labels and prices.",
+            "auto_fixable": False,
+            "source_signal": "variant_score",
+        })
+
+    return recs
+
+
+def _build_flag_summary_recommendation(
+    item: Dict[str, Any],
+    priority: str,
+    details: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build flag-attention recommendation summarizing outstanding flags."""
+    flag_score = details.get("flag_penalty_score", 1.0)
+    if flag_score >= _REPAIR_THRESHOLD_FLAG_PENALTY:
+        return None
+
+    flags = item.get("price_flags") or []
+    if not flags:
+        return None
+
+    n_warn = sum(1 for f in flags if f.get("severity") == "warn")
+    n_info = sum(1 for f in flags if f.get("severity") == "info")
+    # Collect unique warn reasons (top 3)
+    warn_reasons = []
+    seen = set()
+    for f in flags:
+        if f.get("severity") == "warn":
+            r = f.get("reason", "unknown")
+            if r not in seen:
+                seen.add(r)
+                warn_reasons.append(r)
+            if len(warn_reasons) >= 3:
+                break
+
+    parts = []
+    if n_warn:
+        parts.append(f"{n_warn} warning(s)")
+    if n_info:
+        parts.append(f"{n_info} info flag(s)")
+    count_str = " and ".join(parts)
+    reason_str = ""
+    if warn_reasons:
+        reason_str = f" Top issues: {', '.join(warn_reasons)}."
+
+    return {
+        "type": "flag_attention",
+        "priority": priority,
+        "message": f"Item has {count_str} requiring attention.{reason_str}",
+        "auto_fixable": False,
+        "source_signal": "flag_penalty_score",
+        "details": {
+            "warn_count": n_warn,
+            "info_count": n_info,
+            "top_reasons": warn_reasons,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 68: Public entry points
+# ---------------------------------------------------------------------------
+
+def generate_repair_recommendations(items: list) -> None:
+    """Generate per-item repair recommendations based on confidence signals.
+
+    Reads semantic_confidence_details, semantic_tier, needs_review, and
+    price_flags.  Writes ``repair_recommendations`` list per item.
+
+    Pipeline placement: Step 9.4, after classify_confidence_tiers (9.3).
+    Mutates items in place.
+    """
+    for item in items:
+        tier = item.get("semantic_tier", "reject")
+        priority = _TIER_TO_PRIORITY.get(tier)
+
+        # High-tier items: no recommendations needed
+        if priority is None:
+            item["repair_recommendations"] = []
+            continue
+
+        details = item.get("semantic_confidence_details") or {}
+        recommendations: List[Dict[str, Any]] = []
+
+        # 1. Name quality
+        recommendations.extend(_build_name_recommendations(item, priority, details))
+
+        # 2. Price missing
+        price_rec = _build_price_recommendation(item, priority, details)
+        if price_rec:
+            recommendations.append(price_rec)
+
+        # 3. Category suggestion (from flags)
+        cat_rec = _build_category_recommendation(item, priority)
+        if cat_rec:
+            recommendations.append(cat_rec)
+
+        # 4. Variant standardization
+        recommendations.extend(_build_variant_recommendations(item, priority, details))
+
+        # 5. Flag summary
+        flag_rec = _build_flag_summary_recommendation(item, priority, details)
+        if flag_rec:
+            recommendations.append(flag_rec)
+
+        # Sort by priority (critical first)
+        recommendations.sort(key=lambda r: _PRIORITY_ORDER.get(r.get("priority", "suggested"), 2))
+
+        item["repair_recommendations"] = recommendations
+
+
+def compute_repair_summary(items: list) -> Dict[str, Any]:
+    """Compute menu-level repair statistics from recommendation-annotated items.
+
+    Should be called after generate_repair_recommendations().
+    Returns a summary dict (does NOT mutate items).
+    """
+    if not items:
+        return {
+            "total_items": 0,
+            "items_with_recommendations": 0,
+            "total_recommendations": 0,
+            "by_priority": {"critical": 0, "important": 0, "suggested": 0},
+            "by_type": {},
+            "auto_fixable_count": 0,
+            "category_breakdown": {},
+        }
+
+    total_recs = 0
+    items_with = 0
+    by_priority: Dict[str, int] = {"critical": 0, "important": 0, "suggested": 0}
+    by_type: Dict[str, int] = {}
+    auto_fixable = 0
+    cat_data: Dict[str, Dict[str, int]] = {}
+
+    for item in items:
+        recs = item.get("repair_recommendations") or []
+        if recs:
+            items_with += 1
+        total_recs += len(recs)
+
+        cat = _extract_category(item)
+        if cat not in cat_data:
+            cat_data[cat] = {"items_with_recommendations": 0, "recommendation_count": 0}
+        if recs:
+            cat_data[cat]["items_with_recommendations"] += 1
+        cat_data[cat]["recommendation_count"] += len(recs)
+
+        for rec in recs:
+            p = rec.get("priority", "suggested")
+            by_priority[p] = by_priority.get(p, 0) + 1
+            t = rec.get("type", "unknown")
+            by_type[t] = by_type.get(t, 0) + 1
+            if rec.get("auto_fixable"):
+                auto_fixable += 1
+
+    return {
+        "total_items": len(items),
+        "items_with_recommendations": items_with,
+        "total_recommendations": total_recs,
+        "by_priority": by_priority,
+        "by_type": by_type,
+        "auto_fixable_count": auto_fixable,
+        "category_breakdown": {k: v for k, v in sorted(cat_data.items())},
     }

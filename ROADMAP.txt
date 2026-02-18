@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 67 (February 18, 2026) — Confidence tiers + menu-level aggregation (Sprint 8.4)
+Last Updated: Day 68 (February 18, 2026) — Confidence-driven auto-repair recommendations (Sprint 8.4)
 
 ================================================================================
 PROJECT MISSION
@@ -113,7 +113,8 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** COMPLETE ***
     Day 63 test suite: 51 cases, 100% pass rate
     Day 64 test suite: 75 cases, 100% pass rate
     Day 65 test suite: 75 cases, 100% pass rate
-    Total: 2,088 tests, all passing
+    Day 68 test suite: 88 cases, 100% pass rate
+    Total: 2,372 tests, all passing
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65) *** COMPLETE ***
 -----------------------------------------------------------------
@@ -156,6 +157,14 @@ Sprint 8.4 — Semantic Confidence (Days 66-70)
     - Menu-level: compute_menu_confidence_summary() returns mean/median/stdev,
       tier distribution, category breakdowns, quality grade (A/B/C/D)
     - Pipeline Step 9.3, after score_semantic_confidence (Step 9.2)
+[x] Confidence-driven auto-repair recommendations (Day 68)
+    - generate_repair_recommendations(items): per-item actionable repair suggestions
+    - 6 recommendation types: garbled_name, name_quality, price_missing,
+      category_reassignment, variant_standardization, flag_attention
+    - Priority from tier: reject→critical, low→important, medium→suggested
+    - Auto-fixable recs with proposed_fix for all-caps, OCR corrections, categories
+    - compute_repair_summary(items): menu-level repair statistics
+    - Pipeline Step 9.4, after classify_confidence_tiers (Step 9.3)
 [ ] Use OCR block heights for heading detection
 [ ] Implement section break detection via gaps
 [ ] Promote large-font blocks to category headings
@@ -384,6 +393,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 68: Confidence-driven auto-repair recommendations — 6 types, priority system (88 tests)
 Day 67: Confidence tiers + menu-level aggregation (103 tests)
 Day 66: Unified semantic confidence scoring — 5 weighted signals (93 tests)
 Day 65: Cross-item variant pattern enforcement — 3 category-level checks (75 tests)
@@ -435,7 +445,7 @@ One Brain (storage/):
 - ai_menu_extract.py         — Claude API extraction module (~260 LOC)
 - category_infer.py          — Category inference (507 LOC)
 - cross_item.py              — Cross-item consistency (8 checks, ~830 LOC)
-- semantic_confidence.py     — Semantic confidence scoring + tiers + aggregation (~350 LOC)
+- semantic_confidence.py     — Semantic confidence scoring + tiers + repair recs (~580 LOC)
 - variant_engine.py          — Variant normalization + price validation (~720 LOC)
 - price_integrity.py         — Price validation (414 LOC)
 - category_hierarchy.py      — Hierarchy building (493 LOC)
@@ -461,7 +471,8 @@ Tests:
 - tests/test_day65_variant_patterns.py  — 75 cases (Day 65)
 - tests/test_day66_semantic_confidence.py — 93 cases (Day 66)
 - tests/test_day67_confidence_tiers.py — 103 cases (Day 67)
+- tests/test_day68_repair_recommendations.py — 88 cases (Day 68)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,284 tests, all passing
+- TOTAL: 2,372 tests, all passing
 
 ================================================================================
