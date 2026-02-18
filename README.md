@@ -879,6 +879,66 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 67 — Confidence Tiers + Menu-Level Aggregation (COMPLETE)
+
+**Extended Module: `storage/semantic_confidence.py`** (~350 LOC):
+- Confidence tier classification: per-item `semantic_tier` + `needs_review` flagging
+- Menu-level aggregation: `compute_menu_confidence_summary(items)` for menu-wide statistics
+
+**Confidence Tier Classification (`classify_confidence_tiers`):**
+
+| Tier | Threshold | needs_review |
+|------|-----------|-------------|
+| high | ≥ 0.80 | False |
+| medium | 0.60 – 0.79 | True |
+| low | 0.40 – 0.59 | True |
+| reject | < 0.40 | True |
+
+- Reads `semantic_confidence` from Day 66, writes `semantic_tier` + `needs_review` per item
+- Defensive: missing `semantic_confidence` → reject + needs_review
+- Pipeline Step 9.3, immediately after `score_semantic_confidence` (Step 9.2)
+
+**Menu-Level Summary (`compute_menu_confidence_summary`):**
+- `total_items`, `mean_confidence`, `median_confidence`, `stdev_confidence`
+- `tier_counts`: {high, medium, low, reject} distribution
+- `needs_review_count`: total items flagged for human review
+- `quality_grade`: A (≥80% high), B (≥60%), C (≥40%), D (<40%)
+- `category_summary`: per-category breakdown with count, mean, review count, tier counts
+- Read-only — does NOT mutate items
+
+**Pipeline Wiring:**
+- Path A (`ocr_pipeline.py`): `classify_confidence_tiers()` after `score_semantic_confidence()`
+- Path B (`ai_ocr_helper.py`): same placement
+- Preview blocks: `semantic_tier` + `needs_review` mirrored for overlay UI
+
+**Test Results** (2,284 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Day 64 cross-cat coherence | 75 | 100% |
+| Day 65 variant patterns | 75 | 100% |
+| Day 66 semantic confidence | 93 | 100% |
+| Day 67 confidence tiers | 103 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **2,284** | **100%** |
+
+**Artifacts:**
+- [storage/semantic_confidence.py](storage/semantic_confidence.py) — Extended with tiers + aggregation (~350 LOC)
+- [tests/test_day67_confidence_tiers.py](tests/test_day67_confidence_tiers.py) — Day 67 test suite (103 cases)
+
+**Day 67 complete. Sprint 8.4 continues.**
+
+---
+
 ### ✅ Day 66 — Semantic Confidence Foundation (Sprint 8.4 Start) (COMPLETE)
 
 **New Module: `storage/semantic_confidence.py`** (~200 LOC):
@@ -994,7 +1054,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 in progress)**
 
-Day 66 started Sprint 8.4 (Semantic Confidence) with a unified per-item `semantic_confidence` score in `storage/semantic_confidence.py`. Five weighted signals (grammar 0.30, name quality 0.20, price presence 0.20, variant quality 0.15, flag penalty 0.15) aggregated into a single 0.0-1.0 score with full audit trail. Polymorphic design works with both pipeline paths. 2,181 tests passing across all suites.
+Day 67 added confidence tier classification (`semantic_tier` + `needs_review` per item) and menu-level aggregation (`compute_menu_confidence_summary`) on top of Day 66's per-item scoring. Four tiers (high/medium/low/reject), quality grades (A-D), and category-level breakdowns. 2,284 tests passing across all suites.
 
 ---
 
@@ -1092,7 +1152,7 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - ✅ Unified semantic confidence scoring — 5 weighted signals, audit trail (Day 66)
+- ✅ Confidence tiers + menu-level aggregation — 4 tiers, quality grades, category breakdowns (Day 67)
 - Geometric heading detection from OCR blocks
-- Confidence-based auto-review flagging
 
-**Next Step:** Day 67 — Sprint 8.4 continues (Semantic Confidence)
+**Next Step:** Day 68 — Sprint 8.4 continues (Semantic Confidence)

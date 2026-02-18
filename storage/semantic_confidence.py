@@ -1,8 +1,8 @@
 # storage/semantic_confidence.py
 """
-Semantic Confidence Scoring -- Sprint 8.4 Day 66
+Semantic Confidence Scoring -- Sprint 8.4 Days 66-67
 
-Computes a unified per-item semantic_confidence score (0.0-1.0) by
+Day 66: Computes a unified per-item semantic_confidence score (0.0-1.0) by
 aggregating five independent signal sources:
 
   1. Grammar/parse confidence (or fallback item confidence for Path B)
@@ -11,19 +11,25 @@ aggregating five independent signal sources:
   4. Variant quality (average variant confidence)
   5. Flag penalty (severity-weighted deductions from price_flags)
 
+Day 67: Confidence tier classification + menu-level aggregation:
+  - classify_confidence_tiers(items): per-item semantic_tier + needs_review
+  - compute_menu_confidence_summary(items): menu-wide statistics, tier
+    distribution, category breakdowns, and overall quality grade
+
 Polymorphic: works with both Path A (text_block dicts from ocr_pipeline)
 and Path B (flat item dicts from ai_ocr_helper).
 
-Entry function: score_semantic_confidence(items)
-Mutates items in place by adding semantic_confidence and
-semantic_confidence_details.
+Entry functions:
+  score_semantic_confidence(items)  — Step 9.2
+  classify_confidence_tiers(items)  — Step 9.3
 
-Pipeline placement: Step 9.2, after check_cross_item_consistency (Step 9.1).
+Pipeline placement: Steps 9.2-9.3, after check_cross_item_consistency (9.1).
 """
 
 from __future__ import annotations
 
 import re
+import statistics
 from typing import Any, Dict, List
 
 
@@ -58,6 +64,16 @@ _DEFAULT_GRAMMAR_SCORE = 0.5
 # Garble detection constants (mirrors menu_grammar._is_garble_run pattern)
 _GARBLE_CHARS = set("secrnotvw")
 _TRIPLE_REPEAT_RE = re.compile(r"(.)\1{2,}", re.IGNORECASE)
+
+# Day 67: Confidence tier thresholds (match menu_grammar.confidence_tier)
+_TIER_HIGH = 0.80
+_TIER_MEDIUM = 0.60
+_TIER_LOW = 0.40
+
+# Quality grade thresholds (% of items in "high" tier)
+_GRADE_A_THRESHOLD = 0.80  # ≥80% high
+_GRADE_B_THRESHOLD = 0.60  # ≥60% high
+_GRADE_C_THRESHOLD = 0.40  # ≥40% high
 
 
 # ---------------------------------------------------------------------------
@@ -245,3 +261,145 @@ def score_semantic_confidence(items: list) -> None:
             "flag_penalty_weighted": round(weighted_flags, 4),
             "final": final,
         }
+
+
+# ---------------------------------------------------------------------------
+# Day 67: Confidence tier classification
+# ---------------------------------------------------------------------------
+
+def _tier_for_score(score: float) -> str:
+    """Map a semantic_confidence score to a tier label."""
+    if score >= _TIER_HIGH:
+        return "high"
+    elif score >= _TIER_MEDIUM:
+        return "medium"
+    elif score >= _TIER_LOW:
+        return "low"
+    return "reject"
+
+
+def classify_confidence_tiers(items: list) -> None:
+    """Classify each item into a confidence tier and flag for review.
+
+    Reads ``semantic_confidence`` (must be set by score_semantic_confidence
+    first) and writes two new fields per item:
+      - semantic_tier: str ("high" / "medium" / "low" / "reject")
+      - needs_review: bool (True unless tier is "high")
+
+    Pipeline placement: Step 9.3, immediately after score_semantic_confidence.
+    Mutates items in place.
+    """
+    for item in items:
+        sc = item.get("semantic_confidence")
+        if sc is None:
+            # Defensive: score wasn't computed yet
+            item["semantic_tier"] = "reject"
+            item["needs_review"] = True
+            continue
+        tier = _tier_for_score(float(sc))
+        item["semantic_tier"] = tier
+        item["needs_review"] = tier != "high"
+
+
+# ---------------------------------------------------------------------------
+# Day 67: Menu-level confidence aggregation
+# ---------------------------------------------------------------------------
+
+def _extract_category(item: Dict[str, Any]) -> str:
+    """Get category name from item, defaulting to 'Uncategorized'."""
+    cat = item.get("category")
+    if cat and str(cat).strip():
+        return str(cat).strip()
+    return "Uncategorized"
+
+
+def compute_menu_confidence_summary(items: list) -> Dict[str, Any]:
+    """Compute menu-wide confidence statistics from scored + tiered items.
+
+    Should be called after both score_semantic_confidence() and
+    classify_confidence_tiers(). Returns a summary dict (does NOT mutate items).
+
+    Returns dict with:
+      - total_items: int
+      - mean_confidence: float (rounded to 4 decimals)
+      - median_confidence: float (rounded to 4 decimals)
+      - stdev_confidence: float (rounded to 4 decimals, 0.0 if <2 items)
+      - tier_counts: {high: int, medium: int, low: int, reject: int}
+      - needs_review_count: int
+      - quality_grade: str ("A" / "B" / "C" / "D")
+      - category_summary: {category: {count, mean, needs_review_count, tier_counts}}
+    """
+    if not items:
+        return {
+            "total_items": 0,
+            "mean_confidence": 0.0,
+            "median_confidence": 0.0,
+            "stdev_confidence": 0.0,
+            "tier_counts": {"high": 0, "medium": 0, "low": 0, "reject": 0},
+            "needs_review_count": 0,
+            "quality_grade": "D",
+            "category_summary": {},
+        }
+
+    scores = [float(it.get("semantic_confidence", 0.0)) for it in items]
+    tiers = [it.get("semantic_tier", "reject") for it in items]
+    reviews = [it.get("needs_review", True) for it in items]
+
+    tier_counts = {"high": 0, "medium": 0, "low": 0, "reject": 0}
+    for t in tiers:
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    total = len(items)
+    mean_conf = statistics.mean(scores)
+    median_conf = statistics.median(scores)
+    stdev_conf = statistics.stdev(scores) if total >= 2 else 0.0
+    review_count = sum(1 for r in reviews if r)
+
+    # Quality grade based on % of items in "high" tier
+    high_ratio = tier_counts["high"] / total
+    if high_ratio >= _GRADE_A_THRESHOLD:
+        grade = "A"
+    elif high_ratio >= _GRADE_B_THRESHOLD:
+        grade = "B"
+    elif high_ratio >= _GRADE_C_THRESHOLD:
+        grade = "C"
+    else:
+        grade = "D"
+
+    # Category-level breakdown
+    cat_data: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        cat = _extract_category(item)
+        if cat not in cat_data:
+            cat_data[cat] = {
+                "scores": [],
+                "needs_review_count": 0,
+                "tier_counts": {"high": 0, "medium": 0, "low": 0, "reject": 0},
+            }
+        bucket = cat_data[cat]
+        bucket["scores"].append(float(item.get("semantic_confidence", 0.0)))
+        if item.get("needs_review", True):
+            bucket["needs_review_count"] += 1
+        tier = item.get("semantic_tier", "reject")
+        bucket["tier_counts"][tier] = bucket["tier_counts"].get(tier, 0) + 1
+
+    category_summary = {}
+    for cat, bucket in sorted(cat_data.items()):
+        cat_scores = bucket["scores"]
+        category_summary[cat] = {
+            "count": len(cat_scores),
+            "mean": round(statistics.mean(cat_scores), 4),
+            "needs_review_count": bucket["needs_review_count"],
+            "tier_counts": bucket["tier_counts"],
+        }
+
+    return {
+        "total_items": total,
+        "mean_confidence": round(mean_conf, 4),
+        "median_confidence": round(median_conf, 4),
+        "stdev_confidence": round(stdev_conf, 4),
+        "tier_counts": tier_counts,
+        "needs_review_count": review_count,
+        "quality_grade": grade,
+        "category_summary": category_summary,
+    }
