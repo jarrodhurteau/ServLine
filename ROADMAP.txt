@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 61 (February 17, 2026) — Cross-item consistency foundation (Sprint 8.3)
+Last Updated: Day 62 (February 18, 2026) — Fuzzy name matching (Sprint 8.3)
 
 ================================================================================
 PROJECT MISSION
@@ -109,7 +109,8 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** COMPLETE ***
     Real import: 115 items from full restaurant menu (was 18 garbled)
 
     Day 61 test suite: 109 cases, 100% pass rate
-    Total: 1,791 tests, all passing
+    Day 62 test suite: 96 cases, 100% pass rate
+    Total: 1,887 tests, all passing
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 -------------------------------------------------
@@ -118,7 +119,11 @@ Sprint 8.3 — Cross-Item Consistency (Days 61-65)
     - Category price outlier detection (MAD-based, 3σ threshold)
     - Category isolation detection (neighbor window ±2)
     - Both code paths wired (pipeline + ai_ocr_helper)
-[ ] Fuzzy name matching (edit distance / n-gram similarity)
+[x] Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
+    - Three-phase: exact → fuzzy on remaining items
+    - OCR typos: "BUFALO"→"BUFFALO", "MARGHERITA"→"MARGARITA"
+    - Price-aware: same price → info, different → warn
+    - Zero new dependencies (difflib is stdlib)
 [ ] Category reassignment suggestions (neighbor-based smoothing)
 [ ] Cross-category price coherence (sides < entrees)
 [ ] Cross-item variant pattern enforcement
@@ -355,6 +360,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 62: Fuzzy name matching — SequenceMatcher near-duplicate detection (96 tests)
 Day 61: Cross-item consistency foundation — 3 checks, new module (109 tests)
 Day 60: Variant confidence scoring + Sprint 8.2 complete (106 tests)
 Day 59: Cross-variant consistency checks (6 validators, 113 tests)
@@ -418,7 +424,8 @@ Tests:
 - tests/test_day59_variant_consistency.py — 113 cases (Day 59)
 - tests/test_day60_variant_confidence.py — 106 cases (Day 60)
 - tests/test_day61_cross_item.py        — 109 cases (Day 61)
+- tests/test_day62_fuzzy_names.py       — 96 cases (Day 62)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 1,791 tests, all passing
+- TOTAL: 1,887 tests, all passing
 
 ================================================================================

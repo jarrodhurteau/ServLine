@@ -1,12 +1,15 @@
 """
-Cross-Item Consistency Checks -- Sprint 8.3 Day 61
+Cross-Item Consistency Checks -- Sprint 8.3 Days 61-62
 
 Compares items ACROSS the menu to detect anomalies that per-item
 checks cannot catch:
 
-  1. Duplicate / near-duplicate name detection
-  2. Category price outlier detection (IQR-based)
+  1. Duplicate / near-duplicate name detection (exact + fuzzy)
+  2. Category price outlier detection (MAD-based)
   3. Category isolation detection (lone miscategorized items)
+
+Day 62 additions: Fuzzy name matching via SequenceMatcher to catch
+OCR typos like "BUFALO" vs "BUFFALO", "MARGARITA" vs "MARGHERITA".
 
 Entry function: check_cross_item_consistency(text_blocks)
 Mutates in place by appending to each item's price_flags list.
@@ -18,7 +21,8 @@ from __future__ import annotations
 import re
 import statistics
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # ---------------------------------------------------------------------------
 # Name extraction / normalisation helpers
@@ -30,6 +34,15 @@ _COMMON_PREFIXES_RE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_TOKEN_RE = re.compile(r"\$?\d+\.\d{2}")
+
+# Day 62: Fuzzy matching constants
+_FUZZY_THRESHOLD = 0.82   # similarity ratio to consider a fuzzy match
+_FUZZY_MIN_LEN = 4        # minimum normalized name length for fuzzy comparison
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """Return similarity ratio (0.0-1.0) between two normalised names."""
+    return SequenceMatcher(None, a, b).ratio()
 
 
 def _extract_item_name(tb: Dict[str, Any]) -> str:
@@ -110,9 +123,10 @@ def _extract_primary_price_cents(tb: Dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 
 def _check_duplicate_names(text_blocks: List[Dict[str, Any]]) -> None:
-    """Flag items with duplicate normalised names."""
-    name_groups: Dict[str, List[Tuple[int, int]]] = {}
+    """Flag items with duplicate normalised names (exact + fuzzy)."""
 
+    # --- Phase 1: collect normalised names ---
+    items: List[Tuple[int, str, int]] = []  # (idx, norm_name, price)
     for idx, tb in enumerate(text_blocks):
         raw_name = _extract_item_name(tb)
         if not raw_name or len(raw_name) < 3:
@@ -121,11 +135,20 @@ def _check_duplicate_names(text_blocks: List[Dict[str, Any]]) -> None:
         if not norm:
             continue
         price = _extract_primary_price_cents(tb)
+        items.append((idx, norm, price))
+
+    # --- Phase 2: exact matching (unchanged from Day 61) ---
+    name_groups: Dict[str, List[Tuple[int, int]]] = {}
+    for idx, norm, price in items:
         name_groups.setdefault(norm, []).append((idx, price))
+
+    exact_grouped: Set[int] = set()  # indices that belong to an exact group
 
     for norm_name, members in name_groups.items():
         if len(members) < 2:
             continue
+
+        exact_grouped.update(i for (i, _) in members)
 
         all_prices = {p for (_, p) in members}
         all_same_price = len(all_prices) == 1
@@ -149,6 +172,76 @@ def _check_duplicate_names(text_blocks: List[Dict[str, Any]]) -> None:
                     "other_prices_cents": other_prices,
                     "other_indices": other_indices,
                     "group_size": len(members),
+                },
+            })
+
+    # --- Phase 3: fuzzy matching (Day 62) ---
+    # Build per-group representative name for cross-group comparison,
+    # plus ungrouped singletons. Compare all pairs across different groups.
+    # Skip pairs within the same exact group (already flagged).
+    fuzzy_candidates: List[Tuple[int, str, int, str]] = []
+    #  (idx, norm_name, price, exact_group_key)
+    for idx, norm, price in items:
+        if len(norm) < _FUZZY_MIN_LEN:
+            continue
+        fuzzy_candidates.append((idx, norm, price, norm))
+
+    # Track which (i, j) pairs already fuzzy-flagged to avoid double-flagging
+    fuzzy_flagged: Set[Tuple[int, int]] = set()
+
+    for a_pos in range(len(fuzzy_candidates)):
+        a_idx, a_norm, a_price, a_group = fuzzy_candidates[a_pos]
+        for b_pos in range(a_pos + 1, len(fuzzy_candidates)):
+            b_idx, b_norm, b_price, b_group = fuzzy_candidates[b_pos]
+
+            # Skip if same exact group (already flagged)
+            if a_group == b_group:
+                continue
+
+            # Skip if names are identical (should be same group, but defensive)
+            if a_norm == b_norm:
+                continue
+
+            sim = _name_similarity(a_norm, b_norm)
+            if sim < _FUZZY_THRESHOLD:
+                continue
+
+            # Avoid double-flagging the same pair
+            pair_key = (min(a_idx, b_idx), max(a_idx, b_idx))
+            if pair_key in fuzzy_flagged:
+                continue
+            fuzzy_flagged.add(pair_key)
+
+            same_price = a_price == b_price
+            if same_price:
+                reason = "cross_item_fuzzy_exact_duplicate"
+                severity = "info"
+            else:
+                reason = "cross_item_fuzzy_duplicate"
+                severity = "warn"
+
+            text_blocks[a_idx]["price_flags"].append({
+                "severity": severity,
+                "reason": reason,
+                "details": {
+                    "this_name": a_norm,
+                    "matched_name": b_norm,
+                    "similarity": round(sim, 3),
+                    "this_price_cents": a_price,
+                    "matched_price_cents": b_price,
+                    "matched_index": b_idx,
+                },
+            })
+            text_blocks[b_idx]["price_flags"].append({
+                "severity": severity,
+                "reason": reason,
+                "details": {
+                    "this_name": b_norm,
+                    "matched_name": a_norm,
+                    "similarity": round(sim, 3),
+                    "this_price_cents": b_price,
+                    "matched_price_cents": a_price,
+                    "matched_index": a_idx,
                 },
             })
 

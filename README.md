@@ -697,7 +697,31 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 - Flags items whose category differs from ALL categorized neighbors (need 2+)
 - Flags: `cross_item_category_isolated` (info) with dominant neighbor suggestion
 
-**Test Results** (1,791 total — 100%):
+**Day 61 complete.**
+
+---
+
+### ✅ Day 62 — Fuzzy Name Matching for Near-Duplicate Detection (COMPLETE)
+
+**Fuzzy Matching via SequenceMatcher** (`storage/cross_item.py`):
+- Extends Day 61's exact-duplicate detection with fuzzy similarity matching
+- Uses Python's `difflib.SequenceMatcher` (zero new dependencies, already in codebase)
+- Catches OCR typos: "BUFALO"→"BUFFALO", "MARGARITA"→"MARGHERITA", "CHEEZE"→"CHEESE"
+- Also catches: space variations ("CHEESEBURGER"/"CHEESE BURGER"), character dropout, transpositions
+
+**Three-Phase Detection Architecture:**
+1. Phase 1: Collect and normalize item names (reuses Day 61 `_normalize_name()`)
+2. Phase 2: Exact matching (unchanged Day 61 logic) → `cross_item_exact_duplicate` / `cross_item_duplicate_name`
+3. Phase 3: Pairwise fuzzy comparison on remaining items → `cross_item_fuzzy_duplicate` / `cross_item_fuzzy_exact_duplicate`
+
+**Fuzzy Match Rules:**
+- Threshold: 0.82 similarity ratio (catches 1-2 char typos in typical menu names)
+- Minimum name length: 4 chars (prevents false positives on short names like "Sub"/"Sup")
+- Same-group pairs skipped (already flagged by exact matching)
+- Price-aware: same price → info severity, different price → warn severity
+- Flag details include `similarity` ratio, `matched_name`, `matched_index`, prices
+
+**Test Results** (1,887 total — 100%):
 
 | Suite | Tests | Pass Rate |
 |-------|-------|-----------|
@@ -708,14 +732,15 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 | Day 59 consistency | 113 | 100% |
 | Day 60 confidence | 106 | 100% |
 | Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
 | Rotation scoring | 18 | 100% |
-| **TOTAL** | **1,791** | **100%** |
+| **TOTAL** | **1,887** | **100%** |
 
 **Artifacts:**
-- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (~200 LOC)
-- [tests/test_day61_cross_item.py](tests/test_day61_cross_item.py) — Day 61 test suite (109 cases)
+- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (~310 LOC, +110 from Day 61)
+- [tests/test_day62_fuzzy_names.py](tests/test_day62_fuzzy_names.py) — Day 62 test suite (96 cases)
 
-**Day 61 complete.**
+**Day 62 complete.**
 
 ---
 
@@ -772,7 +797,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.3 in progress)**
 
-Day 61 started Sprint 8.3 (Cross-Item Consistency) with a new `storage/cross_item.py` module providing three cross-item checks: duplicate name detection, category price outlier detection (MAD-based), and category isolation detection. Wired as pipeline Step 9.1 into both code paths. 1,791 tests passing across all suites.
+Day 62 added fuzzy name matching to `storage/cross_item.py` — detects OCR near-duplicates like "BUFALO WINGS" vs "BUFFALO WINGS" using `difflib.SequenceMatcher` (threshold 0.82). Three-phase architecture: exact matching first, then pairwise fuzzy on remaining items. Zero new dependencies. 1,887 tests passing across all suites.
 
 ---
 
@@ -862,7 +887,7 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
-- Fuzzy name matching (edit distance / n-gram similarity)
+- ✅ Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
 - Category reassignment suggestions (neighbor-based smoothing)
 - Cross-category price coherence (sides < entrees)
 
@@ -871,4 +896,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 62 — Sprint 8.3 continued (Fuzzy Name Matching)
+**Next Step:** Day 63 — Sprint 8.3 continued (Category Reassignment Suggestions)
