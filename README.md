@@ -832,6 +832,53 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 65 — Cross-Item Variant Pattern Enforcement (Sprint 8.3 Complete) (COMPLETE)
+
+**Three Category-Level Variant Checks** (`storage/cross_item.py`):
+
+**Check 6: Variant Count Consistency:**
+- Within each category, computes MODE variant count among items with 2+ variants
+- Flags items where `mode - actual >= 2` as `cross_item_variant_count_outlier` (info)
+- Complements Day 59's grid_count_outlier (which uses size_grid_source grouping, not category)
+
+**Check 7: Variant Label Set Consistency:**
+- Finds dominant set of `normalized_size` labels (kind=="size" only) within each category
+- Subset tolerance (gourmet right-alignment: {M,L} under {S,M,L} is OK)
+- Superset tolerance (extra sizes: {S,M,L,XL} under {S,M,L} is OK)
+- 60% agreement threshold; flags as `cross_item_variant_label_mismatch` (info)
+
+**Check 8: Price Step Consistency:**
+- Computes median price step between consecutive sizes within each category
+- MAD-based outlier detection with 15% median floor
+- Only positive steps counted (inversions already flagged Day 57)
+- Flags as `cross_item_price_step_outlier` (info)
+
+**Test Results** (2,088 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Day 64 cross-cat coherence | 75 | 100% |
+| Day 65 variant patterns | 75 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **2,088** | **100%** |
+
+**Artifacts:**
+- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (8 checks, ~830 LOC)
+- [tests/test_day65_variant_patterns.py](tests/test_day65_variant_patterns.py) — Day 65 test suite (75 cases)
+
+**Day 65 complete. Sprint 8.3 complete.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -883,9 +930,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.3 in progress)**
+➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 next)**
 
-Day 64 added cross-category price coherence to `storage/cross_item.py` — detects when a cheap-category item (side, beverage, dessert) costs more than the typical expensive-category item (pizza, pasta, burger), or vice versa. Uses 16 directional rules (e.g., Beverages < Pizza, Sides < Pasta), data-driven median comparison, and 30% minimum gap guard to avoid false positives. Each item gets at most one "above" and one "below" flag (most dramatic violation kept). 2,013 tests passing across all suites.
+Day 65 completed Sprint 8.3 with cross-item variant pattern enforcement — three category-level checks in `storage/cross_item.py`: (1) variant count consistency (MODE-based, gap >= 2 to flag), (2) variant label set consistency (dominant set with subset/superset tolerance), (3) price step consistency (MAD-based outlier detection). Sprint 8.3 now has 8 cross-item checks total. 2,088 tests passing across all suites.
 
 ---
 
@@ -973,16 +1020,16 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Cross-variant consistency checks — 6 validators, flag-only (Day 59)
 - ✅ Variant confidence scoring — multi-signal per-variant scoring (Day 60)
 
-### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
+### Sprint 8.3 — Cross-Item Consistency (Days 61-65) ✅ COMPLETE
 - ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
 - ✅ Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
 - ✅ Category reassignment suggestions — 4-signal neighbor smoothing (Day 63)
 - ✅ Cross-category price coherence — 16 directional rules, median-based (Day 64)
-- Cross-item variant pattern enforcement
+- ✅ Cross-item variant pattern enforcement — 3 category-level checks (Day 65)
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
 - Geometric heading detection from OCR blocks
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 65 — Sprint 8.3 finale (Cross-Item Variant Pattern Enforcement)
+**Next Step:** Day 66 — Sprint 8.4 start (Semantic Confidence)

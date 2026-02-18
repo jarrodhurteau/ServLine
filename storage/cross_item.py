@@ -1,5 +1,5 @@
 """
-Cross-Item Consistency Checks -- Sprint 8.3 Days 61-64
+Cross-Item Consistency Checks -- Sprint 8.3 Days 61-65
 
 Compares items ACROSS the menu to detect anomalies that per-item
 checks cannot catch:
@@ -9,6 +9,9 @@ checks cannot catch:
   3. Category isolation detection (lone miscategorized items)
   4. Category reassignment suggestions (neighbor-based smoothing)
   5. Cross-category price coherence (sides < entrees)
+  6. Variant count consistency (category-level mode comparison)
+  7. Variant label set consistency (dominant size labels)
+  8. Price step consistency (MAD-based step outlier detection)
 
 Day 62 additions: Fuzzy name matching via SequenceMatcher to catch
 OCR typos like "BUFALO" vs "BUFFALO", "MARGARITA" vs "MARGHERITA".
@@ -19,6 +22,10 @@ agreement, keyword fit, price band, and original confidence.
 Day 64 additions: Cross-category price coherence — detect when a
 cheap-category item (side, beverage) costs more than the typical
 expensive-category item (pizza, pasta), or vice versa.
+
+Day 65 additions: Cross-item variant pattern enforcement — detect
+variant count outliers, mismatched size label sets, and price step
+deviations within the same category.
 
 Entry function: check_cross_item_consistency(text_blocks)
 Mutates in place by appending to each item's price_flags list.
@@ -34,6 +41,7 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .category_infer import CATEGORY_KEYWORDS, CATEGORY_PRICE_BANDS
+from .parsers.size_vocab import size_ordinal, size_track
 
 # ---------------------------------------------------------------------------
 # Name extraction / normalisation helpers
@@ -56,6 +64,13 @@ _SUGGESTION_MIN_NEIGHBORS = 3     # minimum categorized neighbors to make a sugg
 _SUGGESTION_MIN_AGREEMENT = 0.60  # 60% of neighbors must agree on dominant category
 _SUGGESTION_MIN_CONFIDENCE = 0.30 # minimum suggestion confidence to emit flag
 _SUGGESTION_KEYWORD_GUARD = 2     # suppress if current category has >= this many keyword matches
+
+# Day 65: Cross-item variant pattern enforcement constants
+_VARIANT_COUNT_MIN_ITEMS = 3      # need 3+ multi-variant items to establish mode
+_VARIANT_COUNT_MIN_GAP = 2        # flag when mode - actual >= 2
+_VARIANT_LABEL_MIN_ITEMS = 3      # need 3+ size-variant items for label check
+_VARIANT_LABEL_MIN_AGREEMENT = 0.60  # 60% must agree on dominant label set
+_PRICE_STEP_MIN_ITEMS = 3         # need 3+ multi-size items for step check
 
 
 def _name_similarity(a: str, b: str) -> float:
@@ -650,6 +665,209 @@ def _check_cross_category_coherence(text_blocks: List[Dict[str, Any]]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check 6: Cross-item variant count consistency (Day 65)
+# ---------------------------------------------------------------------------
+
+def _check_variant_count_consistency(text_blocks: List[Dict[str, Any]]) -> None:
+    """Flag items whose variant count deviates from the category mode.
+
+    Within each category, compute the MODE variant count among items with
+    2+ variants.  Flag items where ``mode - actual >= 2``.
+
+    Items with 0-1 variants (single-price) are excluded entirely.
+    """
+    cat_groups: Dict[str, List[Tuple[int, int]]] = {}  # cat -> [(idx, var_count)]
+
+    for idx, tb in enumerate(text_blocks):
+        cat = tb.get("category")
+        if not cat:
+            continue
+        variants = tb.get("variants") or []
+        if len(variants) < 2:
+            continue
+        cat_groups.setdefault(cat, []).append((idx, len(variants)))
+
+    for cat, members in cat_groups.items():
+        if len(members) < _VARIANT_COUNT_MIN_ITEMS:
+            continue
+
+        counts = [c for (_, c) in members]
+        mode_count = Counter(counts).most_common(1)[0][0]
+
+        for idx, var_count in members:
+            gap = mode_count - var_count
+            if gap >= _VARIANT_COUNT_MIN_GAP:
+                text_blocks[idx]["price_flags"].append({
+                    "severity": "info",
+                    "reason": "cross_item_variant_count_outlier",
+                    "details": {
+                        "category": cat,
+                        "item_variant_count": var_count,
+                        "category_mode_count": mode_count,
+                        "category_multi_variant_items": len(members),
+                    },
+                })
+
+
+# ---------------------------------------------------------------------------
+# Check 7: Cross-item variant label set consistency (Day 65)
+# ---------------------------------------------------------------------------
+
+def _check_variant_label_consistency(text_blocks: List[Dict[str, Any]]) -> None:
+    """Flag items whose size-variant label set differs from the category norm.
+
+    Within each category, collect the sorted tuple of ``normalized_size``
+    values for ``kind == "size"`` variants.  Find the dominant set (>= 60%
+    agreement).  Flag items using a non-dominant set that is neither a subset
+    (gourmet right-alignment tolerance) nor a superset (extra sizes OK).
+    """
+    cat_groups: Dict[str, List[Tuple[int, frozenset]]] = {}
+
+    for idx, tb in enumerate(text_blocks):
+        cat = tb.get("category")
+        if not cat:
+            continue
+        variants = tb.get("variants") or []
+        size_labels: Set[str] = set()
+        for v in variants:
+            if v.get("kind") == "size" and v.get("normalized_size"):
+                size_labels.add(v["normalized_size"])
+        if len(size_labels) < 2:
+            continue
+        cat_groups.setdefault(cat, []).append((idx, frozenset(size_labels)))
+
+    for cat, members in cat_groups.items():
+        if len(members) < _VARIANT_LABEL_MIN_ITEMS:
+            continue
+
+        set_counter: Counter = Counter(label_set for (_, label_set) in members)
+        dominant_set, dominant_count = set_counter.most_common(1)[0]
+
+        if dominant_count / len(members) < _VARIANT_LABEL_MIN_AGREEMENT:
+            continue
+
+        for idx, item_set in members:
+            if item_set == dominant_set:
+                continue
+            # Subset tolerance (right-alignment: {M, L} under {S, M, L})
+            if item_set.issubset(dominant_set):
+                continue
+            # Superset tolerance (extra sizes: {S, M, L, XL} under {S, M, L})
+            if dominant_set.issubset(item_set):
+                continue
+
+            text_blocks[idx]["price_flags"].append({
+                "severity": "info",
+                "reason": "cross_item_variant_label_mismatch",
+                "details": {
+                    "category": cat,
+                    "item_labels": sorted(item_set),
+                    "dominant_labels": sorted(dominant_set),
+                    "dominant_count": dominant_count,
+                    "category_size_items": len(members),
+                },
+            })
+
+
+# ---------------------------------------------------------------------------
+# Check 8: Cross-item price step consistency (Day 65)
+# ---------------------------------------------------------------------------
+
+def _check_variant_price_steps(text_blocks: List[Dict[str, Any]]) -> None:
+    """Flag items whose size-variant price step deviates from the category norm.
+
+    Within each category, compute per-item average price step between
+    consecutive sizes (ordered by ``size_ordinal``).  Use MAD-based outlier
+    detection to flag items whose average step is significantly different.
+    Only positive steps are considered (inversions already flagged Day 57).
+    """
+    # cat -> [(idx, avg_step_cents)]
+    cat_steps: Dict[str, List[Tuple[int, float]]] = {}
+
+    for idx, tb in enumerate(text_blocks):
+        cat = tb.get("category")
+        if not cat:
+            continue
+        variants = tb.get("variants") or []
+
+        # Collect size variants with valid ordinal and positive price
+        sized: List[Tuple[int, int, str]] = []  # (ordinal, price_cents, track)
+        for v in variants:
+            if v.get("kind") != "size":
+                continue
+            ns = v.get("normalized_size")
+            if not ns:
+                continue
+            pc = v.get("price_cents", 0)
+            if not isinstance(pc, (int, float)) or pc <= 0:
+                continue
+            ordinal = size_ordinal(ns)
+            if ordinal is None:
+                continue
+            trk = size_track(ns)
+            if not trk:
+                continue
+            sized.append((ordinal, int(pc), trk))
+
+        if len(sized) < 2:
+            continue
+
+        # Group by track and compute steps per track
+        track_groups: Dict[str, List[Tuple[int, int]]] = {}
+        for ordinal, pc, trk in sized:
+            track_groups.setdefault(trk, []).append((ordinal, pc))
+
+        item_steps: List[int] = []
+        for trk, entries in track_groups.items():
+            if len(entries) < 2:
+                continue
+            entries.sort(key=lambda x: x[0])
+            for i in range(len(entries) - 1):
+                step = entries[i + 1][1] - entries[i][1]
+                if step > 0:
+                    item_steps.append(step)
+
+        if not item_steps:
+            continue
+
+        avg_step = sum(item_steps) / len(item_steps)
+        cat_steps.setdefault(cat, []).append((idx, avg_step))
+
+    # Outlier detection per category
+    for cat, members in cat_steps.items():
+        if len(members) < _PRICE_STEP_MIN_ITEMS:
+            continue
+
+        all_steps = [s for (_, s) in members]
+        median_step = statistics.median(all_steps)
+        if median_step <= 0:
+            continue
+
+        deviations = [abs(s - median_step) for s in all_steps]
+        mad = statistics.median(deviations)
+        mad_effective = max(mad, median_step * 0.15)
+        threshold = 3.0 * mad_effective
+
+        for idx, avg_step in members:
+            deviation = abs(avg_step - median_step)
+            if deviation > threshold:
+                direction = "above" if avg_step > median_step else "below"
+                text_blocks[idx]["price_flags"].append({
+                    "severity": "info",
+                    "reason": "cross_item_price_step_outlier",
+                    "details": {
+                        "category": cat,
+                        "item_avg_step_cents": int(round(avg_step)),
+                        "category_median_step_cents": int(round(median_step)),
+                        "category_mad_step_cents": int(round(mad)),
+                        "deviation_cents": int(round(deviation)),
+                        "threshold_cents": int(round(threshold)),
+                        "direction": direction,
+                    },
+                })
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -670,3 +888,6 @@ def check_cross_item_consistency(text_blocks: List[Dict[str, Any]]) -> None:
     _check_category_isolation(text_blocks)
     _check_category_suggestions(text_blocks)
     _check_cross_category_coherence(text_blocks)
+    _check_variant_count_consistency(text_blocks)
+    _check_variant_label_consistency(text_blocks)
+    _check_variant_price_steps(text_blocks)
