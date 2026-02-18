@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 65 (February 18, 2026) — Cross-item variant pattern enforcement (Sprint 8.3 complete)
+Last Updated: Day 67 (February 18, 2026) — Confidence tiers + menu-level aggregation (Sprint 8.4)
 
 ================================================================================
 PROJECT MISSION
@@ -145,11 +145,20 @@ Sprint 8.3 — Cross-Item Consistency (Days 61-65) *** COMPLETE ***
 
 Sprint 8.4 — Semantic Confidence (Days 66-70)
 ----------------------------------------------
+[x] Unified semantic confidence scoring — 5 weighted signals, audit trail (Day 66)
+    - Grammar/parse confidence (0.30), name quality (0.20), price presence (0.20),
+      variant quality (0.15), flag penalty (0.15)
+    - Per-item semantic_confidence (0.0-1.0) + semantic_confidence_details audit trail
+    - Polymorphic: works with both Path A (ocr_pipeline) and Path B (ai_ocr_helper)
+    - Pipeline Step 9.2, after cross-item consistency (Step 9.1)
+[x] Confidence tiers + menu-level aggregation (Day 67)
+    - Per-item: semantic_tier (high/medium/low/reject) + needs_review flag
+    - Menu-level: compute_menu_confidence_summary() returns mean/median/stdev,
+      tier distribution, category breakdowns, quality grade (A/B/C/D)
+    - Pipeline Step 9.3, after score_semantic_confidence (Step 9.2)
 [ ] Use OCR block heights for heading detection
 [ ] Implement section break detection via gaps
 [ ] Promote large-font blocks to category headings
-[ ] Multi-signal confidence scoring
-[ ] Confidence-based auto-review flagging
 
 Success Metrics (Day 58 actuals vs targets):
 - Category accuracy: 75% -> 90%+ (ACHIEVED: proper categories on 115 items)
@@ -375,6 +384,8 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 67: Confidence tiers + menu-level aggregation (103 tests)
+Day 66: Unified semantic confidence scoring — 5 weighted signals (93 tests)
 Day 65: Cross-item variant pattern enforcement — 3 category-level checks (75 tests)
 Day 64: Cross-category price coherence — 16 directional rules, median-based (75 tests)
 Day 63: Category reassignment suggestions — 4-signal neighbor smoothing (51 tests)
@@ -424,6 +435,7 @@ One Brain (storage/):
 - ai_menu_extract.py         — Claude API extraction module (~260 LOC)
 - category_infer.py          — Category inference (507 LOC)
 - cross_item.py              — Cross-item consistency (8 checks, ~830 LOC)
+- semantic_confidence.py     — Semantic confidence scoring + tiers + aggregation (~350 LOC)
 - variant_engine.py          — Variant normalization + price validation (~720 LOC)
 - price_integrity.py         — Price validation (414 LOC)
 - category_hierarchy.py      — Hierarchy building (493 LOC)
@@ -447,7 +459,9 @@ Tests:
 - tests/test_day63_category_suggestions.py — 51 cases (Day 63)
 - tests/test_day64_cross_category_coherence.py — 75 cases (Day 64)
 - tests/test_day65_variant_patterns.py  — 75 cases (Day 65)
+- tests/test_day66_semantic_confidence.py — 93 cases (Day 66)
+- tests/test_day67_confidence_tiers.py — 103 cases (Day 67)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,088 tests, all passing
+- TOTAL: 2,284 tests, all passing
 
 ================================================================================
