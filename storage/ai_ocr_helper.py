@@ -62,7 +62,7 @@ from storage.variant_engine import (
 )
 from .category_hierarchy import infer_category_hierarchy
 from .cross_item import check_cross_item_consistency
-from .semantic_confidence import score_semantic_confidence, classify_confidence_tiers, generate_repair_recommendations, apply_auto_repairs
+from .semantic_confidence import score_semantic_confidence, classify_confidence_tiers, generate_repair_recommendations, apply_auto_repairs, generate_semantic_report
 from .parsers.menu_grammar import classify_menu_lines, _normalize_w_slash
 from .parsers.combo_vocab import extract_combo_hints
 
@@ -1000,8 +1000,12 @@ def analyze_ocr_text(
             "sides & apps": "Sides & Apps",
         }.get(low, _normalize_header(it["category"] or "Uncategorized"))
 
+    # Sprint 8.4 Day 70: semantic quality report (Phase 8 capstone)
+    semantic_report = generate_semantic_report(items)
+
     doc = {
         "sections": [],
         "items": items,
+        "semantic_report": semantic_report,
     }
     return doc

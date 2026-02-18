@@ -1,6 +1,6 @@
 # storage/semantic_confidence.py
 """
-Semantic Confidence Scoring -- Sprint 8.4 Days 66-69
+Semantic Confidence Scoring -- Sprint 8.4 Days 66-70
 
 Day 66: Computes a unified per-item semantic_confidence score (0.0-1.0) by
 aggregating five independent signal sources:
@@ -26,6 +26,11 @@ Day 69: Auto-repair execution engine:
     updates item fields (name, category), records audit trail per item,
     returns summary of repairs applied
 
+Day 70: Semantic quality report (Phase 8 capstone):
+  - generate_semantic_report(items, repair_results): unified quality report
+    combining menu confidence, repair summary, pipeline coverage,
+    issue digest, category health ranking, and quality narrative
+
 Polymorphic: works with both Path A (text_block dicts from ocr_pipeline)
 and Path B (flat item dicts from ai_ocr_helper).
 
@@ -34,8 +39,9 @@ Entry functions:
   classify_confidence_tiers(items)        — Step 9.3
   generate_repair_recommendations(items)  — Step 9.4
   apply_auto_repairs(items)              — Step 9.5
+  generate_semantic_report(items)        — Step 9.6
 
-Pipeline placement: Steps 9.2-9.5, after check_cross_item_consistency (9.1).
+Pipeline placement: Steps 9.2-9.6, after check_cross_item_consistency (9.1).
 """
 
 from __future__ import annotations
@@ -935,4 +941,249 @@ def apply_auto_repairs(items: list) -> Dict[str, Any]:
         "total_items_repaired": total_items_repaired,
         "repairs_applied": total_repairs,
         "by_type": by_type,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 70: Semantic Quality Report (Phase 8 Capstone)
+# ---------------------------------------------------------------------------
+
+_WORST_ITEMS_LIMIT = 10
+_TOP_ISSUES_LIMIT = 6
+_COMMON_FLAGS_LIMIT = 8
+
+
+def _pipeline_coverage(items: list) -> Dict[str, Any]:
+    """Compute what percentage of items have each pipeline signal."""
+    total = len(items)
+    if total == 0:
+        return {}
+
+    checks = {
+        "has_grammar": lambda it: bool(it.get("grammar")),
+        "has_semantic_confidence": lambda it: it.get("semantic_confidence") is not None,
+        "has_semantic_tier": lambda it: it.get("semantic_tier") is not None,
+        "has_price_flags": lambda it: bool(it.get("price_flags")),
+        "has_variants": lambda it: bool(it.get("variants")),
+        "has_repair_recommendations": lambda it: bool(it.get("repair_recommendations")),
+        "has_auto_repairs": lambda it: bool(it.get("auto_repairs_applied")),
+    }
+
+    coverage: Dict[str, Any] = {}
+    for key, check_fn in checks.items():
+        count = sum(1 for it in items if check_fn(it))
+        coverage[key] = {
+            "count": count,
+            "pct": round(count / total, 4),
+        }
+    return coverage
+
+
+def _issue_digest(items: list) -> Dict[str, Any]:
+    """Build top-issues, worst-items, and common-flags digests."""
+    # --- Top recommendation types ---
+    type_counts: Dict[str, int] = {}
+    for item in items:
+        for rec in (item.get("repair_recommendations") or []):
+            t = rec.get("type", "unknown")
+            type_counts[t] = type_counts.get(t, 0) + 1
+
+    total_recs = sum(type_counts.values())
+    top_issues = []
+    for t, c in sorted(type_counts.items(), key=lambda x: -x[1]):
+        top_issues.append({
+            "type": t,
+            "count": c,
+            "pct": round(c / total_recs, 4) if total_recs else 0.0,
+        })
+    top_issues = top_issues[:_TOP_ISSUES_LIMIT]
+
+    # --- Worst items (lowest semantic_confidence) ---
+    scored = [
+        it for it in items
+        if it.get("semantic_confidence") is not None
+    ]
+    scored.sort(key=lambda it: it.get("semantic_confidence", 0.0))
+    worst_items = []
+    for it in scored[:_WORST_ITEMS_LIMIT]:
+        rec_count = len(it.get("repair_recommendations") or [])
+        worst_items.append({
+            "name": _extract_name(it),
+            "confidence": it.get("semantic_confidence", 0.0),
+            "tier": it.get("semantic_tier", "reject"),
+            "category": _extract_category(it),
+            "issue_count": rec_count,
+        })
+
+    # --- Common price_flags reasons ---
+    reason_counts: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        for flag in (item.get("price_flags") or []):
+            reason = flag.get("reason", "unknown")
+            severity = flag.get("severity", "info")
+            if reason not in reason_counts:
+                reason_counts[reason] = {"count": 0, "severity": severity}
+            reason_counts[reason]["count"] += 1
+
+    common_flags = []
+    for reason, data in sorted(reason_counts.items(), key=lambda x: -x[1]["count"]):
+        common_flags.append({
+            "reason": reason,
+            "count": data["count"],
+            "severity": data["severity"],
+        })
+    common_flags = common_flags[:_COMMON_FLAGS_LIMIT]
+
+    return {
+        "top_issues": top_issues,
+        "worst_items": worst_items,
+        "common_flags": common_flags,
+    }
+
+
+def _category_health(items: list) -> List[Dict[str, Any]]:
+    """Rank categories by mean confidence, worst first."""
+    cat_data: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        cat = _extract_category(item)
+        if cat not in cat_data:
+            cat_data[cat] = {"scores": [], "needs_review": 0, "total": 0}
+        sc = item.get("semantic_confidence", 0.0)
+        cat_data[cat]["scores"].append(float(sc))
+        cat_data[cat]["total"] += 1
+        if item.get("needs_review", True):
+            cat_data[cat]["needs_review"] += 1
+
+    health: List[Dict[str, Any]] = []
+    for cat, data in cat_data.items():
+        scores = data["scores"]
+        count = data["total"]
+        mean = statistics.mean(scores) if scores else 0.0
+        nr_pct = data["needs_review"] / count if count else 0.0
+        # Per-category grade using same thresholds
+        high_count = sum(1 for s in scores if s >= _TIER_HIGH)
+        high_ratio = high_count / count if count else 0.0
+        if high_ratio >= _GRADE_A_THRESHOLD:
+            grade = "A"
+        elif high_ratio >= _GRADE_B_THRESHOLD:
+            grade = "B"
+        elif high_ratio >= _GRADE_C_THRESHOLD:
+            grade = "C"
+        else:
+            grade = "D"
+        health.append({
+            "category": cat,
+            "count": count,
+            "mean_confidence": round(mean, 4),
+            "needs_review_pct": round(nr_pct, 4),
+            "grade": grade,
+        })
+
+    # Sort worst first (lowest mean confidence)
+    health.sort(key=lambda h: h["mean_confidence"])
+    return health
+
+
+def _quality_narrative(
+    menu_summary: Dict[str, Any],
+    repair_summary: Dict[str, Any],
+    repair_results: Optional[Dict[str, Any]],
+    category_health: List[Dict[str, Any]],
+) -> str:
+    """Build a human-readable quality assessment narrative."""
+    total = menu_summary.get("total_items", 0)
+    if total == 0:
+        return "No items to evaluate."
+
+    grade = menu_summary.get("quality_grade", "D")
+    mean_conf = menu_summary.get("mean_confidence", 0.0)
+    tier_counts = menu_summary.get("tier_counts", {})
+    high = tier_counts.get("high", 0)
+    reject = tier_counts.get("reject", 0)
+    review = menu_summary.get("needs_review_count", 0)
+
+    parts: List[str] = []
+
+    # Grade assessment
+    grade_desc = {
+        "A": "Excellent",
+        "B": "Good",
+        "C": "Fair",
+        "D": "Poor",
+    }
+    parts.append(
+        f"Menu quality grade: {grade} ({grade_desc.get(grade, 'Unknown')}). "
+        f"{total} items with {mean_conf:.0%} average confidence."
+    )
+
+    # Tier breakdown
+    parts.append(
+        f"{high} items high-confidence, {reject} rejected, {review} need review."
+    )
+
+    # Repairs
+    total_recs = repair_summary.get("total_recommendations", 0)
+    auto_fixable = repair_summary.get("auto_fixable_count", 0)
+    if total_recs > 0:
+        parts.append(
+            f"{total_recs} repair recommendations generated ({auto_fixable} auto-fixable)."
+        )
+
+    if repair_results:
+        applied = repair_results.get("repairs_applied", 0)
+        if applied > 0:
+            parts.append(f"{applied} auto-repairs applied.")
+
+    # Weakest category
+    if category_health:
+        worst_cat = category_health[0]
+        if worst_cat["mean_confidence"] < _TIER_MEDIUM:
+            parts.append(
+                f"Weakest category: {worst_cat['category']} "
+                f"({worst_cat['mean_confidence']:.0%} avg, grade {worst_cat['grade']})."
+            )
+
+    return " ".join(parts)
+
+
+def generate_semantic_report(
+    items: list,
+    repair_results: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generate comprehensive semantic quality report for a menu.
+
+    Combines all Phase 8 Sprint 8.4 signals into a unified report:
+      - Menu confidence summary (Day 67)
+      - Repair summary (Day 68)
+      - Auto-repair results (Day 69)
+      - Pipeline coverage metrics
+      - Item-level issue digest
+      - Category health ranking
+      - Quality narrative
+
+    Args:
+        items: List of item dicts (after full pipeline processing).
+        repair_results: Optional dict from apply_auto_repairs() return value.
+
+    Returns report dict (does NOT mutate items).
+    """
+    menu_conf = compute_menu_confidence_summary(items)
+    repair_summ = compute_repair_summary(items)
+    coverage = _pipeline_coverage(items)
+    digest = _issue_digest(items)
+    cat_health = _category_health(items)
+    narrative = _quality_narrative(menu_conf, repair_summ, repair_results, cat_health)
+
+    return {
+        "menu_confidence": menu_conf,
+        "repair_summary": repair_summ,
+        "auto_repair_results": repair_results or {
+            "total_items_repaired": 0,
+            "repairs_applied": 0,
+            "by_type": {},
+        },
+        "pipeline_coverage": coverage,
+        "issue_digest": digest,
+        "category_health": cat_health,
+        "quality_narrative": narrative,
     }

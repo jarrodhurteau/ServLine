@@ -1018,7 +1018,31 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 **Pipeline Wiring:** Step 9.5, after `generate_repair_recommendations` (Step 9.4). Both paths wired. Preview blocks mirror `auto_repairs_applied`.
 
-**Test Results** (2,448 total — 100%):
+**Day 69 complete.**
+
+---
+
+### ✅ Day 70 — Semantic Quality Report (Phase 8 Capstone) (COMPLETE)
+
+**Extended Module: `storage/semantic_confidence.py`** (~1,120 LOC):
+- Unified quality report combining all Phase 8 signals into a single actionable output
+- Entry function: `generate_semantic_report(items, repair_results)` — Pipeline Step 9.6
+
+**Report Sections:**
+
+| Section | Contents |
+|---------|----------|
+| `menu_confidence` | Mean/median/stdev, tier distribution, quality grade (A/B/C/D), category breakdowns |
+| `repair_summary` | Recommendation counts by priority and type, auto-fixable count, category breakdown |
+| `auto_repair_results` | Items repaired, repairs applied, by type |
+| `pipeline_coverage` | % of items with each signal (grammar, confidence, tiers, flags, variants, repairs) |
+| `issue_digest` | Top issues by frequency, bottom-10 worst items, most common flags |
+| `category_health` | Per-category ranking sorted worst-first: mean confidence, needs-review %, grade |
+| `quality_narrative` | Human-readable assessment: grade, tier breakdown, repair summary, weakest category |
+
+**Pipeline Wiring:** Step 9.6 (final step). Both paths wired. Report attached to pipeline output (`segmented["semantic_report"]` for OCR path, `doc["semantic_report"]` for website path).
+
+**Test Results** (2,521 total — 100%):
 
 | Suite | Tests | Pass Rate |
 |-------|-------|-----------|
@@ -1037,14 +1061,15 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 | Day 67 confidence tiers | 103 | 100% |
 | Day 68 repair recommendations | 88 | 100% |
 | Day 69 auto-repair | 76 | 100% |
+| Day 70 semantic report | 73 | 100% |
 | Rotation scoring | 18 | 100% |
-| **TOTAL** | **2,448** | **100%** |
+| **TOTAL** | **2,521** | **100%** |
 
 **Artifacts:**
-- [storage/semantic_confidence.py](storage/semantic_confidence.py) — Extended with auto-repair engine (~930 LOC)
-- [tests/test_day69_auto_repair.py](tests/test_day69_auto_repair.py) — Day 69 test suite (76 cases)
+- [storage/semantic_confidence.py](storage/semantic_confidence.py) — Extended with semantic quality report (~1,120 LOC)
+- [tests/test_day70_semantic_report.py](tests/test_day70_semantic_report.py) — Day 70 test suite (73 cases)
 
-**Day 69 complete. Sprint 8.4 continues.**
+**Day 70 complete. Sprint 8.4 complete. Phase 8 complete.**
 
 ---
 
@@ -1161,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 in progress)**
+➡ **Phase 8 — Semantic Menu Intelligence — COMPLETE**
 
-Day 69 added the auto-repair execution engine, closing the confidence → tier → recommend → fix loop. `apply_auto_repairs(items)` walks each item's recommendations, executes auto-fixable fixes (name title-casing, OCR corrections, category reassignment), records before/after audit trails, and re-scores to reflect improved quality. The pipeline now self-heals: all-caps names get title-cased, garbled names get OCR-corrected, miscategorized items get reassigned — all automatically with full traceability. 2,448 tests passing across all suites.
+Day 70 completes Phase 8 with the semantic quality report — a unified capstone that combines all 20 days of work (Days 51-70) into a single actionable output. The full pipeline now: parses grammar → detects variants → validates prices → checks cross-item consistency → scores confidence → classifies tiers → generates repair recommendations → auto-repairs → produces a comprehensive quality report with grade, category health, issue digest, and human-readable narrative. 2,521 tests passing across 21 test suites.
 
 ---
 
@@ -1206,6 +1231,7 @@ ServLine now has:
 - ✅ Semantic confidence scoring — unified per-item score, 5 weighted signals
 - ✅ Confidence-driven auto-repair recommendations — 6 types, priority system
 - ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring
+- ✅ Semantic quality report — unified quality report with grade, category health, narrative
 
 ---
 
@@ -1266,5 +1292,6 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Confidence tiers + menu-level aggregation — 4 tiers, quality grades, category breakdowns (Day 67)
 - ✅ Confidence-driven auto-repair recommendations — 6 rec types, priority system, menu-level summary (Day 68)
 - ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring after repair (Day 69)
+- ✅ Semantic quality report — unified capstone combining all signals, quality narrative (Day 70)
 
-**Next Step:** Day 70 — Sprint 8.4 finale (Semantic Confidence)
+**Phase 8 complete. Next: Phase 9 — Structured Variants & Export**

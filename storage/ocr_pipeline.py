@@ -2287,12 +2287,16 @@ def segment_document(
 
         page_index += 1
 
+    # ----- Sprint 8.4 Day 70: semantic quality report (Phase 8 capstone)
+    _semantic_report = semantic_confidence.generate_semantic_report(all_text_blocks)
+
     segmented: Dict[str, Any] = {
         "pages": len(pages),
         "dpi": dpi,
         "blocks": all_blocks,                  # Phase-2 compatible
         "text_blocks": all_text_blocks,        # Phase-3+ TextBlock dicts (+category fields, +prices/variants, +roles)
         "preview_blocks": all_preview_blocks,  # Phase-3/4 compact overlay records (+category, +hierarchy, +prices/variants, +roles)
+        "semantic_report": _semantic_report,   # Phase-8 quality report (Day 70)
 
         # ------------------------------------------------------------
         # NEW (Day 43 Phase 7 pt.3): Layout Debug payload
