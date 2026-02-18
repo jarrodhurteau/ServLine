@@ -1,5 +1,5 @@
 """
-Cross-Item Consistency Checks -- Sprint 8.3 Days 61-62
+Cross-Item Consistency Checks -- Sprint 8.3 Days 61-63
 
 Compares items ACROSS the menu to detect anomalies that per-item
 checks cannot catch:
@@ -7,9 +7,13 @@ checks cannot catch:
   1. Duplicate / near-duplicate name detection (exact + fuzzy)
   2. Category price outlier detection (MAD-based)
   3. Category isolation detection (lone miscategorized items)
+  4. Category reassignment suggestions (neighbor-based smoothing)
 
 Day 62 additions: Fuzzy name matching via SequenceMatcher to catch
 OCR typos like "BUFALO" vs "BUFFALO", "MARGARITA" vs "MARGHERITA".
+
+Day 63 additions: Multi-signal category suggestion using neighbor
+agreement, keyword fit, price band, and original confidence.
 
 Entry function: check_cross_item_consistency(text_blocks)
 Mutates in place by appending to each item's price_flags list.
@@ -23,6 +27,8 @@ import statistics
 from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from .category_infer import CATEGORY_KEYWORDS, CATEGORY_PRICE_BANDS
 
 # ---------------------------------------------------------------------------
 # Name extraction / normalisation helpers
@@ -38,6 +44,13 @@ _PRICE_TOKEN_RE = re.compile(r"\$?\d+\.\d{2}")
 # Day 62: Fuzzy matching constants
 _FUZZY_THRESHOLD = 0.82   # similarity ratio to consider a fuzzy match
 _FUZZY_MIN_LEN = 4        # minimum normalized name length for fuzzy comparison
+
+# Day 63: Category suggestion constants
+_SUGGESTION_WINDOW = 3            # +-3 neighbor window (wider than isolation's +-2)
+_SUGGESTION_MIN_NEIGHBORS = 3     # minimum categorized neighbors to make a suggestion
+_SUGGESTION_MIN_AGREEMENT = 0.60  # 60% of neighbors must agree on dominant category
+_SUGGESTION_MIN_CONFIDENCE = 0.30 # minimum suggestion confidence to emit flag
+_SUGGESTION_KEYWORD_GUARD = 2     # suppress if current category has >= this many keyword matches
 
 
 def _name_similarity(a: str, b: str) -> float:
@@ -116,6 +129,35 @@ def _extract_primary_price_cents(tb: Dict[str, Any]) -> int:
         return int(direct)
 
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Day 63: Keyword and price-band helpers for category suggestions
+# ---------------------------------------------------------------------------
+
+def _keyword_match_count(norm_name: str, category: str) -> int:
+    """Count how many CATEGORY_KEYWORDS for *category* appear in *norm_name*.
+
+    Expects *norm_name* to be lowercased already.
+    """
+    if not norm_name:
+        return 0
+    count = 0
+    for kw in CATEGORY_KEYWORDS.get(category, ()):
+        if kw in norm_name:
+            count += 1
+    return count
+
+
+def _in_price_band(price_cents: int, category: str) -> bool:
+    """Return True if *price_cents* falls within the expected band for *category*."""
+    if price_cents <= 0:
+        return False
+    band = CATEGORY_PRICE_BANDS.get(category)
+    if not band:
+        return False
+    lo, hi = band
+    return lo <= price_cents <= hi
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +384,143 @@ def _check_category_isolation(text_blocks: List[Dict[str, Any]]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check 4: Category reassignment suggestions (Day 63)
+# ---------------------------------------------------------------------------
+
+def _check_category_suggestions(text_blocks: List[Dict[str, Any]]) -> None:
+    """Suggest category reassignment based on multi-signal scoring.
+
+    Signals:
+      1. Neighbor agreement (primary) — +-3 window, need 60%+ consensus
+      2. Keyword fit — do keywords in the item name favor current or suggested?
+      3. Price band fit — does the price fit current or suggested category band?
+      4. Original category confidence — low confidence boosts suggestion
+
+    Emits ``cross_item_category_suggestion`` flags (severity: info).
+    Keyword guard: if the current category has >= 2 keyword matches in the
+    item name, suppress the suggestion (item is likely correctly categorized).
+    """
+    n = len(text_blocks)
+
+    for idx, tb in enumerate(text_blocks):
+        current_cat = tb.get("category")
+        if not current_cat:
+            continue
+
+        # --- Signal 1: Neighbor agreement ---
+        neighbor_cats: List[str] = []
+        for offset in range(-_SUGGESTION_WINDOW, _SUGGESTION_WINDOW + 1):
+            if offset == 0:
+                continue
+            ni = idx + offset
+            if 0 <= ni < n:
+                nc = text_blocks[ni].get("category")
+                if nc:
+                    neighbor_cats.append(nc)
+
+        if len(neighbor_cats) < _SUGGESTION_MIN_NEIGHBORS:
+            continue
+
+        cat_counts = Counter(neighbor_cats)
+        dominant_cat, dominant_count = cat_counts.most_common(1)[0]
+
+        if dominant_cat == current_cat:
+            continue
+
+        neighbor_agreement = dominant_count / len(neighbor_cats)
+        if neighbor_agreement < _SUGGESTION_MIN_AGREEMENT:
+            continue
+
+        # --- Keyword guard ---
+        raw_name = _extract_item_name(tb)
+        norm_name = _normalize_name(raw_name).lower() if raw_name else ""
+
+        current_kw_count = _keyword_match_count(norm_name, current_cat)
+        if current_kw_count >= _SUGGESTION_KEYWORD_GUARD:
+            continue
+
+        # --- Signal 2: Keyword fit ---
+        suggested_kw_count = _keyword_match_count(norm_name, dominant_cat)
+
+        if suggested_kw_count > current_kw_count:
+            keyword_delta = 0.20
+        elif current_kw_count > suggested_kw_count:
+            keyword_delta = -0.20
+        else:
+            keyword_delta = 0.0
+
+        # --- Signal 3: Price band fit ---
+        price_cents = _extract_primary_price_cents(tb)
+        price_band_delta = 0.0
+        if price_cents > 0:
+            fits_current = _in_price_band(price_cents, current_cat)
+            fits_suggested = _in_price_band(price_cents, dominant_cat)
+            if fits_suggested and not fits_current:
+                price_band_delta = 0.15
+            elif fits_current and not fits_suggested:
+                price_band_delta = -0.15
+
+        # --- Signal 4: Original category confidence ---
+        orig_conf = tb.get("category_confidence")
+        if orig_conf is None:
+            orig_conf = 50
+        orig_conf = int(orig_conf)
+
+        confidence_delta = 0.0
+        if orig_conf < 50:
+            confidence_delta = 0.10
+        elif orig_conf >= 80:
+            confidence_delta = -0.15
+
+        # --- Combine signals ---
+        suggestion_confidence = (
+            neighbor_agreement * 0.40
+            + keyword_delta
+            + price_band_delta
+            + confidence_delta
+        )
+        suggestion_confidence = max(0.0, min(1.0, suggestion_confidence))
+
+        if suggestion_confidence < _SUGGESTION_MIN_CONFIDENCE:
+            continue
+
+        # --- Build human-readable signal descriptions ---
+        signals: List[str] = []
+        signals.append(
+            f"{dominant_count}/{len(neighbor_cats)} neighbors are {dominant_cat}"
+        )
+        if keyword_delta > 0:
+            signals.append(
+                f"keywords favor {dominant_cat} ({suggested_kw_count} vs {current_kw_count})"
+            )
+        elif keyword_delta < 0:
+            signals.append(
+                f"keywords favor {current_cat} ({current_kw_count} vs {suggested_kw_count})"
+            )
+        if price_band_delta > 0:
+            signals.append(f"price fits {dominant_cat} band, not {current_cat}")
+        elif price_band_delta < 0:
+            signals.append(f"price fits {current_cat} band, not {dominant_cat}")
+        if confidence_delta > 0:
+            signals.append(f"low original confidence ({orig_conf})")
+        elif confidence_delta < 0:
+            signals.append(f"high original confidence ({orig_conf})")
+
+        tb["price_flags"].append({
+            "severity": "info",
+            "reason": "cross_item_category_suggestion",
+            "details": {
+                "current_category": current_cat,
+                "suggested_category": dominant_cat,
+                "suggestion_confidence": round(suggestion_confidence, 3),
+                "neighbor_agreement": round(neighbor_agreement, 3),
+                "neighbor_count": len(neighbor_cats),
+                "signals": signals,
+            },
+        })
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -360,3 +539,4 @@ def check_cross_item_consistency(text_blocks: List[Dict[str, Any]]) -> None:
     _check_duplicate_names(text_blocks)
     _check_category_price_outliers(text_blocks)
     _check_category_isolation(text_blocks)
+    _check_category_suggestions(text_blocks)

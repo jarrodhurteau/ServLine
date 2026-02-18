@@ -744,6 +744,48 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 63 — Category Reassignment Suggestions (Neighbor-Based Smoothing) (COMPLETE)
+
+**Multi-Signal Category Suggestion** (`storage/cross_item.py`):
+- 4th cross-item check: when neighbor context disagrees with an item's category, suggests reassignment
+- Four scoring signals combined into a single confidence score:
+
+| Signal | Weight | Description |
+|--------|--------|-------------|
+| Neighbor agreement (+-3 window) | `agreement * 0.40` | Primary signal — what category do surrounding items have? |
+| Keyword fit | +/-0.20 | Do item name keywords favor current or suggested category? |
+| Price band fit | +/-0.15 | Does the item's price fit the suggested category's expected range? |
+| Original confidence | +0.10/-0.15 | Low initial confidence boosts suggestion; high confidence penalizes |
+
+- **Keyword guard**: If current category has 2+ keyword matches (e.g., "Caesar Salad" → salad + caesar), suppresses suggestion entirely
+- **Minimum 0.30 confidence** to emit flag; severity always "info" (suggestions, not errors)
+- **Complements isolation** (Day 61): isolation is factual ("you're alone"), suggestion is prescriptive ("consider X")
+- Reuses `CATEGORY_KEYWORDS` and `CATEGORY_PRICE_BANDS` from `category_infer.py` — no duplication
+
+**Test Results** (1,938 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **1,938** | **100%** |
+
+**Artifacts:**
+- [storage/cross_item.py](storage/cross_item.py) — Cross-item consistency module (~540 LOC, +180 from Day 62)
+- [tests/test_day63_category_suggestions.py](tests/test_day63_category_suggestions.py) — Day 63 test suite (51 cases)
+
+**Day 63 complete.**
+
+---
+
 ### ✅ Day 59 — Cross-Variant Consistency Checks (COMPLETE)
 
 Six new validators in `check_variant_consistency()` (Pipeline Step 8.6):
@@ -797,7 +839,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.3 in progress)**
 
-Day 62 added fuzzy name matching to `storage/cross_item.py` — detects OCR near-duplicates like "BUFALO WINGS" vs "BUFFALO WINGS" using `difflib.SequenceMatcher` (threshold 0.82). Three-phase architecture: exact matching first, then pairwise fuzzy on remaining items. Zero new dependencies. 1,887 tests passing across all suites.
+Day 63 added category reassignment suggestions to `storage/cross_item.py` — when an item appears miscategorized based on neighbor context, suggests which category it should move to with a multi-signal confidence score. Four signals: neighbor agreement (+-3 window), keyword fit, price band, original confidence. Keyword guard prevents false suggestions for clearly categorized items. 1,938 tests passing across all suites.
 
 ---
 
@@ -888,7 +930,7 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 ### Sprint 8.3 — Cross-Item Consistency (Days 61-65)
 - ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
 - ✅ Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
-- Category reassignment suggestions (neighbor-based smoothing)
+- ✅ Category reassignment suggestions — 4-signal neighbor smoothing (Day 63)
 - Cross-category price coherence (sides < entrees)
 
 ### Sprint 8.4 — Semantic Confidence (Days 66-70)
@@ -896,4 +938,4 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - Multi-signal confidence scoring
 - Confidence-based auto-review flagging
 
-**Next Step:** Day 63 — Sprint 8.3 continued (Category Reassignment Suggestions)
+**Next Step:** Day 64 — Sprint 8.3 continued (Cross-Category Price Coherence)
