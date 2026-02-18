@@ -993,6 +993,61 @@ Each variant gets a `confidence_details` audit trail: `{base, label_mod, grammar
 
 ---
 
+### ✅ Day 69 — Auto-Repair Execution Engine (COMPLETE)
+
+**Extended Module: `storage/semantic_confidence.py`** (~930 LOC):
+- Executes auto-fixable repair recommendations, updating item fields and recording audit trails
+- Entry function: `apply_auto_repairs(items)` — Pipeline Step 9.5
+
+**Auto-Repair Application:**
+
+| Fix Type | proposed_fix Format | Fields Updated |
+|----------|-------------------|----------------|
+| `garbled_name` | `"Corrected Name"` (string) | `grammar.parsed_name` (Path A) and/or `name` (Path B) |
+| `name_quality` (all-caps) | `"Title Cased"` (string) | same |
+| `name_quality` (OCR fix) | `"Corrected Name"` (string) | same |
+| `category_reassignment` | `{"category": "Pizza"}` (dict) | `item["category"]` |
+
+**Execution Behavior:**
+- Walks each item's `repair_recommendations`, applies only `auto_fixable: True` recs
+- Sets `rec["applied"] = True` on executed recommendations
+- Per-item `auto_repairs_applied` audit trail: `{type, field, old_value, new_value}`
+- Returns summary: `{total_items_repaired, repairs_applied, by_type}`
+- Idempotent: already-applied recs skipped on re-run
+- Re-scores after repair: `score_semantic_confidence()` + `classify_confidence_tiers()` so final output reflects improved quality
+
+**Pipeline Wiring:** Step 9.5, after `generate_repair_recommendations` (Step 9.4). Both paths wired. Preview blocks mirror `auto_repairs_applied`.
+
+**Test Results** (2,448 total — 100%):
+
+| Suite | Tests | Pass Rate |
+|-------|-------|-----------|
+| Day 51-55 (Sprint 8.1) | 691 | 100% |
+| Day 56 variants | 237 | 100% |
+| Day 57 price validation | 242 | 100% |
+| Day 58 combo modifiers | 275 | 100% |
+| Day 59 consistency | 113 | 100% |
+| Day 60 confidence | 106 | 100% |
+| Day 61 cross-item | 109 | 100% |
+| Day 62 fuzzy names | 96 | 100% |
+| Day 63 category suggestions | 51 | 100% |
+| Day 64 cross-cat coherence | 75 | 100% |
+| Day 65 variant patterns | 75 | 100% |
+| Day 66 semantic confidence | 93 | 100% |
+| Day 67 confidence tiers | 103 | 100% |
+| Day 68 repair recommendations | 88 | 100% |
+| Day 69 auto-repair | 76 | 100% |
+| Rotation scoring | 18 | 100% |
+| **TOTAL** | **2,448** | **100%** |
+
+**Artifacts:**
+- [storage/semantic_confidence.py](storage/semantic_confidence.py) — Extended with auto-repair engine (~930 LOC)
+- [tests/test_day69_auto_repair.py](tests/test_day69_auto_repair.py) — Day 69 test suite (76 cases)
+
+**Day 69 complete. Sprint 8.4 continues.**
+
+---
+
 ### ✅ Day 66 — Semantic Confidence Foundation (Sprint 8.4 Start) (COMPLETE)
 
 **New Module: `storage/semantic_confidence.py`** (~200 LOC):
@@ -1108,7 +1163,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 8 — Semantic Menu Intelligence (Sprint 8.4 in progress)**
 
-Day 68 added confidence-driven auto-repair recommendations on top of Days 66-67's scoring and tier system. Each non-high-tier item gets a `repair_recommendations` list with actionable suggestions (name quality, missing prices, category reassignment, variant standardization, flag summaries). Priority maps from tier (reject→critical, low→important, medium→suggested). Auto-fixable recs include proposed fixes (title-cased names, OCR corrections, category reassignment). Menu-level `compute_repair_summary()` provides aggregate statistics. 2,372 tests passing across all suites.
+Day 69 added the auto-repair execution engine, closing the confidence → tier → recommend → fix loop. `apply_auto_repairs(items)` walks each item's recommendations, executes auto-fixable fixes (name title-casing, OCR corrections, category reassignment), records before/after audit trails, and re-scores to reflect improved quality. The pipeline now self-heals: all-caps names get title-cased, garbled names get OCR-corrected, miscategorized items get reassigned — all automatically with full traceability. 2,448 tests passing across all suites.
 
 ---
 
@@ -1150,6 +1205,7 @@ ServLine now has:
 - ✅ Confidence tiers — high/medium/low/unknown scoring
 - ✅ Semantic confidence scoring — unified per-item score, 5 weighted signals
 - ✅ Confidence-driven auto-repair recommendations — 6 types, priority system
+- ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring
 
 ---
 
@@ -1209,5 +1265,6 @@ With OCR extraction stable and validated, Phase 8 focuses on semantic understand
 - ✅ Unified semantic confidence scoring — 5 weighted signals, audit trail (Day 66)
 - ✅ Confidence tiers + menu-level aggregation — 4 tiers, quality grades, category breakdowns (Day 67)
 - ✅ Confidence-driven auto-repair recommendations — 6 rec types, priority system, menu-level summary (Day 68)
+- ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring after repair (Day 69)
 
-**Next Step:** Day 69 — Sprint 8.4 continues (Semantic Confidence)
+**Next Step:** Day 70 — Sprint 8.4 finale (Semantic Confidence)

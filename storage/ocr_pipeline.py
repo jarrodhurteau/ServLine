@@ -2221,6 +2221,13 @@ def segment_document(
         # ----- Sprint 8.4 Day 68: repair recommendations
         semantic_confidence.generate_repair_recommendations(page_text_blocks)
 
+        # ----- Sprint 8.4 Day 69: auto-repair execution
+        semantic_confidence.apply_auto_repairs(page_text_blocks)
+
+        # ----- Re-score after repairs (reflect improved quality)
+        semantic_confidence.score_semantic_confidence(page_text_blocks)
+        semantic_confidence.classify_confidence_tiers(page_text_blocks)
+
         # Compact preview records (xyxy coords), annotate page/column for overlay UI
         pblocks = ocr_utils.blocks_for_preview(page_text_blocks)
         for tb, pb in zip(page_text_blocks, pblocks):
@@ -2266,6 +2273,8 @@ def segment_document(
                 pb["needs_review"] = tb["needs_review"]
             if "repair_recommendations" in tb:
                 pb["repair_recommendations"] = tb["repair_recommendations"]
+            if "auto_repairs_applied" in tb:
+                pb["auto_repairs_applied"] = tb["auto_repairs_applied"]
             if tb.get("meta") and tb["meta"].get("multiline_reconstructed"):
                 pb.setdefault("meta", {})["multiline_reconstructed"] = True
 

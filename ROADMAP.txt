@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 68 (February 18, 2026) — Confidence-driven auto-repair recommendations (Sprint 8.4)
+Last Updated: Day 69 (February 18, 2026) — Auto-repair execution engine (Sprint 8.4)
 
 ================================================================================
 PROJECT MISSION
@@ -114,7 +114,8 @@ Sprint 8.2 — Variant & Portion Logic (Days 56-60) *** COMPLETE ***
     Day 64 test suite: 75 cases, 100% pass rate
     Day 65 test suite: 75 cases, 100% pass rate
     Day 68 test suite: 88 cases, 100% pass rate
-    Total: 2,372 tests, all passing
+    Day 69 test suite: 76 cases, 100% pass rate
+    Total: 2,448 tests, all passing
 
 Sprint 8.3 — Cross-Item Consistency (Days 61-65) *** COMPLETE ***
 -----------------------------------------------------------------
@@ -165,6 +166,14 @@ Sprint 8.4 — Semantic Confidence (Days 66-70)
     - Auto-fixable recs with proposed_fix for all-caps, OCR corrections, categories
     - compute_repair_summary(items): menu-level repair statistics
     - Pipeline Step 9.4, after classify_confidence_tiers (Step 9.3)
+[x] Auto-repair execution engine (Day 69)
+    - apply_auto_repairs(items): executes auto-fixable recommendations
+    - Name fixes: all-caps→title, garbled→corrected, OCR→fixed
+    - Category fixes: reassignment from cross-item suggestions
+    - Per-item audit trail: auto_repairs_applied [{type, field, old_value, new_value}]
+    - rec["applied"] = True on executed recs, idempotent on re-run
+    - Re-scores after repair (score_semantic_confidence + classify_confidence_tiers)
+    - Pipeline Step 9.5, after generate_repair_recommendations (Step 9.4)
 [ ] Use OCR block heights for heading detection
 [ ] Implement section break detection via gaps
 [ ] Promote large-font blocks to category headings
@@ -393,6 +402,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 69: Auto-repair execution engine — applies fixes, audit trail, re-scoring (76 tests)
 Day 68: Confidence-driven auto-repair recommendations — 6 types, priority system (88 tests)
 Day 67: Confidence tiers + menu-level aggregation (103 tests)
 Day 66: Unified semantic confidence scoring — 5 weighted signals (93 tests)
@@ -445,7 +455,7 @@ One Brain (storage/):
 - ai_menu_extract.py         — Claude API extraction module (~260 LOC)
 - category_infer.py          — Category inference (507 LOC)
 - cross_item.py              — Cross-item consistency (8 checks, ~830 LOC)
-- semantic_confidence.py     — Semantic confidence scoring + tiers + repair recs (~580 LOC)
+- semantic_confidence.py     — Semantic confidence + tiers + repair recs + auto-repair (~930 LOC)
 - variant_engine.py          — Variant normalization + price validation (~720 LOC)
 - price_integrity.py         — Price validation (414 LOC)
 - category_hierarchy.py      — Hierarchy building (493 LOC)
@@ -472,7 +482,8 @@ Tests:
 - tests/test_day66_semantic_confidence.py — 93 cases (Day 66)
 - tests/test_day67_confidence_tiers.py — 103 cases (Day 67)
 - tests/test_day68_repair_recommendations.py — 88 cases (Day 68)
+- tests/test_day69_auto_repair.py       — 76 cases (Day 69)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,372 tests, all passing
+- TOTAL: 2,448 tests, all passing
 
 ================================================================================

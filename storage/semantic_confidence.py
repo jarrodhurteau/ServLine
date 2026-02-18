@@ -1,6 +1,6 @@
 # storage/semantic_confidence.py
 """
-Semantic Confidence Scoring -- Sprint 8.4 Days 66-68
+Semantic Confidence Scoring -- Sprint 8.4 Days 66-69
 
 Day 66: Computes a unified per-item semantic_confidence score (0.0-1.0) by
 aggregating five independent signal sources:
@@ -21,6 +21,11 @@ Day 68: Confidence-driven auto-repair recommendations:
     suggestions driven by confidence signal breakdowns and existing flags
   - compute_repair_summary(items): menu-level repair statistics
 
+Day 69: Auto-repair execution engine:
+  - apply_auto_repairs(items): executes auto-fixable recommendations,
+    updates item fields (name, category), records audit trail per item,
+    returns summary of repairs applied
+
 Polymorphic: works with both Path A (text_block dicts from ocr_pipeline)
 and Path B (flat item dicts from ai_ocr_helper).
 
@@ -28,8 +33,9 @@ Entry functions:
   score_semantic_confidence(items)        — Step 9.2
   classify_confidence_tiers(items)        — Step 9.3
   generate_repair_recommendations(items)  — Step 9.4
+  apply_auto_repairs(items)              — Step 9.5
 
-Pipeline placement: Steps 9.2-9.4, after check_cross_item_consistency (9.1).
+Pipeline placement: Steps 9.2-9.5, after check_cross_item_consistency (9.1).
 """
 
 from __future__ import annotations
@@ -793,4 +799,140 @@ def compute_repair_summary(items: list) -> Dict[str, Any]:
         "by_type": by_type,
         "auto_fixable_count": auto_fixable,
         "category_breakdown": {k: v for k, v in sorted(cat_data.items())},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 69: Auto-repair execution engine
+# ---------------------------------------------------------------------------
+
+def _apply_name_fix(item: Dict[str, Any], proposed_fix: str) -> List[Dict[str, Any]]:
+    """Apply a name fix to item, returning audit trail entries."""
+    if not proposed_fix or not isinstance(proposed_fix, str):
+        return []
+
+    repairs = []
+    grammar = item.get("grammar")
+
+    # Path A: update grammar.parsed_name
+    if grammar and isinstance(grammar, dict) and grammar.get("parsed_name"):
+        old_val = grammar["parsed_name"]
+        if old_val != proposed_fix:
+            grammar["parsed_name"] = proposed_fix
+            repairs.append({
+                "type": "name",
+                "field": "grammar.parsed_name",
+                "old_value": old_val,
+                "new_value": proposed_fix,
+            })
+
+    # Path B: update item["name"]
+    if "name" in item:
+        old_val = item["name"]
+        if old_val != proposed_fix:
+            item["name"] = proposed_fix
+            repairs.append({
+                "type": "name",
+                "field": "name",
+                "old_value": old_val,
+                "new_value": proposed_fix,
+            })
+
+    # If neither field existed, set name as fallback
+    if not repairs:
+        old_val = _extract_name(item)
+        item["name"] = proposed_fix
+        repairs.append({
+            "type": "name",
+            "field": "name",
+            "old_value": old_val,
+            "new_value": proposed_fix,
+        })
+
+    return repairs
+
+
+def _apply_category_fix(item: Dict[str, Any], proposed_fix: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Apply a category fix to item, returning audit trail entries."""
+    if not isinstance(proposed_fix, dict) or "category" not in proposed_fix:
+        return []
+
+    new_cat = proposed_fix["category"]
+    old_cat = item.get("category", "Uncategorized")
+    if old_cat == new_cat:
+        return []
+
+    item["category"] = new_cat
+    return [{
+        "type": "category",
+        "field": "category",
+        "old_value": old_cat,
+        "new_value": new_cat,
+    }]
+
+
+def apply_auto_repairs(items: list) -> Dict[str, Any]:
+    """Execute auto-fixable repair recommendations on items.
+
+    Walks each item's ``repair_recommendations``.  For each rec with
+    ``auto_fixable: True``, applies the ``proposed_fix`` to the item's
+    fields and records an audit trail.
+
+    Per-item writes:
+      - ``auto_repairs_applied``: list of {type, field, old_value, new_value}
+      - Sets ``rec["applied"] = True`` on executed recommendations
+
+    Returns summary dict:
+      - total_items_repaired: int
+      - repairs_applied: int
+      - by_type: {name: int, category: int}
+
+    Pipeline placement: Step 9.5, after generate_repair_recommendations (9.4).
+    Mutates items in place.
+
+    Note: Caller should re-run score_semantic_confidence() and
+    classify_confidence_tiers() after this to reflect repaired quality.
+    """
+    total_items_repaired = 0
+    total_repairs = 0
+    by_type: Dict[str, int] = {}
+
+    for item in items:
+        recs = item.get("repair_recommendations") or []
+        item_repairs: List[Dict[str, Any]] = []
+
+        for rec in recs:
+            if not rec.get("auto_fixable"):
+                continue
+            if rec.get("applied"):
+                continue  # Already applied (idempotency)
+
+            proposed = rec.get("proposed_fix")
+            if proposed is None:
+                continue
+
+            rec_type = rec.get("type", "unknown")
+            repairs: List[Dict[str, Any]] = []
+
+            if rec_type in ("garbled_name", "name_quality") and isinstance(proposed, str):
+                repairs = _apply_name_fix(item, proposed)
+            elif rec_type == "category_reassignment" and isinstance(proposed, dict):
+                repairs = _apply_category_fix(item, proposed)
+
+            if repairs:
+                rec["applied"] = True
+                item_repairs.extend(repairs)
+
+        item["auto_repairs_applied"] = item_repairs
+        if item_repairs:
+            total_items_repaired += 1
+            total_repairs += len(item_repairs)
+            for r in item_repairs:
+                rtype = r["type"]
+                by_type[rtype] = by_type.get(rtype, 0) + 1
+
+    return {
+        "total_items_repaired": total_items_repaired,
+        "repairs_applied": total_repairs,
+        "by_type": by_type,
     }
