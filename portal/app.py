@@ -4201,19 +4201,16 @@ def draft_publish_now(draft_id: int):
             flash("Assign a restaurant before publishing.", "error")
             return redirect(url_for("draft_editor", draft_id=draft_id))
 
-        items = drafts_store.get_draft_items(draft_id) or []
+        # Day 73: variant-aware publish — expand variants into flat rows
+        publish_rows = drafts_store.get_publish_rows(draft_id)
         with db_connect() as conn:
             menu_id = _find_or_create_menu_for_restaurant(conn, int(restaurant_id))
             cur = conn.cursor()
             inserted = 0
-            for it in items:
-                name = (it.get("name") or "").strip()
-                if not name:
-                    continue
-                desc = (it.get("description") or "").strip()
-                price_cents = it.get("price_cents")
-                if price_cents is None:
-                    price_cents = _price_to_cents(it.get("price") or it.get("price_text"))
+            for row in publish_rows:
+                name = row.get("name", "")
+                desc = row.get("description", "")
+                price_cents = row.get("price_cents", 0)
                 if not _dedupe_exists(conn, menu_id, name, int(price_cents)):
                     cur.execute(
                         "INSERT INTO menu_items (menu_id, name, description, price_cents, is_available) VALUES (?, ?, ?, ?, 1)",

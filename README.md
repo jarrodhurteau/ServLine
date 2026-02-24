@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — IN PROGRESS (Sprint 9.1)**
+➡ **Phase 9 — Structured Variants & Export — Sprint 9.1 COMPLETE, Sprint 9.2 next**
 
-Day 72 wires the extraction pipeline to produce structured variants end-to-end. All three extraction strategies (Claude API, Heuristic AI, Legacy JSON) now preserve size/combo data as `_variants` on each item dict instead of flattening to pipe-delimited strings. `_insert_items_bulk()` and `upsert_draft_items()` automatically insert child variant rows. Backfill function converts existing "Name (Size)" patterns into proper variant rows. 2,662 tests passing across 23 test suites.
+Day 73 completes Sprint 9.1 with migration and backward compatibility. Existing drafts without variants continue to work identically. New `get_publish_rows()` expands variant items into flat "Name (Label)" rows for publishing to `menu_items`. `ensure_parent_base_price()` enforces parent price_cents = min(variant prices). The publish flow (`draft_publish_now`) is now variant-aware: items with variants emit one `menu_items` row per variant; items without variants use price_cents directly. 2,707 tests passing across 24 test suites.
 
 ---
 
@@ -1241,15 +1241,20 @@ ServLine now has:
 - ✅ Extraction pipeline → structured variants — all 3 strategies preserve `_variants`
 - ✅ `_insert_items_bulk()` and `upsert_draft_items()` auto-insert child variant rows
 - ✅ Backfill logic — `backfill_variants_from_names()` converts "Name (Size)" patterns
+- ✅ Variant-aware publish flow — `get_publish_rows()` expands variants for `menu_items`
+- ✅ Parent base price enforcement — `ensure_parent_base_price()` keeps parent = min(variants)
+- ✅ Backward compatibility — old drafts (0 variants) load and publish identically
 
 ---
 
 ## ⏭️ Phase 9 — Structured Variants & Export
 
-### Sprint 9.1 — Structured Variant Storage (Days 71-73)
+### Sprint 9.1 — Structured Variant Storage (Days 71-73) *** COMPLETE ***
 - ✅ Database schema & migration — `draft_item_variants` table (Day 71)
 - ✅ CRUD functions — insert, update, delete, get with normalization (Day 71)
 - ✅ LEFT JOIN grouping — single round-trip variant loading (Day 71)
 - ✅ FK CASCADE + clone support (Day 71)
 - ✅ Extraction pipeline → structured variants (Day 72)
-- [ ] Migration & backward compatibility (Day 73)
+- ✅ Migration & backward compatibility (Day 73)
+- ✅ Variant-aware publish flow (Day 73)
+- ✅ Parent base price enforcement (Day 73)

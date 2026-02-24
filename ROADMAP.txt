@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 72 (February 24, 2026) — Extraction pipeline → structured variants
+Last Updated: Day 73 (February 24, 2026) — Migration & backward compatibility (Sprint 9.1 complete)
 
 ================================================================================
 PROJECT MISSION
@@ -250,14 +250,18 @@ Sprint 9.1 — Structured Variant Storage (Days 71-73)
   [x] Test: 59 cases covering all paths, backward compat, edge cases
 
     Day 72 test suite: 59 cases, 100% pass rate
-    Total: 2,662 tests, all passing
 
-  Day 73: Migration & Backward Compatibility
+  Day 73: Migration & Backward Compatibility *** COMPLETE ***
   -------------------------------------------
-  [ ] Existing drafts with no variants continue to work (0 variant rows = single price)
-  [ ] price_cents on parent item = base/lowest price (unchanged)
-  [ ] Publish flow: if variants exist, use structured data; else use price_cents
-  [ ] Test: old drafts load cleanly, new drafts have variant rows
+  [x] Existing drafts with no variants continue to work (0 variant rows = single price)
+  [x] price_cents on parent item = base/lowest price (ensure_parent_base_price)
+  [x] Publish flow: if variants exist, use structured data; else use price_cents
+      - get_publish_rows() expands variants → flat "Name (Label)" rows
+      - draft_publish_now() uses get_publish_rows() for variant-aware publishing
+  [x] Test: old drafts load cleanly, new drafts have variant rows
+
+    Day 73 test suite: 45 cases, 100% pass rate
+    Total: 2,707 tests, all passing
 
 Sprint 9.2 — Editor Redesign (Days 74-77)
 ..........................................
@@ -427,6 +431,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 73: Migration & backward compatibility — publish flow, parent base price, Sprint 9.1 complete (45 tests)
 Day 72: Extraction pipeline → structured variants — all 3 strategies, DB insert, backfill (59 tests)
 Day 71: Database schema & migration — draft_item_variants table, CRUD, LEFT JOIN grouping (82 tests)
 Day 70: Semantic quality report — Phase 8 capstone, unified quality output (73 tests)
@@ -514,7 +519,8 @@ Tests:
 - tests/test_day70_semantic_report.py   — 73 cases (Day 70)
 - tests/test_day71_variant_schema.py   — 82 cases (Day 71)
 - tests/test_day72_extraction_variants.py — 59 cases (Day 72)
+- tests/test_day73_migration_compat.py — 45 cases (Day 73)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,662 tests, all passing
+- TOTAL: 2,707 tests, all passing
 
 ================================================================================

@@ -1699,6 +1699,82 @@ def backfill_variants_from_names(draft_id: int) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------
+# Publish helpers (Phase 9 — variant-aware output)
+# ------------------------------------------------------------
+def get_publish_rows(draft_id: int) -> List[Dict[str, Any]]:
+    """
+    Return a flat list of publishable rows for a draft, expanding variants.
+
+    For each draft item:
+      - If the item has variants: emit one row per variant with
+        name = "ItemName (VariantLabel)" and price = variant price_cents.
+      - If the item has NO variants: emit a single row with the
+        item's own price_cents.
+
+    Each row dict has: name, description, price_cents, category.
+    """
+    items = get_draft_items(int(draft_id), include_variants=True)
+    rows: List[Dict[str, Any]] = []
+
+    for it in items:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        desc = (it.get("description") or "").strip()
+        category = it.get("category")
+        variants = it.get("variants") or []
+
+        if variants:
+            for v in variants:
+                label = (v.get("label") or "").strip()
+                vname = f"{name} ({label})" if label else name
+                rows.append({
+                    "name": vname,
+                    "description": desc,
+                    "price_cents": v.get("price_cents", 0),
+                    "category": category,
+                })
+        else:
+            rows.append({
+                "name": name,
+                "description": desc,
+                "price_cents": it.get("price_cents", 0),
+                "category": category,
+            })
+
+    return rows
+
+
+def ensure_parent_base_price(draft_id: int) -> int:
+    """
+    Scan items with variants and ensure each parent's price_cents equals
+    the minimum variant price.  Returns count of items updated.
+
+    This enforces the rule: price_cents on parent = base/lowest price.
+    Items without variants are untouched.
+    """
+    items = get_draft_items(int(draft_id), include_variants=True)
+    updated = 0
+
+    with db_connect() as conn:
+        for it in items:
+            variants = it.get("variants") or []
+            if not variants:
+                continue
+            min_price = min(v.get("price_cents", 0) for v in variants)
+            current_price = it.get("price_cents", 0)
+            if current_price != min_price:
+                conn.execute(
+                    "UPDATE draft_items SET price_cents=?, updated_at=? WHERE id=?",
+                    (min_price, _now(), it["id"]),
+                )
+                updated += 1
+        conn.commit()
+
+    return updated
+
+
+# ------------------------------------------------------------
 # Clone
 # ------------------------------------------------------------
 def clone_draft(draft_id: int) -> Dict[str, Any]:
