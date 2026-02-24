@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 8 — Semantic Menu Intelligence — COMPLETE**
+➡ **Phase 9 — Structured Variants & Export — IN PROGRESS (Sprint 9.1)**
 
-Day 70 completes Phase 8 with the semantic quality report — a unified capstone that combines all 20 days of work (Days 51-70) into a single actionable output. The full pipeline now: parses grammar → detects variants → validates prices → checks cross-item consistency → scores confidence → classifies tiers → generates repair recommendations → auto-repairs → produces a comprehensive quality report with grade, category health, issue digest, and human-readable narrative. 2,521 tests passing across 21 test suites.
+Day 71 begins Phase 9 with the database foundation for structured variant storage. The new `draft_item_variants` child table preserves size/combo/flavor variant data end-to-end instead of flattening to a single price. CRUD functions, LEFT JOIN grouping in `get_draft_items()`, FK cascade deletion, and clone support are all wired. 2,603 tests passing across 22 test suites.
 
 ---
 
@@ -1233,65 +1233,20 @@ ServLine now has:
 - ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring
 - ✅ Semantic quality report — unified quality report with grade, category health, narrative
 
+**Structured Variants (Phase 9):**
+- ✅ `draft_item_variants` child table — structured variant storage with FK cascade
+- ✅ Variant CRUD — insert, update, delete, get with defensive normalization
+- ✅ LEFT JOIN grouping — `get_draft_items()` returns items with nested `variants: []`
+- ✅ Clone support — `clone_draft()` preserves variants
+
 ---
 
-## ⏭️ Phase 8 — Semantic Menu Intelligence
+## ⏭️ Phase 9 — Structured Variants & Export
 
-With OCR extraction stable and validated, Phase 8 focuses on semantic understanding:
-
-### Sprint 8.1 — Core Grammar & Structure (Days 51-55) ✅ COMPLETE
-- ✅ Menu item grammar parser (Day 51)
-- ✅ Phrase-level category keywords (Day 51)
-- ✅ Enhanced long-name parsing (Day 51)
-- ✅ Pizza-specific grammar rules (Day 52)
-- ✅ Real OCR testing — 100% classification (Day 52)
-- ✅ OCR garble stripping (Day 52)
-- ✅ New line types: size_header, topping_list, info_line, price_only (Day 52)
-- ✅ Multi-menu grammar testing — full restaurant coverage (Day 53)
-- ✅ Contextual multi-pass classification (Day 53)
-- ✅ Broader description detection — 60+ ingredients, lowercase heuristic (Day 53)
-- ✅ Post-garble noise cleanup & W/ normalization (Day 53)
-- ✅ Item component detection — toppings, sauce, preparation, flavors (Day 54)
-- ✅ Multi-column merge detection — whitespace-gap heuristic (Day 54)
-- ✅ Pipeline integration — enrich_grammar_on_text_blocks (Day 55)
-- ✅ OCR typo normalization — 88Q→BBQ, piZzA→PIZZA (Day 55)
-- ✅ Confidence tiers — high/medium/low/unknown (Day 55)
-- ✅ Fallback OCR hardening — 100% on degraded output (Day 55)
-
-### Sprint 8.2 — Variant & Portion Logic (Days 56-60)
-- ✅ Portion detection — half, whole, family, party (Day 51)
-- ✅ Expanded crust/size vocabulary (Day 51)
-- ✅ Shared size vocabulary — single source of truth (Day 56)
-- ✅ Size grid context propagation — header → item variant mapping (Day 56)
-- ✅ Grammar-to-variant bridge — pipeline + website integration (Day 56)
-- ✅ Grammar-aware block building — ALL-CAPS item rescue (Day 56)
-- ✅ Multi-price capture — all N prices preserved (Day 56)
-- ✅ Website OCR quality — psm 3 + image preprocessing (Day 56)
-- ✅ Variant price validation (S < M < L) — flag-only, track-separated (Day 57)
-- ✅ Portion-aware price rules — half < whole, slice < pie (Day 57)
-- ✅ Canonical size ordering — ordinal positions for all size types (Day 57)
-- ✅ Combo modifier detection — "W/FRIES", "WIFRIES" normalization (Day 58)
-- ✅ Combo food vocabulary — ~35 side items, truncation tolerance (Day 58)
-- ✅ Combo kind classification — context-aware variant building (Day 58)
-- ✅ Claude API extraction pipeline — 106 items at 90% confidence (Day 58)
-- ✅ Three-strategy extraction — Claude → Heuristic AI → Legacy JSON (Day 58)
-- ✅ Clean OCR text path — 7,736 chars via image_to_string (Day 58)
-- ✅ Auto-redirect from import view to draft editor (Day 58)
-- ✅ Cross-variant consistency checks — 6 validators, flag-only (Day 59)
-- ✅ Variant confidence scoring — multi-signal per-variant scoring (Day 60)
-
-### Sprint 8.3 — Cross-Item Consistency (Days 61-65) ✅ COMPLETE
-- ✅ Cross-item consistency foundation — 3 checks, new module (Day 61)
-- ✅ Fuzzy name matching — SequenceMatcher, 0.82 threshold, 4-char min (Day 62)
-- ✅ Category reassignment suggestions — 4-signal neighbor smoothing (Day 63)
-- ✅ Cross-category price coherence — 16 directional rules, median-based (Day 64)
-- ✅ Cross-item variant pattern enforcement — 3 category-level checks (Day 65)
-
-### Sprint 8.4 — Semantic Confidence (Days 66-70)
-- ✅ Unified semantic confidence scoring — 5 weighted signals, audit trail (Day 66)
-- ✅ Confidence tiers + menu-level aggregation — 4 tiers, quality grades, category breakdowns (Day 67)
-- ✅ Confidence-driven auto-repair recommendations — 6 rec types, priority system, menu-level summary (Day 68)
-- ✅ Auto-repair execution engine — applies fixes, audit trail, re-scoring after repair (Day 69)
-- ✅ Semantic quality report — unified capstone combining all signals, quality narrative (Day 70)
-
-**Phase 8 complete. Next: Phase 9 — Structured Variants & Export**
+### Sprint 9.1 — Structured Variant Storage (Days 71-73)
+- ✅ Database schema & migration — `draft_item_variants` table (Day 71)
+- ✅ CRUD functions — insert, update, delete, get with normalization (Day 71)
+- ✅ LEFT JOIN grouping — single round-trip variant loading (Day 71)
+- ✅ FK CASCADE + clone support (Day 71)
+- [ ] Extraction pipeline → structured variants (Day 72)
+- [ ] Migration & backward compatibility (Day 73)

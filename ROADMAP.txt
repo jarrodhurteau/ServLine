@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 70 (February 18, 2026) — Semantic quality report (Phase 8 capstone)
+Last Updated: Day 71 (February 24, 2026) — Database schema & migration for structured variants
 
 ================================================================================
 PROJECT MISSION
@@ -190,11 +190,10 @@ Success Metrics (Day 58 actuals vs targets):
 - Item extraction: 18 garbled -> 115 proper (Claude API + clean OCR)
 
 ================================================================================
-FUTURE PHASES (Tentative)
+ACTIVE PHASE: Phase 9 — Structured Variants & Export
 ================================================================================
 
-Phase 9 — Structured Variants & Export (Days 71-85)
-----------------------------------------------------
+Status: IN PROGRESS (Days 71-85)
 
   PROBLEM STATEMENT:
   Claude API extracts structured size/variant data (e.g., [{label:"Small",price:10.00},
@@ -211,9 +210,9 @@ Phase 9 — Structured Variants & Export (Days 71-85)
 Sprint 9.1 — Structured Variant Storage (Days 71-73)
 .....................................................
 
-  Day 71: Database Schema & Migration
+  Day 71: Database Schema & Migration *** COMPLETE ***
   ------------------------------------
-  [ ] New draft_item_variants table:
+  [x] New draft_item_variants table:
         id          INTEGER PRIMARY KEY AUTOINCREMENT
         item_id     INTEGER NOT NULL (FK -> draft_items.id ON DELETE CASCADE)
         label       TEXT NOT NULL        -- "Small", "Large", "W/Fries"
@@ -222,10 +221,19 @@ Sprint 9.1 — Structured Variant Storage (Days 71-73)
         position    INTEGER DEFAULT 0    -- ordering within parent item
         created_at  TEXT NOT NULL
         updated_at  TEXT NOT NULL
-  [ ] Auto-migration in drafts.py (detect table, create if missing)
-  [ ] CRUD functions: insert_variants(), update_variant(), delete_variant()
-  [ ] Update get_draft_items() to LEFT JOIN and group variants by item
-  [ ] Index: idx_variants_item on (item_id)
+  [x] Auto-migration in drafts.py (CREATE TABLE IF NOT EXISTS, idempotent)
+  [x] CRUD functions: insert_variants(), update_variant(), delete_variants(),
+      delete_all_variants_for_item(), get_item_variants()
+  [x] Defensive normalizer: _normalize_variant_for_db() with label/price/kind/position validation
+  [x] Update get_draft_items() to LEFT JOIN and group variants by item
+      - include_variants=True (default): single DB round-trip, items get variants: []
+      - include_variants=False: backward-compatible flat output
+  [x] Update clone_draft() to preserve variants on clone
+  [x] FK CASCADE: deleting item/draft auto-deletes variants
+  [x] Index: idx_variants_item on (item_id)
+
+    Day 71 test suite: 82 cases, 100% pass rate
+    Total: 2,603 tests, all passing
 
   Day 72: Extraction Pipeline -> Structured Variants
   ---------------------------------------------------
@@ -413,6 +421,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 71: Database schema & migration — draft_item_variants table, CRUD, LEFT JOIN grouping (82 tests)
 Day 70: Semantic quality report — Phase 8 capstone, unified quality output (73 tests)
 Day 69: Auto-repair execution engine — applies fixes, audit trail, re-scoring (76 tests)
 Day 68: Confidence-driven auto-repair recommendations — 6 types, priority system (88 tests)
@@ -496,7 +505,8 @@ Tests:
 - tests/test_day68_repair_recommendations.py — 88 cases (Day 68)
 - tests/test_day69_auto_repair.py       — 76 cases (Day 69)
 - tests/test_day70_semantic_report.py   — 73 cases (Day 70)
+- tests/test_day71_variant_schema.py   — 82 cases (Day 71)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,521 tests, all passing
+- TOTAL: 2,603 tests, all passing
 
 ================================================================================

@@ -189,6 +189,23 @@ def _ensure_schema() -> None:
             """
         )
 
+        # draft_item_variants (Phase 9 — structured variant storage)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_item_variants (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              item_id     INTEGER NOT NULL,
+              label       TEXT NOT NULL,
+              price_cents INTEGER NOT NULL DEFAULT 0,
+              kind        TEXT DEFAULT 'size',
+              position    INTEGER DEFAULT 0,
+              created_at  TEXT NOT NULL,
+              updated_at  TEXT NOT NULL,
+              FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -204,6 +221,9 @@ def _ensure_schema() -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_items_pos ON draft_items(draft_id, position)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_variants_item ON draft_item_variants(item_id)"
         )
 
         # in case existing DBs predate Day-14+ columns, patch them
@@ -532,15 +552,85 @@ def get_draft(draft_id: int) -> Optional[Dict[str, Any]]:
         return _row_to_dict(row) if row else None
 
 
-def get_draft_items(draft_id: int) -> List[Dict[str, Any]]:
+def get_draft_items(
+    draft_id: int, *, include_variants: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Fetch all items for a draft, ordered by position then id.
+
+    When include_variants=True (default), each item dict gets a 'variants'
+    key containing a list of variant dicts (may be empty).  This uses a
+    LEFT JOIN + in-memory grouping so it's a single DB round-trip.
+    """
     with db_connect() as conn:
+        if not include_variants:
+            rows = conn.execute(
+                "SELECT * FROM draft_items WHERE draft_id=? "
+                "ORDER BY COALESCE(position, 1000000000), id",
+                (int(draft_id),),
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+
+        # LEFT JOIN: one query to get items + their variants
         rows = conn.execute(
-            # NULL positions go last (use a big integer sentinel)
-            "SELECT * FROM draft_items WHERE draft_id=? "
-            "ORDER BY COALESCE(position, 1000000000), id",
+            """
+            SELECT
+                di.*,
+                v.id          AS v_id,
+                v.label       AS v_label,
+                v.price_cents AS v_price_cents,
+                v.kind        AS v_kind,
+                v.position    AS v_position,
+                v.created_at  AS v_created_at,
+                v.updated_at  AS v_updated_at
+            FROM draft_items di
+            LEFT JOIN draft_item_variants v ON v.item_id = di.id
+            WHERE di.draft_id = ?
+            ORDER BY COALESCE(di.position, 1000000000), di.id,
+                     COALESCE(v.position, 1000000000), v.id
+            """,
             (int(draft_id),),
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+
+    # Group by item id
+    items_map: Dict[int, Dict[str, Any]] = {}
+    ordered_ids: List[int] = []
+
+    for row in rows:
+        item_id = row["id"]
+        if item_id not in items_map:
+            item = {
+                "id": row["id"],
+                "draft_id": row["draft_id"],
+                "name": row["name"],
+                "description": row["description"],
+                "price_cents": row["price_cents"],
+                "category": row["category"],
+                "position": row["position"],
+                "confidence": row["confidence"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "variants": [],
+            }
+            items_map[item_id] = item
+            ordered_ids.append(item_id)
+
+        # Attach variant if present (LEFT JOIN may produce NULL v_id)
+        if row["v_id"] is not None:
+            items_map[item_id]["variants"].append(
+                {
+                    "id": row["v_id"],
+                    "item_id": item_id,
+                    "label": row["v_label"],
+                    "price_cents": row["v_price_cents"],
+                    "kind": row["v_kind"],
+                    "position": row["v_position"],
+                    "created_at": row["v_created_at"],
+                    "updated_at": row["v_updated_at"],
+                }
+            )
+
+    return [items_map[iid] for iid in ordered_ids]
 
 
 def save_draft_metadata(
@@ -830,6 +920,190 @@ def delete_draft_items(draft_id: int, item_ids: Iterable[int]) -> int:
         )
         conn.commit()
         return int(cur.rowcount)
+
+
+# ------------------------------------------------------------
+# Variant CRUD (Phase 9 — structured variant storage)
+# ------------------------------------------------------------
+def _normalize_variant_for_db(raw: Any) -> Optional[Dict[str, Any]]:
+    """
+    Defensive normalizer for draft_item_variants payloads.
+
+    Ensures:
+      - label: non-empty string (required; rows without a label are dropped)
+      - price_cents: int, never negative
+      - kind: one of size/combo/flavor/style/other (default: size)
+      - position: int (default: 0)
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    label_raw = raw.get("label")
+    label = str(label_raw).strip() if label_raw is not None else ""
+    if not label:
+        return None
+
+    price_raw = raw.get("price_cents")
+    try:
+        price_cents = int(price_raw)
+    except Exception:
+        price_cents = 0
+    if price_cents < 0:
+        price_cents = 0
+
+    _VALID_KINDS = {"size", "combo", "flavor", "style", "other"}
+    kind_raw = raw.get("kind")
+    kind = str(kind_raw).strip().lower() if kind_raw else "size"
+    if kind not in _VALID_KINDS:
+        kind = "other"
+
+    pos_raw = raw.get("position")
+    try:
+        position = int(pos_raw) if pos_raw is not None else 0
+    except Exception:
+        position = 0
+
+    return {
+        "label": label,
+        "price_cents": price_cents,
+        "kind": kind,
+        "position": position,
+    }
+
+
+def insert_variants(
+    item_id: int, variants: Iterable[Dict[str, Any]]
+) -> List[int]:
+    """
+    Bulk-insert variant rows for a given item.
+    Returns list of inserted variant IDs.
+    Silently skips invalid rows (no label).
+    """
+    ids: List[int] = []
+    with db_connect() as conn:
+        cur = conn.cursor()
+        for v in variants:
+            norm = _normalize_variant_for_db(v)
+            if not norm:
+                continue
+            cur.execute(
+                """
+                INSERT INTO draft_item_variants
+                    (item_id, label, price_cents, kind, position,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(item_id),
+                    norm["label"],
+                    norm["price_cents"],
+                    norm["kind"],
+                    norm["position"],
+                    _now(),
+                    _now(),
+                ),
+            )
+            ids.append(int(cur.lastrowid))
+        conn.commit()
+    return ids
+
+
+def update_variant(variant_id: int, data: Dict[str, Any]) -> bool:
+    """
+    Partial update of a single variant row.
+    Only updates fields present in data (label, price_cents, kind, position).
+    Returns True if a row was updated, False otherwise.
+    """
+    sets: List[str] = []
+    args: List[Any] = []
+
+    if "label" in data:
+        label = str(data["label"]).strip()
+        if not label:
+            return False
+        sets.append("label=?")
+        args.append(label)
+
+    if "price_cents" in data:
+        try:
+            pc = int(data["price_cents"])
+        except Exception:
+            pc = 0
+        if pc < 0:
+            pc = 0
+        sets.append("price_cents=?")
+        args.append(pc)
+
+    if "kind" in data:
+        _VALID_KINDS = {"size", "combo", "flavor", "style", "other"}
+        k = str(data["kind"]).strip().lower()
+        if k not in _VALID_KINDS:
+            k = "other"
+        sets.append("kind=?")
+        args.append(k)
+
+    if "position" in data:
+        try:
+            pos = int(data["position"])
+        except Exception:
+            pos = 0
+        sets.append("position=?")
+        args.append(pos)
+
+    if not sets:
+        return False
+
+    sets.append("updated_at=?")
+    args.append(_now())
+    args.append(int(variant_id))
+
+    with db_connect() as conn:
+        cur = conn.execute(
+            f"UPDATE draft_item_variants SET {', '.join(sets)} WHERE id=?",
+            args,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_variants(item_id: int, variant_ids: Iterable[int]) -> int:
+    """
+    Delete specific variant rows for a given item.
+    Returns count of deleted rows.
+    """
+    ids = [int(i) for i in variant_ids if str(i).isdigit()]
+    if not ids:
+        return 0
+    with db_connect() as conn:
+        qmarks = ",".join(["?"] * len(ids))
+        cur = conn.execute(
+            f"DELETE FROM draft_item_variants WHERE item_id=? AND id IN ({qmarks})",
+            (int(item_id), *ids),
+        )
+        conn.commit()
+        return int(cur.rowcount)
+
+
+def delete_all_variants_for_item(item_id: int) -> int:
+    """Delete all variant rows for a given item. Returns count deleted."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM draft_item_variants WHERE item_id=?",
+            (int(item_id),),
+        )
+        conn.commit()
+        return int(cur.rowcount)
+
+
+def get_item_variants(item_id: int) -> List[Dict[str, Any]]:
+    """Fetch all variants for a single item, ordered by position then id."""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM draft_item_variants WHERE item_id=? "
+            "ORDER BY position, id",
+            (int(item_id),),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
 
 
 # ------------------------------------------------------------
@@ -1255,20 +1529,37 @@ def clone_draft(draft_id: int) -> Dict[str, Any]:
         source_file_path=src.get("source_file_path"),
     )
 
-    items = get_draft_items(int(draft_id))
-    _insert_items_bulk(
-        new_id,
-        [
-            {
-                "name": it.get("name"),
-                "description": it.get("description"),
-                "price_cents": _coerce_int(it.get("price_cents"), 0),
-                "category": it.get("category"),
-                "position": it.get("position"),
-                "confidence": _coerce_opt_int(it.get("confidence")),
-            }
-            for it in items
-        ],
-    )
+    items = get_draft_items(int(draft_id), include_variants=True)
+    for it in items:
+        # Insert item into new draft
+        inserted_ids = _insert_items_bulk(
+            new_id,
+            [
+                {
+                    "name": it.get("name"),
+                    "description": it.get("description"),
+                    "price_cents": _coerce_int(it.get("price_cents"), 0),
+                    "category": it.get("category"),
+                    "position": it.get("position"),
+                    "confidence": _coerce_opt_int(it.get("confidence")),
+                }
+            ],
+        )
+        # Clone variants if present
+        variants = it.get("variants") or []
+        if inserted_ids and variants:
+            new_item_id = inserted_ids[0]
+            insert_variants(
+                new_item_id,
+                [
+                    {
+                        "label": v.get("label"),
+                        "price_cents": v.get("price_cents", 0),
+                        "kind": v.get("kind", "size"),
+                        "position": v.get("position", 0),
+                    }
+                    for v in variants
+                ],
+            )
 
     return {"id": new_id, "draft_id": new_id}
