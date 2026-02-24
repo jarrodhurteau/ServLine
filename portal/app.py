@@ -1727,6 +1727,9 @@ def _draft_items_from_draft_json(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
     Convert saved draft JSON format:
       {"categories":[{"name": "...", "items":[{...}]}]}
     into a flat list of DB draft_items rows expected by drafts_store.upsert_draft_items.
+
+    Each item may include a '_variants' key with structured variant data
+    that upsert_draft_items() will insert into draft_item_variants.
     """
     out: List[Dict[str, Any]] = []
 
@@ -1751,32 +1754,51 @@ def _draft_items_from_draft_json(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
             name = (it.get("name") or "").strip()
             desc = (it.get("description") or "").strip()
 
-            price_val = None
+            # Build structured variants from sizes array
             sizes = it.get("sizes")
+            variants: list = []
             if isinstance(sizes, list) and sizes:
-                first = sizes[0]
-                if isinstance(first, dict):
-                    price_val = first.get("price")
+                for vi, s in enumerate(sizes):
+                    if not isinstance(s, dict):
+                        continue
+                    lbl = (s.get("name") or s.get("label") or "").strip()
+                    try:
+                        pr = float(s.get("price", 0))
+                    except Exception:
+                        pr = 0.0
+                    pr_cents = int(round(pr * 100))
+                    if lbl or pr_cents > 0:
+                        variants.append({
+                            "label": lbl or f"Size {vi + 1}",
+                            "price_cents": pr_cents,
+                            "kind": "size",
+                            "position": vi,
+                        })
+
+            # Base price: first variant price or item-level price
+            price_val = None
+            if variants:
+                price_val = variants[0]["price_cents"] / 100.0
             if price_val is None:
-                price_val = it.get("price")
+                raw_price = it.get("price")
+                try:
+                    price_val = float(raw_price) if raw_price is not None and str(raw_price).strip() != "" else None
+                except Exception:
+                    price_val = None
 
-            try:
-                price = float(price_val) if price_val is not None and str(price_val).strip() != "" else None
-            except Exception:
-                price = None
-
-            if not name and not desc and price is None:
+            if not name and not desc and price_val is None:
                 continue
 
-            out.append(
-                {
-                    "name": name or "Untitled",
-                    "description": desc,
-                    "price": price,
-                    "category": cat_name,
-                    "position": pos,
-                }
-            )
+            row: Dict[str, Any] = {
+                "name": name or "Untitled",
+                "description": desc,
+                "price": price_val,
+                "category": cat_name,
+                "position": pos,
+            }
+            if variants:
+                row["_variants"] = variants
+            out.append(row)
             pos += 1
 
     return out
@@ -1788,6 +1810,9 @@ def _draft_items_from_ai_preview(ai_items: list) -> list:
     Bypasses the triple-transformation chain (group->helper->json) that loses
     prices, confidence, and categories.  Same logic as imports_ai_commit()
     but reusable for background imports.
+
+    Each item may include a '_variants' key with structured variant data
+    that upsert_draft_items() will insert into draft_item_variants.
     """
     def _to_cents(v) -> int:
         try:
@@ -1813,17 +1838,46 @@ def _draft_items_from_ai_preview(ai_items: list) -> list:
             except Exception:
                 pass
 
-        price_text = _build_price_text(it)
+        # Build structured variants from AI preview data
+        raw_variants = it.get("variants") or []
+        variants: list = []
+        for vi, v in enumerate(raw_variants):
+            if not isinstance(v, dict):
+                continue
+            lbl = (v.get("label") or v.get("normalized_size") or "").strip()
+            vpc = v.get("price_cents")
+            if vpc is None:
+                continue
+            try:
+                vpc = int(vpc)
+            except Exception:
+                continue
+            kind = (v.get("kind") or "size").strip().lower()
+            if kind not in ("size", "combo", "flavor", "style", "other"):
+                kind = "size"
+            if lbl or vpc > 0:
+                variants.append({
+                    "label": lbl or f"Option {vi + 1}",
+                    "price_cents": vpc,
+                    "kind": kind,
+                    "position": vi,
+                })
 
-        out.append({
+        # Use lowest variant price as base if no price_candidates
+        if price_cents == 0 and variants:
+            price_cents = min(v["price_cents"] for v in variants)
+
+        row: Dict[str, Any] = {
             "name": name,
             "description": desc,
             "price_cents": int(price_cents),
-            "price_text": price_text,
             "category": cat,
             "position": pos,
             "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf,
-        })
+        }
+        if variants:
+            row["_variants"] = variants
+        out.append(row)
         pos += 1
     return out
 

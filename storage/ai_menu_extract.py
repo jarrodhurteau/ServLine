@@ -219,6 +219,8 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
     """Convert Claude-extracted items to the draft_items DB row format.
 
     Returns list of dicts ready for drafts_store.upsert_draft_items().
+    Each item may include a '_variants' key with structured variant data
+    that upsert_draft_items() will insert into draft_item_variants.
     """
     rows = []
     for pos, it in enumerate(items, start=1):
@@ -229,32 +231,34 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
         price = _to_float(it.get("price"))
         price_cents = int(round(price * 100))
 
-        # Build price_text from sizes if available
+        # Build structured variants from sizes
         sizes = it.get("sizes") or []
+        variants: List[Dict[str, Any]] = []
         if sizes:
-            parts = []
-            for s in sizes:
-                lbl = s.get("label", "")
+            for vi, s in enumerate(sizes):
+                lbl = (s.get("label") or s.get("name") or "").strip()
                 pr = _to_float(s.get("price"))
-                if lbl and pr > 0:
-                    parts.append(f"{lbl}: ${pr:.2f}")
-                elif pr > 0:
-                    parts.append(f"${pr:.2f}")
-            price_text = " | ".join(parts) if parts else ""
-            # Use first size price if base price is 0
-            if price_cents == 0 and sizes:
-                first_price = _to_float(sizes[0].get("price"))
-                price_cents = int(round(first_price * 100))
-        else:
-            price_text = f"${price:.2f}" if price > 0 else ""
+                pr_cents = int(round(pr * 100))
+                if lbl or pr_cents > 0:
+                    variants.append({
+                        "label": lbl or f"Size {vi + 1}",
+                        "price_cents": pr_cents,
+                        "kind": "size",
+                        "position": vi,
+                    })
+            # Use first size price as base if base price is 0
+            if price_cents == 0 and variants:
+                price_cents = variants[0]["price_cents"]
 
-        rows.append({
+        row: Dict[str, Any] = {
             "name": name,
             "description": it.get("description"),
             "price_cents": price_cents,
-            "price_text": price_text,
             "category": it.get("category") or "Other",
             "position": pos,
             "confidence": 90,  # Claude extractions are high-confidence
-        })
+        }
+        if variants:
+            row["_variants"] = variants
+        rows.append(row)
     return rows

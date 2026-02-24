@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — IN PROGRESS (Sprint 9.1)**
 
-Day 71 begins Phase 9 with the database foundation for structured variant storage. The new `draft_item_variants` child table preserves size/combo/flavor variant data end-to-end instead of flattening to a single price. CRUD functions, LEFT JOIN grouping in `get_draft_items()`, FK cascade deletion, and clone support are all wired. 2,603 tests passing across 22 test suites.
+Day 72 wires the extraction pipeline to produce structured variants end-to-end. All three extraction strategies (Claude API, Heuristic AI, Legacy JSON) now preserve size/combo data as `_variants` on each item dict instead of flattening to pipe-delimited strings. `_insert_items_bulk()` and `upsert_draft_items()` automatically insert child variant rows. Backfill function converts existing "Name (Size)" patterns into proper variant rows. 2,662 tests passing across 23 test suites.
 
 ---
 
@@ -1238,6 +1238,9 @@ ServLine now has:
 - ✅ Variant CRUD — insert, update, delete, get with defensive normalization
 - ✅ LEFT JOIN grouping — `get_draft_items()` returns items with nested `variants: []`
 - ✅ Clone support — `clone_draft()` preserves variants
+- ✅ Extraction pipeline → structured variants — all 3 strategies preserve `_variants`
+- ✅ `_insert_items_bulk()` and `upsert_draft_items()` auto-insert child variant rows
+- ✅ Backfill logic — `backfill_variants_from_names()` converts "Name (Size)" patterns
 
 ---
 
@@ -1248,5 +1251,5 @@ ServLine now has:
 - ✅ CRUD functions — insert, update, delete, get with normalization (Day 71)
 - ✅ LEFT JOIN grouping — single round-trip variant loading (Day 71)
 - ✅ FK CASCADE + clone support (Day 71)
-- [ ] Extraction pipeline → structured variants (Day 72)
+- ✅ Extraction pipeline → structured variants (Day 72)
 - [ ] Migration & backward compatibility (Day 73)

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 71 (February 24, 2026) — Database schema & migration for structured variants
+Last Updated: Day 72 (February 24, 2026) — Extraction pipeline → structured variants
 
 ================================================================================
 PROJECT MISSION
@@ -233,18 +233,24 @@ Sprint 9.1 — Structured Variant Storage (Days 71-73)
   [x] Index: idx_variants_item on (item_id)
 
     Day 71 test suite: 82 cases, 100% pass rate
-    Total: 2,603 tests, all passing
 
-  Day 72: Extraction Pipeline -> Structured Variants
+  Day 72: Extraction Pipeline -> Structured Variants *** COMPLETE ***
   ---------------------------------------------------
-  [ ] Update claude_items_to_draft_rows() to return variants alongside items
-      - Currently flattens sizes[] into pipe-delimited price_text string
-      - New: return [{item: {...}, variants: [{label, price_cents, kind}]}]
-  [ ] Update _draft_items_from_ai_preview() to preserve variant structure
-  [ ] Update upsert_draft_items() to accept + insert child variant rows
-  [ ] Update heuristic AI path (Strategy 2) to preserve size data
-  [ ] Backfill logic: parse existing "Name (Size)" patterns into variant rows
-  [ ] Test: upload menu -> verify variants stored in new table
+  [x] Update claude_items_to_draft_rows() — sizes[] → _variants list (kind=size)
+      - No more pipe-delimited price_text; structured variant dicts instead
+  [x] Update _draft_items_from_ai_preview() — preserves variants from AI preview
+  [x] Update _draft_items_from_draft_json() — legacy sizes[] → _variants
+  [x] Update _flat_from_ai_items() — preserves variants from AI pipeline items
+  [x] Update _insert_items_bulk() — auto-inserts child variant rows from _variants
+  [x] Update upsert_draft_items() — inserts on new items, replaces on updates
+  [x] Backfill logic: backfill_variants_from_names() parses "Name (Size)" patterns
+      - Groups by (base_name, category), requires 2+ items to merge
+      - Sorts by price, creates parent + variant rows, deletes extra flat rows
+      - Idempotent: items with existing variants skipped
+  [x] Test: 59 cases covering all paths, backward compat, edge cases
+
+    Day 72 test suite: 59 cases, 100% pass rate
+    Total: 2,662 tests, all passing
 
   Day 73: Migration & Backward Compatibility
   -------------------------------------------
@@ -421,6 +427,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 72: Extraction pipeline → structured variants — all 3 strategies, DB insert, backfill (59 tests)
 Day 71: Database schema & migration — draft_item_variants table, CRUD, LEFT JOIN grouping (82 tests)
 Day 70: Semantic quality report — Phase 8 capstone, unified quality output (73 tests)
 Day 69: Auto-repair execution engine — applies fixes, audit trail, re-scoring (76 tests)
@@ -506,7 +513,8 @@ Tests:
 - tests/test_day69_auto_repair.py       — 76 cases (Day 69)
 - tests/test_day70_semantic_report.py   — 73 cases (Day 70)
 - tests/test_day71_variant_schema.py   — 82 cases (Day 71)
+- tests/test_day72_extraction_variants.py — 59 cases (Day 72)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,603 tests, all passing
+- TOTAL: 2,662 tests, all passing
 
 ================================================================================

@@ -769,7 +769,32 @@ def _insert_items_bulk(
                     _now(),
                 ),
             )
-            ids.append(int(cur.lastrowid))
+            item_id = int(cur.lastrowid)
+            ids.append(item_id)
+
+            # Day 72: insert child variant rows if present
+            raw_variants = it.get("_variants") or []
+            for v in raw_variants:
+                vnorm = _normalize_variant_for_db(v)
+                if not vnorm:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO draft_item_variants
+                        (item_id, label, price_cents, kind, position,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        vnorm["label"],
+                        vnorm["price_cents"],
+                        vnorm["kind"],
+                        vnorm["position"],
+                        _now(),
+                        _now(),
+                    ),
+                )
         conn.commit()
     return ids
 
@@ -782,6 +807,10 @@ def upsert_draft_items(
       - If id is a valid integer -> UPDATE that item
       - Else -> INSERT new item
     Returns: {"inserted_ids":[...], "updated_ids":[...]}
+
+    Day 72: If an item dict contains '_variants' (list of variant dicts),
+    those are inserted as child rows in draft_item_variants.  For updates,
+    existing variants are replaced (delete-all + re-insert).
     """
     inserted: List[int] = []
     updated: List[int] = []
@@ -815,6 +844,8 @@ def upsert_draft_items(
             position = norm["position"]
             confidence = norm["confidence"]
 
+            effective_id: Optional[int] = None
+
             if has_int_id:
                 cur.execute(
                     """
@@ -842,6 +873,7 @@ def upsert_draft_items(
                 )
                 if cur.rowcount > 0:
                     updated.append(item_id)
+                    effective_id = item_id
                 else:
                     # if the id doesn't belong to this draft, insert instead (safety)
                     cur.execute(
@@ -871,7 +903,8 @@ def upsert_draft_items(
                             _now(),
                         ),
                     )
-                    inserted.append(int(cur.lastrowid))
+                    effective_id = int(cur.lastrowid)
+                    inserted.append(effective_id)
             else:
                 cur.execute(
                     """
@@ -900,7 +933,39 @@ def upsert_draft_items(
                         _now(),
                     ),
                 )
-                inserted.append(int(cur.lastrowid))
+                effective_id = int(cur.lastrowid)
+                inserted.append(effective_id)
+
+            # Day 72: insert child variant rows if present
+            raw_variants = it.get("_variants") or []
+            if raw_variants and effective_id is not None:
+                # For updates, replace existing variants
+                if has_int_id and item_id in updated:
+                    cur.execute(
+                        "DELETE FROM draft_item_variants WHERE item_id=?",
+                        (effective_id,),
+                    )
+                for v in raw_variants:
+                    vnorm = _normalize_variant_for_db(v)
+                    if not vnorm:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO draft_item_variants
+                            (item_id, label, price_cents, kind, position,
+                             created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            effective_id,
+                            vnorm["label"],
+                            vnorm["price_cents"],
+                            vnorm["kind"],
+                            vnorm["position"],
+                            _now(),
+                            _now(),
+                        ),
+                    )
 
         conn.commit()
 
@@ -1182,6 +1247,10 @@ def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             * Map float 0–1 to 0–100; tolerate integer % as-is.
       - Garbage guard:
             * Drop items whose NAME fails is_garbage_line unless a valid price was found.
+
+    Day 72: Each item may include a '_variants' key with structured variant
+    data that _insert_items_bulk() / upsert_draft_items() will insert into
+    draft_item_variants.
     """
     flat: List[Dict[str, Any]] = []
 
@@ -1219,16 +1288,42 @@ def _flat_from_ai_items(ai_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         else:
             confidence = _coerce_opt_int(conf_float)
 
-        flat.append(
-            {
-                "name": name_raw,
-                "description": (desc_raw or "").strip() or None,
-                "price_cents": price_cents,
-                "category": cat,
-                "position": None,
-                "confidence": confidence,
-            }
-        )
+        # Build structured variants from AI preview variant data
+        raw_variants = it.get("variants") or []
+        variants: List[Dict[str, Any]] = []
+        for vi, v in enumerate(raw_variants):
+            if not isinstance(v, dict):
+                continue
+            lbl = (v.get("label") or v.get("normalized_size") or "").strip()
+            vpc = v.get("price_cents")
+            if vpc is None:
+                continue
+            try:
+                vpc = int(vpc)
+            except Exception:
+                continue
+            kind = (v.get("kind") or "size").strip().lower()
+            if kind not in ("size", "combo", "flavor", "style", "other"):
+                kind = "size"
+            if lbl or vpc > 0:
+                variants.append({
+                    "label": lbl or f"Option {vi + 1}",
+                    "price_cents": vpc,
+                    "kind": kind,
+                    "position": vi,
+                })
+
+        row: Dict[str, Any] = {
+            "name": name_raw,
+            "description": (desc_raw or "").strip() or None,
+            "price_cents": price_cents,
+            "category": cat,
+            "position": None,
+            "confidence": confidence,
+        }
+        if variants:
+            row["_variants"] = variants
+        flat.append(row)
 
     return flat
 
@@ -1506,6 +1601,101 @@ def rebuild_draft_from_mapping(
         "sample_rows": sample_rows,
     }
 
+
+
+# ------------------------------------------------------------
+# Backfill: parse "Name (Size)" patterns into variant rows
+# ------------------------------------------------------------
+_BACKFILL_PATTERN = re.compile(
+    r"^(?P<base>.+?)\s*\((?P<size>[^)]+)\)\s*$"
+)
+
+
+def backfill_variants_from_names(draft_id: int) -> Dict[str, Any]:
+    """
+    Scan draft items for the legacy "Name (Size)" naming pattern and convert
+    them into proper parent item + variant rows.
+
+    Groups items that share the same base name (after stripping the (Size)
+    suffix) and category.  For each group with 2+ items:
+      - Keep the first item as the parent (rename to base name)
+      - Create variant rows from all items in the group
+      - Delete the extra flattened rows
+
+    Returns summary: {groups_found, variants_created, items_deleted}
+    """
+    items = get_draft_items(int(draft_id), include_variants=True)
+
+    # Group by (base_name, category)
+    groups: Dict[Tuple[str, Optional[str]], List[Dict[str, Any]]] = {}
+    for it in items:
+        # Skip items that already have variants
+        if it.get("variants"):
+            continue
+        name = it.get("name") or ""
+        m = _BACKFILL_PATTERN.match(name)
+        if not m:
+            continue
+        base = m.group("base").strip()
+        size_label = m.group("size").strip()
+        if not base or not size_label:
+            continue
+        key = (base.lower(), it.get("category"))
+        if key not in groups:
+            groups[key] = []
+        groups[key].append({
+            "item": it,
+            "base": base,
+            "size_label": size_label,
+        })
+
+    groups_found = 0
+    variants_created = 0
+    items_deleted = 0
+
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        groups_found += 1
+
+        # Sort by price to get consistent ordering (cheapest first)
+        members.sort(key=lambda m: m["item"].get("price_cents", 0))
+
+        # First item becomes the parent
+        parent = members[0]["item"]
+        parent_id = parent["id"]
+
+        # Rename parent to base name (strip size suffix)
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE draft_items SET name=?, updated_at=? WHERE id=?",
+                (members[0]["base"], _now(), parent_id),
+            )
+            conn.commit()
+
+        # Create variant rows from all members
+        variant_rows = []
+        for vi, m in enumerate(members):
+            variant_rows.append({
+                "label": m["size_label"],
+                "price_cents": m["item"].get("price_cents", 0),
+                "kind": "size",
+                "position": vi,
+            })
+        inserted_ids = insert_variants(parent_id, variant_rows)
+        variants_created += len(inserted_ids)
+
+        # Delete the extra flattened rows (all except parent)
+        delete_ids = [m["item"]["id"] for m in members[1:]]
+        if delete_ids:
+            deleted = delete_draft_items(int(draft_id), delete_ids)
+            items_deleted += deleted
+
+    return {
+        "groups_found": groups_found,
+        "variants_created": variants_created,
+        "items_deleted": items_deleted,
+    }
 
 
 # ------------------------------------------------------------
