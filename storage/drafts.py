@@ -1149,6 +1149,21 @@ def delete_variants(item_id: int, variant_ids: Iterable[int]) -> int:
         return int(cur.rowcount)
 
 
+def delete_variants_by_id(variant_ids: Iterable[int]) -> int:
+    """Delete variant rows by their primary key IDs (no item_id needed)."""
+    ids = [int(i) for i in variant_ids if str(i).isdigit()]
+    if not ids:
+        return 0
+    with db_connect() as conn:
+        qmarks = ",".join(["?"] * len(ids))
+        cur = conn.execute(
+            f"DELETE FROM draft_item_variants WHERE id IN ({qmarks})",
+            ids,
+        )
+        conn.commit()
+        return int(cur.rowcount)
+
+
 def delete_all_variants_for_item(item_id: int) -> int:
     """Delete all variant rows for a given item. Returns count deleted."""
     with db_connect() as conn:

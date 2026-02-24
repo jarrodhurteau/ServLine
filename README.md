@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — Sprint 9.1 COMPLETE, Sprint 9.2 next**
+➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 IN PROGRESS (Editor Redesign)**
 
-Day 73 completes Sprint 9.1 with migration and backward compatibility. Existing drafts without variants continue to work identically. New `get_publish_rows()` expands variant items into flat "Name (Label)" rows for publishing to `menu_items`. `ensure_parent_base_price()` enforces parent price_cents = min(variant prices). The publish flow (`draft_publish_now`) is now variant-aware: items with variants emit one `menu_items` row per variant; items without variants use price_cents directly. 2,707 tests passing across 24 test suites.
+Day 74 starts Sprint 9.2 with the Variant Sub-Row UI. The draft editor now renders structured variant sub-rows beneath each parent item — indented with kind-colored badges (size/combo/flavor/style/other), collapse/expand toggles, inline label+price editing, and kind dropdowns. The sidebar outline uses structured variant data instead of regex parsing. `collectPayload()` sends `_variants` per item, and `saveNow()` handles `deleted_variant_ids` for orphan cleanup. Search/filter includes variant labels. Duplicate and delete operations cascade properly to variant sub-rows. 2,744 tests passing across 25 test suites.
 
 ---
 
@@ -1244,6 +1244,9 @@ ServLine now has:
 - ✅ Variant-aware publish flow — `get_publish_rows()` expands variants for `menu_items`
 - ✅ Parent base price enforcement — `ensure_parent_base_price()` keeps parent = min(variants)
 - ✅ Backward compatibility — old drafts (0 variants) load and publish identically
+- ✅ Variant Sub-Row UI — indented sub-rows with kind badges, collapse/expand, add/delete
+- ✅ Editor variant save — `_variants` in payload, `deleted_variant_ids` for orphan cleanup
+- ✅ Sidebar structured variants — uses variant data instead of regex name parsing
 
 ---
 
@@ -1258,3 +1261,16 @@ ServLine now has:
 - ✅ Migration & backward compatibility (Day 73)
 - ✅ Variant-aware publish flow (Day 73)
 - ✅ Parent base price enforcement (Day 73)
+
+### Sprint 9.2 — Editor Redesign (Days 74-77) *** IN PROGRESS ***
+- ✅ Variant Sub-Row UI (Day 74):
+  - Indented variant rows with kind-colored badges (size/combo/flavor/style/other)
+  - Collapse/expand toggle (auto-collapses 4+ variants)
+  - Add Variant / Delete Variant buttons per item
+  - Kind dropdown (select) with live badge update
+  - Variant count pill on parent row
+  - collectPayload() sends `_variants` per item
+  - Save endpoint handles `deleted_variant_ids`
+  - Sidebar outline uses structured variant data
+  - Search/filter includes variant labels
+  - Duplicate/delete cascades to variant sub-rows

@@ -235,6 +235,132 @@
     #items-table td {
       vertical-align: top;
     }
+
+    /* ===== Variant Sub-Row Styles (Day 74) ===== */
+    #items-body tr.variant-row {
+      background: rgba(30, 41, 59, 0.55);
+      border-left: 3px solid rgba(99, 102, 241, 0.45);
+    }
+    #items-body tr.variant-row:hover {
+      background: rgba(30, 41, 59, 0.75);
+    }
+    #items-body tr.variant-row td {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    .variant-indent {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding-left: 24px;
+    }
+    .variant-indent::before {
+      content: "\2514";
+      color: rgba(99, 102, 241, 0.6);
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+    .variant-label-input {
+      width: 100%;
+      min-width: 80px;
+    }
+
+    /* Kind badge */
+    .kind-select {
+      font-size: 0.8rem;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: rgba(15, 23, 42, 0.7);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .kind-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .kind-badge.kind-size   { background: rgba(99,102,241,0.18); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.4); }
+    .kind-badge.kind-combo  { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4); }
+    .kind-badge.kind-flavor { background: rgba(236,72,153,0.18); color: #f9a8d4; border: 1px solid rgba(236,72,153,0.4); }
+    .kind-badge.kind-style  { background: rgba(16,185,129,0.18); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.4); }
+    .kind-badge.kind-other  { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.35); }
+
+    /* Expand/collapse toggle */
+    .toggle-variants-btn {
+      background: none;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #a5b4fc;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .toggle-variants-btn:hover {
+      background: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.6);
+    }
+
+    /* Add Variant button */
+    .add-variant-btn {
+      background: none;
+      border: 1px dashed rgba(99, 102, 241, 0.4);
+      color: #818cf8;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .add-variant-btn:hover {
+      background: rgba(99, 102, 241, 0.12);
+      border-color: rgba(99, 102, 241, 0.6);
+      color: #a5b4fc;
+    }
+
+    /* Variant count pill on parent row */
+    .variant-count-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: rgba(99, 102, 241, 0.14);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      white-space: nowrap;
+      margin-left: 4px;
+    }
+
+    /* Collapsed variant rows */
+    #items-body tr.variant-row.variant-collapsed {
+      display: none;
+    }
+
+    /* Delete variant button */
+    .delete-variant-btn {
+      background: none;
+      border: 1px solid rgba(220, 53, 69, 0.4);
+      color: #fca5a5;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .delete-variant-btn:hover {
+      background: rgba(220, 53, 69, 0.15);
+      border-color: rgba(220, 53, 69, 0.6);
+    }
   </style>
 
   <div class="layout">
@@ -445,6 +571,9 @@
                     {% if it.low_confidence %}
                       <span class="pill-low-mini">⚠ Low</span>
                     {% endif %}
+                    {% if it.variants %}
+                      <span class="variant-count-pill">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
+                    {% endif %}
                   </div>
                   {% if it.quality is not none %}
                     <div class="quality-meta">
@@ -477,10 +606,52 @@
                          inputmode="numeric"
                          {% if draft.status != 'editing' %}disabled{% endif %} /></td>
               <td class="row-actions">
+                {% if it.variants %}
+                  <button class="btn toggle-variants-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.variants|length }} var ▾</button>
+                {% endif %}
+                <button class="btn add-variant-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>+ Variant</button>
                 <button class="btn duplicate-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Duplicate</button>
                 <button class="btn btn-danger delete-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
               </td>
             </tr>
+            {% if it.variants %}
+              {% for v in it.variants %}
+            <tr class="variant-row{% if it.variants|length > 3 %} variant-collapsed{% endif %}"
+                data-variant-id="{{ v.id }}"
+                data-parent-id="{{ it.id }}"
+                data-kind="{{ v.kind|default('size') }}">
+              <td></td>
+              <td>
+                <div class="variant-indent">
+                  <input class="cell-input variant-label-input"
+                         value="{{ v.label|e }}"
+                         placeholder="Label"
+                         {% if draft.status != 'editing' %}disabled{% endif %} />
+                  <span class="kind-badge kind-{{ v.kind|default('size') }}">{{ v.kind|default('size') }}</span>
+                </div>
+              </td>
+              <td></td>
+              <td><input class="cell-input cell-price variant-price"
+                         value="{{ '%.2f'|format((v.price_cents|default(0,true)|int) / 100.0) }}"
+                         inputmode="decimal"
+                         {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              <td>
+                <select class="kind-select"
+                        {% if draft.status != 'editing' %}disabled{% endif %}>
+                  <option value="size"{% if v.kind == 'size' %} selected{% endif %}>size</option>
+                  <option value="combo"{% if v.kind == 'combo' %} selected{% endif %}>combo</option>
+                  <option value="flavor"{% if v.kind == 'flavor' %} selected{% endif %}>flavor</option>
+                  <option value="style"{% if v.kind == 'style' %} selected{% endif %}>style</option>
+                  <option value="other"{% if v.kind == 'other' %} selected{% endif %}>other</option>
+                </select>
+              </td>
+              <td>{{ v.position|default(0) }}</td>
+              <td>
+                <button class="delete-variant-btn" data-variant-id="{{ v.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
+              </td>
+            </tr>
+              {% endfor %}
+            {% endif %}
             {% endfor %}
           </tbody>
         </table>
@@ -612,7 +783,8 @@
       const q = search.value.trim().toLowerCase();
       const threshold = confSlider ? Number(confSlider.value || 0) : 0;
 
-      $$("#items-body tr").forEach(tr=>{
+      // First pass: filter parent rows
+      $$("#items-body tr:not(.variant-row)").forEach(tr=>{
         const name=$(".name", tr)?.value?.toLowerCase()||"";
         const desc=$(".description", tr)?.value?.toLowerCase()||"";
         const cat =(tr.getAttribute("data-cat")||"").toLowerCase();
@@ -620,13 +792,29 @@
         const passCat = tr.dataset.filterCat ? (cat === tr.dataset.filterCat) : true;
         const passItem = tr.dataset.filterItem ? (normalizeBaseName($(".name", tr)?.value||"") === tr.dataset.filterItem) : true;
 
-        const hit = (!q || name.includes(q) || desc.includes(q) || cat.includes(q));
+        // Also check variant labels for search matches
+        const parentId = tr.getAttribute("data-id");
+        const variantLabels = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"] .variant-label-input`)
+          .map(el => (el.value||"").toLowerCase()).join(" ");
+
+        const hit = (!q || name.includes(q) || desc.includes(q) || cat.includes(q) || variantLabels.includes(q));
 
         const confRaw = tr.getAttribute("data-confidence") || "";
         const confNum = confRaw === "" ? null : Number(confRaw);
         const passConf = (confNum === null) ? true : (confNum >= threshold);
 
-        tr.style.display = (passCat && passItem && hit && passConf) ? "" : "none";
+        const visible = passCat && passItem && hit && passConf;
+        tr.style.display = visible ? "" : "none";
+
+        // Sync variant row visibility with parent (respecting collapsed state)
+        $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`).forEach(vtr=>{
+          if (!visible){
+            vtr.style.display = "none";
+          } else {
+            // Respect collapsed state — only show if not collapsed
+            vtr.style.display = vtr.classList.contains("variant-collapsed") ? "none" : "";
+          }
+        });
       });
     }
 
@@ -639,22 +827,36 @@
 
     function gatherData(){
       const data = {};
-      $$("#items-body tr").forEach(tr=>{
+      $$("#items-body tr:not(.variant-row)").forEach(tr=>{
         const rowId = tr.getAttribute("data-id");
         const cat = ($(".category", tr)?.value || tr.getAttribute("data-cat") || "").trim() || "(Uncategorized)";
         const fullName = $(".name", tr)?.value || "";
         const priceStr = $(".price", tr)?.value || "";
         const price = dollarsToCents(priceStr)/100;
-        const m = fullName.match(sizeRx);
-        const base = (m ? m[1] : fullName).trim();
-        const sizeLabel = m ? m[2].trim() : null;
+
+        // Use structured variant data first, fall back to regex parsing
+        const variantRows = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(rowId))}"]`);
+        const sizes = [];
+        if (variantRows.length){
+          variantRows.forEach(vtr => {
+            const label = ($(".variant-label-input", vtr)?.value || "").trim();
+            const vPrice = dollarsToCents($(".variant-price", vtr)?.value || "")/100;
+            if (label) sizes.push({ label, rowId: vtr.getAttribute("data-variant-id"), price: vPrice });
+          });
+        } else {
+          const m = fullName.match(sizeRx);
+          if (m){
+            const sizeLabel = m[2].trim();
+            sizes.push({ label: sizeLabel, rowId, price });
+          }
+        }
+
+        const base = variantRows.length ? fullName.trim() : ((fullName.match(sizeRx)?.[1]) || fullName).trim();
 
         data[cat] ||= {};
         data[cat][base] ||= { rows: [], sizes: [] };
         data[cat][base].rows.push(rowId);
-        if (sizeLabel){
-          data[cat][base].sizes.push({ label: sizeLabel, rowId, price });
-        }
+        sizes.forEach(s => data[cat][base].sizes.push(s));
       });
       return data;
     }
@@ -825,7 +1027,27 @@
         }
         const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
 
-        items.push({
+        // Collect variants for this item
+        const itemId = idAttr || tr.getAttribute("data-id");
+        const variantRows = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(itemId))}"]`);
+        const _variants = [];
+        variantRows.forEach(vtr => {
+          const vid = vtr.getAttribute("data-variant-id");
+          const vLabel = ($(".variant-label-input", vtr)?.value || "").trim();
+          const vPriceStr = ($(".variant-price", vtr)?.value || "").trim();
+          const vKind = ($(".kind-select", vtr)?.value || "size");
+          const vPriceCents = dollarsToCents(vPriceStr);
+          if (!vLabel) return; // skip blank variant rows
+          _variants.push({
+            id: (vid && /^\d+$/.test(vid)) ? Number(vid) : null,
+            label: vLabel,
+            price_cents: vPriceCents,
+            kind: vKind,
+            position: _variants.length
+          });
+        });
+
+        const item = {
           id,
           name,
           description,
@@ -833,7 +1055,9 @@
           category: category || null,
           position,
           confidence
-        });
+        };
+        if (_variants.length) item._variants = _variants;
+        items.push(item);
       });
 
       const title = $("#draft-title").value.trim();
@@ -851,21 +1075,33 @@
         const res = await fetch(`/drafts/${draftId}/save`, {
           method:"POST",
           headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds })
+          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds, deleted_variant_ids: deletedVariantIds })
         });
         const data = await res.json();
         if (!res.ok || data.ok===false) throw new Error(data.error || "Save failed");
         let insIdx=0;
-        $$("#items-body tr").forEach(tr=>{
+        $$("#items-body tr:not(.variant-row)").forEach(tr=>{
           const idAttr=tr.getAttribute("data-id");
           if (!idAttr || !/^\d+$/.test(idAttr)){
+            const oldId = idAttr;
             const newId = data.inserted_ids?.[insIdx++];
-            if (newId) tr.setAttribute("data-id", String(newId));
+            if (newId){
+              tr.setAttribute("data-id", String(newId));
+              // Update parent references on variant rows
+              $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(oldId||'')}"]`).forEach(vtr=>{
+                vtr.setAttribute("data-parent-id", String(newId));
+              });
+              // Update toggle/add-variant button references
+              $$(`button[data-parent-id="${CSS.escape(oldId||'')}"]`).forEach(btn=>{
+                btn.setAttribute("data-parent-id", String(newId));
+              });
+            }
           }
         });
         lastSaved.textContent = data.saved_at || new Date().toISOString();
         setDirty(false);
         deletedIds=[];
+        deletedVariantIds=[];
         showSuccess("Saved");
         rebuildOutline();
       } catch(e){
@@ -968,11 +1204,32 @@
       const tr=e.target.closest("tr");
       if(!tr) return;
       if (btn.classList.contains("duplicate-btn")){
+        if (tr.classList.contains("variant-row")) return; // Don't duplicate variant rows directly
+        const oldId = tr.getAttribute("data-id");
         const clone=tr.cloneNode(true);
-        clone.setAttribute("data-id", newTempId());
+        const newId = newTempId();
+        clone.setAttribute("data-id", newId);
         const nameEl=$(".name", clone);
         if(nameEl) nameEl.value=(nameEl.value||"")+" (copy)";
-        itemsBody.insertBefore(clone, tr.nextSibling);
+        // Update button references
+        $$("button[data-parent-id]", clone).forEach(b => b.setAttribute("data-parent-id", newId));
+        // Find insertion point (after last variant of original)
+        const origVariants = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(oldId))}"]`);
+        const insertAfter = origVariants.length ? origVariants[origVariants.length - 1] : tr;
+        insertAfter.after(clone);
+        // Clone variant rows too
+        origVariants.forEach(vtr => {
+          const vClone = vtr.cloneNode(true);
+          vClone.setAttribute("data-variant-id", newVariantTempId());
+          vClone.setAttribute("data-parent-id", newId);
+          $(".delete-variant-btn", vClone)?.setAttribute("data-variant-id", vClone.getAttribute("data-variant-id"));
+          clone.after(vClone); // Insert after parent clone... but we need order
+        });
+        // Re-order: move cloned variants after clone
+        const clonedVariants = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(newId)}"]`);
+        let prevRow = clone;
+        clonedVariants.forEach(cv => { prevRow.after(cv); prevRow = cv; });
+
         const ta=$(".desc-text", clone); if(ta){ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); }
         const taN=$(".name-text", clone); if(taN){ autosize(taN); taN.addEventListener('input',()=>autosize(taN)); }
         setDirty(true);
@@ -980,7 +1237,15 @@
         rebuildOutline();
         applyConfidenceTint();
         wireRowProvPins(clone);
-      } else if (btn.classList.contains("btn-danger")){
+      } else if (btn.classList.contains("btn-danger") && !btn.classList.contains("delete-variant-btn")){
+        if (tr.classList.contains("variant-row")) return; // Handled by delete-variant-btn
+        const parentId = tr.getAttribute("data-id");
+        // Delete associated variant rows
+        $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`).forEach(vtr => {
+          const vid = vtr.getAttribute("data-variant-id");
+          if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+          vtr.remove();
+        });
         queueDelete(tr);
         tr.remove();
         setDirty(true);
@@ -1177,6 +1442,178 @@
       provTip.style.left = x + "px";
       provTip.style.top  = y + "px";
     }
+
+    /* ===== Variant Sub-Row Management (Day 74) ===== */
+    const VARIANT_KINDS = ['size','combo','flavor','style','other'];
+    let variantSeq = 1;
+    function newVariantTempId(){ return "vtmp-"+(variantSeq++); }
+    let deletedVariantIds = [];
+
+    function toggleVariants(parentId){
+      const rows = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      if (!rows.length) return;
+      const isCollapsed = rows[0].classList.contains("variant-collapsed");
+      rows.forEach(r => r.classList.toggle("variant-collapsed", !isCollapsed));
+      // Update toggle button text
+      const toggleBtn = $(`button.toggle-variants-btn[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      if (toggleBtn){
+        toggleBtn.textContent = rows.length + " var " + (isCollapsed ? "\u25B4" : "\u25BE");
+      }
+    }
+
+    function addVariantRow(parentId, prefill={}){
+      const parentRow = $(`#items-body tr[data-id="${CSS.escape(String(parentId))}"]`);
+      if (!parentRow) return null;
+      // Find last variant row for this parent (or the parent row itself)
+      let insertAfter = parentRow;
+      const existing = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      if (existing.length) insertAfter = existing[existing.length - 1];
+
+      const kind = prefill.kind || 'size';
+      const tr = document.createElement("tr");
+      tr.className = "variant-row";
+      tr.setAttribute("data-variant-id", prefill.id || newVariantTempId());
+      tr.setAttribute("data-parent-id", String(parentId));
+      tr.setAttribute("data-kind", kind);
+      const priceVal = prefill.price_cents != null ? (prefill.price_cents/100).toFixed(2) : "";
+      const labelVal = escapeHtml(prefill.label || "");
+      tr.innerHTML = `
+        <td></td>
+        <td>
+          <div class="variant-indent">
+            <input class="cell-input variant-label-input"
+                   value="${labelVal}"
+                   placeholder="Label" />
+            <span class="kind-badge kind-${kind}">${kind}</span>
+          </div>
+        </td>
+        <td></td>
+        <td><input class="cell-input cell-price variant-price"
+                   value="${priceVal}"
+                   inputmode="decimal" /></td>
+        <td>
+          <select class="kind-select">
+            ${VARIANT_KINDS.map(k => `<option value="${k}"${k===kind?' selected':''}>${k}</option>`).join('')}
+          </select>
+        </td>
+        <td>${prefill.position != null ? prefill.position : existing.length}</td>
+        <td>
+          <button class="delete-variant-btn" data-variant-id="${tr.getAttribute('data-variant-id')}">Delete</button>
+        </td>`;
+      insertAfter.after(tr);
+      setDirty(true);
+      updateParentVariantUI(parentId);
+      return tr;
+    }
+
+    function deleteVariantRow(variantRow){
+      const vid = variantRow.getAttribute("data-variant-id");
+      const parentId = variantRow.getAttribute("data-parent-id");
+      if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+      variantRow.remove();
+      setDirty(true);
+      if (parentId) updateParentVariantUI(parentId);
+      showToast("Variant deleted");
+    }
+
+    function updateParentVariantUI(parentId){
+      const variants = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      const parentRow = $(`#items-body tr[data-id="${CSS.escape(String(parentId))}"]`);
+      if (!parentRow) return;
+
+      // Update or create variant count pill
+      let pill = $(".variant-count-pill", parentRow);
+      if (variants.length > 0){
+        if (!pill){
+          pill = document.createElement("span");
+          pill.className = "variant-count-pill";
+          const nameMain = $(".name-main", parentRow);
+          if (nameMain) nameMain.appendChild(pill);
+        }
+        pill.textContent = variants.length + " variant" + (variants.length !== 1 ? "s" : "");
+      } else if (pill){
+        pill.remove();
+      }
+
+      // Update or remove toggle button
+      let toggleBtn = $(`button.toggle-variants-btn[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      if (variants.length > 0){
+        if (!toggleBtn){
+          const actions = $(".row-actions", parentRow);
+          if (actions){
+            toggleBtn = document.createElement("button");
+            toggleBtn.className = "btn toggle-variants-btn";
+            toggleBtn.setAttribute("data-parent-id", String(parentId));
+            actions.insertBefore(toggleBtn, actions.firstChild);
+          }
+        }
+        if (toggleBtn){
+          const collapsed = variants[0].classList.contains("variant-collapsed");
+          toggleBtn.textContent = variants.length + " var " + (collapsed ? "\u25BE" : "\u25B4");
+        }
+      } else if (toggleBtn){
+        toggleBtn.remove();
+      }
+    }
+
+    // Wire click handlers on items body for variant actions (event delegation)
+    itemsBody.addEventListener("click", (e)=>{
+      const btn = e.target.closest("button");
+      if (!btn) return;
+
+      if (btn.classList.contains("toggle-variants-btn")){
+        e.stopPropagation();
+        const parentId = btn.getAttribute("data-parent-id");
+        if (parentId) toggleVariants(parentId);
+        return;
+      }
+      if (btn.classList.contains("add-variant-btn")){
+        e.stopPropagation();
+        const parentId = btn.getAttribute("data-parent-id");
+        if (parentId){
+          const tr = addVariantRow(parentId);
+          if (tr){
+            // Ensure variants are visible
+            $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`)
+              .forEach(r => r.classList.remove("variant-collapsed"));
+            updateParentVariantUI(parentId);
+            $(".variant-label-input", tr)?.focus();
+          }
+        }
+        return;
+      }
+      if (btn.classList.contains("delete-variant-btn")){
+        e.stopPropagation();
+        const variantRow = btn.closest("tr.variant-row");
+        if (variantRow) deleteVariantRow(variantRow);
+        return;
+      }
+    });
+
+    // Kind dropdown change → update badge + data-kind
+    itemsBody.addEventListener("change", (e)=>{
+      if (e.target.classList.contains("kind-select")){
+        const tr = e.target.closest("tr.variant-row");
+        if (!tr) return;
+        const newKind = e.target.value;
+        tr.setAttribute("data-kind", newKind);
+        const badge = $(".kind-badge", tr);
+        if (badge){
+          badge.className = "kind-badge kind-" + newKind;
+          badge.textContent = newKind;
+        }
+        setDirty(true);
+      }
+    });
+
+    // Variant price formatting on blur
+    itemsBody.addEventListener("blur", (e)=>{
+      if (e.target.classList.contains("variant-price")){
+        let cents = dollarsToCents(e.target.value);
+        if (!Number.isFinite(cents) || cents < 0) cents = 0;
+        e.target.value = (cents/100).toFixed(2);
+      }
+    }, true);
 
     wireRowProvPins();
     applyConfidenceTint();

@@ -4132,6 +4132,7 @@ def draft_save(draft_id: int):
     title = (payload.get("title") or "").strip() or None
     items = payload.get("items") or []
     deleted_ids = payload.get("deleted_item_ids") or []
+    deleted_variant_ids = payload.get("deleted_variant_ids") or []
 
     try:
         if title is not None:
@@ -4147,6 +4148,14 @@ def draft_save(draft_id: int):
                     continue
             if del_ints:
                 deleted_count = drafts_store.delete_draft_items(draft_id, del_ints)
+        # Delete orphaned variant rows
+        if deleted_variant_ids:
+            for vid in deleted_variant_ids:
+                try:
+                    vid_int = int(vid)
+                    drafts_store.delete_variants_by_id([vid_int])
+                except Exception:
+                    continue
         saved = {
             "ok": True,
             "saved_at": _now_iso(),

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 73 (February 24, 2026) — Migration & backward compatibility (Sprint 9.1 complete)
+Last Updated: Day 74 (February 24, 2026) — Variant Sub-Row UI (Sprint 9.2 started)
 
 ================================================================================
 PROJECT MISSION
@@ -261,20 +261,32 @@ Sprint 9.1 — Structured Variant Storage (Days 71-73)
   [x] Test: old drafts load cleanly, new drafts have variant rows
 
     Day 73 test suite: 45 cases, 100% pass rate
-    Total: 2,707 tests, all passing
+    Total (Sprint 9.1): 2,707 tests, all passing
 
 Sprint 9.2 — Editor Redesign (Days 74-77)
 ..........................................
 
-  Day 74: Variant Sub-Row UI
+  Day 74: Variant Sub-Row UI *** COMPLETE ***
   --------------------------
-  [ ] Update draft_editor.html table layout:
+  [x] Update draft_editor.html table layout:
         Parent row:  Name | Description | Base Price | Category | Position | Actions
-        Variant row: (indented) Label | Price | Kind | [Delete]
-  [ ] Collapse/expand toggle per item (default: collapsed for items with variants)
-  [ ] "Add Variant" button per item (adds blank sub-row)
-  [ ] Variant kind dropdown: size / combo / flavor / style / other
-  [ ] CSS: indented sub-rows, visual grouping with parent
+        Variant row: (indented) Label | Price | Kind dropdown | [Delete]
+  [x] Collapse/expand toggle per item (default: collapsed for 4+ variants)
+  [x] "Add Variant" button per item (adds blank sub-row)
+  [x] Variant kind dropdown: size / combo / flavor / style / other
+  [x] CSS: indented sub-rows, visual grouping with parent
+  [x] Variant count pill on parent row name cell
+  [x] Kind badges with color coding (size=indigo, combo=amber, flavor=pink, style=green, other=gray)
+  [x] Updated collectPayload() to send _variants per item
+  [x] Updated saveNow() with deleted_variant_ids support
+  [x] Updated sidebar outline to use structured variant data (not regex)
+  [x] Search/filter includes variant labels
+  [x] Duplicate item copies variant sub-rows
+  [x] Delete item cascades variant deletion
+  [x] delete_variants_by_id() function for orphan cleanup
+  [x] Save endpoint handles deleted_variant_ids
+
+    Day 74 test suite: 37 cases, 100% pass rate
 
   Day 75: Editor JavaScript
   -------------------------
@@ -431,6 +443,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 74: Variant Sub-Row UI — editor table layout, collapse/expand, kind badges, sidebar structured variants (37 tests)
 Day 73: Migration & backward compatibility — publish flow, parent base price, Sprint 9.1 complete (45 tests)
 Day 72: Extraction pipeline → structured variants — all 3 strategies, DB insert, backfill (59 tests)
 Day 71: Database schema & migration — draft_item_variants table, CRUD, LEFT JOIN grouping (82 tests)
@@ -520,7 +533,8 @@ Tests:
 - tests/test_day71_variant_schema.py   — 82 cases (Day 71)
 - tests/test_day72_extraction_variants.py — 59 cases (Day 72)
 - tests/test_day73_migration_compat.py — 45 cases (Day 73)
+- tests/test_day74_variant_subrow_ui.py — 37 cases (Day 74)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,707 tests, all passing
+- TOTAL: 2,744 tests, all passing
 
 ================================================================================
