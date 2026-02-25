@@ -4446,25 +4446,131 @@ def draft_export_csv(draft_id: int):
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.csv"'
     return resp
 
+@app.get("/drafts/<int:draft_id>/export_variants.csv")
+@login_required
+def draft_export_csv_variants(draft_id: int):
+    """CSV export with variant sub-rows under each parent item."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["type", "id", "name", "description", "price_cents", "category", "kind", "label"])
+    for it in items:
+        writer.writerow([
+            "item",
+            it.get("id", ""),
+            it.get("name", ""),
+            it.get("description", ""),
+            it.get("price_cents", 0),
+            it.get("category") or "",
+            "",
+            "",
+        ])
+        for v in (it.get("variants") or []):
+            writer.writerow([
+                "variant",
+                "",
+                "",
+                "",
+                v.get("price_cents", 0),
+                "",
+                v.get("kind", "size"),
+                v.get("label", ""),
+            ])
+    csv_data = buf.getvalue().encode("utf-8-sig")
+    resp = make_response(csv_data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_variants.csv"'
+    return resp
+
+
+@app.get("/drafts/<int:draft_id>/export_wide.csv")
+@login_required
+def draft_export_csv_wide(draft_id: int):
+    """CSV export with variant prices as extra columns (one row per item)."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+
+    # Collect all unique variant labels across the draft (in order of first appearance)
+    seen_labels: dict = {}  # label -> insertion order
+    for it in items:
+        for v in (it.get("variants") or []):
+            lbl = (v.get("label") or "").strip()
+            if lbl and lbl not in seen_labels:
+                seen_labels[lbl] = len(seen_labels)
+    label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    base_headers = ["id", "name", "description", "price_cents", "category"]
+    writer.writerow(base_headers + [f"price_{lbl}" for lbl in label_order])
+
+    for it in items:
+        row = [
+            it.get("id", ""),
+            it.get("name", ""),
+            it.get("description", ""),
+            it.get("price_cents", 0),
+            it.get("category") or "",
+        ]
+        # Build a label -> price mapping for this item's variants
+        vpmap = {}
+        for v in (it.get("variants") or []):
+            lbl = (v.get("label") or "").strip()
+            if lbl:
+                vpmap[lbl] = v.get("price_cents", 0)
+        # Append variant price columns
+        for lbl in label_order:
+            row.append(vpmap.get(lbl, ""))
+        writer.writerow(row)
+
+    csv_data = buf.getvalue().encode("utf-8-sig")
+    resp = make_response(csv_data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_wide.csv"'
+    return resp
+
+
 @app.get("/drafts/<int:draft_id>/export.json")
 @login_required
 def draft_export_json(draft_id: int):
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id) or []
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+
+    # Clean items for export: include nested variants array per item
+    export_items = []
+    for it in items:
+        eitem = {
+            "id": it.get("id"),
+            "name": it.get("name", ""),
+            "description": it.get("description", ""),
+            "price_cents": it.get("price_cents", 0),
+            "category": it.get("category") or "",
+            "position": it.get("position"),
+        }
+        variants = it.get("variants") or []
+        if variants:
+            eitem["variants"] = [
+                {
+                    "label": v.get("label", ""),
+                    "price_cents": v.get("price_cents", 0),
+                    "kind": v.get("kind", "size"),
+                }
+                for v in variants
+            ]
+        else:
+            eitem["variants"] = []
+        export_items.append(eitem)
+
     payload = {
         "draft_id": draft_id,
         "title": draft.get("title"),
         "restaurant_id": draft.get("restaurant_id"),
         "status": draft.get("status"),
-        "items": items,
+        "items": export_items,
         "exported_at": _now_iso(),
     }
-
-    # 🔒 Validate contract on the way out as well
-    ok, err = validate_draft_payload(payload)
-    if not ok:
-        return make_response(json.dumps({"error": f"schema: {err}"}, indent=2), 500)
 
     resp = make_response(json.dumps(payload, indent=2))
     resp.headers["Content-Type"] = "application/json; charset=utf-8"

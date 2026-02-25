@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 77 (February 25, 2026) — Low-Confidence & Bulk Operations (Sprint 9.2)
+Last Updated: Day 78 (February 25, 2026) — CSV & JSON Export with Variants (Sprint 9.3)
 
 ================================================================================
 PROJECT MISSION
@@ -359,14 +359,18 @@ Sprint 9.2 — Editor Redesign (Days 74-77)
 Sprint 9.3 — Export Formats (Days 78-82)
 .........................................
 
-  Day 78: CSV & JSON Export with Variants
+  Day 78: CSV & JSON Export with Variants *** COMPLETE ***
   ----------------------------------------
-  [ ] JSON export: items[].variants[] nested array
+  [x] JSON export: items[].variants[] nested array
         {name, description, price_cents, category, variants: [{label, price_cents, kind}]}
-  [ ] CSV export option A (sub-rows): parent row + indented variant rows
-  [ ] CSV export option B (columns): one row per item, size prices as extra columns
-        name, description, category, price_small, price_medium, price_large
-  [ ] User toggle in export UI to choose format
+  [x] CSV export option A (sub-rows): parent row + variant sub-rows
+        type,id,name,description,price_cents,category,kind,label
+  [x] CSV export option B (columns): one row per item, size prices as extra columns
+        id,name,description,price_cents,category,price_Small,price_Medium,price_Large
+  [x] User toggle in export UI to choose format (6 options in dropdown)
+  [x] Backward compat: original flat CSV export unchanged
+
+    Day 78 test suite: 31 cases, 100% pass rate
 
   Day 79: Excel Export with Variants
   -----------------------------------
@@ -485,6 +489,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 78: CSV & JSON Export with Variants — 3 variant-aware export formats, UI toggle, backward compat (31 tests)
 Day 77: Low-Confidence & Bulk Operations — variant info in panel, bulk category change, delete-selected cascade fix, Sprint 9.2 complete (25 tests)
 Day 76: Save/Load Round-Trip & Backfill — backfill endpoint + UI button, save/load verification, publish round-trip (26 tests)
 Day 75: Inline Variant Validation & Reorder — up/down reorder, price inversion warnings, template presets, contract validation (59 tests)
@@ -582,7 +587,8 @@ Tests:
 - tests/test_day75_variant_reorder_validate.py — 59 cases (Day 75)
 - tests/test_day76_save_load_backfill.py — 26 cases (Day 76)
 - tests/test_day77_low_conf_bulk_ops.py — 25 cases (Day 77)
+- tests/test_day78_export_variants.py  — 31 cases (Day 78)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,854 tests, all passing
+- TOTAL: 2,885 tests, all passing
 
 ================================================================================

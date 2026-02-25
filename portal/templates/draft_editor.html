@@ -568,10 +568,12 @@
             <details class="export">
               <summary class="btn">Export ▾</summary>
               <div class="menu">
-                <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">Download CSV (all rows)</a>
-                <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">Download JSON (all rows)</a>
-                <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Download Excel (all rows)</a>
-                <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
+                <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">CSV (flat rows)</a>
+                <a href="{{ url_for('draft_export_csv_variants', draft_id=draft.id) }}">CSV with Variants (sub-rows)</a>
+                <a href="{{ url_for('draft_export_csv_wide', draft_id=draft.id) }}">CSV Wide (size columns)</a>
+                <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">JSON (with variants)</a>
+                <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Excel (all rows)</a>
+                <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">OCR Debug (CSV)</a>
                 <button type="button" id="export-visible-btn">Export Visible as CSV</button>
               </div>
             </details>

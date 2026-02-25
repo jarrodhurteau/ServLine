@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 COMPLETE (Editor Redesign)**
+➡ **Phase 9 — Structured Variants & Export — Sprint 9.3 IN PROGRESS (Export Formats)**
 
-Day 77 completes Sprint 9.2 (Editor Redesign) with low-confidence panel enhancements and bulk operations. The low-confidence panel now shows variant info (count + label summary) for flagged items, with click-to-scroll navigation that auto-expands collapsed variants. A new bulk "Set Category" toolbar button changes the category for all selected items while preserving existing variants. The delete-selected handler now properly cascades variant row deletion. All five Day 77 checklist items verified: low-confidence panel with variants, bulk category preserves variants, duplicate copies variants, delete cascades variants, search includes variant labels. 2,854 tests passing across 28 test suites.
+Day 78 begins Sprint 9.3 (Export Formats) with three variant-aware export formats. JSON export now includes nested `variants: [{label, price_cents, kind}]` per item. CSV sub-row export produces `type=item` parent rows followed by `type=variant` child rows with label/price/kind. CSV wide export creates dynamic `price_Small`, `price_Medium`, `price_Large` columns based on all unique variant labels across the draft, with items having their variant prices in the matching columns. The export UI dropdown now offers 6 format choices. Original flat CSV export preserved for backward compatibility. 2,885 tests passing across 29 test suites.
 
 ---
 
@@ -1254,6 +1254,10 @@ ServLine now has:
 - ✅ Low-confidence panel — variant info display, click-to-scroll, auto-expand
 - ✅ Bulk category change — toolbar button, preserves variants on category update
 - ✅ Delete-selected cascade — bulk delete now removes associated variant rows
+- ✅ JSON export with nested variants — `items[].variants[]` array per item
+- ✅ CSV sub-row export — `type=item`/`type=variant` rows with kind and label
+- ✅ CSV wide export — dynamic `price_Label` columns from all variant labels
+- ✅ Export UI dropdown — 6 format choices (flat CSV, sub-row CSV, wide CSV, JSON, Excel, Debug)
 
 ---
 
@@ -1301,3 +1305,12 @@ ServLine now has:
   - Bulk "Set Category" button for selected items (preserves variants)
   - Delete-selected cascade fix — variant rows + IDs cleaned up
   - Sprint 9.2 complete: 147 tests across Days 74-77
+
+### Sprint 9.3 — Export Formats (Days 78-82) — IN PROGRESS
+- ✅ CSV & JSON Export with Variants (Day 78):
+  - JSON export: nested `variants: [{label, price_cents, kind}]` per item
+  - CSV sub-row export: `type=item` parent rows + `type=variant` child rows
+  - CSV wide export: dynamic `price_Label` columns from unique variant labels
+  - Export UI dropdown: 6 format choices (flat, sub-row, wide, JSON, Excel, debug)
+  - Backward compat: original flat CSV unchanged
+  - Day 78 test suite: 31 cases, 100% pass rate
