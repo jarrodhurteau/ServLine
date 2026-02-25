@@ -129,16 +129,27 @@
     .low-conf-list li {
       font-size: 0.82rem;
       color: #f9fafb;
-      display: inline-flex;
+      display: flex;
       align-items: center;
       gap: 0.35rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: 999px;
+      padding: 0.35rem 0.6rem;
+      border-radius: 0.5rem;
       background: rgba(15, 23, 42, 0.85);
       border: 1px solid rgba(148, 163, 184, 0.4);
+      cursor: pointer;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    .low-conf-list li:hover {
+      border-color: rgba(248, 113, 113, 0.7);
     }
     .low-conf-list .lc-name {
       font-weight: 600;
+      flex-shrink: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 140px;
     }
     .low-conf-list .lc-cat {
       font-size: 0.75rem;
@@ -146,10 +157,28 @@
       border-radius: 999px;
       background: rgba(30, 64, 175, 0.2);
       color: #bfdbfe;
+      flex-shrink: 0;
     }
     .low-conf-list .lc-score {
       font-size: 0.75rem;
       opacity: 0.8;
+      flex-shrink: 0;
+    }
+    .low-conf-list .lc-variants {
+      font-size: 0.72rem;
+      color: #c4b5fd;
+      margin-left: auto;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .low-conf-list .lc-var-labels {
+      font-size: 0.7rem;
+      color: #a5b4fc;
+      opacity: 0.85;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 120px;
     }
 
     .pill-low {
@@ -595,29 +624,39 @@
 
         <div class="spacer"></div>
         <button id="add-row-btn" class="btn">Add Item</button>
+        <span style="position:relative;display:inline-flex;align-items:center;gap:4px;">
+          <input list="category-datalist" id="bulk-cat-input" class="cell-input"
+                 placeholder="Category..." style="width:130px;font-size:.82rem;"
+                 {% if draft.status != 'editing' %}disabled{% endif %} />
+          <button id="bulk-cat-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Set Category</button>
+        </span>
         <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
       </div>
 
-      {# === Low Confidence Bucket (Phase 3 pt.7) === #}
+      {# === Low Confidence Bucket (Phase 3 pt.7 + Day 77 variant info) === #}
       {% set q_thresh = quality_threshold|default(65) %}
       {% if low_conf_items is defined and low_conf_items %}
-      <section class="low-conf-panel">
+      <section class="low-conf-panel" id="low-conf-panel">
         <div class="low-conf-header">
           <span class="low-conf-header-title">Low Confidence Items</span>
           <span class="low-conf-sub">
             {{ low_conf_items|length }} item{{ low_conf_items|length != 1 and 's' or '' }}
-            scored &lt; {{ q_thresh }}/100. Review these first.
+            scored &lt; {{ q_thresh }}/100. Click to review.
           </span>
         </div>
         <ul class="low-conf-list">
           {% for it in low_conf_items %}
-          <li>
+          <li data-lc-item-id="{{ it.id }}" title="Click to scroll to item">
             <span class="lc-name">{{ it.name or "Untitled" }}</span>
             {% if it.category %}
               <span class="lc-cat">{{ it.category }}</span>
             {% endif %}
             {% if it.quality is not none %}
               <span class="lc-score">{{ it.quality }}/100</span>
+            {% endif %}
+            {% if it.variants %}
+              <span class="lc-variants">{{ it.variants|length }} var</span>
+              <span class="lc-var-labels" title="{{ it.variants|map(attribute='label')|join(', ') }}">{{ it.variants|map(attribute='label')|join(', ') }}</span>
             {% endif %}
           </li>
           {% endfor %}
@@ -1399,6 +1438,13 @@
       const selected=$$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr"));
       if (!selected.length) return;
       selected.forEach(tr=>{
+        // Cascade: delete associated variant rows
+        const parentId = tr.getAttribute("data-id");
+        $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`).forEach(vtr => {
+          const vid = vtr.getAttribute("data-variant-id");
+          if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+          vtr.remove();
+        });
         queueDelete(tr);
         tr.remove();
       });
@@ -1407,6 +1453,44 @@
       rebuildOutline();
       applyConfidenceTint();
     });
+
+    // === Bulk category change (Day 77) ===
+    $("#bulk-cat-btn")?.addEventListener("click", (e)=>{
+      e.preventDefault();
+      const newCat = ($("#bulk-cat-input")?.value || "").trim();
+      if (!newCat){ showToast("Enter a category first"); return; }
+      const selected = $$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr")).filter(tr=>tr && !tr.classList.contains("variant-row"));
+      if (!selected.length){ showToast("Select items first"); return; }
+      selected.forEach(tr=>{
+        const catInput = $(".category", tr);
+        if (catInput) catInput.value = newCat;
+        tr.setAttribute("data-cat", newCat);
+      });
+      setDirty(true);
+      showToast(`Category set to "${newCat}" for ${selected.length} item(s)`);
+      rebuildOutline();
+    });
+
+    // === Low-confidence panel click-to-scroll (Day 77) ===
+    const lcPanel = $("#low-conf-panel");
+    if (lcPanel) {
+      lcPanel.addEventListener("click", (e) => {
+        const li = e.target.closest("li[data-lc-item-id]");
+        if (!li) return;
+        const itemId = li.getAttribute("data-lc-item-id");
+        focusRow(itemId);
+        // Expand variants if collapsed
+        const parentRow = document.querySelector(`#items-body tr[data-id="${CSS.escape(itemId)}"]`);
+        if (parentRow) {
+          $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(itemId)}"]`).forEach(vtr => {
+            vtr.classList.remove("variant-collapsed");
+            vtr.style.display = "";
+          });
+          const toggle = $(".toggle-variants-btn", parentRow);
+          if (toggle) toggle.textContent = toggle.textContent.replace("▾", "▴");
+        }
+      });
+    }
 
     itemsBody.addEventListener("blur",(e)=>{
       const el=e.target;

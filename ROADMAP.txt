@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 76 (February 25, 2026) — Save/Load Round-Trip & Backfill (Sprint 9.2)
+Last Updated: Day 77 (February 25, 2026) — Low-Confidence & Bulk Operations (Sprint 9.2)
 
 ================================================================================
 PROJECT MISSION
@@ -332,13 +332,29 @@ Sprint 9.2 — Editor Redesign (Days 74-77)
 
     Day 76 test suite: 26 cases, 100% pass rate
 
-  Day 77: Low-Confidence & Bulk Operations
+  Day 77: Low-Confidence & Bulk Operations *** COMPLETE ***
   -----------------------------------------
-  [ ] Low-confidence panel shows variant info for flagged items
-  [ ] Bulk category change preserves variants
-  [ ] Duplicate item copies variants
-  [ ] Delete item cascades variant deletion (FK constraint)
-  [ ] Filter/search includes variant labels
+  [x] Low-confidence panel shows variant info for flagged items
+      - Variant count + label summary per item in panel
+      - Click-to-scroll from panel to item row in table
+      - Auto-expand collapsed variants on click
+  [x] Bulk category change preserves variants
+      - New "Set Category" toolbar button with category input
+      - Applies to all selected items via checkbox
+      - No _variants key in payload → existing variants preserved
+  [x] Duplicate item copies variants (Day 74, verified Day 77)
+      - clone_draft copies variant rows with correct parent references
+      - Labels, prices, kinds, positions all preserved
+  [x] Delete item cascades variant deletion (FK constraint)
+      - FK CASCADE on draft_item_variants.item_id
+      - Delete-selected bulk handler now cascades variant rows + IDs
+      - No orphan variants possible
+  [x] Filter/search includes variant labels (Day 74, verified Day 77)
+      - collectRowsFiltered() checks variant label inputs
+      - Parent + variant rows visibility synced
+
+    Day 77 test suite: 25 cases, 100% pass rate
+    Sprint 9.2 complete: Days 74-77, 147 tests, all passing
 
 Sprint 9.3 — Export Formats (Days 78-82)
 .........................................
@@ -469,6 +485,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 77: Low-Confidence & Bulk Operations — variant info in panel, bulk category change, delete-selected cascade fix, Sprint 9.2 complete (25 tests)
 Day 76: Save/Load Round-Trip & Backfill — backfill endpoint + UI button, save/load verification, publish round-trip (26 tests)
 Day 75: Inline Variant Validation & Reorder — up/down reorder, price inversion warnings, template presets, contract validation (59 tests)
 Day 74: Variant Sub-Row UI — editor table layout, collapse/expand, kind badges, sidebar structured variants (37 tests)
@@ -564,7 +581,8 @@ Tests:
 - tests/test_day74_variant_subrow_ui.py — 37 cases (Day 74)
 - tests/test_day75_variant_reorder_validate.py — 59 cases (Day 75)
 - tests/test_day76_save_load_backfill.py — 26 cases (Day 76)
+- tests/test_day77_low_conf_bulk_ops.py — 25 cases (Day 77)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,829 tests, all passing
+- TOTAL: 2,854 tests, all passing
 
 ================================================================================

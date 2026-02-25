@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 IN PROGRESS (Editor Redesign)**
+➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 COMPLETE (Editor Redesign)**
 
-Day 76 completes save/load round-trip verification and adds the Backfill Variants feature. A new Flask endpoint (`POST /drafts/<id>/backfill_variants`) merges legacy "Name (Size)" items into structured parent + variant rows using the existing `backfill_variants_from_names()` function. A sidebar button in the draft editor calls this endpoint with async feedback — showing a toast with groups found and variants created, then auto-reloading. The test suite verifies full lifecycle: save with variants → reload → verify persistence, backfill → reload → publish expanded rows. 2,829 tests passing across 27 test suites.
+Day 77 completes Sprint 9.2 (Editor Redesign) with low-confidence panel enhancements and bulk operations. The low-confidence panel now shows variant info (count + label summary) for flagged items, with click-to-scroll navigation that auto-expands collapsed variants. A new bulk "Set Category" toolbar button changes the category for all selected items while preserving existing variants. The delete-selected handler now properly cascades variant row deletion. All five Day 77 checklist items verified: low-confidence panel with variants, bulk category preserves variants, duplicate copies variants, delete cascades variants, search includes variant labels. 2,854 tests passing across 28 test suites.
 
 ---
 
@@ -1251,6 +1251,9 @@ ServLine now has:
 - ✅ Inline price validation — S < M < L inversion warnings with ordinal mapping
 - ✅ Variant template presets — 6 quick-add templates (S/M/L, Half/Whole, etc.)
 - ✅ Contract validation — `_variants` schema + `deleted_variant_ids` validated
+- ✅ Low-confidence panel — variant info display, click-to-scroll, auto-expand
+- ✅ Bulk category change — toolbar button, preserves variants on category update
+- ✅ Delete-selected cascade — bulk delete now removes associated variant rows
 
 ---
 
@@ -1266,7 +1269,7 @@ ServLine now has:
 - ✅ Variant-aware publish flow (Day 73)
 - ✅ Parent base price enforcement (Day 73)
 
-### Sprint 9.2 — Editor Redesign (Days 74-77) *** IN PROGRESS ***
+### Sprint 9.2 — Editor Redesign (Days 74-77) *** COMPLETE ***
 - ✅ Variant Sub-Row UI (Day 74):
   - Indented variant rows with kind-colored badges (size/combo/flavor/style/other)
   - Collapse/expand toggle (auto-collapses 4+ variants)
@@ -1292,3 +1295,9 @@ ServLine now has:
   - Backfill button in editor sidebar with async toast feedback
   - Guards: draft must exist and be in editing state
   - Full lifecycle: save → backfill → reload → publish expanded rows
+- ✅ Low-Confidence & Bulk Operations (Day 77):
+  - Low-confidence panel shows variant count + labels per flagged item
+  - Click-to-scroll from panel to item row with auto-expand variants
+  - Bulk "Set Category" button for selected items (preserves variants)
+  - Delete-selected cascade fix — variant rows + IDs cleaned up
+  - Sprint 9.2 complete: 147 tests across Days 74-77
