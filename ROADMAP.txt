@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 75 (February 24, 2026) — Inline Variant Validation & Reorder (Sprint 9.2)
+Last Updated: Day 76 (February 25, 2026) — Save/Load Round-Trip & Backfill (Sprint 9.2)
 
 ================================================================================
 PROJECT MISSION
@@ -317,11 +317,20 @@ Sprint 9.2 — Editor Redesign (Days 74-77)
 
     Day 75 test suite: 59 cases, 100% pass rate
 
-  Day 76: Save/Load with Variants
-  --------------------------------
-  NOTE: Most Day 76 tasks completed in Day 74 (save payload, endpoint, load).
-  [ ] Remaining: edit variants -> save -> reload -> verify UI persistence
-  [ ] Backfill button in editor UI (wire backfill_variants_from_names)
+  Day 76: Save/Load Round-Trip & Backfill *** COMPLETE ***
+  ----------------------------------------
+  NOTE: Most save/load tasks completed in Day 74 (save payload, endpoint, load).
+  [x] End-to-end save/load round-trip verified (upsert → reload → variants intact)
+  [x] Backfill Flask endpoint: POST /drafts/<id>/backfill_variants
+      - Calls backfill_variants_from_names(), returns JSON summary
+      - Guards: draft must exist and be in editing state
+  [x] Backfill button in editor sidebar UI
+      - Async fetch with toast feedback (groups found, variants created)
+      - Auto-reloads page on success; no-op toast if nothing to backfill
+      - Disabled when draft is not in editing state
+  [x] Test: 26 cases covering save/load, backfill, endpoint guards, publish
+
+    Day 76 test suite: 26 cases, 100% pass rate
 
   Day 77: Low-Confidence & Bulk Operations
   -----------------------------------------
@@ -460,6 +469,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 76: Save/Load Round-Trip & Backfill — backfill endpoint + UI button, save/load verification, publish round-trip (26 tests)
 Day 75: Inline Variant Validation & Reorder — up/down reorder, price inversion warnings, template presets, contract validation (59 tests)
 Day 74: Variant Sub-Row UI — editor table layout, collapse/expand, kind badges, sidebar structured variants (37 tests)
 Day 73: Migration & backward compatibility — publish flow, parent base price, Sprint 9.1 complete (45 tests)
@@ -553,7 +563,8 @@ Tests:
 - tests/test_day73_migration_compat.py — 45 cases (Day 73)
 - tests/test_day74_variant_subrow_ui.py — 37 cases (Day 74)
 - tests/test_day75_variant_reorder_validate.py — 59 cases (Day 75)
+- tests/test_day76_save_load_backfill.py — 26 cases (Day 76)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,803 tests, all passing
+- TOTAL: 2,829 tests, all passing
 
 ================================================================================

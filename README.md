@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 IN PROGRESS (Editor Redesign)**
 
-Day 75 adds inline variant validation and reorder controls. Variant sub-rows now have up/down arrow buttons for position reordering within a parent item. Real-time price-order validation highlights S < M < L inversions with warning icons. Six variant template presets (S/M/L, Half/Whole, Slice/Pie, etc.) let users quickly scaffold variant structures from a dropdown. The save contract now validates `_variants` schema (label, price_cents, kind, position, id) and `deleted_variant_ids`. Position is collected from DOM order for accurate reorder persistence. 2,803 tests passing across 26 test suites.
+Day 76 completes save/load round-trip verification and adds the Backfill Variants feature. A new Flask endpoint (`POST /drafts/<id>/backfill_variants`) merges legacy "Name (Size)" items into structured parent + variant rows using the existing `backfill_variants_from_names()` function. A sidebar button in the draft editor calls this endpoint with async feedback — showing a toast with groups found and variants created, then auto-reloading. The test suite verifies full lifecycle: save with variants → reload → verify persistence, backfill → reload → publish expanded rows. 2,829 tests passing across 27 test suites.
 
 ---
 
@@ -1286,3 +1286,9 @@ ServLine now has:
   - `_variants` schema validation in save contract
   - `deleted_variant_ids` validation in save contract
   - Position from DOM order (0-indexed) for accurate reorder persistence
+- ✅ Save/Load Round-Trip & Backfill (Day 76):
+  - End-to-end save/load round-trip verified (upsert → reload → variants intact)
+  - Backfill Flask endpoint: `POST /drafts/<id>/backfill_variants`
+  - Backfill button in editor sidebar with async toast feedback
+  - Guards: draft must exist and be in editing state
+  - Full lifecycle: save → backfill → reload → publish expanded rows

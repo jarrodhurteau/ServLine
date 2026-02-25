@@ -479,6 +479,12 @@
         {% endif %}
       </form>
 
+      <!-- Backfill Variants -->
+      <div style="margin-top:10px;">
+        <button id="backfill-variants-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Backfill Variants</button>
+        <div class="helper-note">Merge "Name (Size)" items into structured variants.</div>
+      </div>
+
       <!-- OCR Debug -->
       <hr style="border-color:#1f2a44; margin:12px 0;">
       <h3>OCR Debug</h3>
@@ -833,6 +839,34 @@
           console.error('Refine error:', err);
         } finally {
           window.location.reload();
+        }
+      });
+    }
+
+    /* Backfill Variants button */
+    const backfillBtn = document.getElementById('backfill-variants-btn');
+    if (backfillBtn) {
+      backfillBtn.addEventListener('click', async () => {
+        backfillBtn.disabled = true;
+        backfillBtn.textContent = 'Backfilling…';
+        try {
+          const res = await fetch('{{ url_for("draft_backfill_variants", draft_id=draft.id) }}', {
+            method: 'POST', credentials: 'same-origin'
+          });
+          const data = await res.json();
+          if (!res.ok || data.ok === false) throw new Error(data.error || 'Backfill failed');
+          if (data.groups_found === 0) {
+            showToast('No "Name (Size)" patterns found to backfill.');
+            backfillBtn.disabled = false;
+            backfillBtn.textContent = 'Backfill Variants';
+          } else {
+            showSuccess(`Backfilled ${data.groups_found} group(s): ${data.variants_created} variants created.`);
+            setTimeout(() => window.location.reload(), 1000);
+          }
+        } catch (err) {
+          showError(String(err));
+          backfillBtn.disabled = false;
+          backfillBtn.textContent = 'Backfill Variants';
         }
       });
     }

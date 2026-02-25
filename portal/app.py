@@ -4242,6 +4242,27 @@ def draft_publish_now(draft_id: int):
         flash(f"Publish failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
+@app.post("/drafts/<int:draft_id>/backfill_variants")
+@login_required
+def draft_backfill_variants(draft_id: int):
+    """Merge legacy 'Name (Size)' items into structured parent + variant rows."""
+    _require_drafts_storage()
+    try:
+        draft = drafts_store.get_draft(draft_id)
+        if not draft:
+            return jsonify({"ok": False, "error": "Draft not found"}), 404
+        if draft.get("status") != "editing":
+            return jsonify({"ok": False, "error": "Draft is not in editing state"}), 400
+        result = drafts_store.backfill_variants_from_names(draft_id)
+        return jsonify({
+            "ok": True,
+            "groups_found": result.get("groups_found", 0),
+            "variants_created": result.get("variants_created", 0),
+            "items_deleted": result.get("items_deleted", 0),
+        }), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.post("/drafts/<int:draft_id>/assign_restaurant")
 @login_required
 def draft_assign_restaurant(draft_id: int):
