@@ -361,6 +361,94 @@
       background: rgba(220, 53, 69, 0.15);
       border-color: rgba(220, 53, 69, 0.6);
     }
+
+    /* ===== Day 75: Reorder Buttons ===== */
+    .variant-reorder-btn {
+      background: none;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: #94a3b8;
+      border-radius: 3px;
+      padding: 0 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      line-height: 1.4;
+      min-width: 20px;
+    }
+    .variant-reorder-btn:hover {
+      background: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.5);
+      color: #a5b4fc;
+    }
+    .variant-reorder-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+    .variant-actions {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+    }
+
+    /* ===== Day 75: Price Inversion Warning ===== */
+    .variant-price.price-warn {
+      border-color: rgba(245, 158, 11, 0.7) !important;
+      background: rgba(245, 158, 11, 0.08) !important;
+    }
+    .price-warn-icon {
+      display: inline-flex;
+      align-items: center;
+      color: #fbbf24;
+      font-size: 0.75rem;
+      margin-left: 4px;
+      cursor: help;
+    }
+
+    /* ===== Day 75: Variant Template Dropdown ===== */
+    .variant-template-btn {
+      background: none;
+      border: 1px dashed rgba(16, 185, 129, 0.4);
+      color: #6ee7b7;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      line-height: 1.4;
+      position: relative;
+    }
+    .variant-template-btn:hover {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.6);
+    }
+    .variant-template-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      background: #1a2236;
+      border: 1px solid #2b3552;
+      border-radius: 6px;
+      padding: 4px 0;
+      min-width: 160px;
+      z-index: 100;
+      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+      display: none;
+    }
+    .variant-template-menu.open { display: block; }
+    .variant-template-menu button {
+      display: block;
+      width: 100%;
+      background: none;
+      border: none;
+      color: #cbd5e1;
+      text-align: left;
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .variant-template-menu button:hover {
+      background: rgba(99, 102, 241, 0.15);
+      color: #fff;
+    }
   </style>
 
   <div class="layout">
@@ -610,6 +698,9 @@
                   <button class="btn toggle-variants-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.variants|length }} var ▾</button>
                 {% endif %}
                 <button class="btn add-variant-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>+ Variant</button>
+                <span style="position:relative;display:inline-block;">
+                  <button class="variant-template-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>&#9783; Preset</button>
+                </span>
                 <button class="btn duplicate-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Duplicate</button>
                 <button class="btn btn-danger delete-btn" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
               </td>
@@ -647,7 +738,11 @@
               </td>
               <td>{{ v.position|default(0) }}</td>
               <td>
-                <button class="delete-variant-btn" data-variant-id="{{ v.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
+                <div class="variant-actions">
+                  <button class="variant-reorder-btn variant-move-up" title="Move up" {% if draft.status != 'editing' %}disabled{% endif %}>&uarr;</button>
+                  <button class="variant-reorder-btn variant-move-down" title="Move down" {% if draft.status != 'editing' %}disabled{% endif %}>&darr;</button>
+                  <button class="delete-variant-btn" data-variant-id="{{ v.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>Delete</button>
+                </div>
               </td>
             </tr>
               {% endfor %}
@@ -1027,11 +1122,11 @@
         }
         const confidence = confStr && /^\d+$/.test(confStr) ? Number(confStr) : null;
 
-        // Collect variants for this item
+        // Collect variants for this item (position = DOM order)
         const itemId = idAttr || tr.getAttribute("data-id");
         const variantRows = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(itemId))}"]`);
         const _variants = [];
-        variantRows.forEach(vtr => {
+        variantRows.forEach((vtr, vIdx) => {
           const vid = vtr.getAttribute("data-variant-id");
           const vLabel = ($(".variant-label-input", vtr)?.value || "").trim();
           const vPriceStr = ($(".variant-price", vtr)?.value || "").trim();
@@ -1043,7 +1138,7 @@
             label: vLabel,
             price_cents: vPriceCents,
             kind: vKind,
-            position: _variants.length
+            position: vIdx
           });
         });
 
@@ -1498,7 +1593,11 @@
         </td>
         <td>${prefill.position != null ? prefill.position : existing.length}</td>
         <td>
-          <button class="delete-variant-btn" data-variant-id="${tr.getAttribute('data-variant-id')}">Delete</button>
+          <div class="variant-actions">
+            <button class="variant-reorder-btn variant-move-up" title="Move up">&uarr;</button>
+            <button class="variant-reorder-btn variant-move-down" title="Move down">&darr;</button>
+            <button class="delete-variant-btn" data-variant-id="${tr.getAttribute('data-variant-id')}">Delete</button>
+          </div>
         </td>`;
       insertAfter.after(tr);
       setDirty(true);
@@ -1606,19 +1705,231 @@
       }
     });
 
-    // Variant price formatting on blur
+    // Variant price formatting on blur + price validation
     itemsBody.addEventListener("blur", (e)=>{
       if (e.target.classList.contains("variant-price")){
         let cents = dollarsToCents(e.target.value);
         if (!Number.isFinite(cents) || cents < 0) cents = 0;
         e.target.value = (cents/100).toFixed(2);
+        // Trigger price order validation for parent
+        const vtr = e.target.closest("tr.variant-row");
+        if (vtr) validateVariantPriceOrder(vtr.getAttribute("data-parent-id"));
       }
     }, true);
+
+    /* ===== Day 75: Variant Reorder (up/down) ===== */
+    function moveVariantRow(variantRow, direction){
+      const parentId = variantRow.getAttribute("data-parent-id");
+      const siblings = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      const idx = siblings.indexOf(variantRow);
+      if (idx < 0) return;
+
+      if (direction === "up" && idx > 0){
+        siblings[idx - 1].before(variantRow);
+      } else if (direction === "down" && idx < siblings.length - 1){
+        siblings[idx + 1].after(variantRow);
+      } else {
+        return; // no-op
+      }
+      setDirty(true);
+      updateReorderButtons(parentId);
+      validateVariantPriceOrder(parentId);
+      rebuildOutline();
+    }
+
+    function updateReorderButtons(parentId){
+      const siblings = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      siblings.forEach((vtr, i) => {
+        const upBtn = $(".variant-move-up", vtr);
+        const downBtn = $(".variant-move-down", vtr);
+        if (upBtn) upBtn.disabled = (i === 0);
+        if (downBtn) downBtn.disabled = (i === siblings.length - 1);
+      });
+    }
+
+    // Wire reorder click handlers via delegation
+    itemsBody.addEventListener("click", (e)=>{
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      if (btn.classList.contains("variant-move-up")){
+        e.stopPropagation();
+        const vtr = btn.closest("tr.variant-row");
+        if (vtr) moveVariantRow(vtr, "up");
+        return;
+      }
+      if (btn.classList.contains("variant-move-down")){
+        e.stopPropagation();
+        const vtr = btn.closest("tr.variant-row");
+        if (vtr) moveVariantRow(vtr, "down");
+        return;
+      }
+    });
+
+    /* ===== Day 75: Inline Price Order Validation ===== */
+    const SIZE_ORDINALS = {
+      'xs':5,'xsm':5,'extra small':5,
+      's':10,'sm':10,'sml':10,'small':10,'mini':10,'personal':10,'individual':10,
+      'm':20,'md':20,'med':20,'medium':20,'regular':20,'reg':20,
+      'l':30,'lg':30,'lrg':30,'large':30,
+      'xl':40,'xlg':40,'extra large':40,'x-large':40,
+      'xxl':50,'jumbo':50,'family':50,'party':50,
+      'half':110,'whole':120,'full':120,
+      'slice':130,'pie':140,
+      'single':210,'double':220,'triple':230
+    };
+
+    function getVariantOrdinal(label){
+      const norm = (label||"").trim().toLowerCase();
+      if (SIZE_ORDINALS[norm] != null) return SIZE_ORDINALS[norm];
+      // Check for inch sizes like 10", 12", 16"
+      const inchMatch = norm.match(/^(\d+)["\u201d]?\s*(in|inch)?$/i);
+      if (inchMatch) return parseInt(inchMatch[1], 10);
+      return null;
+    }
+
+    function validateVariantPriceOrder(parentId){
+      const variants = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      // Clear existing warnings
+      variants.forEach(vtr => {
+        const priceInput = $(".variant-price", vtr);
+        if (priceInput) priceInput.classList.remove("price-warn");
+        const existingIcon = $(".price-warn-icon", vtr);
+        if (existingIcon) existingIcon.remove();
+      });
+
+      // Only validate size-kind variants with ordinals
+      const sizeVariants = variants
+        .filter(vtr => (vtr.getAttribute("data-kind") || "size") === "size")
+        .map(vtr => {
+          const label = ($(".variant-label-input", vtr)?.value || "").trim();
+          const price = dollarsToCents($(".variant-price", vtr)?.value || "");
+          const ord = getVariantOrdinal(label);
+          return { vtr, label, price, ord };
+        })
+        .filter(v => v.ord != null && v.price > 0);
+
+      if (sizeVariants.length < 2) return;
+
+      // Sort by ordinal to check monotonic
+      const sorted = [...sizeVariants].sort((a,b) => a.ord - b.ord);
+      for (let i = 1; i < sorted.length; i++){
+        if (sorted[i].price < sorted[i-1].price){
+          // Price inversion detected
+          const priceInput = $(".variant-price", sorted[i].vtr);
+          if (priceInput){
+            priceInput.classList.add("price-warn");
+            // Add warning icon if not already present
+            if (!$(".price-warn-icon", sorted[i].vtr.querySelector("td:nth-child(4)"))){
+              const icon = document.createElement("span");
+              icon.className = "price-warn-icon";
+              icon.title = `Price inversion: ${sorted[i].label} ($${(sorted[i].price/100).toFixed(2)}) < ${sorted[i-1].label} ($${(sorted[i-1].price/100).toFixed(2)})`;
+              icon.textContent = "\u26A0";
+              priceInput.parentElement.appendChild(icon);
+            }
+          }
+        }
+      }
+    }
+
+    // Run validation on page load for all items with variants
+    function validateAllPriceOrders(){
+      const parentIds = new Set();
+      $$(`#items-body tr.variant-row`).forEach(vtr => {
+        const pid = vtr.getAttribute("data-parent-id");
+        if (pid) parentIds.add(pid);
+      });
+      parentIds.forEach(pid => {
+        validateVariantPriceOrder(pid);
+        updateReorderButtons(pid);
+      });
+    }
+
+    // Also validate when kind changes (affects which variants are checked)
+    const origKindHandler = itemsBody._day75_kind_validate;
+    itemsBody.addEventListener("change", (e)=>{
+      if (e.target.classList.contains("kind-select")){
+        const vtr = e.target.closest("tr.variant-row");
+        if (vtr) validateVariantPriceOrder(vtr.getAttribute("data-parent-id"));
+      }
+    });
+
+    /* ===== Day 75: Variant Template Presets ===== */
+    const VARIANT_TEMPLATES = [
+      { name: "S / M / L", kind: "size", labels: ["Small","Medium","Large"] },
+      { name: "S / M / L / XL", kind: "size", labels: ["Small","Medium","Large","Extra Large"] },
+      { name: 'Half / Whole', kind: "size", labels: ["Half","Whole"] },
+      { name: 'Slice / Pie', kind: "size", labels: ["Slice","Pie"] },
+      { name: 'Single / Double / Triple', kind: "size", labels: ["Single","Double","Triple"] },
+      { name: 'W/Fries / W/Salad', kind: "combo", labels: ["W/Fries","W/Salad"] },
+    ];
+
+    let activeTemplateMenu = null;
+
+    function showTemplateMenu(btn){
+      closeTemplateMenu();
+      const parentId = btn.getAttribute("data-parent-id");
+      const menu = document.createElement("div");
+      menu.className = "variant-template-menu open";
+      VARIANT_TEMPLATES.forEach(tmpl => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = tmpl.name;
+        b.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          applyTemplate(parentId, tmpl);
+          closeTemplateMenu();
+        });
+        menu.appendChild(b);
+      });
+      btn.parentElement.appendChild(menu);
+      activeTemplateMenu = menu;
+      // Close on outside click
+      setTimeout(()=>{
+        document.addEventListener("click", closeTemplateMenu, { once: true });
+      }, 0);
+    }
+
+    function closeTemplateMenu(){
+      if (activeTemplateMenu){
+        activeTemplateMenu.remove();
+        activeTemplateMenu = null;
+      }
+    }
+
+    function applyTemplate(parentId, tmpl){
+      // Remove existing variant rows for this parent
+      const existing = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
+      existing.forEach(vtr => {
+        const vid = vtr.getAttribute("data-variant-id");
+        if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+        vtr.remove();
+      });
+      // Add new rows from template
+      tmpl.labels.forEach((label, i) => {
+        addVariantRow(parentId, { label, kind: tmpl.kind, position: i });
+      });
+      // Expand all
+      $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`)
+        .forEach(r => r.classList.remove("variant-collapsed"));
+      updateParentVariantUI(parentId);
+      updateReorderButtons(parentId);
+      showToast(`Applied "${tmpl.name}" template`);
+    }
+
+    // Wire template button clicks via delegation
+    itemsBody.addEventListener("click", (e)=>{
+      const btn = e.target.closest(".variant-template-btn");
+      if (btn){
+        e.stopPropagation();
+        showTemplateMenu(btn);
+      }
+    });
 
     wireRowProvPins();
     applyConfidenceTint();
     rebuildOutline();
     collectRowsFiltered();
+    validateAllPriceOrders();
 
     // ---- Live status pill for Finalize with AI ----
     (function(){

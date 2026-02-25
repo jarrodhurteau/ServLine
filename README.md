@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.2 IN PROGRESS (Editor Redesign)**
 
-Day 74 starts Sprint 9.2 with the Variant Sub-Row UI. The draft editor now renders structured variant sub-rows beneath each parent item — indented with kind-colored badges (size/combo/flavor/style/other), collapse/expand toggles, inline label+price editing, and kind dropdowns. The sidebar outline uses structured variant data instead of regex parsing. `collectPayload()` sends `_variants` per item, and `saveNow()` handles `deleted_variant_ids` for orphan cleanup. Search/filter includes variant labels. Duplicate and delete operations cascade properly to variant sub-rows. 2,744 tests passing across 25 test suites.
+Day 75 adds inline variant validation and reorder controls. Variant sub-rows now have up/down arrow buttons for position reordering within a parent item. Real-time price-order validation highlights S < M < L inversions with warning icons. Six variant template presets (S/M/L, Half/Whole, Slice/Pie, etc.) let users quickly scaffold variant structures from a dropdown. The save contract now validates `_variants` schema (label, price_cents, kind, position, id) and `deleted_variant_ids`. Position is collected from DOM order for accurate reorder persistence. 2,803 tests passing across 26 test suites.
 
 ---
 
@@ -1247,6 +1247,10 @@ ServLine now has:
 - ✅ Variant Sub-Row UI — indented sub-rows with kind badges, collapse/expand, add/delete
 - ✅ Editor variant save — `_variants` in payload, `deleted_variant_ids` for orphan cleanup
 - ✅ Sidebar structured variants — uses variant data instead of regex name parsing
+- ✅ Variant reorder — up/down buttons, position from DOM order
+- ✅ Inline price validation — S < M < L inversion warnings with ordinal mapping
+- ✅ Variant template presets — 6 quick-add templates (S/M/L, Half/Whole, etc.)
+- ✅ Contract validation — `_variants` schema + `deleted_variant_ids` validated
 
 ---
 
@@ -1274,3 +1278,11 @@ ServLine now has:
   - Sidebar outline uses structured variant data
   - Search/filter includes variant labels
   - Duplicate/delete cascades to variant sub-rows
+- ✅ Inline Variant Validation & Reorder (Day 75):
+  - Up/down reorder buttons on variant sub-rows
+  - Real-time price-order validation (S < M < L inversion warnings)
+  - SIZE_ORDINALS mapping for word sizes, inch sizes, portions, multiplicities
+  - 6 variant template presets (S/M/L, Half/Whole, Slice/Pie, etc.)
+  - `_variants` schema validation in save contract
+  - `deleted_variant_ids` validation in save contract
+  - Position from DOM order (0-indexed) for accurate reorder persistence

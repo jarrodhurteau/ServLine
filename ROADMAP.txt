@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 74 (February 24, 2026) — Variant Sub-Row UI (Sprint 9.2 started)
+Last Updated: Day 75 (February 24, 2026) — Inline Variant Validation & Reorder (Sprint 9.2)
 
 ================================================================================
 PROJECT MISSION
@@ -288,23 +288,40 @@ Sprint 9.2 — Editor Redesign (Days 74-77)
 
     Day 74 test suite: 37 cases, 100% pass rate
 
-  Day 75: Editor JavaScript
-  -------------------------
-  [ ] Render variant sub-rows from loaded data
-  [ ] Inline editing: variant label, price (currency formatted), kind
-  [ ] Add/delete variant sub-rows dynamically (no page reload)
-  [ ] Update sidebar outline to use structured variants (remove regex parsing)
-  [ ] Drag-to-reorder variant sub-rows within a parent item
+  Day 75: Inline Variant Validation & Reorder *** COMPLETE ***
+  -----------------------------------------------
+  [x] Up/down reorder buttons on variant sub-rows
+      - Move variant up/down within parent's variant block
+      - Position from DOM order (0-indexed)
+      - Disabled at top/bottom boundaries
+      - Persists through save/reload cycle
+  [x] Inline price-order validation (S < M < L)
+      - Real-time warning highlights on price inversions
+      - SIZE_ORDINALS mapping: word sizes, inch sizes, portions, multiplicities
+      - Warning icon with tooltip showing inversion details
+      - Only validates size-kind variants with known ordinals
+      - Triggers on price blur, kind change, reorder
+  [x] Variant template presets (quick-add dropdown)
+      - 6 presets: S/M/L, S/M/L/XL, Half/Whole, Slice/Pie,
+        Single/Double/Triple, W/Fries/W/Salad
+      - Replaces existing variants on application
+      - Popup menu with click-outside dismiss
+  [x] _variants schema validation in save contract
+      - Label: required string, must not be empty
+      - Price_cents: optional int-like
+      - Kind: must be one of size/combo/flavor/style/other
+      - Position: optional int-like
+      - Id: optional int-like or null
+      - deleted_variant_ids: validated as list of integers
+  [x] Position collection from DOM order (vIdx) in collectPayload()
+
+    Day 75 test suite: 59 cases, 100% pass rate
 
   Day 76: Save/Load with Variants
   --------------------------------
-  [ ] Update save payload: items[].variants[] nested array
-  [ ] Update /drafts/<id>/save endpoint:
-      - Insert new variants (no id)
-      - Update existing variants (has id)
-      - Delete removed variants (deleted_variant_ids[])
-  [ ] Update load to return variants grouped by item_id
-  [ ] Test: edit variants -> save -> reload -> verify persistence
+  NOTE: Most Day 76 tasks completed in Day 74 (save payload, endpoint, load).
+  [ ] Remaining: edit variants -> save -> reload -> verify UI persistence
+  [ ] Backfill button in editor UI (wire backfill_variants_from_names)
 
   Day 77: Low-Confidence & Bulk Operations
   -----------------------------------------
@@ -443,6 +460,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 75: Inline Variant Validation & Reorder — up/down reorder, price inversion warnings, template presets, contract validation (59 tests)
 Day 74: Variant Sub-Row UI — editor table layout, collapse/expand, kind badges, sidebar structured variants (37 tests)
 Day 73: Migration & backward compatibility — publish flow, parent base price, Sprint 9.1 complete (45 tests)
 Day 72: Extraction pipeline → structured variants — all 3 strategies, DB insert, backfill (59 tests)
@@ -534,7 +552,8 @@ Tests:
 - tests/test_day72_extraction_variants.py — 59 cases (Day 72)
 - tests/test_day73_migration_compat.py — 45 cases (Day 73)
 - tests/test_day74_variant_subrow_ui.py — 37 cases (Day 74)
+- tests/test_day75_variant_reorder_validate.py — 59 cases (Day 75)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,744 tests, all passing
+- TOTAL: 2,803 tests, all passing
 
 ================================================================================

@@ -5,6 +5,8 @@ from typing import Any, Dict, Tuple
 # (Optional) reference set used by the editor/clients; not enforced strictly.
 DraftItemKeys = {"id", "name", "description", "price_cents", "category", "position", "meta", "confidence"}
 
+VALID_VARIANT_KINDS = {"size", "combo", "flavor", "style", "other"}
+
 def _is_intlike(x: Any) -> bool:
     try:
         int(x)
@@ -91,5 +93,43 @@ def validate_draft_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
                     return False, f"items[{i}].confidence must be between 0 and 100"
             except Exception:
                 return False, f"items[{i}].confidence must be an integer or null"
+
+        # _variants (optional list of variant dicts)
+        if "_variants" in it:
+            variants = it["_variants"]
+            if not isinstance(variants, list):
+                return False, f"items[{i}]._variants must be a list"
+            for vi, v in enumerate(variants):
+                if not isinstance(v, dict):
+                    return False, f"items[{i}]._variants[{vi}] must be an object"
+                # id (optional int-like or null)
+                if "id" in v and v["id"] is not None and not _is_intlike(v["id"]):
+                    return False, f"items[{i}]._variants[{vi}].id must be an integer or null"
+                # label (required string)
+                if "label" not in v or not isinstance(v.get("label"), str):
+                    return False, f"items[{i}]._variants[{vi}].label must be a string"
+                if not v["label"].strip():
+                    return False, f"items[{i}]._variants[{vi}].label must not be empty"
+                # price_cents (required int-like)
+                if "price_cents" in v:
+                    if not _is_intlike(v["price_cents"]):
+                        return False, f"items[{i}]._variants[{vi}].price_cents must be an integer"
+                # kind (optional, must be valid)
+                if "kind" in v and v["kind"] is not None:
+                    if not isinstance(v["kind"], str) or v["kind"] not in VALID_VARIANT_KINDS:
+                        return False, f"items[{i}]._variants[{vi}].kind must be one of {sorted(VALID_VARIANT_KINDS)}"
+                # position (optional int-like)
+                if "position" in v and v["position"] is not None:
+                    if not _is_intlike(v["position"]):
+                        return False, f"items[{i}]._variants[{vi}].position must be an integer"
+
+    # --- Top-level deleted_variant_ids (optional) ---
+    if "deleted_variant_ids" in payload:
+        dvids = payload["deleted_variant_ids"]
+        if not isinstance(dvids, list):
+            return False, "deleted_variant_ids must be a list"
+        for dvi, dvid in enumerate(dvids):
+            if not _is_intlike(dvid):
+                return False, f"deleted_variant_ids[{dvi}] must be an integer"
 
     return True, ""
