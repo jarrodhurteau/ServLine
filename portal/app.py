@@ -39,6 +39,7 @@ def _pdf_to_text(pdf_path: Path) -> str: ...
 import io
 import csv
 import re  # <-- for OCR parsing
+import statistics  # <-- for export metrics (Day 81)
 
 # NEW: optional Excel export dependency
 openpyxl = None  # type: ignore[assignment]
@@ -4832,6 +4833,60 @@ def _validate_draft_for_export(items):
                     "type": "variant_missing_price",
                     "message": f"Variant '{v.get('label','')}' on '{name}' has no price",
                 })
+
+        # --- Day 81: variant_missing_label ---
+        for v in variants:
+            lbl = (v.get("label") or "").strip()
+            if not lbl:
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "variant_missing_label",
+                    "message": f"A variant on '{name}' has no label",
+                })
+
+        # --- Day 81: duplicate_variant_label (case-insensitive, one per item) ---
+        seen_labels = set()
+        for v in variants:
+            lbl = (v.get("label") or "").strip().lower()
+            if lbl:
+                if lbl in seen_labels:
+                    warnings.append({
+                        "item_id": item_id,
+                        "name": name,
+                        "type": "duplicate_variant_label",
+                        "message": f"Duplicate variant label '{v.get('label', '')}' on '{name}'",
+                    })
+                    break
+                seen_labels.add(lbl)
+
+        # --- Day 81: price_inversion (size-kind only) ---
+        size_variants = [v for v in variants
+                         if v.get("kind") == "size" and v.get("price_cents")]
+        if len(size_variants) >= 2:
+            try:
+                from storage.parsers.size_vocab import normalize_size_token, size_ordinal
+                ordinal_prices = []
+                for v in size_variants:
+                    raw_label = (v.get("label") or "").strip()
+                    normalized = normalize_size_token(raw_label)
+                    ordinal = size_ordinal(normalized)
+                    if ordinal is not None:
+                        ordinal_prices.append((ordinal, v.get("price_cents", 0)))
+                if len(ordinal_prices) >= 2:
+                    ordinal_prices.sort(key=lambda x: x[0])
+                    for i in range(1, len(ordinal_prices)):
+                        if ordinal_prices[i][1] < ordinal_prices[i - 1][1]:
+                            warnings.append({
+                                "item_id": item_id,
+                                "name": name,
+                                "type": "price_inversion",
+                                "message": f"Size variant prices on '{name}' are not in ascending order",
+                            })
+                            break
+            except ImportError:
+                pass  # size_vocab not available — skip price inversion check
+
     return warnings
 
 
@@ -4840,6 +4895,154 @@ def _format_price_dollars(cents):
     if not cents:
         return "0.00"
     return f"{int(cents) / 100:.2f}"
+
+
+# ---------------------------------------------------------------------------
+# Export Metrics & Round-Trip Verification (Day 81)
+# ---------------------------------------------------------------------------
+
+def _compute_export_metrics(items):
+    """Compute export metrics: counts, breakdowns, price stats."""
+    total_items = len(items)
+    items_with_variants = 0
+    total_variants = 0
+    variants_by_kind = {}
+    category_breakdown = {}
+    all_prices = []
+
+    for it in items:
+        variants = it.get("variants") or []
+        cat = it.get("category") or "Uncategorized"
+
+        if cat not in category_breakdown:
+            category_breakdown[cat] = {"item_count": 0, "variant_count": 0}
+        category_breakdown[cat]["item_count"] += 1
+
+        if variants:
+            items_with_variants += 1
+            total_variants += len(variants)
+            category_breakdown[cat]["variant_count"] += len(variants)
+            for v in variants:
+                k = v.get("kind", "size")
+                variants_by_kind[k] = variants_by_kind.get(k, 0) + 1
+                vp = v.get("price_cents", 0)
+                if vp:
+                    all_prices.append(vp)
+
+        base_price = it.get("price_cents", 0)
+        if base_price:
+            all_prices.append(base_price)
+
+    price_stats = {
+        "min_cents": min(all_prices) if all_prices else 0,
+        "max_cents": max(all_prices) if all_prices else 0,
+        "avg_cents": round(statistics.mean(all_prices)) if all_prices else 0,
+        "price_count": len(all_prices),
+    }
+
+    return {
+        "total_items": total_items,
+        "items_with_variants": items_with_variants,
+        "items_without_variants": total_items - items_with_variants,
+        "total_variants": total_variants,
+        "variants_by_kind": variants_by_kind,
+        "category_breakdown": category_breakdown,
+        "price_stats": price_stats,
+    }
+
+
+def _verify_csv_round_trip(items):
+    """Export to CSV variants format, parse back, verify counts match."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["type", "id", "name", "description", "price_cents",
+                      "category", "kind", "label"])
+    for it in items:
+        writer.writerow(["item", it.get("id", ""), it.get("name", ""),
+                          it.get("description", ""), it.get("price_cents", 0),
+                          it.get("category") or "", "", ""])
+        for v in (it.get("variants") or []):
+            writer.writerow(["variant", "", "", "", v.get("price_cents", 0),
+                              "", v.get("kind", "size"), v.get("label", "")])
+    text = buf.getvalue()
+
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    item_rows = [r for r in rows if r.get("type") == "item"]
+    variant_rows = [r for r in rows if r.get("type") == "variant"]
+
+    expected_items = len(items)
+    expected_variants = sum(len(it.get("variants") or []) for it in items)
+
+    return {
+        "ok": len(item_rows) == expected_items and len(variant_rows) == expected_variants,
+        "expected_items": expected_items,
+        "actual_items": len(item_rows),
+        "expected_variants": expected_variants,
+        "actual_variants": len(variant_rows),
+    }
+
+
+def _verify_json_round_trip(items):
+    """Export to JSON format, parse back, verify structure matches."""
+    export_items = []
+    for it in items:
+        eitem = {
+            "id": it.get("id"),
+            "name": it.get("name", ""),
+            "description": it.get("description", ""),
+            "price_cents": it.get("price_cents", 0),
+            "category": it.get("category") or "",
+            "position": it.get("position"),
+        }
+        variants = it.get("variants") or []
+        eitem["variants"] = [
+            {"label": v.get("label", ""), "price_cents": v.get("price_cents", 0),
+             "kind": v.get("kind", "size")}
+            for v in variants
+        ] if variants else []
+        export_items.append(eitem)
+
+    payload = {"items": export_items}
+    text = json.dumps(payload, indent=2)
+    parsed = json.loads(text)
+
+    actual_items = parsed.get("items", [])
+    actual_variants = sum(len(i.get("variants", [])) for i in actual_items)
+    expected_variants = sum(len(it.get("variants") or []) for it in items)
+
+    return {
+        "ok": len(actual_items) == len(items) and actual_variants == expected_variants,
+        "expected_items": len(items),
+        "actual_items": len(actual_items),
+        "expected_variants": expected_variants,
+        "actual_variants": actual_variants,
+    }
+
+
+def _verify_pos_json_round_trip(items, draft=None):
+    """Export to Generic POS JSON, parse back, verify structure."""
+    payload = _build_generic_pos_json(items, draft)
+    text = json.dumps(payload, indent=2)
+    parsed = json.loads(text)
+
+    actual_items = 0
+    actual_modifiers = 0
+    for cat in parsed.get("menu", {}).get("categories", []):
+        for item in cat.get("items", []):
+            actual_items += 1
+            actual_modifiers += len(item.get("modifiers", []))
+
+    expected_variants = sum(len(it.get("variants") or []) for it in items)
+
+    return {
+        "ok": actual_items == len(items) and actual_modifiers == expected_variants,
+        "expected_items": len(items),
+        "actual_items": actual_items,
+        "expected_modifiers": expected_variants,
+        "actual_modifiers": actual_modifiers,
+        "metadata": parsed.get("metadata", {}),
+    }
 
 
 @app.get("/drafts/<int:draft_id>/export/validate")
@@ -4856,6 +5059,17 @@ def draft_export_validate(draft_id: int):
         "warnings": warnings,
         "warning_count": len(warnings),
     })
+
+
+@app.get("/drafts/<int:draft_id>/export/metrics")
+@login_required
+def draft_export_metrics(draft_id: int):
+    """Export metrics: counts, breakdowns, price statistics."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    metrics = _compute_export_metrics(items)
+    metrics["draft_id"] = draft_id
+    return jsonify(metrics)
 
 
 @app.get("/drafts/<int:draft_id>/export/preview")

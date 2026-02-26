@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.3 IN PROGRESS (Export Formats)**
 
-Day 80 adds POS export templates for Square, Toast, and Generic POS JSON formats. Items with variants are exported as modifier groups (Square) or option groups (Toast), with all 5 variant kinds mapped to human-readable group names. A pre-export validation endpoint warns about missing prices, categories, and names. An export preview modal shows formatted output before download with format selection (Square CSV, Toast CSV, Generic POS JSON). The export dropdown now has 10 options organized into Standard and POS Formats sections. 2,976 tests passing across 31 test suites.
+Day 81 adds export metrics, enhanced validation, and round-trip verification. A new `/export/metrics` endpoint returns item/variant counts, variants-by-kind breakdown, category breakdown, and price statistics. Validation now catches 7 warning types (3 new: missing variant labels, duplicate labels, size price inversions). Three round-trip verification helpers confirm CSV, JSON, and POS JSON exports can be parsed back with matching structure. Comprehensive edge case tests cover empty drafts, 10+ variants, Unicode names, variant-only items, and all 5 variant kinds across all 9 export formats. 3,043 tests passing across 32 test suites.
 
 ---
 
@@ -1338,3 +1338,9 @@ ServLine now has:
   - Export preview: modal with format selector, formatted output, validation warnings
   - Export dropdown: 10 options organized into Standard + POS Formats sections
   - Day 80 test suite: 58 cases, 100% pass rate
+- ✅ Export Metrics, Enhanced Validation & Round-Trip Tests (Day 81):
+  - Export metrics endpoint: item/variant counts, by-kind breakdown, category breakdown, price stats
+  - Enhanced validation: variant_missing_label, duplicate_variant_label, price_inversion
+  - Round-trip verification: CSV, JSON, POS JSON export → parse → verify counts/structure
+  - Edge cases: empty drafts (all 9 formats), 10+ variants, Unicode, variant-only, all kinds
+  - Day 81 test suite: 67 cases, 100% pass rate

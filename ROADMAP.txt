@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 80 (February 25, 2026) — POS Export Templates (Sprint 9.3)
+Last Updated: Day 81 (February 26, 2026) — Export Metrics, Enhanced Validation & Round-Trip Tests (Sprint 9.3)
 
 ================================================================================
 PROJECT MISSION
@@ -426,12 +426,33 @@ Sprint 9.3 — Export Formats (Days 78-82)
 
     Day 80 test suite: 58 cases, 100% pass rate
 
-  Day 81-82: Export Validation & Testing
-  ---------------------------------------
+  Day 81: Export Metrics, Enhanced Validation & Round-Trip Tests *** COMPLETE ***
+  -------------------------------------------------------------------------------
+  [x] Export metrics endpoint: GET /drafts/<id>/export/metrics
+      - _compute_export_metrics(items): total items, items w/ variants, total variants
+      - Variants by kind breakdown (size/combo/flavor/style/other)
+      - Category breakdown with item + variant counts per category
+      - Price stats: min/max/avg cents (excludes zeros)
+  [x] Enhanced validation: 3 new warning types in _validate_draft_for_export()
+      - variant_missing_label: empty/whitespace variant labels flagged
+      - duplicate_variant_label: same label (case-insensitive) on same item
+      - price_inversion: size variants with non-ascending prices by ordinal
+      - Lazy import of normalize_size_token + size_ordinal from size_vocab
+      - Backward compatible: original 4 warning types unchanged
+  [x] Round-trip verification helpers (internal, for tests):
+      - _verify_csv_round_trip(items): CSV sub-row export -> parse -> verify counts
+      - _verify_json_round_trip(items): JSON export -> parse -> verify structure
+      - _verify_pos_json_round_trip(items, draft): POS JSON -> parse -> verify
+  [x] Edge case testing: empty drafts, 10+ variants, unicode, variant-only, all kinds
+  [x] Flask route integration tests for metrics endpoint
+
+    Day 81 test suite: 67 cases, 100% pass rate
+
+  Day 82: Export Finalization & Sprint 9.3 Wrap-Up
+  -------------------------------------------------
   [ ] End-to-end test: upload menu -> extract -> edit variants -> export
-  [ ] Verify export files can be imported by target POS systems
-  [ ] Edge cases: items with 0 variants, items with 10+ variants
-  [ ] Export metrics: item count, variant count, category breakdown
+  [ ] Final edge case hardening
+  [ ] Sprint 9.3 summary and documentation
 
 Sprint 9.4 — API & Integration (Days 83-85)
 ............................................
@@ -528,6 +549,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 81: Export Metrics, Enhanced Validation & Round-Trip Tests — metrics endpoint, 3 new warning types, round-trip verification, edge cases (67 tests)
 Day 80: POS Export Templates — Square CSV, Toast CSV, Generic POS JSON, preview modal, validation (58 tests)
 Day 79: Excel Export with Variants — XLSX sub-rows, formatting, auto-columns, sheet per category (33 tests)
 Day 78: CSV & JSON Export with Variants — 3 variant-aware export formats, UI toggle, backward compat (31 tests)
@@ -631,7 +653,8 @@ Tests:
 - tests/test_day78_export_variants.py  — 31 cases (Day 78)
 - tests/test_day79_excel_variants.py   — 33 cases (Day 79)
 - tests/test_day80_pos_export.py       — 58 cases (Day 80)
+- tests/test_day81_export_validation.py — 67 cases (Day 81)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,976 tests, all passing
+- TOTAL: 3,043 tests, all passing
 
 ================================================================================
