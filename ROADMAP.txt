@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 78 (February 25, 2026) — CSV & JSON Export with Variants (Sprint 9.3)
+Last Updated: Day 79 (February 25, 2026) — Excel Export with Variants (Sprint 9.3)
 
 ================================================================================
 PROJECT MISSION
@@ -372,12 +372,29 @@ Sprint 9.3 — Export Formats (Days 78-82)
 
     Day 78 test suite: 31 cases, 100% pass rate
 
-  Day 79: Excel Export with Variants
+  Day 79: Excel Export with Variants *** COMPLETE ***
   -----------------------------------
-  [ ] XLSX: variant sub-rows with indented formatting
-  [ ] Column headers: auto-generate from actual size labels found in draft
-  [ ] Color coding: parent rows bold, variant rows gray/indented
-  [ ] Sheet per category option
+  [x] XLSX: variant sub-rows with indented formatting
+      - Parent rows: bold font for emphasis
+      - Variant sub-rows: gray text + light gray fill + indented label
+      - Header row: dark fill with white bold text
+  [x] Column headers: auto-generate from actual size labels found in draft
+      - Dynamic price_Label columns from all unique variant labels
+      - First-appearance order preserved
+      - Parent rows show prices in corresponding label columns
+  [x] Color coding: parent rows bold, variant rows gray/indented
+      - openpyxl Font + PatternFill styles applied per row type
+      - Auto-width 18px columns for readability
+  [x] Sheet per category option
+      - New endpoint: GET /drafts/<id>/export_by_category.xlsx
+      - One sheet per unique category (alphabetically sorted)
+      - Each sheet has category-specific variant label columns
+      - Items with no category → "Uncategorized" sheet
+      - Empty draft → placeholder "Empty" sheet
+      - Same bold/gray formatting per sheet
+  [x] Export dropdown updated: 7 options (added "Excel (sheet per category)")
+
+    Day 79 test suite: 33 cases, 100% pass rate
 
   Day 80: POS Export Templates
   ----------------------------
@@ -489,6 +506,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 79: Excel Export with Variants — XLSX sub-rows, formatting, auto-columns, sheet per category (33 tests)
 Day 78: CSV & JSON Export with Variants — 3 variant-aware export formats, UI toggle, backward compat (31 tests)
 Day 77: Low-Confidence & Bulk Operations — variant info in panel, bulk category change, delete-selected cascade fix, Sprint 9.2 complete (25 tests)
 Day 76: Save/Load Round-Trip & Backfill — backfill endpoint + UI button, save/load verification, publish round-trip (26 tests)
@@ -588,7 +606,8 @@ Tests:
 - tests/test_day76_save_load_backfill.py — 26 cases (Day 76)
 - tests/test_day77_low_conf_bulk_ops.py — 25 cases (Day 77)
 - tests/test_day78_export_variants.py  — 31 cases (Day 78)
+- tests/test_day79_excel_variants.py   — 33 cases (Day 79)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,885 tests, all passing
+- TOTAL: 2,918 tests, all passing
 
 ================================================================================

@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.3 IN PROGRESS (Export Formats)**
 
-Day 78 begins Sprint 9.3 (Export Formats) with three variant-aware export formats. JSON export now includes nested `variants: [{label, price_cents, kind}]` per item. CSV sub-row export produces `type=item` parent rows followed by `type=variant` child rows with label/price/kind. CSV wide export creates dynamic `price_Small`, `price_Medium`, `price_Large` columns based on all unique variant labels across the draft, with items having their variant prices in the matching columns. The export UI dropdown now offers 6 format choices. Original flat CSV export preserved for backward compatibility. 2,885 tests passing across 29 test suites.
+Day 79 adds formatted Excel export with variants. The XLSX export now includes variant sub-rows (indented gray text with light gray fill) under bold parent rows, plus auto-generated `price_Label` columns from all unique variant labels in the draft. A new sheet-per-category endpoint groups items by category with each sheet having its own category-specific variant columns. The export dropdown now offers 7 format choices including both Excel options. 2,918 tests passing across 30 test suites.
 
 ---
 
@@ -1257,7 +1257,9 @@ ServLine now has:
 - ✅ JSON export with nested variants — `items[].variants[]` array per item
 - ✅ CSV sub-row export — `type=item`/`type=variant` rows with kind and label
 - ✅ CSV wide export — dynamic `price_Label` columns from all variant labels
-- ✅ Export UI dropdown — 6 format choices (flat CSV, sub-row CSV, wide CSV, JSON, Excel, Debug)
+- ✅ Export UI dropdown — 7 format choices (flat CSV, sub-row CSV, wide CSV, JSON, Excel, Excel by category, Debug)
+- ✅ XLSX export with variant sub-rows — bold parents, gray indented variants, auto-generated label columns
+- ✅ XLSX sheet-per-category export — one sheet per category with category-specific variant columns
 
 ---
 
@@ -1314,3 +1316,12 @@ ServLine now has:
   - Export UI dropdown: 6 format choices (flat, sub-row, wide, JSON, Excel, debug)
   - Backward compat: original flat CSV unchanged
   - Day 78 test suite: 31 cases, 100% pass rate
+- ✅ Excel Export with Variants (Day 79):
+  - XLSX with variant sub-rows: bold parent rows, gray indented variant rows
+  - Auto-generated `price_Label` columns from all unique variant labels
+  - Header styling: dark fill, white bold text
+  - Sheet-per-category: `GET /drafts/<id>/export_by_category.xlsx`
+  - Category-specific variant columns per sheet (not global)
+  - Uncategorized items → "Uncategorized" sheet; empty draft → placeholder
+  - Export dropdown updated to 7 options
+  - Day 79 test suite: 33 cases, 100% pass rate

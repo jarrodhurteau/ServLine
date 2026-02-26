@@ -4580,11 +4580,12 @@ def draft_export_json(draft_id: int):
 @app.get("/drafts/<int:draft_id>/export.xlsx")
 @login_required
 def draft_export_xlsx(draft_id: int):
+    """Excel export with variant sub-rows, formatting, and auto-generated columns."""
     _require_drafts_storage()
 
-    # Local import makes Pylance happy and keeps runtime behavior correct.
     try:
         import openpyxl as xl  # type: ignore[import]
+        from openpyxl.styles import Font, PatternFill, Alignment  # type: ignore[import]
     except Exception:
         xl = None
 
@@ -4592,23 +4593,80 @@ def draft_export_xlsx(draft_id: int):
         return make_response("openpyxl not installed. pip install openpyxl", 500)
 
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id) or []
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+
+    # Collect all unique variant labels in first-appearance order
+    seen_labels: dict = {}
+    for it in items:
+        for v in (it.get("variants") or []):
+            lbl = (v.get("label") or "").strip()
+            if lbl and lbl not in seen_labels:
+                seen_labels[lbl] = len(seen_labels)
+    label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
 
     wb = xl.Workbook()
     ws = wb.active
     ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]
 
-    headers = ["id", "name", "description", "price_cents", "category", "position"]
-    ws.append(headers)
+    # -- Styles --
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1a2236", end_color="1a2236", fill_type="solid")
+    parent_font = Font(bold=True)
+    variant_font = Font(color="666666")
+    variant_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+    # -- Headers --
+    base_headers = ["name", "description", "price_cents", "category"]
+    variant_headers = [f"price_{lbl}" for lbl in label_order]
+    all_headers = base_headers + variant_headers
+    ws.append(all_headers)
+    for ci, _ in enumerate(all_headers, start=1):
+        cell = ws.cell(row=1, column=ci)
+        cell.font = header_font
+        cell.fill = header_fill
+
+    # -- Data rows --
     for it in items:
-        ws.append([
-            it.get("id"),
+        variants = it.get("variants") or []
+        vpmap = {}
+        for v in variants:
+            lbl = (v.get("label") or "").strip()
+            if lbl:
+                vpmap[lbl] = v.get("price_cents", 0)
+
+        row_data = [
             it.get("name", ""),
             it.get("description", ""),
             it.get("price_cents", 0),
             it.get("category") or "",
-            "" if it.get("position") is None else it.get("position"),
-        ])
+        ]
+        for lbl in label_order:
+            row_data.append(vpmap.get(lbl, ""))
+        ws.append(row_data)
+        row_num = ws.max_row
+        for ci in range(1, len(all_headers) + 1):
+            ws.cell(row=row_num, column=ci).font = parent_font
+
+        # Variant sub-rows (indented)
+        for v in variants:
+            vrow = [
+                "  " + (v.get("label") or ""),  # indented label in name column
+                v.get("kind", "size"),            # kind in description column
+                v.get("price_cents", 0),          # price in price column
+                "",                               # no category
+            ]
+            for _ in label_order:
+                vrow.append("")
+            ws.append(vrow)
+            vrow_num = ws.max_row
+            for ci in range(1, len(all_headers) + 1):
+                cell = ws.cell(row=vrow_num, column=ci)
+                cell.font = variant_font
+                cell.fill = variant_fill
+
+    # Auto-width columns
+    for ci, _ in enumerate(all_headers, start=1):
+        ws.column_dimensions[xl.utils.get_column_letter(ci)].width = 18
 
     out = io.BytesIO()
     wb.save(out)
@@ -4617,6 +4675,117 @@ def draft_export_xlsx(draft_id: int):
     resp = make_response(out.read())
     resp.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.xlsx"'
+    return resp
+
+
+@app.get("/drafts/<int:draft_id>/export_by_category.xlsx")
+@login_required
+def draft_export_xlsx_by_category(draft_id: int):
+    """Excel export with one sheet per category.  Each sheet has variant sub-rows."""
+    _require_drafts_storage()
+
+    try:
+        import openpyxl as xl  # type: ignore[import]
+        from openpyxl.styles import Font, PatternFill  # type: ignore[import]
+    except Exception:
+        xl = None
+
+    if xl is None:
+        return make_response("openpyxl not installed. pip install openpyxl", 500)
+
+    draft = drafts_store.get_draft(draft_id) or {}
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+
+    # Group items by category
+    cat_map: dict = {}  # category -> list of items
+    for it in items:
+        cat = (it.get("category") or "Uncategorized").strip()
+        cat_map.setdefault(cat, []).append(it)
+
+    # Styles
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1a2236", end_color="1a2236", fill_type="solid")
+    parent_font = Font(bold=True)
+    variant_font = Font(color="666666")
+    variant_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+    wb = xl.Workbook()
+    wb.remove(wb.active)  # remove default empty sheet
+
+    for cat_name in sorted(cat_map.keys()):
+        cat_items = cat_map[cat_name]
+        sheet_title = cat_name[:31] or "Uncategorized"
+        ws = wb.create_sheet(title=sheet_title)
+
+        # Collect variant labels for this category
+        seen_labels: dict = {}
+        for it in cat_items:
+            for v in (it.get("variants") or []):
+                lbl = (v.get("label") or "").strip()
+                if lbl and lbl not in seen_labels:
+                    seen_labels[lbl] = len(seen_labels)
+        label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
+
+        base_headers = ["name", "description", "price_cents"]
+        variant_headers = [f"price_{lbl}" for lbl in label_order]
+        all_headers = base_headers + variant_headers
+
+        ws.append(all_headers)
+        for ci, _ in enumerate(all_headers, start=1):
+            cell = ws.cell(row=1, column=ci)
+            cell.font = header_font
+            cell.fill = header_fill
+
+        for it in cat_items:
+            variants = it.get("variants") or []
+            vpmap = {}
+            for v in variants:
+                lbl = (v.get("label") or "").strip()
+                if lbl:
+                    vpmap[lbl] = v.get("price_cents", 0)
+
+            row_data = [
+                it.get("name", ""),
+                it.get("description", ""),
+                it.get("price_cents", 0),
+            ]
+            for lbl in label_order:
+                row_data.append(vpmap.get(lbl, ""))
+            ws.append(row_data)
+            row_num = ws.max_row
+            for ci in range(1, len(all_headers) + 1):
+                ws.cell(row=row_num, column=ci).font = parent_font
+
+            for v in variants:
+                vrow = [
+                    "  " + (v.get("label") or ""),
+                    v.get("kind", "size"),
+                    v.get("price_cents", 0),
+                ]
+                for _ in label_order:
+                    vrow.append("")
+                ws.append(vrow)
+                vrow_num = ws.max_row
+                for ci in range(1, len(all_headers) + 1):
+                    cell = ws.cell(row=vrow_num, column=ci)
+                    cell.font = variant_font
+                    cell.fill = variant_fill
+
+        for ci, _ in enumerate(all_headers, start=1):
+            ws.column_dimensions[xl.utils.get_column_letter(ci)].width = 18
+
+    # If no categories at all, create a placeholder sheet
+    if not cat_map:
+        ws = wb.create_sheet(title="Empty")
+        ws.append(["No items"])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    resp = make_response(out.read())
+    resp.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_by_category.xlsx"'
     return resp
 
 
