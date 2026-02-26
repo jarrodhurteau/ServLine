@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 81 (February 26, 2026) — Export Metrics, Enhanced Validation & Round-Trip Tests (Sprint 9.3)
+Last Updated: Day 82 (February 26, 2026) — Export Finalization & Sprint 9.3 Wrap-Up
 
 ================================================================================
 PROJECT MISSION
@@ -356,7 +356,7 @@ Sprint 9.2 — Editor Redesign (Days 74-77)
     Day 77 test suite: 25 cases, 100% pass rate
     Sprint 9.2 complete: Days 74-77, 147 tests, all passing
 
-Sprint 9.3 — Export Formats (Days 78-82)
+Sprint 9.3 — Export Formats (Days 78-82) *** COMPLETE ***
 .........................................
 
   Day 78: CSV & JSON Export with Variants *** COMPLETE ***
@@ -448,22 +448,76 @@ Sprint 9.3 — Export Formats (Days 78-82)
 
     Day 81 test suite: 67 cases, 100% pass rate
 
-  Day 82: Export Finalization & Sprint 9.3 Wrap-Up
+  Day 82: Export Finalization & Sprint 9.3 Wrap-Up *** COMPLETE ***
   -------------------------------------------------
-  [ ] End-to-end test: upload menu -> extract -> edit variants -> export
-  [ ] Final edge case hardening
-  [ ] Sprint 9.3 summary and documentation
+  [x] End-to-end integration tests: realistic draft -> all 9 export formats
+      - 14 E2E tests: CSV flat, CSV variants, CSV wide, JSON, XLSX,
+        XLSX by category, Square CSV, Toast CSV, POS JSON,
+        validate, metrics, preview (generic/square/toast)
+      - All formats verified with multi-category, multi-variant data
+  [x] Cross-format consistency tests: 8 tests verifying all formats agree
+      - CSV/JSON/Square/Toast/POS JSON item and variant counts match
+      - Metrics match round-trip counts
+      - Category groupings consistent between Toast and POS JSON
+  [x] Edge case hardening:
+      - CSV-hostile characters (commas, quotes in names/descriptions/labels)
+      - Very long names (250+ chars) and descriptions (2500+ chars)
+      - Mixed variant kinds (all 5 kinds on single item, 10 variants)
+      - Large drafts (55 items, 19 with variants): all formats + preview truncation
+      - Price formatting edge cases (0, 1 cent, $999.99, None)
+      - Null/empty descriptions across all formats
+      - All 7 validation warning types triggered in single test
+  [x] Export pipeline integration (Flask routes):
+      - DB insert -> Flask route -> parse output -> verify (5 formats)
+      - Route header verification (Content-Type, Content-Disposition, filenames)
+      - Validate/metrics/preview consistency (item counts, warning counts agree)
+      - Wide CSV column ordering and missing-label handling
+      - Square CSV token field and modifier parent name
+      - Toast CSV structure (category, option groups, prices)
+      - POS JSON metadata, category sorting, item grouping
+  [x] Sprint 9.3 summary and documentation
 
-Sprint 9.4 — API & Integration (Days 83-85)
-............................................
-[ ] REST API endpoints for programmatic access
-    - GET  /api/drafts/<id>/items (with variants)
-    - POST /api/drafts/<id>/items (create with variants)
-    - PUT  /api/drafts/<id>/items/<item_id> (update with variants)
-[ ] Webhook support for menu update notifications
-[ ] API key authentication
-[ ] Rate limiting per API key
-[ ] API documentation page
+    Day 82 test suite: 103 cases, 100% pass rate
+    Sprint 9.3 complete: Days 78-82, 292 tests, all passing
+
+Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
+...........................................................
+
+  Day 83: "Approve & Export to POS" Button
+  -----------------------------------------
+  [ ] Prominent "Approve & Export to POS" button in editor toolbar
+      - Primary action button (green, visually distinct from Save)
+      - Auto-saves draft before export
+  [ ] Validation modal before export
+      - Runs _validate_draft_for_export(), shows warnings
+      - Owner can fix issues or proceed anyway
+      - Shows item count, variant count, category summary
+  [ ] Generic POS JSON download on approval
+      - Uses existing _build_generic_pos_json() — no new format needed
+      - Downloads file automatically after approval
+  [ ] New draft status: "approved"
+      - Tracks that owner reviewed and approved the menu
+      - Status pill: green "Approved" badge in editor
+      - Approved drafts remain viewable but not editable
+  [ ] Export history tracking
+      - Record: format, timestamp, item count per export
+      - Show last export info in editor header
+
+  Day 84: REST API Endpoints
+  ---------------------------
+  [ ] GET  /api/drafts/<id>/items (with variants)
+  [ ] POST /api/drafts/<id>/items (create with variants)
+  [ ] PUT  /api/drafts/<id>/items/<item_id> (update with variants)
+  [ ] API key authentication (simple token-based)
+  [ ] Rate limiting per API key
+
+  Day 85: Webhooks & API Documentation
+  --------------------------------------
+  [ ] Webhook support for menu update notifications
+      - POST callback on draft approval/export
+      - Configurable per restaurant
+  [ ] API documentation page
+  [ ] Sprint 9.4 summary and tests
 
 Phase 10 — Multi-Menu & Versioning (Days 86-95)
 ------------------------------------------------
@@ -505,6 +559,64 @@ Phase 13 — User Experience Polish (Days 116-125)
 [ ] Mobile-responsive editor
 [ ] Undo/redo functionality
 
+Phase 14 — POS Connection & Live Push (Days 126-140)
+-----------------------------------------------------
+  TARGET: Small POS companies first. Prove the integration works, build case
+  studies, then approach larger vendors (Square, Toast, Clover).
+
+  OWNER EXPERIENCE:
+  Settings → "Connect POS" → redirected to POS login → authorize ServLine →
+  redirected back → POS connected. Then in editor: "Approve & Push to POS" →
+  one click → menu items appear in their POS dashboard automatically.
+
+  Sprint 14.1 — OAuth & Token Storage (Days 126-130)
+  [ ] OAuth 2.0 Authorization Code flow (generic)
+      - GET /connect/<provider> → redirect to provider's authorize URL
+      - GET /oauth/<provider>/callback → exchange code for access token
+      - Configurable per provider: auth URL, token URL, scopes, client ID/secret
+  [ ] pos_connections DB table
+      - restaurant_id, provider, access_token (encrypted), refresh_token,
+        token_expires_at, scopes, connected_at, status
+  [ ] POS provider adapter pattern (pluggable)
+      - Base class: authorize(), callback(), push_menu(), disconnect()
+      - Each POS company gets its own adapter module
+      - Config-driven: provider settings in DB or .env
+  [ ] Connect/disconnect UI in restaurant settings page
+      - "Connect to [Provider]" button per available provider
+      - Show connection status, connected date, last sync
+      - "Disconnect" with confirmation
+
+  Sprint 14.2 — Live Menu Push (Days 131-135)
+  [ ] Generic push interface: convert POS JSON → provider API calls
+      - Create/update categories
+      - Create/update items with modifiers (variants)
+      - Price sync (cents → provider format)
+      - Idempotent: re-push updates existing items, doesn't duplicate
+  [ ] Push status tracking per export
+      - push_history table: draft_id, provider, status, items_pushed,
+        errors, started_at, completed_at
+      - Success/partial/failed states with error details
+  [ ] Retry logic for failed pushes
+      - Automatic retry with exponential backoff
+      - Manual "Retry Failed Items" button
+  [ ] Replace download with live push when POS connected
+      - "Approve & Push to POS" button detects connection
+      - Connected: pushes via API, shows progress + confirmation
+      - Not connected: falls back to Generic POS JSON download
+
+  Sprint 14.3 — First POS Partner Integration (Days 136-140)
+  [ ] Onboard first small POS company partner
+      - Build their specific adapter
+      - Test with real restaurant data
+      - Document integration for their team
+  [ ] Integration health dashboard
+      - Sync status per restaurant per provider
+      - Last push timestamp, success rate, error log
+  [ ] Provider onboarding guide
+      - How to register as a ServLine POS partner
+      - API documentation for adapter development
+      - Sandbox testing environment
+
 ================================================================================
 LONG-TERM VISION
 ================================================================================
@@ -514,12 +626,15 @@ Year 1 Goals:
 - Support for 5+ POS export formats
 - < 2 minute processing time for typical menu
 - Zero manual intervention for clean menus
+- Live POS integration with 1-3 small POS partners
 
 Year 2 Goals:
 - Expand to all restaurant types (Asian, Mexican, American, etc.)
 - Real-time menu sync with POS systems
 - Multi-language menu support
 - White-label solution for POS vendors
+- 10+ POS partner integrations (scale from small → mid-tier → enterprise)
+- Self-service POS partner onboarding portal
 
 ================================================================================
 KEY PRINCIPLES
@@ -549,6 +664,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 82: Export Finalization & Sprint 9.3 Wrap-Up — E2E integration, cross-format consistency, edge case hardening, Sprint 9.3 complete (103 tests)
 Day 81: Export Metrics, Enhanced Validation & Round-Trip Tests — metrics endpoint, 3 new warning types, round-trip verification, edge cases (67 tests)
 Day 80: POS Export Templates — Square CSV, Toast CSV, Generic POS JSON, preview modal, validation (58 tests)
 Day 79: Excel Export with Variants — XLSX sub-rows, formatting, auto-columns, sheet per category (33 tests)
@@ -654,7 +770,8 @@ Tests:
 - tests/test_day79_excel_variants.py   — 33 cases (Day 79)
 - tests/test_day80_pos_export.py       — 58 cases (Day 80)
 - tests/test_day81_export_validation.py — 67 cases (Day 81)
+- tests/test_day82_export_integration.py — 103 cases (Day 82)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 3,043 tests, all passing
+- TOTAL: 3,146 tests, all passing
 
 ================================================================================
