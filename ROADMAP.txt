@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 79 (February 25, 2026) — Excel Export with Variants (Sprint 9.3)
+Last Updated: Day 80 (February 25, 2026) — POS Export Templates (Sprint 9.3)
 
 ================================================================================
 PROJECT MISSION
@@ -396,13 +396,35 @@ Sprint 9.3 — Export Formats (Days 78-82)
 
     Day 79 test suite: 33 cases, 100% pass rate
 
-  Day 80: POS Export Templates
+  Day 80: POS Export Templates *** COMPLETE ***
   ----------------------------
-  [ ] Square CSV format: item + modifier groups
-  [ ] Toast import format: parent/child structure
-  [ ] Generic POS JSON: universal item/variant/modifier schema
-  [ ] Export preview: show formatted output before download
-  [ ] Validation: warn if items missing prices, categories
+  [x] Square CSV format: item + modifier groups
+      - Token/Item Name/Description/Category/Price/Modifier Set/Modifier/Modifier Price
+      - Variants grouped by kind: Size, Combo Add-on, Flavor, Style, Option
+      - Items without variants: single row with base price
+      - Route: GET /drafts/<id>/export_square.csv
+  [x] Toast import format: parent/child structure
+      - Menu Group/Menu Item/Base Price/Option Group/Option/Option Price
+      - Category as Menu Group, variants as Option Groups by kind
+      - Items with no category → "Uncategorized" as Menu Group
+      - Route: GET /drafts/<id>/export_toast.csv
+  [x] Generic POS JSON: universal item/variant/modifier schema
+      - Structure: menu.categories[].items[].modifiers[]
+      - Categories sorted alphabetically, items grouped by category
+      - Metadata: format version, counts, export timestamp
+      - Route: GET /drafts/<id>/export_pos.json
+  [x] Export preview: show formatted output before download
+      - Modal with format selector (Square CSV, Toast CSV, Generic POS JSON)
+      - Shows formatted output, item counts, validation warnings
+      - Truncated preview for large datasets (50 rows)
+      - Route: GET /drafts/<id>/export/preview?format=<fmt>
+  [x] Validation: warn if items missing prices, categories
+      - Pre-export validation endpoint: GET /drafts/<id>/export/validate
+      - Warns: missing_price, missing_category, missing_name, variant_missing_price
+      - Items with variants but no base price: no false positive
+      - Returns item_count, variant_count, warnings, warning_count
+
+    Day 80 test suite: 58 cases, 100% pass rate
 
   Day 81-82: Export Validation & Testing
   ---------------------------------------
@@ -506,6 +528,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 80: POS Export Templates — Square CSV, Toast CSV, Generic POS JSON, preview modal, validation (58 tests)
 Day 79: Excel Export with Variants — XLSX sub-rows, formatting, auto-columns, sheet per category (33 tests)
 Day 78: CSV & JSON Export with Variants — 3 variant-aware export formats, UI toggle, backward compat (31 tests)
 Day 77: Low-Confidence & Bulk Operations — variant info in panel, bulk category change, delete-selected cascade fix, Sprint 9.2 complete (25 tests)
@@ -607,7 +630,8 @@ Tests:
 - tests/test_day77_low_conf_bulk_ops.py — 25 cases (Day 77)
 - tests/test_day78_export_variants.py  — 31 cases (Day 78)
 - tests/test_day79_excel_variants.py   — 33 cases (Day 79)
+- tests/test_day80_pos_export.py       — 58 cases (Day 80)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 2,918 tests, all passing
+- TOTAL: 2,976 tests, all passing
 
 ================================================================================

@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.3 IN PROGRESS (Export Formats)**
 
-Day 79 adds formatted Excel export with variants. The XLSX export now includes variant sub-rows (indented gray text with light gray fill) under bold parent rows, plus auto-generated `price_Label` columns from all unique variant labels in the draft. A new sheet-per-category endpoint groups items by category with each sheet having its own category-specific variant columns. The export dropdown now offers 7 format choices including both Excel options. 2,918 tests passing across 30 test suites.
+Day 80 adds POS export templates for Square, Toast, and Generic POS JSON formats. Items with variants are exported as modifier groups (Square) or option groups (Toast), with all 5 variant kinds mapped to human-readable group names. A pre-export validation endpoint warns about missing prices, categories, and names. An export preview modal shows formatted output before download with format selection (Square CSV, Toast CSV, Generic POS JSON). The export dropdown now has 10 options organized into Standard and POS Formats sections. 2,976 tests passing across 31 test suites.
 
 ---
 
@@ -1257,9 +1257,14 @@ ServLine now has:
 - ✅ JSON export with nested variants — `items[].variants[]` array per item
 - ✅ CSV sub-row export — `type=item`/`type=variant` rows with kind and label
 - ✅ CSV wide export — dynamic `price_Label` columns from all variant labels
-- ✅ Export UI dropdown — 7 format choices (flat CSV, sub-row CSV, wide CSV, JSON, Excel, Excel by category, Debug)
+- ✅ Export UI dropdown — 10 format choices organized into Standard + POS sections
 - ✅ XLSX export with variant sub-rows — bold parents, gray indented variants, auto-generated label columns
 - ✅ XLSX sheet-per-category export — one sheet per category with category-specific variant columns
+- ✅ Square CSV export — items + modifier groups from variants (Size, Combo Add-on, Flavor, Style, Option)
+- ✅ Toast CSV export — menu group / item / option hierarchy
+- ✅ Generic POS JSON — universal `menu.categories[].items[].modifiers[]` schema
+- ✅ Pre-export validation — missing prices, categories, names, zero-price variants
+- ✅ Export preview modal — formatted output preview before download with format selector
 
 ---
 
@@ -1325,3 +1330,11 @@ ServLine now has:
   - Uncategorized items → "Uncategorized" sheet; empty draft → placeholder
   - Export dropdown updated to 7 options
   - Day 79 test suite: 33 cases, 100% pass rate
+- ✅ POS Export Templates (Day 80):
+  - Square CSV: items + modifier groups (variants grouped by kind)
+  - Toast CSV: menu group / item / option group hierarchy
+  - Generic POS JSON: universal `menu.categories[].items[].modifiers[]` schema
+  - Pre-export validation: warns on missing prices, categories, names, zero-price variants
+  - Export preview: modal with format selector, formatted output, validation warnings
+  - Export dropdown: 10 options organized into Standard + POS Formats sections
+  - Day 80 test suite: 58 cases, 100% pass rate

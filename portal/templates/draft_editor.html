@@ -65,6 +65,47 @@
       background:transparent; border:none; cursor:pointer; font-size:.9rem;
     }
     details.export .menu a:hover, details.export .menu button:hover{ color:#fff; }
+    details.export .menu .export-divider{
+      border-top:1px solid #2b3552; margin:6px 0; padding:0;
+    }
+    details.export .menu .export-section-label{
+      display:block; color:#94a3b8; font-size:.75rem; font-weight:600;
+      text-transform:uppercase; padding:4px 4px 2px; letter-spacing:.04em;
+      cursor:default;
+    }
+    /* Export preview modal */
+    #export-preview-modal{
+      display:none; position:fixed; inset:0; z-index:2000;
+      background:rgba(0,0,0,0.6); align-items:center; justify-content:center;
+    }
+    #export-preview-modal.show{ display:flex; }
+    #export-preview-modal .modal-content{
+      background:#1a2236; border:1px solid #2b3552; border-radius:12px;
+      padding:20px; max-width:800px; width:90%; max-height:80vh; overflow:auto;
+      color:#cbd5e1;
+    }
+    #export-preview-modal .modal-header{
+      display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;
+    }
+    #export-preview-modal .modal-header h3{ margin:0; color:#f8fafc; }
+    #export-preview-modal .modal-close{
+      background:transparent; border:none; color:#94a3b8; cursor:pointer;
+      font-size:1.4rem; padding:4px 8px;
+    }
+    #export-preview-modal .modal-close:hover{ color:#fff; }
+    #export-preview-modal pre{
+      background:#0f172a; border:1px solid #2b3552; border-radius:8px;
+      padding:12px; overflow:auto; max-height:50vh; font-size:.82rem;
+      white-space:pre-wrap; word-break:break-word;
+    }
+    #export-preview-modal .warnings{
+      background:#451a03; border:1px solid #92400e; border-radius:8px;
+      padding:10px 14px; margin-bottom:12px; font-size:.85rem; color:#fbbf24;
+    }
+    #export-preview-modal .stats{
+      display:flex; gap:16px; margin-bottom:12px; font-size:.85rem; color:#94a3b8;
+    }
+    #export-preview-modal .stats span{ font-weight:600; color:#f8fafc; }
 
     /* ===== Status pill (parity with import view) ===== */
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
@@ -568,14 +609,22 @@
             <details class="export">
               <summary class="btn">Export ▾</summary>
               <div class="menu">
+                <span class="export-section-label">Standard</span>
                 <a href="{{ url_for('draft_export_csv',  draft_id=draft.id) }}">CSV (flat rows)</a>
                 <a href="{{ url_for('draft_export_csv_variants', draft_id=draft.id) }}">CSV with Variants (sub-rows)</a>
                 <a href="{{ url_for('draft_export_csv_wide', draft_id=draft.id) }}">CSV Wide (size columns)</a>
                 <a href="{{ url_for('draft_export_json', draft_id=draft.id) }}">JSON (with variants)</a>
                 <a href="{{ url_for('draft_export_xlsx', draft_id=draft.id) }}">Excel (with variants)</a>
                 <a href="{{ url_for('draft_export_xlsx_by_category', draft_id=draft.id) }}">Excel (sheet per category)</a>
-                <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">OCR Debug (CSV)</a>
+                <div class="export-divider"></div>
+                <span class="export-section-label">POS Formats</span>
+                <a href="{{ url_for('draft_export_square_csv', draft_id=draft.id) }}">Square (CSV)</a>
+                <a href="{{ url_for('draft_export_toast_csv', draft_id=draft.id) }}">Toast (CSV)</a>
+                <a href="{{ url_for('draft_export_pos_json', draft_id=draft.id) }}">Generic POS (JSON)</a>
+                <div class="export-divider"></div>
+                <button type="button" id="export-preview-btn">Preview Export...</button>
                 <button type="button" id="export-visible-btn">Export Visible as CSV</button>
+                <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">OCR Debug (CSV)</a>
               </div>
             </details>
 
@@ -1598,6 +1647,43 @@
       showToast("Exported visible rows");
     });
 
+    // ── Export Preview Modal ──
+    const previewBtn = $("#export-preview-btn");
+    const previewModal = $("#export-preview-modal");
+    const previewClose = $("#export-preview-close");
+    const previewBody = $("#export-preview-body");
+    const previewFormat = $("#export-preview-format");
+    const previewStats = $("#export-preview-stats");
+    const previewWarnings = $("#export-preview-warnings");
+
+    previewBtn?.addEventListener("click", async ()=>{
+      const fmt = previewFormat?.value || "generic_pos";
+      previewBody.textContent = "Loading preview...";
+      previewWarnings.style.display = "none";
+      previewStats.innerHTML = "";
+      previewModal.classList.add("show");
+      try {
+        const resp = await fetch(`/drafts/{{ draft.id }}/export/preview?format=${fmt}`);
+        const data = await resp.json();
+        previewBody.textContent = data.content || "(empty)";
+        previewStats.innerHTML = `Items: <span>${data.item_count}</span> | Warnings: <span>${data.warnings?.length || 0}</span>`;
+        if (data.warnings && data.warnings.length > 0) {
+          previewWarnings.style.display = "block";
+          previewWarnings.innerHTML = data.warnings.map(w => w.message).join("<br>");
+        }
+        if (data.truncated) {
+          previewBody.textContent += "\n\n... (truncated, showing first 50 rows)";
+        }
+      } catch(e) {
+        previewBody.textContent = "Error loading preview: " + e.message;
+      }
+    });
+    previewClose?.addEventListener("click", ()=> previewModal.classList.remove("show"));
+    previewModal?.addEventListener("click", (e)=>{
+      if (e.target === previewModal) previewModal.classList.remove("show");
+    });
+    previewFormat?.addEventListener("change", ()=> previewBtn?.click());
+
     // Provenance tooltip
     function renderProvTip({name, cat, conf, pos}){
       const confNum = conf==="" ? null : Number(conf);
@@ -2081,5 +2167,25 @@
 
   })();
   </script>
+
+  <!-- Export Preview Modal -->
+  <div id="export-preview-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Export Preview</h3>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <select id="export-preview-format" style="background:#0f172a;color:#cbd5e1;border:1px solid #2b3552;border-radius:6px;padding:4px 8px;font-size:.85rem;">
+            <option value="generic_pos">Generic POS (JSON)</option>
+            <option value="square">Square (CSV)</option>
+            <option value="toast">Toast (CSV)</option>
+          </select>
+          <button class="modal-close" id="export-preview-close">&times;</button>
+        </div>
+      </div>
+      <div class="stats" id="export-preview-stats"></div>
+      <div class="warnings" id="export-preview-warnings" style="display:none;"></div>
+      <pre id="export-preview-body">Select a format and click Preview...</pre>
+    </div>
+  </div>
 </div>
 {% endblock %}

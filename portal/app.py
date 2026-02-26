@@ -4789,6 +4789,337 @@ def draft_export_xlsx_by_category(draft_id: int):
     return resp
 
 
+# ---------------------------------------------------------------------------
+# POS Export Templates (Day 80)
+# ---------------------------------------------------------------------------
+
+def _validate_draft_for_export(items):
+    """Pre-export validation: returns list of warning dicts."""
+    warnings = []
+    for it in items:
+        item_id = it.get("id")
+        name = it.get("name", "")
+        price = it.get("price_cents", 0)
+        cat = it.get("category") or ""
+        variants = it.get("variants") or []
+
+        if not price and not variants:
+            warnings.append({
+                "item_id": item_id,
+                "name": name,
+                "type": "missing_price",
+                "message": f"Item '{name}' has no price and no variants",
+            })
+        if not cat:
+            warnings.append({
+                "item_id": item_id,
+                "name": name,
+                "type": "missing_category",
+                "message": f"Item '{name}' has no category",
+            })
+        if not name.strip():
+            warnings.append({
+                "item_id": item_id,
+                "name": name,
+                "type": "missing_name",
+                "message": "Item has no name",
+            })
+        for v in variants:
+            if not v.get("price_cents"):
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "variant_missing_price",
+                    "message": f"Variant '{v.get('label','')}' on '{name}' has no price",
+                })
+    return warnings
+
+
+def _format_price_dollars(cents):
+    """Convert cents to dollar string: 1299 -> '12.99'."""
+    if not cents:
+        return "0.00"
+    return f"{int(cents) / 100:.2f}"
+
+
+@app.get("/drafts/<int:draft_id>/export/validate")
+@login_required
+def draft_export_validate(draft_id: int):
+    """Pre-export validation: returns warnings for items missing data."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    warnings = _validate_draft_for_export(items)
+    return jsonify({
+        "draft_id": draft_id,
+        "item_count": len(items),
+        "variant_count": sum(len(it.get("variants") or []) for it in items),
+        "warnings": warnings,
+        "warning_count": len(warnings),
+    })
+
+
+@app.get("/drafts/<int:draft_id>/export/preview")
+@login_required
+def draft_export_preview(draft_id: int):
+    """Export preview: returns formatted output as JSON for pre-download review."""
+    _require_drafts_storage()
+    fmt = request.args.get("format", "generic_pos")
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    draft = drafts_store.get_draft(draft_id) or {}
+    warnings = _validate_draft_for_export(items)
+
+    if fmt == "square":
+        rows = _build_square_rows(items)
+        # Return first 50 rows as preview
+        preview_lines = []
+        headers = ["Token", "Item Name", "Description", "Category",
+                    "Price", "Modifier Set Name", "Modifier Name", "Modifier Price"]
+        preview_lines.append(",".join(headers))
+        for r in rows[:50]:
+            preview_lines.append(",".join(str(c) for c in r))
+        content = "\n".join(preview_lines)
+    elif fmt == "toast":
+        rows = _build_toast_rows(items)
+        headers = ["Menu Group", "Menu Item", "Base Price",
+                    "Option Group", "Option", "Option Price"]
+        preview_lines = [",".join(headers)]
+        for r in rows[:50]:
+            preview_lines.append(",".join(str(c) for c in r))
+        content = "\n".join(preview_lines)
+    else:
+        payload = _build_generic_pos_json(items, draft)
+        content = json.dumps(payload, indent=2)
+
+    return jsonify({
+        "format": fmt,
+        "content": content,
+        "item_count": len(items),
+        "warnings": warnings,
+        "truncated": fmt != "generic_pos" and len(items) > 50,
+    })
+
+
+def _build_square_rows(items):
+    """Build Square CSV rows: items + modifier groups from variants.
+
+    Square import format:
+      Token, Item Name, Description, Category, Price,
+      Modifier Set Name, Modifier Name, Modifier Price
+
+    Items without variants: single row with base price.
+    Items with variants: parent row (price=base), then modifier rows
+    grouped by kind (e.g., "Size", "Combo Add-on").
+    """
+    rows = []
+    for it in items:
+        name = it.get("name", "")
+        desc = it.get("description") or ""
+        cat = it.get("category") or ""
+        price = _format_price_dollars(it.get("price_cents", 0))
+        variants = it.get("variants") or []
+
+        if not variants:
+            rows.append([
+                "item", name, desc, cat, price, "", "", "",
+            ])
+        else:
+            # Parent row with base price
+            rows.append([
+                "item", name, desc, cat, price, "", "", "",
+            ])
+            # Group variants by kind for modifier sets
+            kind_groups: dict = {}
+            for v in variants:
+                k = v.get("kind", "size")
+                kind_groups.setdefault(k, []).append(v)
+
+            kind_labels = {
+                "size": "Size",
+                "combo": "Combo Add-on",
+                "flavor": "Flavor",
+                "style": "Style",
+                "other": "Option",
+            }
+            for kind, vlist in kind_groups.items():
+                set_name = kind_labels.get(kind, "Option")
+                for v in vlist:
+                    mod_price = _format_price_dollars(v.get("price_cents", 0))
+                    rows.append([
+                        "modifier", name, "", "", "",
+                        set_name, v.get("label", ""), mod_price,
+                    ])
+    return rows
+
+
+def _build_toast_rows(items):
+    """Build Toast CSV rows: menu group/item/option hierarchy.
+
+    Toast import format:
+      Menu Group, Menu Item, Base Price,
+      Option Group, Option, Option Price
+
+    Items map to Menu Items under their category (Menu Group).
+    Variants map to Options under Option Groups (by kind).
+    """
+    rows = []
+    for it in items:
+        name = it.get("name", "")
+        cat = it.get("category") or "Uncategorized"
+        price = _format_price_dollars(it.get("price_cents", 0))
+        variants = it.get("variants") or []
+
+        if not variants:
+            rows.append([cat, name, price, "", "", ""])
+        else:
+            # Parent row
+            rows.append([cat, name, price, "", "", ""])
+            # Group by kind
+            kind_groups: dict = {}
+            for v in variants:
+                k = v.get("kind", "size")
+                kind_groups.setdefault(k, []).append(v)
+
+            kind_labels = {
+                "size": "Size",
+                "combo": "Combo Add-on",
+                "flavor": "Flavor",
+                "style": "Style",
+                "other": "Option",
+            }
+            for kind, vlist in kind_groups.items():
+                group_name = kind_labels.get(kind, "Option")
+                for v in vlist:
+                    opt_price = _format_price_dollars(v.get("price_cents", 0))
+                    rows.append([
+                        "", "", "", group_name,
+                        v.get("label", ""), opt_price,
+                    ])
+    return rows
+
+
+def _build_generic_pos_json(items, draft=None):
+    """Build Generic POS JSON: universal item/variant/modifier schema.
+
+    Structure:
+      { menu: { id, title, categories: [
+          { name, items: [
+              { name, description, base_price, modifiers: [
+                  { group, name, price }
+              ]}
+          ]}
+      ]}, metadata: { ... } }
+    """
+    draft = draft or {}
+    cat_map: dict = {}
+    for it in items:
+        cat = it.get("category") or "Uncategorized"
+        cat_map.setdefault(cat, []).append(it)
+
+    categories = []
+    for cat_name in sorted(cat_map.keys()):
+        cat_items = []
+        for it in cat_map[cat_name]:
+            item_entry = {
+                "name": it.get("name", ""),
+                "description": it.get("description") or "",
+                "base_price": _format_price_dollars(it.get("price_cents", 0)),
+            }
+            variants = it.get("variants") or []
+            if variants:
+                modifiers = []
+                for v in variants:
+                    kind_labels = {
+                        "size": "Size",
+                        "combo": "Combo Add-on",
+                        "flavor": "Flavor",
+                        "style": "Style",
+                        "other": "Option",
+                    }
+                    modifiers.append({
+                        "group": kind_labels.get(v.get("kind", "size"), "Option"),
+                        "name": v.get("label", ""),
+                        "price": _format_price_dollars(v.get("price_cents", 0)),
+                    })
+                item_entry["modifiers"] = modifiers
+            else:
+                item_entry["modifiers"] = []
+            cat_items.append(item_entry)
+        categories.append({"name": cat_name, "items": cat_items})
+
+    return {
+        "menu": {
+            "id": draft.get("id"),
+            "title": draft.get("title") or "",
+            "categories": categories,
+        },
+        "metadata": {
+            "exported_at": _now_iso(),
+            "format": "generic_pos",
+            "version": "1.0",
+            "item_count": len(items),
+            "category_count": len(categories),
+        },
+    }
+
+
+@app.get("/drafts/<int:draft_id>/export_square.csv")
+@login_required
+def draft_export_square_csv(draft_id: int):
+    """Square POS CSV export: items + modifier groups."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    rows = _build_square_rows(items)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Token", "Item Name", "Description", "Category",
+                      "Price", "Modifier Set Name", "Modifier Name", "Modifier Price"])
+    for r in rows:
+        writer.writerow(r)
+
+    csv_data = buf.getvalue().encode("utf-8-sig")
+    resp = make_response(csv_data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_square.csv"'
+    return resp
+
+
+@app.get("/drafts/<int:draft_id>/export_toast.csv")
+@login_required
+def draft_export_toast_csv(draft_id: int):
+    """Toast POS CSV export: menu group / item / option hierarchy."""
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    rows = _build_toast_rows(items)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Menu Group", "Menu Item", "Base Price",
+                      "Option Group", "Option", "Option Price"])
+    for r in rows:
+        writer.writerow(r)
+
+    csv_data = buf.getvalue().encode("utf-8-sig")
+    resp = make_response(csv_data)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_toast.csv"'
+    return resp
+
+
+@app.get("/drafts/<int:draft_id>/export_pos.json")
+@login_required
+def draft_export_pos_json(draft_id: int):
+    """Generic POS JSON export: universal item/variant/modifier schema."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id) or {}
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    payload = _build_generic_pos_json(items, draft)
+
+    resp = make_response(json.dumps(payload, indent=2))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}_pos.json"'
+    return resp
+
 
 # ------------------------
 # NEW: Fix descriptions endpoint used by the editor button
