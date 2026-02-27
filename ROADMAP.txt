@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 84 (February 27, 2026) — REST API Endpoints with Auth & Rate Limiting
+Last Updated: Day 85 (February 27, 2026) — Webhooks, API Docs & Sprint 9.4 / Phase 9 Complete
 
 ================================================================================
 PROJECT MISSION
@@ -190,10 +190,10 @@ Success Metrics (Day 58 actuals vs targets):
 - Item extraction: 18 garbled -> 115 proper (Claude API + clean OCR)
 
 ================================================================================
-ACTIVE PHASE: Phase 9 — Structured Variants & Export
+COMPLETED PHASE: Phase 9 — Structured Variants & Export
 ================================================================================
 
-Status: IN PROGRESS (Days 71-85)
+Status: COMPLETE (Days 71-85)
 
   PROBLEM STATEMENT:
   Claude API extracts structured size/variant data (e.g., [{label:"Small",price:10.00},
@@ -529,13 +529,26 @@ Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
 
     Day 84 test suite: 50 cases, 100% pass rate
 
-  Day 85: Webhooks & API Documentation
+  Day 85: Webhooks & API Documentation *** COMPLETE ***
   --------------------------------------
-  [ ] Webhook support for menu update notifications
-      - POST callback on draft approval/export
-      - Configurable per restaurant
-  [ ] API documentation page
-  [ ] Sprint 9.4 summary and tests
+  [x] Webhook support for menu update notifications
+      - webhooks table: id, restaurant_id, url, event_types, secret, active, timestamps
+      - CRUD: register_webhook(), list_webhooks(), get_webhook(), delete_webhook()
+      - get_webhooks_for_event(): match by event type + restaurant (global + scoped)
+      - fire_webhooks(): async POST via daemon threads, fire-and-forget
+      - HMAC-SHA256 signature in X-Webhook-Signature header
+      - REST API: POST/GET/DELETE /api/webhooks (api_key_required)
+      - Wired into draft_approve_export(): fires draft.approved + draft.exported
+      - Event types: draft.approved, draft.exported
+  [x] API documentation page
+      - GET /api/docs — public HTML, no auth required
+      - Documents: auth, rate limiting, items CRUD, webhooks, error codes, payloads
+      - HMAC signature verification example
+  [x] Sprint 9.4 summary and tests
+
+    Day 85 test suite: 55 cases, 100% pass rate
+    Sprint 9.4 complete: Days 83-85, 157 tests, all passing
+    Phase 9 complete: Days 71-85, 782 tests, all passing
 
 Phase 10 — Multi-Menu & Versioning (Days 86-95)
 ------------------------------------------------
@@ -682,6 +695,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 85: Webhooks & API Docs — webhook CRUD, HMAC-SHA256 signed dispatch, POST/GET/DELETE /api/webhooks, /api/docs page, approve_export integration, Sprint 9.4 & Phase 9 complete (55 tests)
 Day 84: REST API Endpoints — GET/POST/PUT /api/drafts/<id>/items, API key auth (SHA-256 hash), sliding-window rate limiting, api_key_required decorator (50 tests)
 Day 83: "Approve & Export to POS" Button — one-click approve workflow, approved status, export history tracking, Sprint 9.4 start (52 tests)
 Day 82: Export Finalization & Sprint 9.3 Wrap-Up — E2E integration, cross-format consistency, edge case hardening, Sprint 9.3 complete (103 tests)
@@ -792,7 +806,9 @@ Tests:
 - tests/test_day81_export_validation.py — 67 cases (Day 81)
 - tests/test_day82_export_integration.py — 103 cases (Day 82)
 - tests/test_day83_approve_export.py   — 52 cases (Day 83)
+- tests/test_day84_rest_api.py         — 50 cases (Day 84)
+- tests/test_day85_webhooks_api_docs.py — 55 cases (Day 85)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 3,198 tests, all passing
+- TOTAL: 3,321 tests, all passing
 
 ================================================================================

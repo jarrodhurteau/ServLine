@@ -1186,7 +1186,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — Sprint 9.4 IN PROGRESS (Approve & Export + API)**
+➡ **Phase 9 — Structured Variants & Export — COMPLETE (Days 71-85)**
 
 Day 84 adds token-authenticated REST API endpoints for external POS integrations. Three endpoints: `GET /api/drafts/<id>/items` (read items + variants), `POST /api/drafts/<id>/items` (create items), `PUT /api/drafts/<id>/items/<item_id>` (update single item). API key auth via `X-API-Key` or `Authorization: Bearer` header — keys stored as SHA-256 hashes with per-key rate limiting (sliding window, 60 RPM default). Rate limit headers on all responses (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`). Status guards prevent writes to approved/published drafts. 3,248 tests passing across 35 test suites.
 
@@ -1352,7 +1352,7 @@ ServLine now has:
   - Day 82 test suite: 103 cases, 100% pass rate
   - Sprint 9.3 complete: Days 78-82, 292 tests, all passing
 
-### Sprint 9.4 — Approve & Export + API Foundation (Days 83-85) — IN PROGRESS
+### Sprint 9.4 — Approve & Export + API Foundation (Days 83-85) — COMPLETE
 - ✅ "Approve & Export to POS" Button (Day 83):
   - Prominent green "Approve & Export to POS" button in editor toolbar
   - Auto-saves draft before export, runs validation, shows confirmation modal
@@ -1375,3 +1375,15 @@ ServLine now has:
   - Rate limit headers on all authenticated responses
   - Status guards: approved/published drafts block POST/PUT (403)
   - Day 84 test suite: 50 cases, 100% pass rate
+- Webhooks & API Documentation (Day 85):
+  - Webhook notifications: POST callbacks on draft approval/export
+  - `webhooks` table: url, event_types, secret, restaurant scoping
+  - CRUD: `register_webhook()`, `list_webhooks()`, `delete_webhook()`
+  - `fire_webhooks()`: async dispatch via daemon threads, HMAC-SHA256 signed
+  - REST API: `POST/GET/DELETE /api/webhooks` (api_key_required)
+  - Wired into `draft_approve_export()`: fires `draft.approved` + `draft.exported`
+  - Public API documentation page: `GET /api/docs`
+  - Documents: authentication, rate limiting, items CRUD, webhooks, error codes
+  - Day 85 test suite: 55 cases, 100% pass rate
+  - Sprint 9.4 complete: Days 83-85, 157 tests, all passing
+  - Phase 9 complete: Days 71-85, 782 tests, all passing

@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+{% block title %}API Documentation - ServLine{% endblock %}
+
+{% block content %}
+<div class="wrap" style="max-width:820px;">
+  <h1>ServLine REST API</h1>
+  <p class="muted">Version 1.0 &mdash; Sprint 9.4</p>
+
+  <!-- ==================== Authentication ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Authentication</h2>
+    <p>All API endpoints require an API key passed via header:</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">X-API-Key: sk_your_api_key_here
+
+# OR
+
+Authorization: Bearer sk_your_api_key_here</pre>
+
+    <h3 style="margin-top:16px;">Auth Errors</h3>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Code</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Meaning</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>401</code></td>
+        <td style="padding:8px 12px;">Missing or invalid API key</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>403</code></td>
+        <td style="padding:8px 12px;">API key revoked, or draft not editable</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>429</code></td>
+        <td style="padding:8px 12px;">Rate limit exceeded</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ==================== Rate Limiting ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Rate Limiting</h2>
+    <p>Each API key has a per-minute request limit (default: 60). Every authenticated response includes rate limit headers:</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Header</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Description</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>X-RateLimit-Limit</code></td>
+        <td style="padding:8px 12px;">Max requests per minute</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>X-RateLimit-Remaining</code></td>
+        <td style="padding:8px 12px;">Requests remaining in current window</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>X-RateLimit-Reset</code></td>
+        <td style="padding:8px 12px;">Unix timestamp when window resets</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>Retry-After</code></td>
+        <td style="padding:8px 12px;">Seconds to wait (only on 429)</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ==================== Response Envelope ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Response Envelope</h2>
+    <p>All responses use a consistent JSON envelope:</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Success
+{"ok": true, ...}
+
+// Error
+{"ok": false, "error": "Description of the problem"}</pre>
+  </div>
+
+  <!-- ==================== Items Endpoints ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Draft Items</h2>
+
+    <!-- GET -->
+    <h3 style="margin-top:12px;color:#7aa2ff;">GET /api/drafts/{id}/items</h3>
+    <p class="muted">Retrieve all items (with variants) for a draft. Works on any draft status.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Response 200
+{
+  "ok": true,
+  "draft_id": 42,
+  "items": [
+    {
+      "id": 1,
+      "name": "Margherita Pizza",
+      "description": "Fresh mozzarella, basil",
+      "price_cents": 1299,
+      "category": "Pizza",
+      "variants": [
+        {"id": 10, "label": "Small", "price_cents": 1099, "kind": "size"},
+        {"id": 11, "label": "Large", "price_cents": 1599, "kind": "size"}
+      ]
+    }
+  ],
+  "count": 1
+}</pre>
+
+    <!-- POST -->
+    <h3 style="margin-top:20px;color:#7aa2ff;">POST /api/drafts/{id}/items</h3>
+    <p class="muted">Create or update items. Draft must be in "editing" status.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Request body
+{
+  "items": [
+    {
+      "name": "Caesar Salad",
+      "price_cents": 1199,
+      "category": "Salads",
+      "description": "Romaine, parmesan, croutons",
+      "_variants": [
+        {"label": "Half", "price_cents": 799, "kind": "size"},
+        {"label": "Full", "price_cents": 1199, "kind": "size"}
+      ]
+    }
+  ]
+}
+
+// Response 201
+{
+  "ok": true,
+  "inserted_ids": [15],
+  "updated_ids": []
+}</pre>
+
+    <!-- PUT -->
+    <h3 style="margin-top:20px;color:#7aa2ff;">PUT /api/drafts/{id}/items/{item_id}</h3>
+    <p class="muted">Update a single item. Item must belong to the draft.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Request body
+{
+  "name": "Caesar Salad (Updated)",
+  "price_cents": 1299
+}
+
+// Response 200
+{
+  "ok": true,
+  "updated_ids": [15]
+}</pre>
+
+    <h3 style="margin-top:16px;">Item Fields</h3>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Field</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Type</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Required</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>name</code></td>
+        <td style="padding:8px 12px;">string</td>
+        <td style="padding:8px 12px;">Yes</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>price_cents</code></td>
+        <td style="padding:8px 12px;">integer</td>
+        <td style="padding:8px 12px;">No (default 0)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>category</code></td>
+        <td style="padding:8px 12px;">string</td>
+        <td style="padding:8px 12px;">No</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>description</code></td>
+        <td style="padding:8px 12px;">string</td>
+        <td style="padding:8px 12px;">No</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>_variants</code></td>
+        <td style="padding:8px 12px;">array</td>
+        <td style="padding:8px 12px;">No</td>
+      </tr>
+    </table>
+
+    <h3 style="margin-top:16px;">Variant Fields</h3>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Field</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Type</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Required</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>label</code></td>
+        <td style="padding:8px 12px;">string</td>
+        <td style="padding:8px 12px;">Yes (non-empty)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>price_cents</code></td>
+        <td style="padding:8px 12px;">integer</td>
+        <td style="padding:8px 12px;">No (default 0)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>kind</code></td>
+        <td style="padding:8px 12px;">string</td>
+        <td style="padding:8px 12px;">No (size|combo|flavor|style|other)</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>position</code></td>
+        <td style="padding:8px 12px;">integer</td>
+        <td style="padding:8px 12px;">No</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ==================== Webhooks ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Webhooks</h2>
+    <p>Register HTTP callbacks to be notified when drafts are approved or exported.</p>
+
+    <!-- POST register -->
+    <h3 style="margin-top:12px;color:#7aa2ff;">POST /api/webhooks</h3>
+    <p class="muted">Register a new webhook.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Request body
+{
+  "url": "https://your-server.com/webhook",
+  "event_types": ["draft.approved", "draft.exported"]
+}
+
+// Response 201
+{
+  "ok": true,
+  "webhook": {
+    "id": 1,
+    "url": "https://your-server.com/webhook",
+    "event_types": ["draft.approved", "draft.exported"],
+    "secret": "abc123...xyz",
+    "restaurant_id": null,
+    "active": 1
+  }
+}</pre>
+    <p class="muted" style="margin-top:8px;">The <code>secret</code> is only returned once at creation. Save it to verify webhook signatures.</p>
+
+    <!-- GET list -->
+    <h3 style="margin-top:20px;color:#7aa2ff;">GET /api/webhooks</h3>
+    <p class="muted">List your active webhooks. Secrets are never included.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Response 200
+{
+  "ok": true,
+  "webhooks": [
+    {
+      "id": 1,
+      "url": "https://your-server.com/webhook",
+      "event_types": ["draft.approved", "draft.exported"],
+      "restaurant_id": null,
+      "active": 1
+    }
+  ],
+  "count": 1
+}</pre>
+
+    <!-- DELETE -->
+    <h3 style="margin-top:20px;color:#7aa2ff;">DELETE /api/webhooks/{id}</h3>
+    <p class="muted">Remove a webhook.</p>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">// Response 200
+{"ok": true, "deleted": true}</pre>
+
+    <h3 style="margin-top:20px;">Event Types</h3>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Event</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Triggered When</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>draft.approved</code></td>
+        <td style="padding:8px 12px;">Draft is approved for POS export</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>draft.exported</code></td>
+        <td style="padding:8px 12px;">POS JSON export is generated</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ==================== Webhook Payloads ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Webhook Payloads</h2>
+    <p>Each webhook POST includes these headers:</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;margin-bottom:16px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Header</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Value</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>Content-Type</code></td>
+        <td style="padding:8px 12px;">application/json</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>X-Webhook-Event</code></td>
+        <td style="padding:8px 12px;">The event type (e.g. <code>draft.approved</code>)</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>X-Webhook-Signature</code></td>
+        <td style="padding:8px 12px;">HMAC-SHA256 hex digest of the body using your webhook secret</td>
+      </tr>
+    </table>
+
+    <h3>draft.approved</h3>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">{
+  "event": "draft.approved",
+  "draft_id": 42,
+  "title": "Main Menu",
+  "item_count": 25,
+  "variant_count": 40,
+  "warning_count": 2,
+  "approved_at": "2026-02-27T14:30:00"
+}</pre>
+
+    <h3 style="margin-top:16px;">draft.exported</h3>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">{
+  "event": "draft.exported",
+  "draft_id": 42,
+  "format": "generic_pos",
+  "item_count": 25,
+  "variant_count": 40,
+  "exported_at": "2026-02-27T14:30:00"
+}</pre>
+
+    <h3 style="margin-top:16px;">Verifying Signatures</h3>
+    <pre style="background:#0d162b;padding:14px;border-radius:8px;overflow-x:auto;color:#e8eefc;font-size:13px;">import hmac, hashlib
+
+def verify_signature(body: bytes, secret: str, signature: str) -> bool:
+    expected = hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)</pre>
+  </div>
+
+  <!-- ==================== Error Codes ==================== -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Error Codes</h2>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Code</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--muted);">Meaning</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>200</code></td>
+        <td style="padding:8px 12px;">Success</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>201</code></td>
+        <td style="padding:8px 12px;">Created (POST success)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>400</code></td>
+        <td style="padding:8px 12px;">Bad request (validation error, malformed JSON)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>401</code></td>
+        <td style="padding:8px 12px;">Missing or invalid API key</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>403</code></td>
+        <td style="padding:8px 12px;">Forbidden (revoked key or non-editable draft)</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>404</code></td>
+        <td style="padding:8px 12px;">Resource not found</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:8px 12px;"><code>429</code></td>
+        <td style="padding:8px 12px;">Rate limit exceeded</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>500</code></td>
+        <td style="padding:8px 12px;">Internal server error</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

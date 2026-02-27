@@ -1,9 +1,13 @@
 # storage/drafts.py
 from __future__ import annotations
 import hashlib
+import hmac
 import json
 import secrets
 import sqlite3
+import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -240,6 +244,23 @@ def _ensure_schema() -> None:
             """
         )
 
+        # webhooks (Day 85 — webhook notification support)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS webhooks (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              restaurant_id   INTEGER,
+              url             TEXT NOT NULL,
+              event_types     TEXT NOT NULL DEFAULT '',
+              secret          TEXT NOT NULL,
+              active          INTEGER NOT NULL DEFAULT 1,
+              created_at      TEXT NOT NULL,
+              updated_at      TEXT NOT NULL,
+              FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -264,6 +285,12 @@ def _ensure_schema() -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhooks_restaurant ON webhooks(restaurant_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(active)"
         )
 
         # in case existing DBs predate Day-14+ columns, patch them
@@ -811,6 +838,162 @@ def revoke_api_key(key_id: int) -> bool:
         )
         conn.commit()
         return cur.rowcount > 0
+
+
+# ------------------------------------------------------------
+# Webhook Management (Day 85 — notification callbacks)
+# ------------------------------------------------------------
+
+VALID_WEBHOOK_EVENTS = {"draft.approved", "draft.exported"}
+
+
+def register_webhook(
+    url: str,
+    event_types: List[str],
+    restaurant_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Register a new webhook. Returns dict with 'secret' (only time visible)."""
+    secret = secrets.token_urlsafe(32)
+    valid = [e for e in event_types if e in VALID_WEBHOOK_EVENTS]
+    if not valid:
+        raise ValueError(
+            f"No valid event types. Must be one of: {sorted(VALID_WEBHOOK_EVENTS)}"
+        )
+    event_str = ",".join(sorted(valid))
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO webhooks "
+            "(restaurant_id, url, event_types, secret, active, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?)",
+            (restaurant_id, url.strip(), event_str, secret, _now(), _now()),
+        )
+        conn.commit()
+        return {
+            "id": int(cur.lastrowid),
+            "url": url.strip(),
+            "event_types": valid,
+            "secret": secret,
+            "restaurant_id": restaurant_id,
+            "active": 1,
+        }
+
+
+def list_webhooks(restaurant_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """List all active webhooks, optionally filtered by restaurant_id."""
+    with db_connect() as conn:
+        if restaurant_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM webhooks WHERE active=1 AND restaurant_id=? ORDER BY id",
+                (int(restaurant_id),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM webhooks WHERE active=1 ORDER BY id"
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = _row_to_dict(r)
+            d["event_types"] = [
+                e.strip() for e in (d.get("event_types") or "").split(",") if e.strip()
+            ]
+            d.pop("secret", None)
+            result.append(d)
+        return result
+
+
+def get_webhook(webhook_id: int) -> Optional[Dict[str, Any]]:
+    """Fetch a single webhook by ID. Returns dict or None."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM webhooks WHERE id=?", (int(webhook_id),)
+        ).fetchone()
+        if not row:
+            return None
+        d = _row_to_dict(row)
+        d["event_types"] = [
+            e.strip() for e in (d.get("event_types") or "").split(",") if e.strip()
+        ]
+        return d
+
+
+def delete_webhook(webhook_id: int) -> bool:
+    """Hard-delete a webhook. Returns True if a row was deleted."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM webhooks WHERE id=?", (int(webhook_id),)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_webhooks_for_event(
+    restaurant_id: Optional[int], event: str
+) -> List[Dict[str, Any]]:
+    """Get active webhooks matching a specific event for a restaurant.
+
+    Returns webhooks where restaurant_id matches OR is NULL (global).
+    """
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM webhooks WHERE active=1 ORDER BY id"
+        ).fetchall()
+        matched = []
+        for r in rows:
+            d = _row_to_dict(r)
+            events = [
+                e.strip() for e in (d.get("event_types") or "").split(",") if e.strip()
+            ]
+            if event not in events:
+                continue
+            wh_rid = d.get("restaurant_id")
+            if wh_rid is None or (restaurant_id is not None and wh_rid == restaurant_id):
+                d["event_types"] = events
+                matched.append(d)
+        return matched
+
+
+def fire_webhooks(
+    restaurant_id: Optional[int],
+    event: str,
+    payload: Dict[str, Any],
+) -> int:
+    """Fire webhooks for a given event. Returns count dispatched.
+
+    Sends POST requests in daemon threads (fire-and-forget).
+    Each request includes X-Webhook-Event and X-Webhook-Signature headers.
+    """
+    hooks = get_webhooks_for_event(restaurant_id, event)
+    if not hooks:
+        return 0
+
+    body = json.dumps(payload, default=str)
+
+    def _send(hook: Dict[str, Any]) -> None:
+        try:
+            secret = hook.get("secret", "")
+            signature = hmac.new(
+                secret.encode(), body.encode(), hashlib.sha256
+            ).hexdigest()
+            req = urllib.request.Request(
+                hook["url"],
+                data=body.encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Event": event,
+                    "X-Webhook-Signature": signature,
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=15)
+        except Exception:
+            pass  # fire-and-forget
+
+    for hook in hooks:
+        t = threading.Thread(target=_send, args=(hook,), daemon=True)
+        t.start()
+
+    return len(hooks)
 
 
 def _insert_draft(

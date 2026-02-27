@@ -4380,6 +4380,33 @@ def draft_approve_export(draft_id: int):
             warning_count=len(warnings),
         )
 
+        # Day 85: Fire webhook notifications
+        rid = (draft or {}).get("restaurant_id")
+        approved_ts = _now_iso()
+        try:
+            drafts_store.fire_webhooks(rid, "draft.approved", {
+                "event": "draft.approved",
+                "draft_id": draft_id,
+                "title": (draft or {}).get("title", ""),
+                "item_count": len(items),
+                "variant_count": variant_count,
+                "warning_count": len(warnings),
+                "approved_at": approved_ts,
+            })
+        except Exception:
+            pass  # webhook failure must not block approve flow
+        try:
+            drafts_store.fire_webhooks(rid, "draft.exported", {
+                "event": "draft.exported",
+                "draft_id": draft_id,
+                "format": "generic_pos",
+                "item_count": len(items),
+                "variant_count": variant_count,
+                "exported_at": approved_ts,
+            })
+        except Exception:
+            pass
+
         return jsonify({
             "ok": True,
             "pos_json": pos_json,
@@ -4387,7 +4414,7 @@ def draft_approve_export(draft_id: int):
             "variant_count": variant_count,
             "warnings": warnings,
             "warning_count": len(warnings),
-            "approved_at": _now_iso(),
+            "approved_at": approved_ts,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -4502,6 +4529,84 @@ def api_update_draft_item(draft_id: int, item_id: int):
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ============================================================
+# Day 85: Webhook Management API
+# ============================================================
+
+@app.post("/api/webhooks")
+@api_key_required
+def api_register_webhook():
+    """REST API: Register a new webhook for notifications."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "url is required"}), 400
+
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return jsonify({"ok": False, "error": "url must start with http:// or https://"}), 400
+
+    event_types = data.get("event_types")
+    if not event_types or not isinstance(event_types, list):
+        return jsonify({"ok": False, "error": "event_types must be a non-empty list"}), 400
+
+    restaurant_id = data.get("restaurant_id")
+    key_record = g.api_key
+    if key_record.get("restaurant_id"):
+        restaurant_id = key_record["restaurant_id"]
+
+    try:
+        result = drafts_store.register_webhook(
+            url=url,
+            event_types=event_types,
+            restaurant_id=restaurant_id,
+        )
+        return jsonify({"ok": True, "webhook": result}), 201
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/webhooks")
+@api_key_required
+def api_list_webhooks():
+    """REST API: List active webhooks."""
+    key_record = g.api_key
+    restaurant_id = key_record.get("restaurant_id")
+    hooks = drafts_store.list_webhooks(restaurant_id=restaurant_id)
+    return jsonify({"ok": True, "webhooks": hooks, "count": len(hooks)})
+
+
+@app.delete("/api/webhooks/<int:webhook_id>")
+@api_key_required
+def api_delete_webhook(webhook_id: int):
+    """REST API: Delete a webhook."""
+    hook = drafts_store.get_webhook(webhook_id)
+    if not hook:
+        return jsonify({"ok": False, "error": "Webhook not found"}), 404
+
+    key_record = g.api_key
+    if key_record.get("restaurant_id"):
+        if hook.get("restaurant_id") != key_record["restaurant_id"]:
+            return jsonify({"ok": False, "error": "Webhook not found"}), 404
+
+    deleted = drafts_store.delete_webhook(webhook_id)
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+# ============================================================
+# Day 85: API Documentation (public, no auth required)
+# ============================================================
+
+@app.get("/api/docs")
+def api_docs_page():
+    """Public API documentation page."""
+    return _safe_render("api_docs.html")
 
 
 @app.post("/drafts/<int:draft_id>/backfill_variants")
