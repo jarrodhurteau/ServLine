@@ -2416,6 +2416,41 @@ def menu_version_detail(version_id):
     )
 
 
+# --- Day 89: Version Comparison / Diff ---
+
+@app.get("/menus/<int:menu_id>/compare")
+@login_required
+def menu_version_compare(menu_id):
+    """Compare two menu versions side by side (Day 89)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404)
+    a = request.args.get("a", type=int)
+    b = request.args.get("b", type=int)
+    if a is None or b is None:
+        flash("Select two versions to compare.", "warning")
+        return redirect(url_for("menu_detail", menu_id=menu_id))
+    diff = menus_store.compare_menu_versions(a, b)
+    if diff is None or diff["menu_id"] != menu_id:
+        abort(404)
+    with db_connect() as conn:
+        rest = conn.execute(
+            "SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)
+        ).fetchone()
+    versions = menus_store.list_menu_versions(menu_id)
+    return _safe_render(
+        "menu_version_compare.html",
+        restaurant=rest,
+        menu=menu,
+        diff=diff,
+        versions=versions,
+        version_a_id=a,
+        version_b_id=b,
+    )
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------

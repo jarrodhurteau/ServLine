@@ -65,6 +65,35 @@
             {% endfor %}
           </tbody>
         </table>
+        {% if versions|length >= 2 %}
+          <div class="mt-4" style="padding:12px; border:1px solid var(--border,#e5e7eb); border-radius:6px;">
+            <h3 class="text-md font-semibold mb-2">Compare Versions</h3>
+            <form method="get" action="/menus/{{ menu.id }}/compare" class="flex gap-2 items-end">
+              <div>
+                <label style="color:var(--muted,#888); font-size:.82rem;">Version A (older)</label>
+                <select name="a" class="cell-input" style="min-width:130px;">
+                  {% for v in versions|reverse %}
+                    <option value="{{ v.id }}" {% if loop.index == (versions|length) %}selected{% endif %}>
+                      {{ v.label }} ({{ v.item_count }} items)
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label style="color:var(--muted,#888); font-size:.82rem;">Version B (newer)</label>
+                <select name="b" class="cell-input" style="min-width:130px;">
+                  {% for v in versions %}
+                    <option value="{{ v.id }}" {% if loop.first %}selected{% endif %}>
+                      {{ v.label }} ({{ v.item_count }} items)
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Compare</button>
+            </form>
+          </div>
+        {% endif %}
+
       {% else %}
         <p class="muted">No versions yet. Publish a draft to this menu to create the first version.</p>
       {% endif %}

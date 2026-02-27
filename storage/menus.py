@@ -458,6 +458,253 @@ def get_current_version(
 
 
 # ====================================================================
+# Version Comparison / Diff Engine (Day 89)
+# ====================================================================
+
+_ITEM_DIFF_FIELDS = ("name", "description", "price_cents", "category", "position")
+_VARIANT_DIFF_FIELDS = ("label", "price_cents", "kind", "position")
+
+
+def _normalize_for_match(val: Any) -> str:
+    """Lowercase + strip for matching names/labels."""
+    return (val or "").strip().lower()
+
+
+def _diff_item_fields(
+    item_a: Dict[str, Any],
+    item_b: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Compare two matched items field-by-field.
+
+    Returns list of ``{field, old, new}`` for fields that differ.
+    None and empty string are treated as equivalent for description.
+    """
+    changes: List[Dict[str, Any]] = []
+    for f in _ITEM_DIFF_FIELDS:
+        old = item_a.get(f)
+        new = item_b.get(f)
+        # Treat None and "" as equivalent for text fields
+        if f in ("description", "category"):
+            old = old or ""
+            new = new or ""
+        if old != new:
+            changes.append({"field": f, "old": old, "new": new})
+    return changes
+
+
+def _diff_variants(
+    variants_a: List[Dict[str, Any]],
+    variants_b: List[Dict[str, Any]],
+) -> Dict[str, list]:
+    """Compare two variant lists by normalized label.
+
+    Returns ``{added, removed, modified, unchanged}`` where each value
+    is a list.  ``modified`` entries are dicts with ``variant_a``,
+    ``variant_b``, and ``field_changes``.
+    """
+    result: Dict[str, list] = {
+        "added": [], "removed": [], "modified": [], "unchanged": [],
+    }
+
+    # Build lookup by normalized label
+    lookup_a: Dict[str, List[Dict]] = {}
+    for v in variants_a:
+        key = _normalize_for_match(v.get("label"))
+        lookup_a.setdefault(key, []).append(v)
+
+    lookup_b: Dict[str, List[Dict]] = {}
+    for v in variants_b:
+        key = _normalize_for_match(v.get("label"))
+        lookup_b.setdefault(key, []).append(v)
+
+    matched_a: set = set()
+    matched_b: set = set()
+    all_keys = set(lookup_a) | set(lookup_b)
+
+    for key in all_keys:
+        a_list = lookup_a.get(key, [])
+        b_list = lookup_b.get(key, [])
+        pairs = min(len(a_list), len(b_list))
+        for i in range(pairs):
+            va, vb = a_list[i], b_list[i]
+            matched_a.add(id(va))
+            matched_b.add(id(vb))
+            # Compare fields
+            fc: List[Dict[str, Any]] = []
+            for f in _VARIANT_DIFF_FIELDS:
+                old = va.get(f)
+                new = vb.get(f)
+                if old != new:
+                    fc.append({"field": f, "old": old, "new": new})
+            if fc:
+                result["modified"].append({
+                    "variant_a": va, "variant_b": vb, "field_changes": fc,
+                })
+            else:
+                result["unchanged"].append(vb)
+        # Excess unmatched go directly to removed/added
+        for va in a_list[pairs:]:
+            result["removed"].append(va)
+        for vb in b_list[pairs:]:
+            result["added"].append(vb)
+
+    return result
+
+
+def compare_menu_versions(
+    version_id_a: int,
+    version_id_b: int,
+) -> Optional[Dict[str, Any]]:
+    """Compare two menu versions and return a structured diff.
+
+    Returns None if either version is not found or they belong to
+    different menus.
+
+    The ``changes`` list is sorted: modified first, then added,
+    then removed, then unchanged.
+    """
+    va = get_menu_version(version_id_a, include_items=True)
+    vb = get_menu_version(version_id_b, include_items=True)
+    if va is None or vb is None:
+        return None
+    if va["menu_id"] != vb["menu_id"]:
+        return None
+
+    items_a = va.get("items", [])
+    items_b = vb.get("items", [])
+
+    # ---- Match items by normalized name ---------------------
+    def _build_lookup(items):
+        by_name: Dict[str, List[Dict]] = {}
+        for it in items:
+            key = _normalize_for_match(it.get("name"))
+            by_name.setdefault(key, []).append(it)
+        return by_name
+
+    lookup_a = _build_lookup(items_a)
+    lookup_b = _build_lookup(items_b)
+
+    # Pair items: unique name match first, then name+category for dupes
+    paired: List[tuple] = []  # (item_a, item_b)
+    used_a: set = set()
+    used_b: set = set()
+
+    all_names = set(lookup_a) | set(lookup_b)
+    for name_key in all_names:
+        a_list = lookup_a.get(name_key, [])
+        b_list = lookup_b.get(name_key, [])
+
+        if len(a_list) == 1 and len(b_list) == 1:
+            # Unique match
+            paired.append((a_list[0], b_list[0]))
+            used_a.add(id(a_list[0]))
+            used_b.add(id(b_list[0]))
+        elif a_list and b_list:
+            # Disambiguate by (name, category)
+            b_by_cat: Dict[str, List[Dict]] = {}
+            for it in b_list:
+                cat_key = _normalize_for_match(it.get("category"))
+                b_by_cat.setdefault(cat_key, []).append(it)
+
+            for ia in a_list:
+                cat_key = _normalize_for_match(ia.get("category"))
+                candidates = b_by_cat.get(cat_key, [])
+                match = None
+                for c in candidates:
+                    if id(c) not in used_b:
+                        match = c
+                        break
+                if match:
+                    paired.append((ia, match))
+                    used_a.add(id(ia))
+                    used_b.add(id(match))
+
+    # Build changes list
+    _empty_vc = {"added": [], "removed": [], "modified": [], "unchanged": []}
+    changes: List[Dict[str, Any]] = []
+
+    # Matched pairs → modified or unchanged
+    for ia, ib in paired:
+        fc = _diff_item_fields(ia, ib)
+        vc = _diff_variants(
+            ia.get("variants", []),
+            ib.get("variants", []),
+        )
+        has_variant_changes = (
+            vc["added"] or vc["removed"] or vc["modified"]
+        )
+        if fc or has_variant_changes:
+            status = "modified"
+        else:
+            status = "unchanged"
+        changes.append({
+            "status": status,
+            "item_a": ia,
+            "item_b": ib,
+            "field_changes": fc,
+            "variant_changes": vc,
+        })
+
+    # Unmatched A → removed
+    for it in items_a:
+        if id(it) not in used_a:
+            changes.append({
+                "status": "removed",
+                "item_a": it,
+                "item_b": None,
+                "field_changes": [],
+                "variant_changes": dict(_empty_vc),
+            })
+
+    # Unmatched B → added
+    for it in items_b:
+        if id(it) not in used_b:
+            changes.append({
+                "status": "added",
+                "item_a": None,
+                "item_b": it,
+                "field_changes": [],
+                "variant_changes": dict(_empty_vc),
+            })
+
+    # Sort: modified > added > removed > unchanged
+    _status_order = {"modified": 0, "added": 1, "removed": 2, "unchanged": 3}
+    changes.sort(key=lambda c: (
+        _status_order.get(c["status"], 9),
+        (c.get("item_b") or c.get("item_a") or {}).get("position", 0),
+    ))
+
+    # Summary
+    counts = {"added": 0, "removed": 0, "modified": 0, "unchanged": 0}
+    for c in changes:
+        counts[c["status"]] = counts.get(c["status"], 0) + 1
+
+    return {
+        "version_a": {
+            "id": va["id"],
+            "version_number": va["version_number"],
+            "label": va.get("label"),
+            "item_count": va.get("item_count", 0),
+            "variant_count": va.get("variant_count", 0),
+        },
+        "version_b": {
+            "id": vb["id"],
+            "version_number": vb["version_number"],
+            "label": vb.get("label"),
+            "item_count": vb.get("item_count", 0),
+            "variant_count": vb.get("variant_count", 0),
+        },
+        "menu_id": va["menu_id"],
+        "summary": {
+            **counts,
+            "total_a": len(items_a),
+            "total_b": len(items_b),
+        },
+        "changes": changes,
+    }
+
+
+# ====================================================================
 # Migration: backfill existing menus into versioned model
 # ====================================================================
 

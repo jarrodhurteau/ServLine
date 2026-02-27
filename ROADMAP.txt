@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 88 (February 27, 2026) — Publish to Versioned Menu / Sprint 10.1
+Last Updated: Day 89 (February 27, 2026) — Version Comparison & Diff Engine / Sprint 10.2
 
 ================================================================================
 PROJECT MISSION
@@ -640,8 +640,31 @@ Sprint 10.1 — Multi-Menu Foundation (Days 86-88)
 
 Sprint 10.2 — Version History & Diff (Days 89-92)
 ..................................................
-  [ ] Version comparison / diff view
-  [ ] Item-level change tracking (added, removed, modified)
+
+  Day 89: Version Comparison & Diff Engine *** COMPLETE ***
+  --------------------------------------------------------
+  [x] Diff engine in storage/menus.py:
+      - compare_menu_versions(version_id_a, version_id_b) → structured diff dict
+      - Item matching by normalized name (case-insensitive, stripped)
+      - Duplicate names disambiguated by (name, category) compound key
+      - Field-level diff: name, description, price_cents, category, position
+      - Variant-level diff: added/removed/modified/unchanged per item
+      - Returns None for invalid/cross-menu version pairs
+      - Sorted output: modified → added → removed → unchanged
+  [x] Flask route: GET /menus/<id>/compare?a=<version_id>&b=<version_id>
+      - Cross-validates versions belong to the URL menu
+      - Redirects with flash when params missing
+  [x] New template: menu_version_compare.html
+      - Color-coded unified diff: green (added), red (removed), amber (modified)
+      - Summary bar: +N added, -N removed, ~N modified, N unchanged
+      - Field change detail rows with old → new values
+      - Variant sub-rows with +/- indicators
+      - Unchanged items collapsed by default with JS toggle
+      - Inline version selector dropdowns for re-comparison
+  [x] Updated menu_detail.html: "Compare Versions" form (shown when 2+ versions)
+
+    Day 89 test suite: 52 cases, 100% pass rate
+
   [ ] Price change highlighting
   [ ] Restore from previous version
 
@@ -788,6 +811,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 89: Version Comparison & Diff Engine — compare_menu_versions(), item matching, field+variant diffs, compare route+template, menu detail compare form, Sprint 10.2 start (52 tests)
 Day 86: Multi-Menu & Versioning Foundation — storage/menus.py module, menu CRUD, version CRUD with draft snapshot, migration, draft-menu linking, Phase 10 start (59 tests)
 Day 85: Webhooks & API Docs — webhook CRUD, HMAC-SHA256 signed dispatch, POST/GET/DELETE /api/webhooks, /api/docs page, approve_export integration, Sprint 9.4 & Phase 9 complete (55 tests)
 Day 84: REST API Endpoints — GET/POST/PUT /api/drafts/<id>/items, API key auth (SHA-256 hash), sliding-window rate limiting, api_key_required decorator (50 tests)
@@ -903,7 +927,10 @@ Tests:
 - tests/test_day84_rest_api.py         — 50 cases (Day 84)
 - tests/test_day85_webhooks_api_docs.py — 55 cases (Day 85)
 - tests/test_day86_menu_versioning.py — 59 cases (Day 86)
+- tests/test_day87_menu_ui.py         — 51 cases (Day 87)
+- tests/test_day88_publish_versioned_menu.py — 44 cases (Day 88)
+- tests/test_day89_version_diff.py    — 52 cases (Day 89)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 3,380 tests, all passing
+- TOTAL: 3,483 tests, all passing
 
 ================================================================================

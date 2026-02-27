@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Compare {{ diff.version_a.label }} vs {{ diff.version_b.label }} · {{ menu.name }} · ServLine{% endblock %}
+
+{% block content %}
+  <style>
+    .diff-added td { background: rgba(74,222,128,.08); }
+    .diff-added { border-left: 3px solid #4ade80; }
+    .diff-removed td { background: rgba(248,113,113,.08); }
+    .diff-removed { border-left: 3px solid #f87171; }
+    .diff-removed .item-name { text-decoration: line-through; opacity:.7; }
+    .diff-modified td { background: rgba(251,191,36,.06); }
+    .diff-modified { border-left: 3px solid #fbbf24; }
+    .diff-unchanged { opacity:.45; }
+    .diff-detail td { font-size:.82rem; padding-left:2.5em; color:var(--muted,#888); }
+    .diff-arrow { color:#fbbf24; font-weight:600; }
+    .diff-badge { display:inline-block; padding:1px 7px; border-radius:4px; font-size:.75rem; font-weight:600; }
+    .badge-added { background:#dcfce7; color:#166534; }
+    .badge-removed { background:#fee2e2; color:#991b1b; }
+    .badge-modified { background:#fef9c3; color:#854d0e; }
+    .var-added td { background:rgba(74,222,128,.06); }
+    .var-removed td { background:rgba(248,113,113,.06); }
+    .var-modified td { background:rgba(251,191,36,.04); }
+  </style>
+
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a>
+    › <a href="/restaurants/{{ restaurant.id }}/menus" class="underline">{{ restaurant.name }}</a>
+    › <a href="/menus/{{ menu.id }}/detail" class="underline">{{ menu.name }}</a>
+    › Compare
+  </p>
+
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-2">Compare: {{ diff.version_a.label }} → {{ diff.version_b.label }}</h1>
+
+    <!-- Version selectors -->
+    <form method="get" action="/menus/{{ menu.id }}/compare" class="flex gap-2 items-end" style="margin-bottom:1rem;">
+      <div>
+        <label style="color:var(--muted,#888); font-size:.82rem;">Version A (older)</label>
+        <select name="a" class="cell-input" style="min-width:140px;">
+          {% for v in versions|reverse %}
+            <option value="{{ v.id }}" {% if v.id == version_a_id %}selected{% endif %}>
+              {{ v.label }} ({{ v.item_count }} items)
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="color:var(--muted,#888); font-size:.82rem;">Version B (newer)</label>
+        <select name="b" class="cell-input" style="min-width:140px;">
+          {% for v in versions %}
+            <option value="{{ v.id }}" {% if v.id == version_b_id %}selected{% endif %}>
+              {{ v.label }} ({{ v.item_count }} items)
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Compare</button>
+    </form>
+
+    <!-- Summary bar -->
+    <div class="flex gap-4" style="font-size:.9rem; margin-bottom:.8rem;">
+      <span style="color:#4ade80; font-weight:600;">+{{ diff.summary.added }} added</span>
+      <span style="color:#f87171; font-weight:600;">−{{ diff.summary.removed }} removed</span>
+      <span style="color:#fbbf24; font-weight:600;">~{{ diff.summary.modified }} modified</span>
+      <span class="text-muted">{{ diff.summary.unchanged }} unchanged</span>
+      <span class="text-muted" style="margin-left:auto;">{{ diff.summary.total_a }} → {{ diff.summary.total_b }} items</span>
+    </div>
+
+    <!-- Changes table -->
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:30px;"></th>
+          <th>Name</th>
+          <th>Category</th>
+          <th class="text-right">Price</th>
+          <th>Changes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in diff.changes %}
+          {% set item = c.item_b or c.item_a %}
+
+          {% if c.status == "unchanged" and loop.first or (c.status == "unchanged" and diff.changes[loop.index0 - 1].status != "unchanged") %}
+            <tr class="unchanged-toggle-row">
+              <td colspan="5" style="text-align:center; padding:6px;">
+                <button onclick="toggleUnchanged()" class="btn btn-ghost btn-sm" id="toggle-unchanged-btn">
+                  Show {{ diff.summary.unchanged }} unchanged item{{ 's' if diff.summary.unchanged != 1 }}
+                </button>
+              </td>
+            </tr>
+          {% endif %}
+
+          <tr class="diff-{{ c.status }}" {% if c.status == "unchanged" %}style="display:none;"{% endif %}>
+            <td style="text-align:center; font-weight:700; font-size:.85rem;">
+              {% if c.status == "added" %}<span style="color:#4ade80;">+</span>
+              {% elif c.status == "removed" %}<span style="color:#f87171;">−</span>
+              {% elif c.status == "modified" %}<span style="color:#fbbf24;">~</span>
+              {% else %}<span class="text-muted">=</span>{% endif %}
+            </td>
+            <td>
+              <span class="item-name">{{ item.name }}</span>
+              {% if c.status == "added" %}<span class="diff-badge badge-added">Added</span>
+              {% elif c.status == "removed" %}<span class="diff-badge badge-removed">Removed</span>
+              {% elif c.status == "modified" %}<span class="diff-badge badge-modified">Modified</span>
+              {% endif %}
+            </td>
+            <td class="text-muted">{{ item.category or '' }}</td>
+            <td class="text-right">
+              {% if item.price_cents is not none %}${{ "%.2f"|format(item.price_cents / 100) }}{% endif %}
+            </td>
+            <td class="text-muted" style="font-size:.82rem;">
+              {% if c.field_changes %}
+                {{ c.field_changes|length }} field{{ 's' if c.field_changes|length != 1 }} changed
+              {% endif %}
+            </td>
+          </tr>
+
+          <!-- Field change details for modified items -->
+          {% if c.status == "modified" and c.field_changes %}
+            <tr class="diff-detail diff-modified">
+              <td></td>
+              <td colspan="4" style="font-size:.82rem;">
+                {% for fc in c.field_changes %}
+                  <span style="margin-right:12px;">
+                    <strong>{{ fc.field }}:</strong>
+                    {% if fc.field == "price_cents" %}
+                      ${{ "%.2f"|format((fc.old or 0) / 100) }}
+                    {% else %}
+                      {{ fc.old if fc.old is not none else '(empty)' }}
+                    {% endif %}
+                    <span class="diff-arrow"> → </span>
+                    {% if fc.field == "price_cents" %}
+                      ${{ "%.2f"|format((fc.new or 0) / 100) }}
+                    {% else %}
+                      {{ fc.new if fc.new is not none else '(empty)' }}
+                    {% endif %}
+                  </span>
+                {% endfor %}
+              </td>
+            </tr>
+          {% endif %}
+
+          <!-- Variant changes -->
+          {% if c.status != "unchanged" %}
+            {% for v in c.variant_changes.added %}
+              <tr class="variant-row var-added" style="font-size:.82rem;">
+                <td></td>
+                <td style="padding-left:2em;"><span style="color:#4ade80; font-weight:600;">+</span> ↳ {{ v.label }}</td>
+                <td class="text-muted">{{ v.kind or '' }}</td>
+                <td class="text-right">${{ "%.2f"|format(v.price_cents / 100) }}</td>
+                <td></td>
+              </tr>
+            {% endfor %}
+            {% for v in c.variant_changes.removed %}
+              <tr class="variant-row var-removed" style="font-size:.82rem;">
+                <td></td>
+                <td style="padding-left:2em; text-decoration:line-through; opacity:.7;"><span style="color:#f87171; font-weight:600;">−</span> ↳ {{ v.label }}</td>
+                <td class="text-muted">{{ v.kind or '' }}</td>
+                <td class="text-right">${{ "%.2f"|format(v.price_cents / 100) }}</td>
+                <td></td>
+              </tr>
+            {% endfor %}
+            {% for vm in c.variant_changes.modified %}
+              <tr class="variant-row var-modified" style="font-size:.82rem;">
+                <td></td>
+                <td style="padding-left:2em;">
+                  <span style="color:#fbbf24; font-weight:600;">~</span> ↳ {{ vm.variant_b.label }}
+                  <span style="color:var(--muted,#888); font-size:.78rem; margin-left:6px;">
+                    {% for fc in vm.field_changes %}
+                      {{ fc.field }}: {{ fc.old }} → {{ fc.new }}{{ ', ' if not loop.last }}
+                    {% endfor %}
+                  </span>
+                </td>
+                <td class="text-muted">{{ vm.variant_b.kind or '' }}</td>
+                <td class="text-right">${{ "%.2f"|format(vm.variant_b.price_cents / 100) }}</td>
+                <td></td>
+              </tr>
+            {% endfor %}
+          {% endif %}
+
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="mt-4 flex gap-2">
+      <a href="/menus/{{ menu.id }}/detail" class="btn btn-ghost">Back to Versions</a>
+      <a href="/menus/versions/{{ diff.version_a.id }}" class="btn btn-ghost btn-sm">View {{ diff.version_a.label }}</a>
+      <a href="/menus/versions/{{ diff.version_b.id }}" class="btn btn-ghost btn-sm">View {{ diff.version_b.label }}</a>
+    </div>
+  </section>
+
+  <script>
+    function toggleUnchanged() {
+      var rows = document.querySelectorAll('.diff-unchanged');
+      var btn = document.getElementById('toggle-unchanged-btn');
+      var hidden = rows.length > 0 && rows[0].style.display === 'none';
+      rows.forEach(function(el) { el.style.display = hidden ? '' : 'none'; });
+      btn.textContent = hidden ? 'Hide {{ diff.summary.unchanged }} unchanged item{{ "s" if diff.summary.unchanged != 1 }}' : 'Show {{ diff.summary.unchanged }} unchanged item{{ "s" if diff.summary.unchanged != 1 }}';
+    }
+  </script>
+{% endblock %}

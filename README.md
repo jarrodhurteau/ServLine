@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 88 completes Sprint 10.1 (Multi-Menu Foundation). The publish workflow now creates immutable versioned snapshots: when a draft is assigned to a menu, `publish_now` calls `create_menu_version()` to snapshot all items + variants. New menu detail page (`/menus/<id>/detail`) shows version history with item/variant counts, source draft links, and current version badge. Version detail page (`/menus/versions/<id>`) displays full item table with variant sub-rows, prices, and categories. Legacy flat publish path preserved for backward compatibility. 3,431 tests passing across 39 test suites.
+Day 89 begins Sprint 10.2 (Version History & Diff) with a full version comparison engine. New `compare_menu_versions()` in `storage/menus.py` matches items by normalized name across two versions, classifying each as added/removed/modified/unchanged with field-level and variant-level diffs. New comparison page (`GET /menus/<id>/compare?a=&b=`) renders a color-coded unified diff view with summary stats, field change details, and variant sub-row indicators. Menu detail page now has version selector dropdowns for side-by-side comparison when 2+ versions exist. 3,483 tests passing across 40 test suites.
 
 ---
 
@@ -1424,3 +1424,20 @@ ServLine now has:
   - Menus list now links to detail page instead of legacy items page
   - Day 88 test suite: 44 cases, 100% pass rate
   - Sprint 10.1 complete: Days 86-88, 154 tests, all passing
+
+- Version Comparison & Diff Engine (Day 89):
+  - New `compare_menu_versions(version_id_a, version_id_b)` in `storage/menus.py`
+  - Item matching by normalized name (case-insensitive, whitespace-stripped)
+  - Duplicate name disambiguation by `(name, category)` compound key
+  - Field-level diff: name, description, price_cents, category, position changes with old/new values
+  - Variant-level diff: added/removed/modified/unchanged variants per item
+  - Items with only variant changes (no field changes) correctly classified as "modified"
+  - Sorted output: modified → added → removed → unchanged for actionable-first display
+  - Cross-menu validation: returns None if versions belong to different menus
+  - New Flask route: `GET /menus/<id>/compare?a=<version_id>&b=<version_id>`
+  - New comparison template: color-coded unified diff (green=added, red=removed, amber=modified)
+  - Summary bar: +N added, -N removed, ~N modified, N unchanged
+  - Unchanged items collapsed by default with toggle button
+  - Version selector dropdowns on comparison page for easy re-comparison
+  - Menu detail page: "Compare Versions" form when 2+ versions exist
+  - Day 89 test suite: 52 cases, 100% pass rate
