@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 87 (February 27, 2026) — Menu Management UI / Sprint 10.1
+Last Updated: Day 88 (February 27, 2026) — Publish to Versioned Menu / Sprint 10.1
 
 ================================================================================
 PROJECT MISSION
@@ -616,11 +616,27 @@ Sprint 10.1 — Multi-Menu Foundation (Days 86-88)
 
     Day 87 test suite: 51 cases, 100% pass rate
 
-  Day 88: Publish to Versioned Menu
-  ---------------------------------
-  [ ] Wire approve/publish to create menu versions
-  [ ] Version list in menu detail page
-  [ ] Version detail view with items
+  Day 88: Publish to Versioned Menu *** COMPLETE ***
+  --------------------------------------------------
+  [x] Wire approve/publish to create menu versions
+      - publish_now detects draft.menu_id → calls create_menu_version()
+      - Snapshots all items + variants into immutable version record
+      - Legacy path preserved: no menu_id → flat menu_items insert
+      - Flash message shows version label, item count, variant count
+      - Redirect to new menu detail page after versioned publish
+  [x] Version list in menu detail page
+      - GET /menus/<id>/detail: breadcrumb nav, version history table
+      - Columns: version number, label, items, variants, source draft, notes, date
+      - Current version highlighted with "(current)" badge
+      - Empty state when no versions published
+  [x] Version detail view with items
+      - GET /menus/versions/<id>: full item table with variant sub-rows
+      - Prices formatted as dollars, categories displayed
+      - Variant sub-rows with kind badges and arrow prefix
+      - Breadcrumb: Restaurants → Restaurant → Menu → Version
+  [x] Menus list now links to detail page (not legacy /items)
+
+    Day 88 test suite: 44 cases, 100% pass rate
 
 Sprint 10.2 — Version History & Diff (Days 89-92)
 ..................................................

@@ -2363,6 +2363,59 @@ def items_page(menu_id):
         ).fetchall()
         return _safe_render("items.html", restaurant=rest, menu=menu, items=items)
 
+
+# --- Day 88: Menu Detail & Version Views ---
+
+@app.get("/menus/<int:menu_id>/detail")
+@login_required
+def menu_detail(menu_id):
+    """Menu detail page showing version history (Day 88)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404)
+    with db_connect() as conn:
+        rest = conn.execute(
+            "SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)
+        ).fetchone()
+    versions = menus_store.list_menu_versions(menu_id)
+    current = menus_store.get_current_version(menu_id) if versions else None
+    return _safe_render(
+        "menu_detail.html",
+        restaurant=rest,
+        menu=menu,
+        versions=versions,
+        current_version=current,
+    )
+
+
+@app.get("/menus/versions/<int:version_id>")
+@login_required
+def menu_version_detail(version_id):
+    """Version detail page with full item list (Day 88)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    version = menus_store.get_menu_version(version_id, include_items=True)
+    if not version:
+        abort(404)
+    menu = menus_store.get_menu(version["menu_id"])
+    if not menu:
+        abort(404)
+    with db_connect() as conn:
+        rest = conn.execute(
+            "SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)
+        ).fetchone()
+    version_items = version.get("items", [])
+    return _safe_render(
+        "menu_version_detail.html",
+        restaurant=rest,
+        menu=menu,
+        version=version,
+        version_items=version_items,
+    )
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------
@@ -4368,6 +4421,9 @@ def draft_publish_now(draft_id: int):
     """
     Approve & publish from the Draft Editor.
     Requires restaurant_id to be assigned (in metadata) or provided in form/json.
+
+    Day 88: If draft has menu_id assigned, creates a versioned snapshot
+    via menus_store.create_menu_version() instead of legacy menu_items insert.
     """
     _require_drafts_storage()
     try:
@@ -4392,7 +4448,36 @@ def draft_publish_now(draft_id: int):
             flash("Assign a restaurant before publishing.", "error")
             return redirect(url_for("draft_editor", draft_id=draft_id))
 
-        # Day 73: variant-aware publish — expand variants into flat rows
+        # Day 88: Versioned publish path — if draft has menu_id, create version
+        assigned_menu_id = draft.get("menu_id")
+        if assigned_menu_id and menus_store:
+            menu = menus_store.get_menu(int(assigned_menu_id))
+            if not menu:
+                flash("Assigned menu not found. Please reassign.", "error")
+                return redirect(url_for("draft_editor", draft_id=draft_id))
+            version = menus_store.create_menu_version(
+                int(assigned_menu_id),
+                source_draft_id=draft_id,
+                notes=f"Published from draft #{draft_id}",
+            )
+            # Mark draft as published
+            try:
+                if hasattr(drafts_store, "approve_publish"):
+                    drafts_store.approve_publish(draft_id)
+                else:
+                    drafts_store.save_draft_metadata(draft_id, status="published")
+            except Exception:
+                pass
+
+            flash(
+                f"Published draft #{draft_id} → {menu['name']} "
+                f"{version['label']} ({version['item_count']} items, "
+                f"{version['variant_count']} variants).",
+                "success",
+            )
+            return redirect(url_for("menu_detail", menu_id=int(assigned_menu_id)))
+
+        # Legacy path: no menu_id assigned — flat publish to menu_items
         publish_rows = drafts_store.get_publish_rows(draft_id)
         with db_connect() as conn:
             menu_id = _find_or_create_menu_for_restaurant(conn, int(restaurant_id))

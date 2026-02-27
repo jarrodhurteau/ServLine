@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ menu.name }} · {{ restaurant.name }} · ServLine{% endblock %}
+
+{% block content %}
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a>
+    › <a href="/restaurants/{{ restaurant.id }}/menus" class="underline">{{ restaurant.name }}</a>
+    › {{ menu.name }}
+  </p>
+
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-2">{{ menu.name }}</h1>
+    {% if menu.menu_type %}
+      <span class="badge">{{ menu.menu_type|replace('_',' ')|title }}</span>
+    {% endif %}
+    {% if menu.description %}
+      <p class="text-muted mt-1">{{ menu.description }}</p>
+    {% endif %}
+
+    <div class="mt-4">
+      <h2 class="text-lg font-semibold mb-3">Version History</h2>
+
+      {% if versions %}
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Version</th>
+              <th>Label</th>
+              <th class="text-right">Items</th>
+              <th class="text-right">Variants</th>
+              <th>Source Draft</th>
+              <th>Notes</th>
+              <th>Created</th>
+              <th class="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in versions %}
+              <tr{% if current_version and v.id == current_version.id %} class="version-current"{% endif %}>
+                <td>
+                  {% if current_version and v.id == current_version.id %}
+                    <strong>v{{ v.version_number }}</strong> <span class="text-brand-500">(current)</span>
+                  {% else %}
+                    v{{ v.version_number }}
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ v.label or '' }}</td>
+                <td class="text-right">{{ v.item_count }}</td>
+                <td class="text-right">{{ v.variant_count }}</td>
+                <td class="text-muted">
+                  {% if v.source_draft_id %}
+                    <a href="/drafts/{{ v.source_draft_id }}/edit" class="underline">#{{ v.source_draft_id }}</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  {{ v.notes or '' }}
+                </td>
+                <td class="text-muted">{{ v.created_at[:16] if v.created_at else '' }}</td>
+                <td class="text-right">
+                  <a href="/menus/versions/{{ v.id }}" class="btn btn-sm btn-ghost">View Items</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No versions yet. Publish a draft to this menu to create the first version.</p>
+      {% endif %}
+    </div>
+
+    <div class="mt-4 flex gap-2">
+      <a href="/restaurants/{{ restaurant.id }}/menus" class="btn btn-ghost">Back to Menus</a>
+      <a href="/menus/{{ menu.id }}/items" class="btn btn-ghost">Legacy Items</a>
+    </div>
+  </section>
+{% endblock %}

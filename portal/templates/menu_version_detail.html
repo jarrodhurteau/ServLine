@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ menu.name }} {{ version.label }} · ServLine{% endblock %}
+
+{% block content %}
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a>
+    › <a href="/restaurants/{{ restaurant.id }}/menus" class="underline">{{ restaurant.name }}</a>
+    › <a href="/menus/{{ menu.id }}/detail" class="underline">{{ menu.name }}</a>
+    › {{ version.label }}
+  </p>
+
+  <section class="card">
+    <h1 class="text-xl font-semibold mb-2">{{ menu.name }} — {{ version.label }}</h1>
+    <div class="flex gap-4 text-muted" style="font-size:.9rem;">
+      <span>{{ version.item_count }} items</span>
+      <span>{{ version.variant_count }} variants</span>
+      {% if version.source_draft_id %}
+        <span>Source: <a href="/drafts/{{ version.source_draft_id }}/edit" class="underline">Draft #{{ version.source_draft_id }}</a></span>
+      {% endif %}
+      {% if version.created_at %}
+        <span>Created: {{ version.created_at[:16] }}</span>
+      {% endif %}
+    </div>
+    {% if version.notes %}
+      <p class="text-muted mt-1" style="font-size:.85rem;">{{ version.notes }}</p>
+    {% endif %}
+
+    <div class="mt-4">
+      <h2 class="text-lg font-semibold mb-3">Items</h2>
+
+      {% if version_items %}
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="text-right" style="width:40px;">#</th>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Category</th>
+              <th class="text-right">Price</th>
+              <th class="text-right">Variants</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in version_items %}
+              <tr>
+                <td class="text-right text-muted">{{ loop.index }}</td>
+                <td>{{ item.name }}</td>
+                <td class="text-muted" style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  {{ item.description or '' }}
+                </td>
+                <td class="text-muted">{{ item.category or '' }}</td>
+                <td class="text-right">${{ "%.2f"|format(item.price_cents / 100) }}</td>
+                <td class="text-right">{{ (item.variants or [])|length }}</td>
+              </tr>
+              {% for v in item.variants or [] %}
+                <tr class="variant-row" style="font-size:.85rem; opacity:.75;">
+                  <td></td>
+                  <td style="padding-left:2em;">↳ {{ v.label }}</td>
+                  <td class="text-muted">{{ v.kind or '' }}</td>
+                  <td></td>
+                  <td class="text-right">${{ "%.2f"|format(v.price_cents / 100) }}</td>
+                  <td></td>
+                </tr>
+              {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">This version has no items.</p>
+      {% endif %}
+    </div>
+
+    <div class="mt-4 flex gap-2">
+      <a href="/menus/{{ menu.id }}/detail" class="btn btn-ghost">Back to Versions</a>
+    </div>
+  </section>
+{% endblock %}

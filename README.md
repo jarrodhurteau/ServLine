@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 86 starts Phase 10 with the multi-menu and versioning foundation. New `storage/menus.py` module provides menu CRUD (create, list, get, update, soft-delete) with 11 menu types (breakfast, lunch, dinner, brunch, etc.). Menu versioning system: `create_menu_version()` snapshots draft items + variants into immutable version records with auto-incrementing version numbers. Three new tables: `menu_versions`, `menu_version_items`, `menu_version_item_variants` — full structured variant support in version snapshots. Drafts now link to specific menus via `menu_id` column. Migration function backfills existing published menus into the versioned model. 3,380 tests passing across 36 test suites.
+Day 88 completes Sprint 10.1 (Multi-Menu Foundation). The publish workflow now creates immutable versioned snapshots: when a draft is assigned to a menu, `publish_now` calls `create_menu_version()` to snapshot all items + variants. New menu detail page (`/menus/<id>/detail`) shows version history with item/variant counts, source draft links, and current version badge. Version detail page (`/menus/versions/<id>`) displays full item table with variant sub-rows, prices, and categories. Legacy flat publish path preserved for backward compatibility. 3,431 tests passing across 39 test suites.
 
 ---
 
@@ -1411,3 +1411,16 @@ ServLine now has:
   - Editor dynamically shows menu dropdown when restaurant assigned, hint link when no menus
   - Fixed pre-existing test schema gaps (menu_id column in Days 73/74/77 test DBs)
   - Day 87 test suite: 51 cases, 100% pass rate
+
+- Publish to Versioned Menu (Day 88):
+  - Wired `publish_now` to create menu versions when draft has `menu_id` assigned
+  - Versioned path: detects `draft.menu_id` → `create_menu_version(menu_id, source_draft_id)`
+  - Snapshots all items + variants into immutable `menu_version_items`/`menu_version_item_variants`
+  - Legacy path preserved: drafts without `menu_id` still publish to flat `menu_items`
+  - New menu detail page: `GET /menus/<id>/detail` — version history table with counts, source draft links
+  - Current version highlighted with "(current)" badge, empty state for new menus
+  - New version detail page: `GET /menus/versions/<id>` — full item table with variant sub-rows
+  - Breadcrumb navigation: Restaurants → Restaurant → Menu → Version
+  - Menus list now links to detail page instead of legacy items page
+  - Day 88 test suite: 44 cases, 100% pass rate
+  - Sprint 10.1 complete: Days 86-88, 154 tests, all passing
