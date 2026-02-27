@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 85 (February 27, 2026) — Webhooks, API Docs & Sprint 9.4 / Phase 9 Complete
+Last Updated: Day 86 (February 27, 2026) — Multi-Menu & Versioning Foundation / Phase 10 Start
 
 ================================================================================
 PROJECT MISSION
@@ -550,13 +550,87 @@ Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
     Sprint 9.4 complete: Days 83-85, 157 tests, all passing
     Phase 9 complete: Days 71-85, 782 tests, all passing
 
-Phase 10 — Multi-Menu & Versioning (Days 86-95)
-------------------------------------------------
-[ ] Multiple menu support per restaurant
-[ ] Menu versioning and history
-[ ] Diff view between versions
-[ ] Seasonal menu management
-[ ] Menu scheduling (breakfast/lunch/dinner)
+================================================================================
+CURRENT PHASE: Phase 10 — Multi-Menu & Versioning
+================================================================================
+
+Status: IN PROGRESS (Days 86-95)
+
+  PROBLEM STATEMENT:
+  Restaurants have at most one implicit menu. There is no way to manage
+  multiple menus (Lunch, Dinner, Brunch) or track version history when a
+  menu is updated. Drafts link to restaurants but not to specific menus.
+
+  SOLUTION:
+  Add multi-menu support with named/typed menus per restaurant, version
+  snapshots when publishing, diff views between versions, and menu
+  scheduling for daypart management.
+
+Sprint 10.1 — Multi-Menu Foundation (Days 86-88)
+.................................................
+
+  Day 86: Schema & Core CRUD *** COMPLETE ***
+  -------------------------------------------
+  [x] New storage/menus.py module (~380 LOC)
+      - Separated from drafts.py (2100+ LOC) for clean domain boundaries
+      - Shares db_connect and _now from drafts module
+  [x] Schema additions (idempotent _ensure_menu_schema):
+      - ALTER menus: +menu_type, +description, +updated_at columns
+      - ALTER drafts: +menu_id column (FK to menus, nullable)
+      - New menu_versions table (version_number, label, source_draft_id,
+        item_count, variant_count, notes, created_by)
+      - New menu_version_items table (structured snapshot with category)
+      - New menu_version_item_variants table (full variant support)
+      - UNIQUE(menu_id, version_number) constraint
+      - 6 new indexes for performance
+  [x] Menu CRUD:
+      - create_menu(restaurant_id, name, menu_type, description)
+      - list_menus(restaurant_id, include_inactive) with version_count
+      - get_menu(menu_id), update_menu(), delete_menu() (soft-delete)
+      - VALID_MENU_TYPES: 11 types (breakfast, lunch, dinner, brunch,
+        happy_hour, kids, dessert, drinks, catering, seasonal, other)
+  [x] Menu Version CRUD:
+      - create_menu_version(menu_id, source_draft_id, label, notes, created_by)
+        Auto-increments version_number, snapshots draft items + variants
+      - list_menu_versions(menu_id) newest first
+      - get_menu_version(version_id, include_items) LEFT JOIN items+variants
+      - get_current_version(menu_id) highest version_number
+  [x] Draft-menu linking:
+      - save_draft_metadata() accepts menu_id parameter
+      - _insert_draft() accepts menu_id parameter
+      - Backward compatible: existing drafts have menu_id=NULL
+  [x] Migration function:
+      - migrate_existing_menus() copies legacy menu_items → version snapshots
+      - Creates v1 for each menu with items but no versions
+      - Idempotent: skips already-migrated menus
+
+    Day 86 test suite: 59 cases, 100% pass rate
+
+  Day 87: Menu Management UI
+  --------------------------
+  [ ] Restaurant menu list page
+  [ ] Create/edit/delete menu forms
+  [ ] Menu type selector and description
+  [ ] Draft-to-menu assignment in editor
+
+  Day 88: Publish to Versioned Menu
+  ---------------------------------
+  [ ] Wire approve/publish to create menu versions
+  [ ] Version list in menu detail page
+  [ ] Version detail view with items
+
+Sprint 10.2 — Version History & Diff (Days 89-92)
+..................................................
+  [ ] Version comparison / diff view
+  [ ] Item-level change tracking (added, removed, modified)
+  [ ] Price change highlighting
+  [ ] Restore from previous version
+
+Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
+.................................................
+  [ ] Seasonal menu management
+  [ ] Menu scheduling (breakfast/lunch/dinner dayparts)
+  [ ] Active menu switching
 
 Phase 11 — Advanced AI Features (Days 96-105)
 ----------------------------------------------
@@ -695,6 +769,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 86: Multi-Menu & Versioning Foundation — storage/menus.py module, menu CRUD, version CRUD with draft snapshot, migration, draft-menu linking, Phase 10 start (59 tests)
 Day 85: Webhooks & API Docs — webhook CRUD, HMAC-SHA256 signed dispatch, POST/GET/DELETE /api/webhooks, /api/docs page, approve_export integration, Sprint 9.4 & Phase 9 complete (55 tests)
 Day 84: REST API Endpoints — GET/POST/PUT /api/drafts/<id>/items, API key auth (SHA-256 hash), sliding-window rate limiting, api_key_required decorator (50 tests)
 Day 83: "Approve & Export to POS" Button — one-click approve workflow, approved status, export history tracking, Sprint 9.4 start (52 tests)
@@ -808,7 +883,8 @@ Tests:
 - tests/test_day83_approve_export.py   — 52 cases (Day 83)
 - tests/test_day84_rest_api.py         — 50 cases (Day 84)
 - tests/test_day85_webhooks_api_docs.py — 55 cases (Day 85)
+- tests/test_day86_menu_versioning.py — 59 cases (Day 86)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 3,321 tests, all passing
+- TOTAL: 3,380 tests, all passing
 
 ================================================================================

@@ -308,6 +308,8 @@ def _ensure_schema() -> None:
             cur.execute("ALTER TABLE drafts ADD COLUMN source_file_path TEXT;")
         if not _col_exists("draft_items", "confidence"):
             cur.execute("ALTER TABLE draft_items ADD COLUMN confidence INTEGER;")
+        if not _col_exists("drafts", "menu_id"):
+            cur.execute("ALTER TABLE drafts ADD COLUMN menu_id INTEGER;")
 
         conn.commit()
 
@@ -708,6 +710,7 @@ def save_draft_metadata(
     status: Optional[str] = None,
     source: Optional[str] = None,
     source_job_id: Optional[int] = None,
+    menu_id: Optional[int] = None,
 ) -> None:
     sets: List[str] = []
     args: List[Any] = []
@@ -728,6 +731,9 @@ def save_draft_metadata(
     if source_job_id is not None:
         sets.append("source_job_id=?")
         args.append(int(source_job_id))
+    if menu_id is not None:
+        sets.append("menu_id=?")
+        args.append(int(menu_id))
 
     if not sets:
         return
@@ -1004,6 +1010,7 @@ def _insert_draft(
     source: Optional[str] = None,
     source_job_id: Optional[int] = None,
     source_file_path: Optional[str] = None,
+    menu_id: Optional[int] = None,
 ) -> int:
     with db_connect() as conn:
         cur = conn.cursor()
@@ -1016,10 +1023,11 @@ def _insert_draft(
                 source,
                 source_job_id,
                 source_file_path,
+                menu_id,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 title,
@@ -1028,6 +1036,7 @@ def _insert_draft(
                 source,
                 source_job_id,
                 source_file_path,
+                menu_id,
                 _now(),
                 _now(),
             ),

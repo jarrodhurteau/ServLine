@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — COMPLETE (Days 71-85)**
+➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 84 adds token-authenticated REST API endpoints for external POS integrations. Three endpoints: `GET /api/drafts/<id>/items` (read items + variants), `POST /api/drafts/<id>/items` (create items), `PUT /api/drafts/<id>/items/<item_id>` (update single item). API key auth via `X-API-Key` or `Authorization: Bearer` header — keys stored as SHA-256 hashes with per-key rate limiting (sliding window, 60 RPM default). Rate limit headers on all responses (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`). Status guards prevent writes to approved/published drafts. 3,248 tests passing across 35 test suites.
+Day 86 starts Phase 10 with the multi-menu and versioning foundation. New `storage/menus.py` module provides menu CRUD (create, list, get, update, soft-delete) with 11 menu types (breakfast, lunch, dinner, brunch, etc.). Menu versioning system: `create_menu_version()` snapshots draft items + variants into immutable version records with auto-incrementing version numbers. Three new tables: `menu_versions`, `menu_version_items`, `menu_version_item_variants` — full structured variant support in version snapshots. Drafts now link to specific menus via `menu_id` column. Migration function backfills existing published menus into the versioned model. 3,380 tests passing across 36 test suites.
 
 ---
 
@@ -1387,3 +1387,17 @@ ServLine now has:
   - Day 85 test suite: 55 cases, 100% pass rate
   - Sprint 9.4 complete: Days 83-85, 157 tests, all passing
   - Phase 9 complete: Days 71-85, 782 tests, all passing
+
+## ⏭️ Phase 10 — Multi-Menu & Versioning (IN PROGRESS)
+
+- Multi-Menu & Versioning Foundation (Day 86):
+  - New `storage/menus.py` module (~380 LOC): menu + version CRUD
+  - Schema: `menu_versions`, `menu_version_items`, `menu_version_item_variants` tables
+  - ALTER `menus`: +menu_type, +description, +updated_at columns
+  - ALTER `drafts`: +menu_id column for draft-to-menu linking
+  - 11 valid menu types: breakfast, lunch, dinner, brunch, happy_hour, kids, dessert, drinks, catering, seasonal, other
+  - `create_menu_version()` snapshots draft items + variants into immutable version
+  - Auto-incrementing version numbers per menu, UNIQUE constraint
+  - `get_menu_version()` LEFT JOIN retrieval with nested items + variants
+  - `migrate_existing_menus()` backfills legacy menu_items → versioned model
+  - Day 86 test suite: 59 cases, 100% pass rate
