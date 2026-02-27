@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 89 (February 27, 2026) — Version Comparison & Diff Engine / Sprint 10.2
+Last Updated: Day 90 (February 27, 2026) — Price Change Highlighting & Restore from Version / Sprint 10.2
 
 ================================================================================
 PROJECT MISSION
@@ -665,8 +665,31 @@ Sprint 10.2 — Version History & Diff (Days 89-92)
 
     Day 89 test suite: 52 cases, 100% pass rate
 
-  [ ] Price change highlighting
-  [ ] Restore from previous version
+  Day 90: Price Change Highlighting & Restore from Version *** COMPLETE ***
+  -----------------------------------------------------------------------
+  [x] Price change highlighting in diff engine:
+      - _diff_item_fields() adds price_direction ('increase'/'decrease') on price changes
+      - _diff_variants() adds price_direction on variant price changes
+      - _price_direction() helper normalizes None→0 for comparison
+  [x] Price change highlighting in compare template:
+      - Old price with strikethrough + new price with direction arrow (▲/▼)
+      - CSS classes: .price-increase (red), .price-decrease (green), .price-old
+      - Variant price changes highlighted with same treatment
+      - Jinja2 namespace pattern for loop-scoped variable access
+  [x] Restore from previous version:
+      - restore_version_to_draft(version_id) in storage/menus.py
+      - Copies version items + variants into new draft (editing status)
+      - Sets source="version_restore", links menu_id, correct restaurant_id
+      - Returns draft_id, version_id, version_label, item_count, variant_count
+  [x] Flask route: POST /menus/versions/<id>/restore
+      - Login required, 404 for missing version
+      - Flash success with draft id, item/variant counts
+      - Redirects to draft editor
+  [x] Restore buttons in UI:
+      - menu_version_detail.html: "Restore to Draft" button with confirm dialog
+      - menu_detail.html: "Restore" button per version in history table
+
+    Day 90 test suite: 49 cases, 100% pass rate
 
 Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
 .................................................
@@ -811,6 +834,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 90: Price Change Highlighting & Restore from Version — price_direction in diffs, ▲/▼ arrows in compare template, restore_version_to_draft(), restore route+buttons, Sprint 10.2 continued (49 tests)
 Day 89: Version Comparison & Diff Engine — compare_menu_versions(), item matching, field+variant diffs, compare route+template, menu detail compare form, Sprint 10.2 start (52 tests)
 Day 86: Multi-Menu & Versioning Foundation — storage/menus.py module, menu CRUD, version CRUD with draft snapshot, migration, draft-menu linking, Phase 10 start (59 tests)
 Day 85: Webhooks & API Docs — webhook CRUD, HMAC-SHA256 signed dispatch, POST/GET/DELETE /api/webhooks, /api/docs page, approve_export integration, Sprint 9.4 & Phase 9 complete (55 tests)

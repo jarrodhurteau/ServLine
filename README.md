@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 89 begins Sprint 10.2 (Version History & Diff) with a full version comparison engine. New `compare_menu_versions()` in `storage/menus.py` matches items by normalized name across two versions, classifying each as added/removed/modified/unchanged with field-level and variant-level diffs. New comparison page (`GET /menus/<id>/compare?a=&b=`) renders a color-coded unified diff view with summary stats, field change details, and variant sub-row indicators. Menu detail page now has version selector dropdowns for side-by-side comparison when 2+ versions exist. 3,483 tests passing across 40 test suites.
+Day 90 adds price change highlighting and version restore. The diff engine now includes `price_direction` metadata on price changes, rendered in the compare template with ▲/▼ arrows, color-coded classes (red increase, green decrease), and old-price strikethrough. New `restore_version_to_draft()` creates an editable draft from any historical menu version, copying all items and variants. Restore buttons appear on both version detail and menu detail pages. 3,532 tests passing across 41 test suites.
 
 ---
 
@@ -1441,3 +1441,20 @@ ServLine now has:
   - Version selector dropdowns on comparison page for easy re-comparison
   - Menu detail page: "Compare Versions" form when 2+ versions exist
   - Day 89 test suite: 52 cases, 100% pass rate
+
+- Price Change Highlighting & Restore from Version (Day 90):
+  - Diff engine enhanced with `price_direction` metadata ('increase'/'decrease') on price changes
+  - `_price_direction()` helper normalizes None→0 for comparison
+  - Variant diffs also include `price_direction` on variant price changes
+  - Compare template: old price with strikethrough + new price with ▲/▼ direction arrows
+  - CSS classes: `.price-increase` (red), `.price-decrease` (green), `.price-old` (strikethrough)
+  - Jinja2 `namespace()` pattern for loop-scoped variable access
+  - New `restore_version_to_draft(version_id)` in `storage/menus.py`
+  - Copies all version items + variants into a new draft in "editing" status
+  - Sets `source="version_restore"`, links `menu_id`, correct `restaurant_id`
+  - Returns `{draft_id, version_id, version_label, item_count, variant_count}`
+  - New Flask route: `POST /menus/versions/<id>/restore` with login required
+  - Flash success with draft id and counts, redirects to draft editor
+  - "Restore to Draft" button on version detail page with confirm dialog
+  - "Restore" button per version in menu detail history table
+  - Day 90 test suite: 49 cases, 100% pass rate

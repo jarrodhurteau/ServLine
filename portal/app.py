@@ -2451,6 +2451,23 @@ def menu_version_compare(menu_id):
     )
 
 
+@app.post("/menus/versions/<int:version_id>/restore")
+@login_required
+def menu_version_restore(version_id):
+    """Restore a menu version to a new draft (Day 90)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    result = menus_store.restore_version_to_draft(version_id)
+    if result is None:
+        abort(404)
+    flash(
+        f"Created draft #{result['draft_id']} from {result['version_label']} "
+        f"({result['item_count']} items, {result['variant_count']} variants).",
+        "success",
+    )
+    return redirect(url_for("draft_editor", draft_id=result["draft_id"]))
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------

@@ -72,6 +72,12 @@
 
     <div class="mt-4 flex gap-2">
       <a href="/menus/{{ menu.id }}/detail" class="btn btn-ghost">Back to Versions</a>
+      <form method="post" action="/menus/versions/{{ version.id }}/restore" style="display:inline;">
+        <button type="submit" class="btn btn-primary btn-sm"
+                onclick="return confirm('Create a new draft from this version?');">
+          Restore to Draft
+        </button>
+      </form>
     </div>
   </section>
 {% endblock %}

@@ -58,8 +58,14 @@
                   {{ v.notes or '' }}
                 </td>
                 <td class="text-muted">{{ v.created_at[:16] if v.created_at else '' }}</td>
-                <td class="text-right">
+                <td class="text-right" style="white-space:nowrap;">
                   <a href="/menus/versions/{{ v.id }}" class="btn btn-sm btn-ghost">View Items</a>
+                  <form method="post" action="/menus/versions/{{ v.id }}/restore" style="display:inline;">
+                    <button type="submit" class="btn btn-sm btn-ghost"
+                            onclick="return confirm('Create a new draft from {{ v.label }}?');">
+                      Restore
+                    </button>
+                  </form>
                 </td>
               </tr>
             {% endfor %}

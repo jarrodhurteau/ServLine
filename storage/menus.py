@@ -470,6 +470,17 @@ def _normalize_for_match(val: Any) -> str:
     return (val or "").strip().lower()
 
 
+def _price_direction(old_cents, new_cents) -> Optional[str]:
+    """Return 'increase', 'decrease', or None for price changes."""
+    old_v = old_cents or 0
+    new_v = new_cents or 0
+    if new_v > old_v:
+        return "increase"
+    elif new_v < old_v:
+        return "decrease"
+    return None
+
+
 def _diff_item_fields(
     item_a: Dict[str, Any],
     item_b: Dict[str, Any],
@@ -478,6 +489,7 @@ def _diff_item_fields(
 
     Returns list of ``{field, old, new}`` for fields that differ.
     None and empty string are treated as equivalent for description.
+    Price changes include ``price_direction`` ('increase'/'decrease').
     """
     changes: List[Dict[str, Any]] = []
     for f in _ITEM_DIFF_FIELDS:
@@ -488,7 +500,10 @@ def _diff_item_fields(
             old = old or ""
             new = new or ""
         if old != new:
-            changes.append({"field": f, "old": old, "new": new})
+            entry: Dict[str, Any] = {"field": f, "old": old, "new": new}
+            if f == "price_cents":
+                entry["price_direction"] = _price_direction(old, new)
+            changes.append(entry)
     return changes
 
 
@@ -535,7 +550,10 @@ def _diff_variants(
                 old = va.get(f)
                 new = vb.get(f)
                 if old != new:
-                    fc.append({"field": f, "old": old, "new": new})
+                    entry: Dict[str, Any] = {"field": f, "old": old, "new": new}
+                    if f == "price_cents":
+                        entry["price_direction"] = _price_direction(old, new)
+                    fc.append(entry)
             if fc:
                 result["modified"].append({
                     "variant_a": va, "variant_b": vb, "field_changes": fc,
@@ -701,6 +719,84 @@ def compare_menu_versions(
             "total_b": len(items_b),
         },
         "changes": changes,
+    }
+
+
+# ====================================================================
+# Restore version → draft (Day 90)
+# ====================================================================
+
+def restore_version_to_draft(version_id: int) -> Optional[Dict[str, Any]]:
+    """Create a new draft from a historical menu version.
+
+    Copies all items and variants from the version into a new draft
+    in "editing" status, linked to the same menu.
+
+    Returns dict with ``draft_id``, ``version_id``, ``item_count``,
+    ``variant_count``, and ``version_label``.  Returns None if the
+    version is not found.
+    """
+    from .drafts import _insert_draft, _insert_items_bulk, insert_variants
+
+    version = get_menu_version(version_id, include_items=True)
+    if version is None:
+        return None
+
+    menu = get_menu(version["menu_id"])
+    restaurant_id = menu["restaurant_id"] if menu else None
+    version_label = version.get("label") or f"v{version.get('version_number', '?')}"
+
+    # Create shell draft
+    draft_id = _insert_draft(
+        title=f"Restored from {version_label}",
+        restaurant_id=restaurant_id,
+        status="editing",
+        source="version_restore",
+        menu_id=version["menu_id"],
+    )
+
+    items = version.get("items", [])
+    item_count = 0
+    variant_count = 0
+
+    for it in items:
+        inserted_ids = _insert_items_bulk(
+            draft_id,
+            [
+                {
+                    "name": it.get("name"),
+                    "description": it.get("description"),
+                    "price_cents": it.get("price_cents", 0),
+                    "category": it.get("category"),
+                    "position": it.get("position"),
+                }
+            ],
+        )
+        item_count += 1
+
+        variants = it.get("variants") or []
+        if inserted_ids and variants:
+            new_item_id = inserted_ids[0]
+            insert_variants(
+                new_item_id,
+                [
+                    {
+                        "label": v.get("label"),
+                        "price_cents": v.get("price_cents", 0),
+                        "kind": v.get("kind", "size"),
+                        "position": v.get("position", 0),
+                    }
+                    for v in variants
+                ],
+            )
+            variant_count += len(variants)
+
+    return {
+        "draft_id": draft_id,
+        "version_id": version_id,
+        "version_label": version_label,
+        "item_count": item_count,
+        "variant_count": variant_count,
     }
 
 

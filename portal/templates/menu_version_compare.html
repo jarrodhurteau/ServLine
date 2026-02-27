@@ -20,6 +20,9 @@
     .var-added td { background:rgba(74,222,128,.06); }
     .var-removed td { background:rgba(248,113,113,.06); }
     .var-modified td { background:rgba(251,191,36,.04); }
+    .price-increase { color:#ef4444; font-weight:600; }
+    .price-decrease { color:#22c55e; font-weight:600; }
+    .price-old { text-decoration:line-through; opacity:.6; margin-right:4px; }
   </style>
 
   <p class="crumbs">
@@ -107,7 +110,17 @@
             </td>
             <td class="text-muted">{{ item.category or '' }}</td>
             <td class="text-right">
-              {% if item.price_cents is not none %}${{ "%.2f"|format(item.price_cents / 100) }}{% endif %}
+              {% set ns = namespace(price_fc=none) %}
+              {% if c.field_changes %}{% for fc in c.field_changes %}{% if fc.field == "price_cents" %}{% set ns.price_fc = fc %}{% endif %}{% endfor %}{% endif %}
+              {% if ns.price_fc %}
+                <span class="price-old">${{ "%.2f"|format((ns.price_fc.old or 0) / 100) }}</span>
+                <span class="{{ 'price-increase' if ns.price_fc.price_direction == 'increase' else 'price-decrease' }}">
+                  {% if ns.price_fc.price_direction == "increase" %}▲{% else %}▼{% endif %}
+                  ${{ "%.2f"|format((ns.price_fc.new or 0) / 100) }}
+                </span>
+              {% elif item.price_cents is not none %}
+                ${{ "%.2f"|format(item.price_cents / 100) }}
+              {% endif %}
             </td>
             <td class="text-muted" style="font-size:.82rem;">
               {% if c.field_changes %}
@@ -162,18 +175,32 @@
               </tr>
             {% endfor %}
             {% for vm in c.variant_changes.modified %}
+              {% set vns = namespace(price_fc=none) %}
+              {% for fc in vm.field_changes %}{% if fc.field == "price_cents" %}{% set vns.price_fc = fc %}{% endif %}{% endfor %}
               <tr class="variant-row var-modified" style="font-size:.82rem;">
                 <td></td>
                 <td style="padding-left:2em;">
                   <span style="color:#fbbf24; font-weight:600;">~</span> ↳ {{ vm.variant_b.label }}
                   <span style="color:var(--muted,#888); font-size:.78rem; margin-left:6px;">
                     {% for fc in vm.field_changes %}
-                      {{ fc.field }}: {{ fc.old }} → {{ fc.new }}{{ ', ' if not loop.last }}
+                      {% if fc.field != "price_cents" %}
+                        {{ fc.field }}: {{ fc.old }} → {{ fc.new }}{{ ', ' if not loop.last }}
+                      {% endif %}
                     {% endfor %}
                   </span>
                 </td>
                 <td class="text-muted">{{ vm.variant_b.kind or '' }}</td>
-                <td class="text-right">${{ "%.2f"|format(vm.variant_b.price_cents / 100) }}</td>
+                <td class="text-right">
+                  {% if vns.price_fc %}
+                    <span class="price-old">${{ "%.2f"|format((vns.price_fc.old or 0) / 100) }}</span>
+                    <span class="{{ 'price-increase' if vns.price_fc.price_direction == 'increase' else 'price-decrease' }}">
+                      {% if vns.price_fc.price_direction == "increase" %}▲{% else %}▼{% endif %}
+                      ${{ "%.2f"|format((vns.price_fc.new or 0) / 100) }}
+                    </span>
+                  {% else %}
+                    ${{ "%.2f"|format(vm.variant_b.price_cents / 100) }}
+                  {% endif %}
+                </td>
                 <td></td>
               </tr>
             {% endfor %}
