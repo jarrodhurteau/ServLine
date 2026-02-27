@@ -206,6 +206,22 @@ def _ensure_schema() -> None:
             """
         )
 
+        # draft_export_history (Day 83 — export tracking)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_export_history (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              draft_id      INTEGER NOT NULL,
+              format        TEXT NOT NULL,
+              item_count    INTEGER NOT NULL DEFAULT 0,
+              variant_count INTEGER NOT NULL DEFAULT 0,
+              warning_count INTEGER NOT NULL DEFAULT 0,
+              exported_at   TEXT NOT NULL,
+              FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -224,6 +240,9 @@ def _ensure_schema() -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_variants_item ON draft_item_variants(item_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_export_history_draft ON draft_export_history(draft_id)"
         )
 
         # in case existing DBs predate Day-14+ columns, patch them
@@ -680,6 +699,44 @@ def submit_draft(draft_id: int) -> None:
 def approve_publish(draft_id: int) -> None:
     """Mark draft as published (used by /drafts/<id>/publish_now)."""
     save_draft_metadata(int(draft_id), status="published")
+
+
+def approve_draft(draft_id: int) -> None:
+    """Mark draft as approved (owner reviewed and approved for POS export)."""
+    save_draft_metadata(int(draft_id), status="approved")
+
+
+def record_export(
+    draft_id: int,
+    fmt: str,
+    item_count: int = 0,
+    variant_count: int = 0,
+    warning_count: int = 0,
+) -> int:
+    """Record an export event in draft_export_history. Returns the new row id."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO draft_export_history "
+            "(draft_id, format, item_count, variant_count, warning_count, exported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (int(draft_id), fmt, int(item_count), int(variant_count),
+             int(warning_count), _now()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def get_export_history(draft_id: int) -> List[Dict[str, Any]]:
+    """Return export history records for a draft, newest first."""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT id, draft_id, format, item_count, variant_count, "
+            "warning_count, exported_at "
+            "FROM draft_export_history WHERE draft_id=? ORDER BY id DESC",
+            (int(draft_id),),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
 
 
 def _insert_draft(

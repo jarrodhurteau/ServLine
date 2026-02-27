@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 9 — Structured Variants & Export — Sprint 9.3 IN PROGRESS (Export Formats)**
+➡ **Phase 9 — Structured Variants & Export — Sprint 9.4 IN PROGRESS (Approve & Export + API)**
 
-Day 81 adds export metrics, enhanced validation, and round-trip verification. A new `/export/metrics` endpoint returns item/variant counts, variants-by-kind breakdown, category breakdown, and price statistics. Validation now catches 7 warning types (3 new: missing variant labels, duplicate labels, size price inversions). Three round-trip verification helpers confirm CSV, JSON, and POS JSON exports can be parsed back with matching structure. Comprehensive edge case tests cover empty drafts, 10+ variants, Unicode names, variant-only items, and all 5 variant kinds across all 9 export formats. 3,043 tests passing across 32 test suites.
+Day 83 adds the "Approve & Export to POS" one-click workflow. A prominent green button in the editor toolbar auto-saves, runs validation, shows a confirmation modal with warnings/counts, then approves the draft and downloads Generic POS JSON. New `approved` draft status makes drafts read-only after approval. Export history table tracks every export event (format, counts, timestamp). New endpoints: `POST /approve_export` and `GET /export_history`. Approved drafts block further saves (403) while read-only exports remain functional. 3,198 tests passing across 33 test suites.
 
 ---
 
@@ -1313,7 +1313,7 @@ ServLine now has:
   - Delete-selected cascade fix — variant rows + IDs cleaned up
   - Sprint 9.2 complete: 147 tests across Days 74-77
 
-### Sprint 9.3 — Export Formats (Days 78-82) — IN PROGRESS
+### Sprint 9.3 — Export Formats (Days 78-82) — COMPLETE
 - ✅ CSV & JSON Export with Variants (Day 78):
   - JSON export: nested `variants: [{label, price_cents, kind}]` per item
   - CSV sub-row export: `type=item` parent rows + `type=variant` child rows
@@ -1344,3 +1344,23 @@ ServLine now has:
   - Round-trip verification: CSV, JSON, POS JSON export → parse → verify counts/structure
   - Edge cases: empty drafts (all 9 formats), 10+ variants, Unicode, variant-only, all kinds
   - Day 81 test suite: 67 cases, 100% pass rate
+- ✅ Export Finalization & Sprint 9.3 Wrap-Up (Day 82):
+  - E2E integration tests: realistic draft → all 9 export formats verified
+  - Cross-format consistency: CSV/JSON/Square/Toast/POS JSON agree on counts
+  - Edge case hardening: CSV-hostile chars, long names, mixed kinds, large drafts, price edges
+  - Export pipeline Flask route round-trips verified end-to-end
+  - Day 82 test suite: 103 cases, 100% pass rate
+  - Sprint 9.3 complete: Days 78-82, 292 tests, all passing
+
+### Sprint 9.4 — Approve & Export + API Foundation (Days 83-85) — IN PROGRESS
+- ✅ "Approve & Export to POS" Button (Day 83):
+  - Prominent green "Approve & Export to POS" button in editor toolbar
+  - Auto-saves draft before export, runs validation, shows confirmation modal
+  - Validation modal: item/variant counts, warning list, approve/cancel actions
+  - Generic POS JSON download on approval (uses existing builder)
+  - New `approved` draft status: read-only after approval, green status pill
+  - Approved drafts block saves (403) while read-only exports remain functional
+  - Export history tracking: `draft_export_history` table, `record_export()`, `get_export_history()`
+  - Last export info displayed in editor header
+  - New endpoints: `POST /approve_export`, `GET /export_history`
+  - Day 83 test suite: 52 cases, 100% pass rate

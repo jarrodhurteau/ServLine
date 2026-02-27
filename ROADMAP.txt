@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 82 (February 26, 2026) — Export Finalization & Sprint 9.3 Wrap-Up
+Last Updated: Day 83 (February 27, 2026) — "Approve & Export to POS" Button & Sprint 9.4 Start
 
 ================================================================================
 PROJECT MISSION
@@ -483,25 +483,31 @@ Sprint 9.3 — Export Formats (Days 78-82) *** COMPLETE ***
 Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
 ...........................................................
 
-  Day 83: "Approve & Export to POS" Button
+  Day 83: "Approve & Export to POS" Button *** COMPLETE ***
   -----------------------------------------
-  [ ] Prominent "Approve & Export to POS" button in editor toolbar
-      - Primary action button (green, visually distinct from Save)
-      - Auto-saves draft before export
-  [ ] Validation modal before export
-      - Runs _validate_draft_for_export(), shows warnings
-      - Owner can fix issues or proceed anyway
-      - Shows item count, variant count, category summary
-  [ ] Generic POS JSON download on approval
+  [x] Prominent "Approve & Export to POS" button in editor toolbar
+      - Primary action button (green btn-success, visually distinct from Save)
+      - Auto-saves draft before export via JS handler
+  [x] Validation modal before export
+      - Fetches /export/validate, shows warnings in confirmation modal
+      - Owner can fix issues (Cancel) or proceed anyway (Approve & Download)
+      - Shows item count, variant count, warning count
+  [x] Generic POS JSON download on approval
       - Uses existing _build_generic_pos_json() — no new format needed
-      - Downloads file automatically after approval
-  [ ] New draft status: "approved"
-      - Tracks that owner reviewed and approved the menu
-      - Status pill: green "Approved" badge in editor
-      - Approved drafts remain viewable but not editable
-  [ ] Export history tracking
-      - Record: format, timestamp, item count per export
-      - Show last export info in editor header
+      - Downloads file automatically after approval via Blob URL
+  [x] New draft status: "approved"
+      - approve_draft() sets status via save_draft_metadata()
+      - Status pill: green "approved" badge in editor
+      - Approved drafts block saves (403), remain viewable + exportable
+      - Autosave ping still works (no-op passthrough)
+  [x] Export history tracking
+      - New draft_export_history table (FK CASCADE on drafts)
+      - record_export(draft_id, format, item_count, variant_count, warning_count)
+      - get_export_history(draft_id) returns newest-first
+      - Last export info shown in editor header bar
+      - GET /drafts/<id>/export_history endpoint
+
+    Day 83 test suite: 52 cases, 100% pass rate
 
   Day 84: REST API Endpoints
   ---------------------------
@@ -664,6 +670,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 83: "Approve & Export to POS" Button — one-click approve workflow, approved status, export history tracking, Sprint 9.4 start (52 tests)
 Day 82: Export Finalization & Sprint 9.3 Wrap-Up — E2E integration, cross-format consistency, edge case hardening, Sprint 9.3 complete (103 tests)
 Day 81: Export Metrics, Enhanced Validation & Round-Trip Tests — metrics endpoint, 3 new warning types, round-trip verification, edge cases (67 tests)
 Day 80: POS Export Templates — Square CSV, Toast CSV, Generic POS JSON, preview modal, validation (58 tests)
@@ -771,7 +778,8 @@ Tests:
 - tests/test_day80_pos_export.py       — 58 cases (Day 80)
 - tests/test_day81_export_validation.py — 67 cases (Day 81)
 - tests/test_day82_export_integration.py — 103 cases (Day 82)
+- tests/test_day83_approve_export.py   — 52 cases (Day 83)
 - tests/test_rotation_scoring.py        — 18 cases
-- TOTAL: 3,146 tests, all passing
+- TOTAL: 3,198 tests, all passing
 
 ================================================================================

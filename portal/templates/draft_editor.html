@@ -107,6 +107,28 @@
     }
     #export-preview-modal .stats span{ font-weight:600; color:#f8fafc; }
 
+    /* ===== Approve & Export Modal (Day 83) ===== */
+    #approve-export-modal{
+      display:none; position:fixed; inset:0; z-index:2000;
+      background:rgba(0,0,0,0.6); align-items:center; justify-content:center;
+    }
+    #approve-export-modal.show{ display:flex; }
+    #approve-export-modal .modal-content{
+      background:#1a2236; border:1px solid #2b3552; border-radius:12px;
+      padding:20px; color:#cbd5e1;
+    }
+    #approve-export-modal .modal-header{
+      display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;
+    }
+    #approve-export-modal .modal-header h3{ margin:0; color:#f8fafc; }
+    #approve-export-modal .modal-close{
+      background:transparent; border:none; color:#94a3b8; cursor:pointer;
+      font-size:1.4rem; padding:4px 8px;
+    }
+    #approve-export-modal .modal-close:hover{ color:#fff; }
+    #approve-export-modal .stats{ font-size:.9rem; color:#94a3b8; }
+    #approve-export-modal .stats strong{ color:#f8fafc; }
+
     /* ===== Status pill (parity with import view) ===== */
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:600; font-size:.85rem; }
     .pill-gray  { background:#e5e7eb; color:#374151; }
@@ -647,8 +669,15 @@
 
 
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
+            <button id="approve-export-btn" class="btn btn-success" {% if draft.status not in ['editing', 'finalized'] %}disabled{% endif %}
+                    title="Review, approve, and download POS-ready export">Approve & Export to POS</button>
           </div>
         </div>
+        {% if last_export %}
+        <div style="padding:2px 12px 6px; font-size:.8rem; color:var(--muted);">
+          Last exported: {{ last_export.exported_at }} ({{ last_export.format }}, {{ last_export.item_count }} items)
+        </div>
+        {% endif %}
       </div>
 
       <!-- Flash banners -->
@@ -1684,6 +1713,97 @@
     });
     previewFormat?.addEventListener("change", ()=> previewBtn?.click());
 
+    // ---- Approve & Export to POS (Day 83) ----
+    const approveExportBtn = $("#approve-export-btn");
+    const approveModal = $("#approve-export-modal");
+    const approveClose = $("#approve-export-close");
+    const approveCancel = $("#approve-export-cancel");
+    const approveConfirm = $("#approve-export-confirm");
+    const approveSummary = $("#approve-export-summary");
+    const approveWarnings = $("#approve-export-warnings");
+    const approveWarningList = $("#approve-export-warning-list");
+
+    approveExportBtn?.addEventListener("click", async ()=>{
+      // Step 1: Auto-save if dirty
+      if (isDirty && isEditable) {
+        try { await saveNow(); } catch(e) {
+          showError("Auto-save failed: " + e.message);
+          return;
+        }
+      }
+      // Step 2: Fetch validation
+      try {
+        const resp = await fetch(`/drafts/${draftId}/export/validate`);
+        const data = await resp.json();
+        // Build summary
+        const cats = new Set();
+        (data.warnings || []).forEach(w => { if (w.name) cats.add(w.type); });
+        approveSummary.innerHTML = `
+          <div style="display:flex;gap:20px;flex-wrap:wrap;">
+            <div>Items: <strong>${data.item_count}</strong></div>
+            <div>Variants: <strong>${data.variant_count}</strong></div>
+            <div>Warnings: <strong>${data.warning_count}</strong></div>
+          </div>`;
+        // Build warnings
+        if (data.warnings && data.warnings.length > 0) {
+          approveWarnings.style.display = "block";
+          approveWarningList.innerHTML = data.warnings.map(w =>
+            `<li style="margin-bottom:4px;">${escapeHtml(w.message)}</li>`
+          ).join("");
+        } else {
+          approveWarnings.style.display = "none";
+          approveWarningList.innerHTML = "";
+        }
+        approveModal.classList.add("show");
+      } catch(e) {
+        showError("Validation failed: " + e.message);
+      }
+    });
+
+    approveConfirm?.addEventListener("click", async ()=>{
+      approveConfirm.disabled = true;
+      approveConfirm.textContent = "Exporting...";
+      try {
+        const resp = await fetch(`/drafts/${draftId}/approve_export`, { method:"POST" });
+        const data = await resp.json();
+        if (!resp.ok || data.ok === false) throw new Error(data.error || "Export failed");
+        // Trigger download
+        const blob = new Blob([JSON.stringify(data.pos_json, null, 2)], { type:"application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `draft_${draftId}_pos_export.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        // Update UI: status pill
+        const pill = document.querySelector(".pill");
+        if (pill) {
+          pill.className = "pill pill-green";
+          pill.textContent = "approved";
+        }
+        // Disable editing controls
+        if (saveBtn) saveBtn.disabled = true;
+        if (titleInput) titleInput.disabled = true;
+        if (approveExportBtn) approveExportBtn.disabled = true;
+        isEditable = false;
+        approveModal.classList.remove("show");
+        showSuccess("Draft approved and exported!");
+      } catch(e) {
+        showError(String(e));
+      } finally {
+        approveConfirm.disabled = false;
+        approveConfirm.textContent = "Approve & Download";
+      }
+    });
+
+    approveClose?.addEventListener("click", ()=> approveModal.classList.remove("show"));
+    approveCancel?.addEventListener("click", ()=> approveModal.classList.remove("show"));
+    approveModal?.addEventListener("click", (e)=>{
+      if (e.target === approveModal) approveModal.classList.remove("show");
+    });
+
     // Provenance tooltip
     function renderProvTip({name, cat, conf, pos}){
       const confNum = conf==="" ? null : Number(conf);
@@ -2185,6 +2305,25 @@
       <div class="stats" id="export-preview-stats"></div>
       <div class="warnings" id="export-preview-warnings" style="display:none;"></div>
       <pre id="export-preview-body">Select a format and click Preview...</pre>
+    </div>
+  </div>
+
+  <!-- Approve & Export Modal (Day 83) -->
+  <div id="approve-export-modal">
+    <div class="modal-content" style="max-width:560px;">
+      <div class="modal-header">
+        <h3>Approve & Export to POS</h3>
+        <button class="modal-close" id="approve-export-close">&times;</button>
+      </div>
+      <div id="approve-export-summary" class="stats" style="padding:10px 16px;"></div>
+      <div id="approve-export-warnings" style="display:none; padding:8px 16px; background:rgba(255,193,7,.08); border-radius:6px; margin:8px 16px; font-size:.85rem; color:#ffc107;">
+        <strong>Warnings:</strong>
+        <ul id="approve-export-warning-list" style="margin:6px 0 0; padding-left:18px;"></ul>
+      </div>
+      <div style="padding:12px 16px; display:flex; gap:10px; justify-content:flex-end;">
+        <button id="approve-export-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="approve-export-confirm" class="btn btn-success">Approve & Download</button>
+      </div>
     </div>
   </div>
 </div>

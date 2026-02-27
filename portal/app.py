@@ -4035,6 +4035,15 @@ def draft_editor(draft_id: int):
 
         # also populate flat (non-nested) grouping
         flat_groups.setdefault(cat, []).append(it)
+    # Day 83: last export info
+    last_export = None
+    try:
+        history = drafts_store.get_export_history(draft_id)
+        if history:
+            last_export = history[0]
+    except Exception:
+        pass
+
     return _safe_render(
         "draft_editor.html",
         draft=draft,
@@ -4043,6 +4052,7 @@ def draft_editor(draft_id: int):
         restaurants=restaurants,
         low_conf_items=low_conf_items,
         quality_threshold=QUALITY_LOW_THRESHOLD,
+        last_export=last_export,
 
         # NEW pt.8 context
         category_tree=category_tree,
@@ -4116,6 +4126,11 @@ def draft_save(draft_id: int):
 
     if payload.get("autosave_ping"):
         return jsonify({"ok": True, "saved_at": _now_iso(), "ping": True}), 200
+
+    # Day 83: Block saves on approved/published drafts
+    draft = drafts_store.get_draft(draft_id)
+    if draft and draft.get("status") in ("approved", "published"):
+        return jsonify({"ok": False, "error": "Draft is approved and cannot be edited"}), 403
 
     # 🔒 Validate payload contract (prevents UI/AI drift)
     probe = {
@@ -4242,6 +4257,64 @@ def draft_publish_now(draft_id: int):
     except Exception as e:
         flash(f"Publish failed: {e}", "error")
         return redirect(url_for("draft_editor", draft_id=draft_id))
+
+@app.post("/drafts/<int:draft_id>/approve_export")
+@login_required
+def draft_approve_export(draft_id: int):
+    """Approve draft and export as Generic POS JSON.
+
+    Day 83: One-click approve & export workflow.
+    1. Validates draft items for export
+    2. Builds Generic POS JSON payload
+    3. Sets draft status to 'approved'
+    4. Records export in history
+    5. Returns POS JSON for client-side download
+    """
+    _require_drafts_storage()
+    try:
+        draft = drafts_store.get_draft(draft_id)
+        if not draft:
+            return jsonify({"ok": False, "error": "Draft not found"}), 404
+
+        items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+        warnings = _validate_draft_for_export(items)
+        variant_count = sum(len(it.get("variants") or []) for it in items)
+
+        pos_json = _build_generic_pos_json(items, draft)
+
+        drafts_store.approve_draft(draft_id)
+
+        drafts_store.record_export(
+            draft_id, "generic_pos",
+            item_count=len(items),
+            variant_count=variant_count,
+            warning_count=len(warnings),
+        )
+
+        return jsonify({
+            "ok": True,
+            "pos_json": pos_json,
+            "item_count": len(items),
+            "variant_count": variant_count,
+            "warnings": warnings,
+            "warning_count": len(warnings),
+            "approved_at": _now_iso(),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/drafts/<int:draft_id>/export_history")
+@login_required
+def draft_export_history(draft_id: int):
+    """Return export history records for a draft."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"ok": False, "error": "Draft not found"}), 404
+    history = drafts_store.get_export_history(draft_id)
+    return jsonify({"ok": True, "draft_id": draft_id, "history": history})
+
 
 @app.post("/drafts/<int:draft_id>/backfill_variants")
 @login_required
