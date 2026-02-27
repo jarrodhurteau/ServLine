@@ -14,7 +14,11 @@
         <thead>
           <tr>
             <th>Name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th class="text-right">Versions</th>
             <th class="text-right">ID</th>
+            <th class="text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -23,7 +27,18 @@
               <td>
                 <a href="/menus/{{ m.id }}/items" class="underline hover:text-brand-500">{{ m.name }}</a>
               </td>
+              <td class="text-muted">{{ (m.menu_type or '')|replace('_',' ')|title }}</td>
+              <td class="text-muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                {{ m.description or '' }}
+              </td>
+              <td class="text-right text-muted">{{ m.version_count|default(0) }}</td>
               <td class="text-right text-muted">#{{ m.id }}</td>
+              <td class="text-right" style="white-space:nowrap;">
+                <button class="btn btn-sm btn-ghost" onclick="openEditModal({{ m.id }}, '{{ m.name|e }}', '{{ m.menu_type or '' }}', '{{ (m.description or '')|e }}')">Edit</button>
+                <form action="{{ url_for('delete_menu_route', menu_id=m.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Delete menu &quot;{{ m.name|e }}&quot;?');">
+                  <button class="btn btn-sm btn-danger">Delete</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -33,10 +48,75 @@
     {% endif %}
 
     <div class="mt-4 flex gap-2">
-      <a href="/restaurants" class="btn btn-primary">Back to Restaurants</a>
-      {# Uncomment if/when a create route exists:
-      <a href="/restaurants/{{ restaurant.id }}/menus/new" class="btn btn-primary">Add Menu</a>
-      #}
+      <a href="/restaurants" class="btn btn-ghost">Back to Restaurants</a>
+      <button class="btn btn-primary" onclick="document.getElementById('create-form').style.display='block'">Add Menu</button>
     </div>
   </section>
+
+  <!-- CREATE MENU FORM (inline, hidden by default) -->
+  <section id="create-form" class="card mt-4" style="display:none;">
+    <h2 class="text-lg font-semibold mb-3">Create New Menu</h2>
+    <form action="{{ url_for('create_menu_route', rest_id=restaurant.id) }}" method="post" style="display:grid; gap:12px; max-width:480px;">
+      <div>
+        <label for="create-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
+        <input id="create-name" name="name" type="text" required class="cell-input" placeholder="e.g. Lunch Menu" style="width:100%;">
+      </div>
+      <div>
+        <label for="create-type" style="color:var(--muted); font-size:.9rem;">Menu Type</label>
+        <select id="create-type" name="menu_type" class="cell-input" style="width:100%;">
+          <option value="">— None —</option>
+          {% for t in valid_types %}
+            <option value="{{ t }}">{{ t|replace('_',' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="create-desc" style="color:var(--muted); font-size:.9rem;">Description</label>
+        <textarea id="create-desc" name="description" class="cell-input" rows="2" placeholder="Optional description" style="width:100%;"></textarea>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">Create Menu</button>
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('create-form').style.display='none'">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- EDIT MENU MODAL (inline, hidden by default) -->
+  <section id="edit-form" class="card mt-4" style="display:none;">
+    <h2 class="text-lg font-semibold mb-3">Edit Menu</h2>
+    <form id="edit-form-inner" method="post" style="display:grid; gap:12px; max-width:480px;">
+      <div>
+        <label for="edit-name" style="color:var(--muted); font-size:.9rem;">Name</label>
+        <input id="edit-name" name="name" type="text" class="cell-input" style="width:100%;">
+      </div>
+      <div>
+        <label for="edit-type" style="color:var(--muted); font-size:.9rem;">Menu Type</label>
+        <select id="edit-type" name="menu_type" class="cell-input" style="width:100%;">
+          <option value="">— None —</option>
+          {% for t in valid_types %}
+            <option value="{{ t }}">{{ t|replace('_',' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="edit-desc" style="color:var(--muted); font-size:.9rem;">Description</label>
+        <textarea id="edit-desc" name="description" class="cell-input" rows="2" style="width:100%;"></textarea>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('edit-form').style.display='none'">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    function openEditModal(menuId, name, menuType, description) {
+      document.getElementById('edit-form').style.display = 'block';
+      document.getElementById('edit-form-inner').action = '/menus/' + menuId + '/update';
+      document.getElementById('edit-name').value = name;
+      document.getElementById('edit-type').value = menuType || '';
+      document.getElementById('edit-desc').value = description;
+      document.getElementById('edit-form').scrollIntoView({ behavior: 'smooth' });
+    }
+  </script>
 {% endblock %}

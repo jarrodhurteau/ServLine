@@ -1401,3 +1401,13 @@ ServLine now has:
   - `get_menu_version()` LEFT JOIN retrieval with nested items + variants
   - `migrate_existing_menus()` backfills legacy menu_items → versioned model
   - Day 86 test suite: 59 cases, 100% pass rate
+
+- Menu Management UI (Day 87):
+  - Upgraded `menus.html` template: type/description/version columns, create form, edit/delete actions
+  - New routes: `POST /restaurants/<id>/menus` (create), `POST /menus/<id>/update`, `POST /menus/<id>/delete`
+  - Menu type selector dropdown (11 types) + description field on create/edit forms
+  - `list_menus()` integration: version count, active filtering, restaurant scoping
+  - Draft-to-menu assignment: `POST /drafts/<id>/assign_menu` route + sidebar dropdown in editor
+  - Editor dynamically shows menu dropdown when restaurant assigned, hint link when no menus
+  - Fixed pre-existing test schema gaps (menu_id column in Days 73/74/77 test DBs)
+  - Day 87 test suite: 51 cases, 100% pass rate

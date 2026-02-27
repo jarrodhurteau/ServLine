@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 86 (February 27, 2026) — Multi-Menu & Versioning Foundation / Phase 10 Start
+Last Updated: Day 87 (February 27, 2026) — Menu Management UI / Sprint 10.1
 
 ================================================================================
 PROJECT MISSION
@@ -606,12 +606,15 @@ Sprint 10.1 — Multi-Menu Foundation (Days 86-88)
 
     Day 86 test suite: 59 cases, 100% pass rate
 
-  Day 87: Menu Management UI
-  --------------------------
-  [ ] Restaurant menu list page
-  [ ] Create/edit/delete menu forms
-  [ ] Menu type selector and description
-  [ ] Draft-to-menu assignment in editor
+  Day 87: Menu Management UI *** COMPLETE ***
+  -------------------------------------------
+  [x] Restaurant menu list page (upgraded table: type, description, version count, edit/delete)
+  [x] Create/edit/delete menu forms (inline create form, edit modal, soft-delete with confirm)
+  [x] Menu type selector and description (11-type dropdown, optional description textarea)
+  [x] Draft-to-menu assignment in editor (sidebar dropdown, hint link when no menus)
+  [x] Fixed pre-existing test schema gaps (menu_id column in Days 73/74/77 test DBs)
+
+    Day 87 test suite: 51 cases, 100% pass rate
 
   Day 88: Publish to Versioned Menu
   ---------------------------------

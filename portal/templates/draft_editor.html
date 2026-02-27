@@ -563,6 +563,24 @@
         <button class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Save Assignment</button>
       </form>
 
+      {% if draft_menus %}
+      <!-- Assign Menu (Day 87) -->
+      <form action="{{ url_for('draft_assign_menu', draft_id=draft.id) }}" method="post" style="display:grid; gap:8px; margin-top:10px;">
+        <label for="menu_id" style="color:var(--muted); font-size:.9rem;">Assign Menu</label>
+        <select id="menu_id" name="menu_id" class="cell-input" {% if draft.status != 'editing' %}disabled{% endif %}>
+          <option value="">— Select Menu —</option>
+          {% for m in draft_menus %}
+            <option value="{{ m.id }}" {% if draft.menu_id == m.id %}selected{% endif %}>{{ m.name }}{% if m.menu_type %} ({{ m.menu_type|replace('_',' ')|title }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Save Menu</button>
+      </form>
+      {% elif draft.restaurant_id %}
+      <div style="margin-top:10px;">
+        <div class="helper-note">No menus for this restaurant yet. <a href="/restaurants/{{ draft.restaurant_id }}/menus" class="underline" target="_blank">Create one</a>.</div>
+      </div>
+      {% endif %}
+
       <!-- Publish -->
       <form action="{{ url_for('draft_publish_now', draft_id=draft.id) }}" method="post" style="margin-top:10px;">
         <button class="btn btn-success">Publish to Menu</button>

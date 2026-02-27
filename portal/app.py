@@ -161,6 +161,13 @@ try:
 except Exception:
     drafts_store = None  # guarded below
 
+# storage layer for menus (multi-menu & versioning, Phase 10 Day 87+)
+menus_store = None  # type: ignore[assignment]
+try:
+    from storage import menus as menus_store
+except Exception:
+    menus_store = None  # guarded below
+
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
     from storage.ocr_facade import build_structured_menu
@@ -2276,12 +2283,73 @@ def restaurants_page():
 def menus_page(rest_id):
     with db_connect() as conn:
         rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
-        menus = conn.execute(
-            "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,),
-        ).fetchall()
     if not rest:
         abort(404)
-    return _safe_render("menus.html", restaurant=rest, menus=menus)
+    # Use menus_store for richer data (version_count, menu_type, etc.)
+    if menus_store:
+        menu_list = menus_store.list_menus(rest_id)
+    else:
+        with db_connect() as conn:
+            menu_list = [dict(r) for r in conn.execute(
+                "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,),
+            ).fetchall()]
+    valid_types = sorted(menus_store.VALID_MENU_TYPES) if menus_store else []
+    return _safe_render("menus.html", restaurant=rest, menus=menu_list, valid_types=valid_types)
+
+@app.post("/restaurants/<int:rest_id>/menus")
+@login_required
+def create_menu_route(rest_id):
+    """Create a new menu for a restaurant."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Menu name is required.", "error")
+        return redirect(url_for("menus_page", rest_id=rest_id))
+    menu_type = (request.form.get("menu_type") or "").strip() or None
+    description = (request.form.get("description") or "").strip() or None
+    try:
+        menus_store.create_menu(rest_id, name, menu_type=menu_type, description=description)
+        flash(f"Menu \"{name}\" created.", "success")
+    except Exception as e:
+        flash(f"Failed to create menu: {e}", "error")
+    return redirect(url_for("menus_page", rest_id=rest_id))
+
+@app.post("/menus/<int:menu_id>/update")
+@login_required
+def update_menu_route(menu_id):
+    """Update menu metadata (name, type, description)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404, description="Menu not found")
+    name = (request.form.get("name") or "").strip() or None
+    menu_type = (request.form.get("menu_type") or "").strip() or None
+    description = (request.form.get("description") or "").strip() or None
+    try:
+        menus_store.update_menu(menu_id, name=name, menu_type=menu_type, description=description)
+        flash("Menu updated.", "success")
+    except Exception as e:
+        flash(f"Failed to update menu: {e}", "error")
+    return redirect(url_for("menus_page", rest_id=menu["restaurant_id"]))
+
+@app.post("/menus/<int:menu_id>/delete")
+@login_required
+def delete_menu_route(menu_id):
+    """Soft-delete a menu."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404, description="Menu not found")
+    rest_id = menu["restaurant_id"]
+    try:
+        menus_store.delete_menu(menu_id)
+        flash(f"Menu \"{menu['name']}\" deleted.", "success")
+    except Exception as e:
+        flash(f"Failed to delete menu: {e}", "error")
+    return redirect(url_for("menus_page", rest_id=rest_id))
 
 @app.get("/menus/<int:menu_id>/items")
 def items_page(menu_id):
@@ -4133,6 +4201,14 @@ def draft_editor(draft_id: int):
     except Exception:
         pass
 
+    # Day 87: menus for draft-to-menu assignment
+    draft_menus = []
+    if menus_store and draft.get("restaurant_id"):
+        try:
+            draft_menus = menus_store.list_menus(draft["restaurant_id"])
+        except Exception:
+            pass
+
     return _safe_render(
         "draft_editor.html",
         draft=draft,
@@ -4142,6 +4218,7 @@ def draft_editor(draft_id: int):
         low_conf_items=low_conf_items,
         quality_threshold=QUALITY_LOW_THRESHOLD,
         last_export=last_export,
+        draft_menus=draft_menus,
 
         # NEW pt.8 context
         category_tree=category_tree,
@@ -4648,6 +4725,27 @@ def draft_assign_restaurant(draft_id: int):
         flash("Restaurant assigned to draft.", "success")
     except Exception as e:
         flash(f"Failed to assign restaurant: {e}", "error")
+    return redirect(url_for("draft_editor", draft_id=draft_id))
+
+@app.post("/drafts/<int:draft_id>/assign_menu")
+@login_required
+def draft_assign_menu(draft_id: int):
+    """Assign a menu to a draft (Phase 10 Day 87)."""
+    _require_drafts_storage()
+    mid = request.form.get("menu_id")
+    if not mid:
+        flash("Please choose a menu.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+    try:
+        menu_id = int(mid)
+    except Exception:
+        flash("Invalid menu id.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+    try:
+        drafts_store.save_draft_metadata(draft_id, menu_id=menu_id)
+        flash("Menu assigned to draft.", "success")
+    except Exception as e:
+        flash(f"Failed to assign menu: {e}", "error")
     return redirect(url_for("draft_editor", draft_id=draft_id))
 
 # OCR Inspector debug endpoints

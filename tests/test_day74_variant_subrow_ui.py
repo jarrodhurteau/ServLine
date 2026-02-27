@@ -64,6 +64,7 @@ def _make_test_db() -> sqlite3.Connection:
             source TEXT,
             source_job_id INTEGER,
             source_file_path TEXT,
+            menu_id INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
