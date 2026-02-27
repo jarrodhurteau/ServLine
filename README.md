@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 9 — Structured Variants & Export — Sprint 9.4 IN PROGRESS (Approve & Export + API)**
 
-Day 83 adds the "Approve & Export to POS" one-click workflow. A prominent green button in the editor toolbar auto-saves, runs validation, shows a confirmation modal with warnings/counts, then approves the draft and downloads Generic POS JSON. New `approved` draft status makes drafts read-only after approval. Export history table tracks every export event (format, counts, timestamp). New endpoints: `POST /approve_export` and `GET /export_history`. Approved drafts block further saves (403) while read-only exports remain functional. 3,198 tests passing across 33 test suites.
+Day 84 adds token-authenticated REST API endpoints for external POS integrations. Three endpoints: `GET /api/drafts/<id>/items` (read items + variants), `POST /api/drafts/<id>/items` (create items), `PUT /api/drafts/<id>/items/<item_id>` (update single item). API key auth via `X-API-Key` or `Authorization: Bearer` header — keys stored as SHA-256 hashes with per-key rate limiting (sliding window, 60 RPM default). Rate limit headers on all responses (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`). Status guards prevent writes to approved/published drafts. 3,248 tests passing across 35 test suites.
 
 ---
 
@@ -1364,3 +1364,14 @@ ServLine now has:
   - Last export info displayed in editor header
   - New endpoints: `POST /approve_export`, `GET /export_history`
   - Day 83 test suite: 52 cases, 100% pass rate
+- ✅ REST API Endpoints (Day 84):
+  - `GET /api/drafts/<id>/items` — retrieve items with nested variants
+  - `POST /api/drafts/<id>/items` — create items with optional variants (201)
+  - `PUT /api/drafts/<id>/items/<item_id>` — update single item with variants
+  - API key auth: `api_keys` table (SHA-256 hash, restaurant_id, label, active, rate_limit_rpm)
+  - `create_api_key()`, `validate_api_key()`, `revoke_api_key()` CRUD in storage layer
+  - `api_key_required` decorator: X-API-Key or Bearer header, 401/403/429 responses
+  - Sliding-window rate limiter: per-key deque, thread-safe, configurable RPM
+  - Rate limit headers on all authenticated responses
+  - Status guards: approved/published drafts block POST/PUT (403)
+  - Day 84 test suite: 50 cases, 100% pass rate

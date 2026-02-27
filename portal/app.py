@@ -1,7 +1,7 @@
 # portal/app.py 
 from flask import (
     Flask, jsonify, render_template, abort, request, redirect, url_for,
-    session, send_from_directory, flash, make_response, send_file        # ← added send_file
+    session, send_from_directory, flash, make_response, send_file, g     # ← added g (Day 84)
 )
 
 # --- Standard libs & typing ---
@@ -209,6 +209,95 @@ def allowed_file(filename: str) -> bool:
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+# ------------------------------------------------------------
+# Day 84: In-memory rate limiter for REST API
+# ------------------------------------------------------------
+from collections import deque
+
+_rate_limit_lock = threading.Lock()
+_rate_limit_windows: Dict[int, deque] = {}
+
+
+def _check_rate_limit(key_record: Dict[str, Any]) -> Tuple[bool, Dict[str, str]]:
+    """Sliding-window rate limiter (per minute). Returns (allowed, headers)."""
+    key_id = key_record["id"]
+    limit = key_record.get("rate_limit_rpm", 60)
+    now = time.time()
+    window_start = now - 60.0
+
+    with _rate_limit_lock:
+        if key_id not in _rate_limit_windows:
+            _rate_limit_windows[key_id] = deque()
+        window = _rate_limit_windows[key_id]
+
+        # Evict expired entries
+        while window and window[0] <= window_start:
+            window.popleft()
+
+        remaining = max(0, limit - len(window))
+        reset_at = int(now + 60)
+
+        headers = {
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": str(remaining),
+            "X-RateLimit-Reset": str(reset_at),
+        }
+
+        if len(window) >= limit:
+            headers["Retry-After"] = "60"
+            return False, headers
+
+        window.append(now)
+        headers["X-RateLimit-Remaining"] = str(max(0, limit - len(window)))
+        return True, headers
+
+
+def api_key_required(view_func):
+    """Decorator: authenticate via X-API-Key or Authorization: Bearer header."""
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        _require_drafts_storage()
+
+        # Extract key from header
+        raw_key = request.headers.get("X-API-Key", "").strip()
+        if not raw_key:
+            auth = request.headers.get("Authorization", "")
+            if auth.lower().startswith("bearer "):
+                raw_key = auth[7:].strip()
+
+        if not raw_key:
+            return jsonify({"ok": False, "error": "Missing API key"}), 401
+
+        key_record = drafts_store.validate_api_key(raw_key)
+        if key_record is None:
+            return jsonify({"ok": False, "error": "Invalid API key"}), 401
+
+        if not key_record.get("active"):
+            return jsonify({"ok": False, "error": "API key is revoked"}), 403
+
+        # Rate limit check
+        allowed, rl_headers = _check_rate_limit(key_record)
+        if not allowed:
+            resp = jsonify({"ok": False, "error": "Rate limit exceeded"})
+            resp.status_code = 429
+            for k, v in rl_headers.items():
+                resp.headers[k] = v
+            return resp
+
+        g.api_key = key_record
+
+        response = view_func(*args, **kwargs)
+        if isinstance(response, tuple):
+            resp_obj = make_response(*response)
+        else:
+            resp_obj = response
+        for k, v in rl_headers.items():
+            resp_obj.headers[k] = v
+        return resp_obj
+
+    return wrapper
+
 
 # ------------------------
 # Safe render helper (prevents template-caused 500 loops)
@@ -4314,6 +4403,105 @@ def draft_export_history(draft_id: int):
         return jsonify({"ok": False, "error": "Draft not found"}), 404
     history = drafts_store.get_export_history(draft_id)
     return jsonify({"ok": True, "draft_id": draft_id, "history": history})
+
+
+# ============================================================
+# Day 84: REST API Endpoints for External POS Integrations
+# ============================================================
+
+@app.get("/api/drafts/<int:draft_id>/items")
+@api_key_required
+def api_get_draft_items(draft_id: int):
+    """REST API: Retrieve draft items with variants."""
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"ok": False, "error": "Draft not found"}), 404
+    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    return jsonify({
+        "ok": True,
+        "draft_id": draft_id,
+        "items": items,
+        "count": len(items),
+    })
+
+
+@app.post("/api/drafts/<int:draft_id>/items")
+@api_key_required
+def api_create_draft_items(draft_id: int):
+    """REST API: Create new items (with optional variants) on a draft."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
+
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"ok": False, "error": "Draft not found"}), 404
+
+    if draft.get("status") != "editing":
+        return jsonify({
+            "ok": False,
+            "error": f"Draft is '{draft.get('status')}' and cannot be modified",
+        }), 403
+
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return jsonify({"ok": False, "error": "'items' must be a list"}), 400
+
+    probe = {"draft_id": draft_id, "items": items}
+    ok, err = validate_draft_payload(probe)
+    if not ok:
+        return jsonify({"ok": False, "error": f"Validation: {err}"}), 400
+
+    try:
+        result = drafts_store.upsert_draft_items(draft_id, items)
+        return jsonify({
+            "ok": True,
+            "inserted_ids": result.get("inserted_ids", []),
+            "updated_ids": result.get("updated_ids", []),
+        }), 201
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/drafts/<int:draft_id>/items/<int:item_id>")
+@api_key_required
+def api_update_draft_item(draft_id: int, item_id: int):
+    """REST API: Update a single item (with optional variants) on a draft."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON payload"}), 400
+
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"ok": False, "error": "Draft not found"}), 404
+
+    if draft.get("status") != "editing":
+        return jsonify({
+            "ok": False,
+            "error": f"Draft is '{draft.get('status')}' and cannot be modified",
+        }), 403
+
+    # Verify item belongs to this draft
+    existing = drafts_store.get_draft_items(draft_id, include_variants=False)
+    item_ids = {it["id"] for it in existing}
+    if item_id not in item_ids:
+        return jsonify({"ok": False, "error": "Item not found in this draft"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    payload["id"] = item_id
+
+    probe = {"draft_id": draft_id, "items": [payload]}
+    ok, err = validate_draft_payload(probe)
+    if not ok:
+        return jsonify({"ok": False, "error": f"Validation: {err}"}), 400
+
+    try:
+        result = drafts_store.upsert_draft_items(draft_id, [payload])
+        return jsonify({
+            "ok": True,
+            "updated_ids": result.get("updated_ids", []),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.post("/drafts/<int:draft_id>/backfill_variants")

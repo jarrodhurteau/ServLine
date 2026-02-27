@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 83 (February 27, 2026) — "Approve & Export to POS" Button & Sprint 9.4 Start
+Last Updated: Day 84 (February 27, 2026) — REST API Endpoints with Auth & Rate Limiting
 
 ================================================================================
 PROJECT MISSION
@@ -509,13 +509,25 @@ Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
 
     Day 83 test suite: 52 cases, 100% pass rate
 
-  Day 84: REST API Endpoints
+  Day 84: REST API Endpoints *** COMPLETE ***
   ---------------------------
-  [ ] GET  /api/drafts/<id>/items (with variants)
-  [ ] POST /api/drafts/<id>/items (create with variants)
-  [ ] PUT  /api/drafts/<id>/items/<item_id> (update with variants)
-  [ ] API key authentication (simple token-based)
-  [ ] Rate limiting per API key
+  [x] GET  /api/drafts/<id>/items (with variants)
+  [x] POST /api/drafts/<id>/items (create with variants)
+  [x] PUT  /api/drafts/<id>/items/<item_id> (update with variants)
+  [x] API key authentication (simple token-based)
+      - api_keys table: key_hash (SHA-256), restaurant_id, label, active, rate_limit_rpm
+      - create_api_key() returns raw key (only time visible), stores hash
+      - validate_api_key() hash-lookup, revoke_api_key() soft-delete
+      - api_key_required decorator: X-API-Key or Authorization: Bearer header
+      - 401 missing/invalid, 403 revoked, sets g.api_key for downstream
+  [x] Rate limiting per API key
+      - In-memory sliding window (deque per key, 60s window)
+      - Thread-safe (threading.Lock)
+      - Custom rate_limit_rpm per key (default 60)
+      - 429 with Retry-After header when exceeded
+      - X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset on all responses
+
+    Day 84 test suite: 50 cases, 100% pass rate
 
   Day 85: Webhooks & API Documentation
   --------------------------------------
@@ -670,6 +682,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 84: REST API Endpoints — GET/POST/PUT /api/drafts/<id>/items, API key auth (SHA-256 hash), sliding-window rate limiting, api_key_required decorator (50 tests)
 Day 83: "Approve & Export to POS" Button — one-click approve workflow, approved status, export history tracking, Sprint 9.4 start (52 tests)
 Day 82: Export Finalization & Sprint 9.3 Wrap-Up — E2E integration, cross-format consistency, edge case hardening, Sprint 9.3 complete (103 tests)
 Day 81: Export Metrics, Enhanced Validation & Round-Trip Tests — metrics endpoint, 3 new warning types, round-trip verification, edge cases (67 tests)

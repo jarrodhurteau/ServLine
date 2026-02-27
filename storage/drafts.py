@@ -1,6 +1,8 @@
 # storage/drafts.py
 from __future__ import annotations
+import hashlib
 import json
+import secrets
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -222,6 +224,22 @@ def _ensure_schema() -> None:
             """
         )
 
+        # api_keys (Day 84 — REST API authentication)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_keys (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              key_hash        TEXT NOT NULL UNIQUE,
+              restaurant_id   INTEGER,
+              label           TEXT NOT NULL DEFAULT '',
+              active          INTEGER NOT NULL DEFAULT 1,
+              rate_limit_rpm  INTEGER NOT NULL DEFAULT 60,
+              created_at      TEXT NOT NULL,
+              FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -243,6 +261,9 @@ def _ensure_schema() -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_export_history_draft ON draft_export_history(draft_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)"
         )
 
         # in case existing DBs predate Day-14+ columns, patch them
@@ -737,6 +758,59 @@ def get_export_history(draft_id: int) -> List[Dict[str, Any]]:
             (int(draft_id),),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+
+# ------------------------------------------------------------
+# API Key Management (Day 84 — REST API authentication)
+# ------------------------------------------------------------
+
+def create_api_key(
+    label: str = "",
+    restaurant_id: Optional[int] = None,
+    rate_limit_rpm: int = 60,
+) -> Dict[str, Any]:
+    """Create a new API key. Returns dict with 'raw_key' (only time visible)."""
+    raw_key = secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO api_keys "
+            "(key_hash, restaurant_id, label, active, rate_limit_rpm, created_at) "
+            "VALUES (?, ?, ?, 1, ?, ?)",
+            (key_hash, restaurant_id, (label or "").strip(),
+             int(rate_limit_rpm), _now()),
+        )
+        conn.commit()
+        return {
+            "id": int(cur.lastrowid),
+            "raw_key": raw_key,
+            "label": (label or "").strip(),
+            "restaurant_id": restaurant_id,
+            "rate_limit_rpm": int(rate_limit_rpm),
+        }
+
+
+def validate_api_key(raw_key: str) -> Optional[Dict[str, Any]]:
+    """Hash the raw key and look it up. Returns key record dict or None."""
+    if not raw_key or not isinstance(raw_key, str):
+        return None
+    key_hash = hashlib.sha256(raw_key.strip().encode()).hexdigest()
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM api_keys WHERE key_hash=?", (key_hash,)
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+
+
+def revoke_api_key(key_id: int) -> bool:
+    """Deactivate an API key. Returns True if a row was updated."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            "UPDATE api_keys SET active=0 WHERE id=?", (int(key_id),)
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def _insert_draft(
