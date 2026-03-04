@@ -127,6 +127,7 @@ def extract_menu_items_via_claude(
         message = client.messages.create(
             model=model,
             max_tokens=max_tokens,
+            temperature=0,
             system=_SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": _USER_PROMPT_TEMPLATE.format(ocr_text=text)},

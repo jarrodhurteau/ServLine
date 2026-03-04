@@ -373,6 +373,7 @@ def verify_menu_with_vision(
         message = client.messages.create(
             model=model,
             max_tokens=max_tokens,
+            temperature=0,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
         )
