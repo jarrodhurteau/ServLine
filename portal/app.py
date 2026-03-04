@@ -2384,6 +2384,9 @@ def menu_detail(menu_id):
     # Day 92: activity log + stats
     activities = menus_store.list_menu_activity(menu_id, limit=10)
     stats = menus_store.get_version_stats(menu_id)
+    # Day 93: schedule summary
+    schedule_summary = menus_store.get_menu_schedule_summary(menu)
+    valid_seasons = sorted(menus_store.VALID_SEASONS)
     return _safe_render(
         "menu_detail.html",
         restaurant=rest,
@@ -2392,6 +2395,8 @@ def menu_detail(menu_id):
         current_version=current,
         activities=activities,
         stats=stats,
+        schedule_summary=schedule_summary,
+        valid_seasons=valid_seasons,
     )
 
 
@@ -2611,6 +2616,70 @@ def menu_activity_feed(menu_id):
         menu=menu,
         activities=activities,
     )
+
+
+# --- Day 93: Menu Scheduling ---
+
+@app.post("/menus/<int:menu_id>/schedule")
+@login_required
+def menu_schedule(menu_id):
+    """Set or clear schedule on a menu (Day 93)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404)
+
+    if request.form.get("clear") == "1":
+        menus_store.clear_menu_schedule(menu_id)
+        try:
+            _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+            menus_store.record_menu_activity(
+                menu_id, "schedule_updated",
+                detail="Cleared schedule",
+                actor=_actor,
+            )
+        except Exception:
+            pass
+        flash("Schedule cleared.", "success")
+        return redirect(url_for("menu_detail", menu_id=menu_id))
+
+    season = (request.form.get("season") or "").strip() or None
+    effective_from = (request.form.get("effective_from") or "").strip() or None
+    effective_to = (request.form.get("effective_to") or "").strip() or None
+    active_days_list = request.form.getlist("active_days")
+    active_days = ",".join(active_days_list) if active_days_list else None
+    active_start_time = (request.form.get("active_start_time") or "").strip() or None
+    active_end_time = (request.form.get("active_end_time") or "").strip() or None
+
+    updated = menus_store.set_menu_schedule(
+        menu_id,
+        season=season,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        active_days=active_days,
+        active_start_time=active_start_time,
+        active_end_time=active_end_time,
+    )
+
+    if updated:
+        try:
+            _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+            summary = menus_store.get_menu_schedule_summary(
+                menus_store.get_menu(menu_id)
+            )
+            menus_store.record_menu_activity(
+                menu_id, "schedule_updated",
+                detail=f"Schedule set: {summary or 'custom'}",
+                actor=_actor,
+            )
+        except Exception:
+            pass
+        flash("Schedule updated.", "success")
+    else:
+        flash("No changes to schedule.", "info")
+
+    return redirect(url_for("menu_detail", menu_id=menu_id))
 
 
 # ------------------------

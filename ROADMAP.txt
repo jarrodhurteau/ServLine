@@ -771,9 +771,23 @@ Sprint 10.2 — Version History & Diff (Days 89-92)
 
 Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
 .................................................
-  [ ] Seasonal menu management
-  [ ] Menu scheduling (breakfast/lunch/dinner dayparts)
+  [x] Seasonal menu management
+  [x] Menu scheduling (breakfast/lunch/dinner dayparts)
   [ ] Active menu switching
+
+    Day 93 — Seasonal Menu Management & Daypart Scheduling
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Storage: set_menu_schedule(), clear_menu_schedule(),
+      get_scheduled_menus(), get_seasonal_menus(),
+      get_menu_schedule_summary()
+    Schema: +season, +effective_from, +effective_to,
+      +active_days, +active_start_time, +active_end_time on menus
+    Constants: VALID_SEASONS, VALID_DAYS
+    Route: POST /menus/<id>/schedule (set/clear)
+    Templates: schedule form in menu_detail, season badges in menus list
+    Activity: schedule_updated action type
+
+    Day 93 test suite: 54 cases, 100% pass rate
 
 Phase 11 — Production AI Pipeline (Days 96-110)
 -------------------------------------------------

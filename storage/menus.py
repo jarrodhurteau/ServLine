@@ -1,6 +1,7 @@
 # storage/menus.py  — Multi-Menu & Versioning (Phase 10, Day 86+)
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,10 @@ VALID_MENU_TYPES = frozenset({
     "breakfast", "lunch", "dinner", "brunch", "happy_hour",
     "kids", "dessert", "drinks", "catering", "seasonal", "other",
 })
+
+VALID_SEASONS = frozenset({"spring", "summer", "fall", "winter"})
+
+VALID_DAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
 
 
 # ------------------------------------------------------------
@@ -100,6 +105,20 @@ def _ensure_menu_schema() -> None:
                 "ALTER TABLE menu_versions ADD COLUMN change_summary TEXT;"
             )
 
+        # -- Day 93: scheduling columns -----------------------------------
+        if not _col_exists("menus", "season"):
+            cur.execute("ALTER TABLE menus ADD COLUMN season TEXT;")
+        if not _col_exists("menus", "effective_from"):
+            cur.execute("ALTER TABLE menus ADD COLUMN effective_from TEXT;")
+        if not _col_exists("menus", "effective_to"):
+            cur.execute("ALTER TABLE menus ADD COLUMN effective_to TEXT;")
+        if not _col_exists("menus", "active_days"):
+            cur.execute("ALTER TABLE menus ADD COLUMN active_days TEXT;")
+        if not _col_exists("menus", "active_start_time"):
+            cur.execute("ALTER TABLE menus ADD COLUMN active_start_time TEXT;")
+        if not _col_exists("menus", "active_end_time"):
+            cur.execute("ALTER TABLE menus ADD COLUMN active_end_time TEXT;")
+
         # -- Day 92: add pinned column if missing -------------------------
         if not _col_exists("menu_versions", "pinned"):
             cur.execute(
@@ -149,6 +168,10 @@ def _ensure_menu_schema() -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_menus_restaurant_active "
             "ON menus(restaurant_id, active)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_menus_restaurant_season "
+            "ON menus(restaurant_id, season)"
         )
 
         conn.commit()
@@ -1045,6 +1068,7 @@ VALID_ACTIVITY_ACTIONS = frozenset({
     "version_deleted",
     "version_restored",
     "version_edited",
+    "schedule_updated",
 })
 
 
@@ -1187,7 +1211,6 @@ def get_version_stats(menu_id: int) -> Dict[str, Any]:
     for v in versions:
         summary = v.get("change_summary") or ""
         # Parse from summary strings like "1 price increase, 2 price decreases"
-        import re
         up_match = re.search(r"(\d+) price increase", summary)
         down_match = re.search(r"(\d+) price decrease", summary)
         if up_match:
@@ -1203,3 +1226,174 @@ def get_version_stats(menu_id: int) -> Dict[str, Any]:
         "total_price_increases": total_price_up,
         "total_price_decreases": total_price_down,
     }
+
+
+# ====================================================================
+# Seasonal & Scheduling (Day 93)
+# ====================================================================
+
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def set_menu_schedule(
+    menu_id: int,
+    *,
+    season: Optional[str] = None,
+    effective_from: Optional[str] = None,
+    effective_to: Optional[str] = None,
+    active_days: Optional[str] = None,
+    active_start_time: Optional[str] = None,
+    active_end_time: Optional[str] = None,
+) -> bool:
+    """Set scheduling fields on a menu. Returns True if a row was updated.
+
+    Sets ALL six fields atomically (complete replacement).
+    Invalid values are silently set to None.
+    """
+    if season and season not in VALID_SEASONS:
+        season = None
+
+    if active_days is not None:
+        raw = [d.strip().lower() for d in active_days.split(",") if d.strip()]
+        valid = [d for d in raw if d in VALID_DAYS]
+        active_days = ",".join(valid) if valid else None
+
+    if active_start_time and not _TIME_RE.match(active_start_time):
+        active_start_time = None
+    if active_end_time and not _TIME_RE.match(active_end_time):
+        active_end_time = None
+    if effective_from and not _DATE_RE.match(effective_from):
+        effective_from = None
+    if effective_to and not _DATE_RE.match(effective_to):
+        effective_to = None
+
+    with db_connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE menus
+            SET season=?, effective_from=?, effective_to=?,
+                active_days=?, active_start_time=?, active_end_time=?,
+                updated_at=?
+            WHERE id=?
+            """,
+            (season, effective_from, effective_to,
+             active_days, active_start_time, active_end_time,
+             _now(), menu_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def clear_menu_schedule(menu_id: int) -> bool:
+    """Reset all schedule fields to NULL. Returns True if a row was updated."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE menus
+            SET season=NULL, effective_from=NULL, effective_to=NULL,
+                active_days=NULL, active_start_time=NULL, active_end_time=NULL,
+                updated_at=?
+            WHERE id=?
+            """,
+            (_now(), menu_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_scheduled_menus(
+    restaurant_id: int,
+    *,
+    date: Optional[str] = None,
+    time: Optional[str] = None,
+    day_of_week: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return active menus for a restaurant matching schedule criteria.
+
+    Filters are additive (AND). Menus with no schedule (all NULLs)
+    are always included (they are "always available").
+    """
+    with db_connect() as conn:
+        qs = "SELECT * FROM menus WHERE restaurant_id = ? AND active = 1"
+        args: List[Any] = [restaurant_id]
+
+        if date is not None:
+            qs += (
+                " AND (effective_from IS NULL OR effective_from <= ?)"
+                " AND (effective_to IS NULL OR effective_to >= ?)"
+            )
+            args.extend([date, date])
+
+        if time is not None:
+            qs += (
+                " AND (active_start_time IS NULL OR active_start_time <= ?)"
+                " AND (active_end_time IS NULL OR active_end_time >= ?)"
+            )
+            args.extend([time, time])
+
+        qs += " ORDER BY created_at ASC, id ASC"
+        rows = conn.execute(qs, args).fetchall()
+        results = [_row_to_dict(r) for r in rows]
+
+    if day_of_week is not None:
+        day = day_of_week.strip().lower()
+        filtered = []
+        for m in results:
+            days = m.get("active_days")
+            if days is None:
+                filtered.append(m)
+            else:
+                day_list = [d.strip().lower() for d in days.split(",")]
+                if day in day_list:
+                    filtered.append(m)
+        return filtered
+
+    return results
+
+
+def get_seasonal_menus(
+    restaurant_id: int,
+    *,
+    season: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return menus filtered by season.
+
+    If season is None, returns all menus that have a season set.
+    """
+    with db_connect() as conn:
+        if season is not None:
+            rows = conn.execute(
+                "SELECT * FROM menus WHERE restaurant_id=? AND active=1 AND season=? "
+                "ORDER BY created_at ASC, id ASC",
+                (restaurant_id, season),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM menus WHERE restaurant_id=? AND active=1 "
+                "AND season IS NOT NULL "
+                "ORDER BY created_at ASC, id ASC",
+                (restaurant_id,),
+            ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def get_menu_schedule_summary(menu: Dict[str, Any]) -> Optional[str]:
+    """Build a human-readable schedule summary string for display.
+
+    Returns None if the menu has no schedule fields set.
+    """
+    parts: List[str] = []
+    if menu.get("season"):
+        parts.append(menu["season"].title())
+    if menu.get("effective_from") or menu.get("effective_to"):
+        frm = menu.get("effective_from") or "..."
+        to = menu.get("effective_to") or "..."
+        parts.append(f"{frm} to {to}")
+    if menu.get("active_days"):
+        parts.append(menu["active_days"].upper())
+    if menu.get("active_start_time") or menu.get("active_end_time"):
+        st = menu.get("active_start_time") or "..."
+        en = menu.get("active_end_time") or "..."
+        parts.append(f"{st} - {en}")
+    return " | ".join(parts) if parts else None

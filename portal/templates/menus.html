@@ -26,6 +26,12 @@
             <tr>
               <td>
                 <a href="/menus/{{ m.id }}/detail" class="underline hover:text-brand-500">{{ m.name }}</a>
+                {% if m.season %}
+                  <span class="schedule-badge season-{{ m.season }}">{{ m.season|title }}</span>
+                {% endif %}
+                {% if m.active_days or m.active_start_time %}
+                  <span class="schedule-badge" title="Scheduled">&#128337;</span>
+                {% endif %}
               </td>
               <td class="text-muted">{{ (m.menu_type or '')|replace('_',' ')|title }}</td>
               <td class="text-muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
@@ -108,6 +114,14 @@
       </div>
     </form>
   </section>
+
+  <style>
+    .schedule-badge { font-size:.7rem; padding:1px 5px; border-radius:3px; background:#e0f2fe; color:#0369a1; margin-left:4px; vertical-align:middle; }
+    .season-spring { background:#dcfce7; color:#166534; }
+    .season-summer { background:#fef3c7; color:#92400e; }
+    .season-fall { background:#ffedd5; color:#9a3412; }
+    .season-winter { background:#dbeafe; color:#1e40af; }
+  </style>
 
   <script>
     function openEditModal(menuId, name, menuType, description) {

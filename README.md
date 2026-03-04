@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 92 completes Sprint 10.2 with version lifecycle management. Pin/unpin important versions, delete unneeded versions (with safety: can't delete pinned or sole version), and a full menu activity log tracking all version events (published, pinned, deleted, restored, edited). Version stats provide item trends and price change totals. All routes wired with activity recording. 1,151 tests passing across 43 test suites.
+Day 93 begins Sprint 10.3 (Seasonal & Scheduling) with seasonal menu management and daypart scheduling. Menus can now have season (spring/summer/fall/winter), effective date ranges, active days of week, and active time ranges. Schedule queries filter menus by date, time, and day. Schedule form in menu detail page with season dropdown, date pickers, day checkboxes, and time inputs. Season badges in menu list. Activity tracking for schedule changes. 1,205 tests passing across 44 test suites.
 
 ---
 
@@ -1490,3 +1490,18 @@ ServLine now has:
   - Schema: `pinned` column on menu_versions, `menu_activity` table (idempotent migrations)
   - Day 92 test suite: 53 cases, 100% pass rate
   - Sprint 10.2 total: 197 tests (Days 89-92), all passing
+
+- Seasonal Menu Management & Daypart Scheduling (Day 93):
+  - 6 new columns on menus table: season, effective_from, effective_to, active_days, active_start_time, active_end_time
+  - `VALID_SEASONS` (spring/summer/fall/winter), `VALID_DAYS` (mon-sun) constants
+  - `set_menu_schedule()`: atomic schedule replacement with validation (season, date, time, day formats)
+  - `clear_menu_schedule()`: reset all schedule fields to NULL
+  - `get_scheduled_menus()`: filter by date/time/day, unscheduled menus always included
+  - `get_seasonal_menus()`: filter by season or get all seasonal menus
+  - `get_menu_schedule_summary()`: human-readable one-liner ("Summer | 2026-06-01 to 2026-08-31 | MON,WED,FRI | 11:00 - 14:00")
+  - New route: `POST /menus/<id>/schedule` — set/clear schedule with activity recording
+  - Schedule form in `menu_detail.html`: season dropdown, date pickers, day checkboxes, time inputs
+  - Season badges in `menus.html` with color coding (spring=green, summer=yellow, fall=orange, winter=blue)
+  - `schedule_updated` activity action with detail summary
+  - Day 93 test suite: 54 cases, 100% pass rate
+  - Sprint 10.3 started: Day 93, 54 tests passing

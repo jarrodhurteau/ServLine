@@ -17,6 +17,82 @@
       <p class="text-muted mt-1">{{ menu.description }}</p>
     {% endif %}
 
+    {# Day 93: Schedule Section #}
+    {% if schedule_summary %}
+      <div class="schedule-summary mt-2" style="font-size:.85rem; color:var(--muted,#888);">
+        &#128197; {{ schedule_summary }}
+      </div>
+    {% endif %}
+
+    <div class="mt-2">
+      <button type="button" class="btn btn-sm btn-ghost"
+              onclick="document.getElementById('scheduleForm').style.display=
+                       document.getElementById('scheduleForm').style.display==='none'?'block':'none'">
+        {{ 'Edit Schedule' if schedule_summary else 'Set Schedule' }}
+      </button>
+    </div>
+
+    <div id="scheduleForm" style="display:none; margin-top:12px; padding:16px; border:1px solid var(--border,#e5e7eb); border-radius:6px; max-width:520px;">
+      <h3 class="text-md font-semibold mb-2">Menu Schedule</h3>
+      <form method="post" action="/menus/{{ menu.id }}/schedule" style="display:grid; gap:10px;">
+        <div>
+          <label style="font-size:.85rem; color:var(--muted,#888);">Season</label>
+          <select name="season" class="cell-input" style="width:100%;">
+            <option value="">-- None --</option>
+            {% for s in valid_seasons %}
+              <option value="{{ s }}" {% if menu.season == s %}selected{% endif %}>{{ s|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <div style="flex:1;">
+            <label style="font-size:.85rem; color:var(--muted,#888);">Effective From</label>
+            <input type="date" name="effective_from" class="cell-input" style="width:100%;"
+                   value="{{ menu.effective_from or '' }}">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:.85rem; color:var(--muted,#888);">Effective To</label>
+            <input type="date" name="effective_to" class="cell-input" style="width:100%;"
+                   value="{{ menu.effective_to or '' }}">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:.85rem; color:var(--muted,#888);">Active Days</label>
+          <div class="flex gap-2 flex-wrap" style="margin-top:4px;">
+            {% set current_days = (menu.active_days or '').split(',') %}
+            {% for d in ['mon','tue','wed','thu','fri','sat','sun'] %}
+              <label style="font-size:.82rem; cursor:pointer;">
+                <input type="checkbox" name="active_days" value="{{ d }}"
+                       {% if d in current_days %}checked{% endif %}>
+                {{ d|upper }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <div style="flex:1;">
+            <label style="font-size:.85rem; color:var(--muted,#888);">Start Time</label>
+            <input type="time" name="active_start_time" class="cell-input" style="width:100%;"
+                   value="{{ menu.active_start_time or '' }}">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:.85rem; color:var(--muted,#888);">End Time</label>
+            <input type="time" name="active_end_time" class="cell-input" style="width:100%;"
+                   value="{{ menu.active_end_time or '' }}">
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="btn btn-primary btn-sm">Save Schedule</button>
+          {% if schedule_summary %}
+            <button type="submit" name="clear" value="1" class="btn btn-ghost btn-sm"
+                    onclick="return confirm('Clear all schedule settings?');">Clear Schedule</button>
+          {% endif %}
+          <button type="button" class="btn btn-ghost btn-sm"
+                  onclick="document.getElementById('scheduleForm').style.display='none'">Cancel</button>
+        </div>
+      </form>
+    </div>
+
     {# Day 92: Version Stats #}
     {% if stats and stats.total_versions > 0 %}
       <div class="mt-3 flex gap-4" style="font-size:.85rem; color:var(--muted,#888);">
@@ -213,6 +289,7 @@
     .activity-version_deleted { background:#fef2f2; color:#991b1b; }
     .activity-version_restored { background:#dbeafe; color:#1e40af; }
     .activity-version_edited { background:#f3f4f6; color:#374151; }
+    .activity-schedule_updated { background:#e0f2fe; color:#0369a1; }
   </style>
 
   <script>
