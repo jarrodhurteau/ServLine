@@ -990,6 +990,27 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
     Semantic pipeline (quality/repair) → draft items with rich debug metadata.
   Graceful fallback at every stage — pipeline never crashes on API/parsing errors.
 
+Day 100.5 — Pipeline Cleanup & Debug View
+.........................................
+  [ ] Remove heuristic fallback (Strategy 2) from run_ocr_and_make_draft()
+      - No API key = empty draft for manual input (free tier)
+      - Heuristic path produces low-quality garble that hurts credibility
+  [ ] Remove legacy draft JSON fallback (Strategy 3) from run_ocr_and_make_draft()
+  [ ] Remove "AI Preview (heuristics)" button from draft_editor.html
+  [ ] Remove "AI Preview (JSON)" link from import_view.html
+  [ ] Add "Pipeline Debug" button/view replacing the old heuristic preview
+      - Shows OCR text sent to Claude (clean Tesseract output)
+      - Call 1 extraction results (raw items from Claude)
+      - Call 2 vision verification results (changes, confidence, model)
+      - Semantic pipeline results (tiers, repairs, quality grade)
+      - Pipeline metrics (per-step timing, bottleneck, item flow)
+      - All data already exists in debug payload — just needs a UI
+  Rationale: Tested live import on real pizza menu (Mar 4, 2026). Claude path
+  produced 139 clean items at 95% confidence. Heuristic fallback on same PDF
+  produced 35 garbled items at grade D (names like "SouPs Ko)", "A serssses-
+  sesssee"). Decision: free tier = manual input only; heuristic path removed
+  to protect credibility. Debug view preserved for internal diagnostics.
+
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................
   [ ] New reconcile_flagged_items() function in storage/
