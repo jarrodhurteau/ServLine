@@ -1599,3 +1599,16 @@ ServLine now has:
   - **Sprint 11.1 complete: 278 tests (Days 96-100), 4 production modules (~900 LOC)**
   - Day 100 test suite: 56 cases, 100% pass rate
   - Cumulative: 1,609 passed (excl. Day 70 fixture errors)
+
+- **Pipeline Cleanup & Debug View (Day 100.5):**
+  - Removed heuristic AI fallback (Strategy 2) and legacy JSON fallback (Strategy 3) from pipeline
+  - No API key = empty draft for manual input (free tier); heuristic garble eliminated
+  - Removed 3 heuristic routes (`imports_ai_preview`, `imports_ai_commit`, `imports_ai_finalize`)
+  - Removed `_draft_items_from_ai_preview` helper and `analyze_ocr_text` import
+  - Removed "AI Preview (heuristics)" button from draft editor, "AI Tools" section from import view
+  - New Pipeline Debug view (`/drafts/<id>/pipeline-debug`): renders pipeline summary, step timeline,
+    vision verification details, semantic pipeline results, raw OCR text, and debug payload download
+  - New template: `portal/templates/pipeline_debug.html` (~290 LOC)
+  - Net: ~390 LOC removed, ~320 LOC added (template + route + tests)
+  - Day 100.5 test suite: 26 cases, 100% pass rate
+  - Cumulative: 1,635 passed (excl. Day 70 fixture errors)

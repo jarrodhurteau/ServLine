@@ -641,9 +641,7 @@
           <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
 
           <div style="margin-left:auto; display:flex; gap:8px; align-items:center; white-space:nowrap;">
-            {% if draft.source_job_id %}
-              <a class="btn" target="_blank" rel="noopener" href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}">AI Preview (heuristics)</a>
-            {% endif %}
+            <a class="btn" target="_blank" rel="noopener" href="{{ url_for('draft_pipeline_debug', draft_id=draft.id) }}">Pipeline Debug</a>
             <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
 
             <details class="export">
@@ -1841,9 +1839,7 @@
         <div class="links">
           <a href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}" target="_blank" rel="noopener">OCR Debug JSON</a>
           <a href="{{ url_for('draft_ocr_debug_csv',  draft_id=draft.id) }}" target="_blank" rel="noopener">OCR Debug CSV</a>
-          {% if draft.source_job_id %}
-          <a href="{{ url_for('imports_ai_preview', job_id=draft.source_job_id) }}" target="_blank" rel="noopener">AI Preview</a>
-          {% endif %}
+          <a href="{{ url_for('draft_pipeline_debug', draft_id=draft.id) }}" target="_blank" rel="noopener">Pipeline Debug</a>
         </div>
       `;
     }

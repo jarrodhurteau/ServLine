@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}Pipeline Debug · Draft #{{ draft.id }}{% endblock %}
+
+{% block content %}
+<style>
+  .pd-wrap { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  .pd-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+  .pd-header h1 { font-size: 1.5rem; font-weight: 600; }
+
+  .pill { display:inline-flex; align-items:center; gap:.4rem; padding:.25rem .55rem; border-radius:999px; font-weight:600; font-size:.80rem; border:1px solid transparent; }
+  .pill-gray  { background:#f3f4f6; color:#111827; border-color:#e5e7eb; }
+  .pill-green { background:#dcfce7; color:#065f46; border-color:#bbf7d0; }
+  .pill-red   { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
+  .pill-blue  { background:#dbeafe; color:#1e3a8a; border-color:#bfdbfe; }
+  .pill-yellow{ background:#fef9c3; color:#854d0e; border-color:#fde68a; }
+  .pill-purple{ background:#f3e8ff; color:#6b21a8; border-color:#e9d5ff; }
+
+  .pd-section { background:#fff; border:1px solid #e5e7eb; border-radius:.5rem; margin-bottom:1rem; }
+  .pd-section summary { padding:.75rem 1rem; cursor:pointer; font-weight:600; font-size:.95rem; list-style:none; display:flex; align-items:center; gap:.5rem; }
+  .pd-section summary::before { content:"▶"; font-size:.7rem; transition:transform .15s; }
+  .pd-section[open] summary::before { transform:rotate(90deg); }
+  .pd-body { padding:0 1rem 1rem; }
+
+  .pd-kv { display:grid; grid-template-columns:180px 1fr; gap:.25rem .75rem; font-size:.9rem; }
+  .pd-kv dt { color:#6b7280; font-weight:500; }
+  .pd-kv dd { margin:0; }
+
+  .pd-timeline { display:flex; gap:0; align-items:stretch; margin:1rem 0; }
+  .pd-step { flex:1; text-align:center; padding:.75rem .5rem; border:1px solid #e5e7eb; position:relative; font-size:.85rem; }
+  .pd-step:first-child { border-radius:.5rem 0 0 .5rem; }
+  .pd-step:last-child  { border-radius:0 .5rem .5rem 0; }
+  .pd-step.success { background:#dcfce7; border-color:#bbf7d0; }
+  .pd-step.skipped { background:#f3f4f6; border-color:#e5e7eb; }
+  .pd-step.failed  { background:#fee2e2; border-color:#fecaca; }
+  .pd-step .step-name { font-weight:600; font-size:.8rem; }
+  .pd-step .step-detail { font-size:.75rem; color:#6b7280; margin-top:.25rem; }
+  .pd-step .step-arrow { position:absolute; right:-8px; top:50%; transform:translateY(-50%); z-index:1; color:#9ca3af; font-size:.8rem; }
+
+  .pd-changes { list-style:none; padding:0; margin:.5rem 0; }
+  .pd-changes li { padding:.25rem 0; font-size:.85rem; border-bottom:1px solid #f3f4f6; }
+  .pd-changes li:last-child { border-bottom:none; }
+
+  .pd-tier-bar { display:flex; height:24px; border-radius:4px; overflow:hidden; margin:.5rem 0; }
+  .pd-tier-bar .tier-high   { background:#22c55e; }
+  .pd-tier-bar .tier-medium { background:#f59e0b; }
+  .pd-tier-bar .tier-low    { background:#ef4444; }
+  .pd-tier-bar .tier-reject { background:#6b7280; }
+
+  .pd-items-table { width:100%; border-collapse:collapse; font-size:.85rem; margin-top:.5rem; }
+  .pd-items-table th { text-align:left; padding:.4rem .5rem; border-bottom:2px solid #e5e7eb; font-weight:600; color:#374151; }
+  .pd-items-table td { padding:.4rem .5rem; border-bottom:1px solid #f3f4f6; }
+
+  pre.pd-ocr { background:#1e293b; color:#e2e8f0; padding:1rem; border-radius:.5rem; font-size:.8rem; line-height:1.4; max-height:400px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+
+  .grade-badge { font-size:1.5rem; font-weight:700; width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; border-radius:.5rem; }
+  .grade-A { background:#dcfce7; color:#065f46; }
+  .grade-B { background:#dbeafe; color:#1e3a8a; }
+  .grade-C { background:#fef9c3; color:#854d0e; }
+  .grade-D { background:#fee2e2; color:#991b1b; }
+</style>
+
+<div class="pd-wrap">
+  <div class="pd-header">
+    <h1>Pipeline Debug — Draft #{{ draft.id }}</h1>
+    <div style="display:flex; gap:.5rem; align-items:center;">
+      <span class="pill pill-purple">{{ extraction_strategy }}</span>
+      {% if metrics and metrics.total_duration_human %}
+        <span class="pill pill-gray">{{ metrics.total_duration_human }}</span>
+      {% endif %}
+      {% if semantic and semantic.quality_grade %}
+        <span class="grade-badge grade-{{ semantic.quality_grade }}">{{ semantic.quality_grade }}</span>
+      {% endif %}
+      <a class="pill pill-blue" href="{{ url_for('draft_editor', draft_id=draft.id) }}">Back to Editor</a>
+    </div>
+  </div>
+
+  {% if not has_debug %}
+    <div class="pd-section" style="padding:2rem; text-align:center; color:#6b7280;">
+      No pipeline debug data available for this draft.
+    </div>
+  {% else %}
+
+  {# ============ PIPELINE SUMMARY ============ #}
+  <details class="pd-section" open>
+    <summary>Pipeline Summary</summary>
+    <div class="pd-body">
+      <dl class="pd-kv">
+        <dt>Strategy</dt>
+        <dd><span class="pill pill-purple">{{ extraction_strategy }}</span></dd>
+        <dt>OCR Characters</dt>
+        <dd>{{ clean_ocr_chars | default(0) }}</dd>
+        {% if metrics %}
+          <dt>Total Duration</dt>
+          <dd>{{ metrics.total_duration_human | default("—") }}</dd>
+          <dt>Bottleneck</dt>
+          <dd>{{ metrics.bottleneck | default("—") }}</dd>
+        {% endif %}
+        {% if semantic %}
+          <dt>Quality Grade</dt>
+          <dd><span class="grade-badge grade-{{ semantic.quality_grade }}">{{ semantic.quality_grade }}</span></dd>
+          <dt>Mean Confidence</dt>
+          <dd>{{ "%.1f%%" | format((semantic.mean_confidence | default(0)) * 100) }}</dd>
+        {% endif %}
+      </dl>
+    </div>
+  </details>
+
+  {# ============ PIPELINE TIMELINE ============ #}
+  {% if metrics and metrics.steps %}
+  <details class="pd-section" open>
+    <summary>Pipeline Timeline</summary>
+    <div class="pd-body">
+      <div class="pd-timeline">
+        {% set step_names = ["ocr_text_extraction", "call_1_claude_extraction", "call_2_vision_verification", "semantic_pipeline"] %}
+        {% set step_labels = {"ocr_text_extraction": "OCR", "call_1_claude_extraction": "Call 1: Extract", "call_2_vision_verification": "Call 2: Vision", "semantic_pipeline": "Semantic"} %}
+        {% for sname in step_names %}
+          {% set s = metrics.steps.get(sname, {}) %}
+          {% set status = s.get("status", "skipped") %}
+          <div class="pd-step {{ status }}">
+            <div class="step-name">{{ step_labels[sname] }}</div>
+            <div class="step-detail">
+              {{ status }}
+              {% if s.get("duration_ms") is not none %}· {{ s.duration_ms }}ms{% endif %}
+              {% if s.get("items") is not none %}· {{ s.items }} items{% endif %}
+            </div>
+            {% if not loop.last %}<span class="step-arrow">→</span>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {# Item flow #}
+      {% if metrics.item_flow %}
+      <div style="font-size:.85rem; color:#6b7280; margin-top:.5rem;">
+        Item flow:
+        {% for f in metrics.item_flow %}
+          {{ step_labels.get(f.step, f.step) }}{% if f.note %} ({{ f.note }}){% elif f.items is not none %} ({{ f.items }}){% endif %}{% if not loop.last %} → {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# ============ VISION VERIFICATION ============ #}
+  {% if vision %}
+  <details class="pd-section">
+    <summary>Vision Verification (Call 2)
+      {% if vision.skipped %}<span class="pill pill-yellow">Skipped</span>
+      {% elif vision.error %}<span class="pill pill-red">Error</span>
+      {% else %}<span class="pill pill-green">{{ "%.0f%%" | format((vision.confidence | default(0)) * 100) }} confidence</span>
+      {% endif %}
+    </summary>
+    <div class="pd-body">
+      <dl class="pd-kv">
+        {% if vision.skipped %}
+          <dt>Skip Reason</dt>
+          <dd>{{ vision.skip_reason | default("—") }}</dd>
+        {% elif vision.error %}
+          <dt>Error</dt>
+          <dd>{{ vision.error }}</dd>
+        {% else %}
+          <dt>Confidence</dt>
+          <dd>{{ "%.1f%%" | format(vision.confidence * 100) }}</dd>
+          <dt>Model</dt>
+          <dd>{{ vision.model | default("—") }}</dd>
+          <dt>Items Before</dt>
+          <dd>{{ vision.item_count_before | default("—") }}</dd>
+          <dt>Changes</dt>
+          <dd>{{ vision.changes_count | default(0) }}</dd>
+          {% if vision.pages_sent %}
+            <dt>Pages Sent</dt>
+            <dd>{{ vision.pages_sent }}</dd>
+          {% endif %}
+          {% if vision.notes %}
+            <dt>Notes</dt>
+            <dd>{{ vision.notes }}</dd>
+          {% endif %}
+        {% endif %}
+      </dl>
+
+      {% if vision.changes %}
+      <h4 style="margin-top:1rem; font-size:.9rem;">Changes Log</h4>
+      <ul class="pd-changes">
+        {% for c in vision.changes %}
+        <li><span class="pill pill-gray">{{ c.type }}</span> {{ c.detail }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# ============ SEMANTIC PIPELINE ============ #}
+  {% if semantic %}
+  <details class="pd-section">
+    <summary>Semantic Pipeline
+      <span class="grade-badge grade-{{ semantic.quality_grade }}" style="font-size:1rem; width:28px; height:28px;">{{ semantic.quality_grade }}</span>
+    </summary>
+    <div class="pd-body">
+      <dl class="pd-kv">
+        <dt>Quality Grade</dt>
+        <dd><span class="grade-badge grade-{{ semantic.quality_grade }}">{{ semantic.quality_grade }}</span></dd>
+        <dt>Mean Confidence</dt>
+        <dd>{{ "%.1f%%" | format((semantic.mean_confidence | default(0)) * 100) }}</dd>
+        <dt>Repairs Applied</dt>
+        <dd>{{ semantic.repairs_applied | default(0) }}</dd>
+      </dl>
+
+      {# Tier distribution bar #}
+      {% if semantic.tier_counts %}
+        {% set tc = semantic.tier_counts %}
+        {% set total = (tc.high|default(0)) + (tc.medium|default(0)) + (tc.low|default(0)) + (tc.reject|default(0)) %}
+        {% if total > 0 %}
+        <h4 style="margin-top:1rem; font-size:.9rem;">Confidence Tiers ({{ total }} items)</h4>
+        <div class="pd-tier-bar">
+          {% if tc.high %}<div class="tier-high" style="width:{{ (tc.high / total * 100)|round }}%;" title="High: {{ tc.high }}"></div>{% endif %}
+          {% if tc.medium %}<div class="tier-medium" style="width:{{ (tc.medium / total * 100)|round }}%;" title="Medium: {{ tc.medium }}"></div>{% endif %}
+          {% if tc.low %}<div class="tier-low" style="width:{{ (tc.low / total * 100)|round }}%;" title="Low: {{ tc.low }}"></div>{% endif %}
+          {% if tc.reject %}<div class="tier-reject" style="width:{{ (tc.reject / total * 100)|round }}%;" title="Reject: {{ tc.reject }}"></div>{% endif %}
+        </div>
+        <div style="display:flex; gap:1rem; font-size:.8rem; color:#6b7280;">
+          <span style="color:#22c55e;">High: {{ tc.high|default(0) }}</span>
+          <span style="color:#f59e0b;">Medium: {{ tc.medium|default(0) }}</span>
+          <span style="color:#ef4444;">Low: {{ tc.low|default(0) }}</span>
+          <span style="color:#6b7280;">Reject: {{ tc.reject|default(0) }}</span>
+        </div>
+        {% endif %}
+      {% endif %}
+
+      {# Per-item metadata table #}
+      {% if semantic.items_metadata %}
+      <h4 style="margin-top:1rem; font-size:.9rem;">Per-Item Details ({{ semantic.items_metadata|length }})</h4>
+      <table class="pd-items-table">
+        <thead>
+          <tr><th>Name</th><th>Confidence</th><th>Tier</th><th>Repairs</th><th>Review?</th></tr>
+        </thead>
+        <tbody>
+          {% for it in semantic.items_metadata[:50] %}
+          <tr>
+            <td>{{ it.name | default("—") }}</td>
+            <td>{{ "%.0f%%" | format((it.semantic_confidence | default(0)) * 100) }}</td>
+            <td>
+              {% if it.semantic_tier == "high" %}<span class="pill pill-green">high</span>
+              {% elif it.semantic_tier == "medium" %}<span class="pill pill-yellow">medium</span>
+              {% elif it.semantic_tier == "low" %}<span class="pill pill-red">low</span>
+              {% else %}<span class="pill pill-gray">{{ it.semantic_tier | default("—") }}</span>{% endif %}
+            </td>
+            <td>{{ it.auto_repairs_applied_count | default(0) }}</td>
+            <td>{% if it.needs_review %}<span class="pill pill-red">yes</span>{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if semantic.items_metadata|length > 50 %}
+        <div style="font-size:.8rem; color:#6b7280; margin-top:.5rem;">Showing first 50 of {{ semantic.items_metadata|length }} items.</div>
+      {% endif %}
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# ============ RAW OCR TEXT ============ #}
+  {% if raw_ocr_text %}
+  <details class="pd-section">
+    <summary>Raw OCR Text ({{ clean_ocr_chars }} chars)</summary>
+    <div class="pd-body">
+      <pre class="pd-ocr">{{ raw_ocr_text[:5000] }}</pre>
+      {% if raw_ocr_text|length > 5000 %}
+        <div style="font-size:.8rem; color:#6b7280; margin-top:.5rem;">Showing first 5000 of {{ raw_ocr_text|length }} characters.</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {# ============ RAW DEBUG JSON ============ #}
+  <details class="pd-section">
+    <summary>Raw Debug Payload</summary>
+    <div class="pd-body">
+      <a class="pill pill-blue" href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}" target="_blank" rel="noopener">Download JSON</a>
+      <a class="pill pill-gray" href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}" target="_blank" rel="noopener">Download CSV</a>
+    </div>
+  </details>
+
+  {% endif %}
+</div>
+{% endblock %}

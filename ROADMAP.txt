@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 100 (March 4, 2026) — Sprint 11.1 Capstone, End-to-End Pipeline Integration
+Last Updated: Day 100.5 (March 4, 2026) — Pipeline Cleanup & Debug View
 
 ================================================================================
 PROJECT MISSION
@@ -990,21 +990,29 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
     Semantic pipeline (quality/repair) → draft items with rich debug metadata.
   Graceful fallback at every stage — pipeline never crashes on API/parsing errors.
 
-Day 100.5 — Pipeline Cleanup & Debug View
+Day 100.5 — Pipeline Cleanup & Debug View  ✅
 .........................................
-  [ ] Remove heuristic fallback (Strategy 2) from run_ocr_and_make_draft()
+  [x] Remove heuristic fallback (Strategy 2) from run_ocr_and_make_draft()
       - No API key = empty draft for manual input (free tier)
       - Heuristic path produces low-quality garble that hurts credibility
-  [ ] Remove legacy draft JSON fallback (Strategy 3) from run_ocr_and_make_draft()
-  [ ] Remove "AI Preview (heuristics)" button from draft_editor.html
-  [ ] Remove "AI Preview (JSON)" link from import_view.html
-  [ ] Add "Pipeline Debug" button/view replacing the old heuristic preview
+  [x] Remove legacy draft JSON fallback (Strategy 3) from run_ocr_and_make_draft()
+  [x] Remove "AI Preview (heuristics)" button from draft_editor.html
+  [x] Remove "AI Preview (JSON)" link from import_view.html
+  [x] Remove heuristic AI routes (imports_ai_preview, imports_ai_commit, imports_ai_finalize)
+  [x] Remove _draft_items_from_ai_preview helper function
+  [x] Remove analyze_ocr_text import (no longer used in pipeline or routes)
+  [x] Add "Pipeline Debug" button/view replacing the old heuristic preview
       - Shows OCR text sent to Claude (clean Tesseract output)
-      - Call 1 extraction results (raw items from Claude)
       - Call 2 vision verification results (changes, confidence, model)
       - Semantic pipeline results (tiers, repairs, quality grade)
       - Pipeline metrics (per-step timing, bottleneck, item flow)
-      - All data already exists in debug payload — just needs a UI
+      - Pipeline summary (strategy, total duration, quality grade)
+      - Raw debug payload download (JSON + CSV)
+      - All data from existing debug payload — rendered in new template
+  [x] Wire Pipeline Debug links in draft editor (header + provenance popover)
+  [x] 26 tests (test_day100_5_pipeline_cleanup.py)
+  Net: removed ~390 LOC of heuristic/legacy code + 3 routes, added ~320 LOC
+  (new template + route + tests). 1,635 tests pass (excl. Day 70 fixture errors).
   Rationale: Tested live import on real pizza menu (Mar 4, 2026). Claude path
   produced 139 clean items at 95% confidence. Heuristic fallback on same PDF
   produced 35 garbled items at grade D (names like "SouPs Ko)", "A serssses-

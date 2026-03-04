@@ -170,28 +170,7 @@
         {% endif %}
         {# ======================================= #}
 
-        <!-- ===== AI TOOLS ===== -->
-        <div class="ai-section">
-          <div class="ai-title">⚡ AI Tools</div>
-          <div class="ai-note">
-            Preview uses heuristics only (Phase A). Commit replaces current draft items.
-          </div>
-
-          <a class="btn btn-ghost w-full"
-             href="{{ url_for('imports_ai_preview', job_id=job.id) }}"
-             target="_blank" rel="noopener">
-            AI Preview (JSON)
-          </a>
-
-          <!-- POST with redirect so no blank JSON page -->
-          <form id="ai-commit-form"
-                action="{{ url_for('imports_ai_finalize', job_id=job.id) }}?redirect=1"
-                method="post"
-                title="Automatically improve names, merge split descriptions, and clean OCR noise.">
-            <button type="submit" class="btn w-full">Finalize with AI Cleanup</button>
-          </form>
-        </div>
-        <!-- ===================== -->
+        <!-- (Day 100.5: AI Tools section removed — heuristic preview no longer available) -->
 
         <!-- Export (enabled after resolving draft_id) -->
         <a id="export-csv"  class="btn w-full" href="#" aria-disabled="true" title="Resolving draft…">Export CSV</a>

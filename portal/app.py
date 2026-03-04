@@ -179,11 +179,8 @@ except Exception as e:
     extract_items_from_path = None
     _ocr_facade_error = repr(e)
 
-# AI OCR Heuristics (Day 20)
-try:
-    from storage.ai_ocr_helper import analyze_ocr_text  # Phase A (heuristics-only)
-except Exception:
-    analyze_ocr_text = None
+# AI OCR Heuristics (Day 20) — removed from pipeline in Day 100.5
+# analyze_ocr_text import removed: heuristic fallback no longer used in pipeline or routes
 
 # uploads (kept out of git via .gitignore)
 UPLOAD_FOLDER = ROOT / "uploads"
@@ -1901,84 +1898,6 @@ def _draft_items_from_draft_json(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def _draft_items_from_ai_preview(ai_items: list) -> list:
-    """Convert analyze_ocr_text() items directly to draft DB rows.
-
-    Bypasses the triple-transformation chain (group->helper->json) that loses
-    prices, confidence, and categories.  Same logic as imports_ai_commit()
-    but reusable for background imports.
-
-    Each item may include a '_variants' key with structured variant data
-    that upsert_draft_items() will insert into draft_item_variants.
-    """
-    def _to_cents(v) -> int:
-        try:
-            return int(round(float(v) * 100))
-        except Exception:
-            return 0
-
-    out: List[Dict[str, Any]] = []
-    pos = 1
-    for it in ai_items:
-        name = (it.get("name") or "").strip()
-        if not name:
-            continue
-        desc = (it.get("description") or "").strip() or None
-        cat = it.get("category") or None
-        conf = it.get("confidence")
-        pcs = it.get("price_candidates") or []
-
-        price_cents = 0
-        if pcs:
-            try:
-                price_cents = _to_cents(pcs[0].get("value"))
-            except Exception:
-                pass
-
-        # Build structured variants from AI preview data
-        raw_variants = it.get("variants") or []
-        variants: list = []
-        for vi, v in enumerate(raw_variants):
-            if not isinstance(v, dict):
-                continue
-            lbl = (v.get("label") or v.get("normalized_size") or "").strip()
-            vpc = v.get("price_cents")
-            if vpc is None:
-                continue
-            try:
-                vpc = int(vpc)
-            except Exception:
-                continue
-            kind = (v.get("kind") or "size").strip().lower()
-            if kind not in ("size", "combo", "flavor", "style", "other"):
-                kind = "size"
-            if lbl or vpc > 0:
-                variants.append({
-                    "label": lbl or f"Option {vi + 1}",
-                    "price_cents": vpc,
-                    "kind": kind,
-                    "position": vi,
-                })
-
-        # Use lowest variant price as base if no price_candidates
-        if price_cents == 0 and variants:
-            price_cents = min(v["price_cents"] for v in variants)
-
-        row: Dict[str, Any] = {
-            "name": name,
-            "description": desc,
-            "price_cents": int(price_cents),
-            "category": cat,
-            "position": pos,
-            "confidence": int(round(conf * 100)) if isinstance(conf, float) else conf,
-        }
-        if variants:
-            row["_variants"] = variants
-        out.append(row)
-        pos += 1
-    return out
-
-
 def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convert the ocr_worker draft object into the on-disk draft JSON format expected by the rest of the app.
@@ -2145,11 +2064,9 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             pass
 
         # =====================================================================
-        # THREE-STRATEGY ITEM EXTRACTION
-        # Get clean OCR text (same path as /ai/preview), then try:
-        #   1. Claude API extraction (best quality)
-        #   2. Heuristic AI (analyze_ocr_text — same as /ai/preview)
-        #   3. Legacy draft JSON parsing (last resort)
+        # ITEM EXTRACTION — Claude API only (Day 100.5: heuristic/legacy removed)
+        # Get clean OCR text, then extract via Claude API.
+        # No API key = empty draft for manual input (free tier).
         # =====================================================================
         items = []
         extraction_strategy = "none"
@@ -2236,29 +2153,13 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     tracker.fail_step(STEP_CALL1_EXTRACT, str(_claude_err))
                 print(f"[Draft] Strategy 1 (Claude API) failed: {_claude_err}")
 
-        # Strategy 2: Heuristic AI (same as /ai/preview endpoint)
-        if clean_ocr_text and not items:
-            try:
-                doc = analyze_ocr_text(clean_ocr_text, layout=None, taxonomy=None, restaurant_profile=None)
-                ai_items = (doc or {}).get("items") or []
-                if ai_items:
-                    items = _draft_items_from_ai_preview(ai_items)
-                    extraction_strategy = "heuristic_ai"
-                    print(f"[Draft] Strategy 2 (Heuristic AI): {len(items)} items")
-            except Exception as _ai_err:
-                print(f"[Draft] Strategy 2 (Heuristic AI) failed: {_ai_err}")
-
-        # Strategy 3: Legacy draft JSON parsing (last resort)
-        if not items:
-            items = _draft_items_from_draft_json(draft if isinstance(draft, dict) else {})
-            extraction_strategy = "legacy_draft_json"
-            print(f"[Draft] Strategy 3 (Legacy JSON): {len(items)} items")
+        # (Day 100.5: Strategy 2 heuristic AI and Strategy 3 legacy JSON removed.
+        #  No API key = empty draft for manual input.)
 
         # =====================================================================
         # SEMANTIC PIPELINE — Phase 8 quality checks on Claude-extracted items
         # Runs cross-item consistency, confidence scoring, tiers, repair recs,
         # auto-repair, and generates quality report.
-        # Strategy 2 (heuristic AI) already runs this internally.
         # =====================================================================
         semantic_result = None
         if items and extraction_strategy in ("claude_api", "claude_api+vision"):
@@ -6792,490 +6693,44 @@ def _ensure_draft_for_job(job_id: int, row=None) -> Optional[int]:
     return None
 
 
+# (Day 100.5: AI Heuristics routes removed — imports_ai_preview, imports_ai_commit, imports_ai_finalize)
+# Heuristic fallback produced low-quality garble; free tier now gets empty draft for manual input.
+# Pipeline Debug view replaces the old heuristic preview.
 
 # ------------------------
-# AI Heuristics Preview (Day 20 Phase A)
+# Pipeline Debug View (Day 100.5)
 # ------------------------
-@app.get("/imports/<int:job_id>/ai/preview")
+@app.get("/drafts/<int:draft_id>/pipeline-debug")
 @login_required
-def imports_ai_preview(job_id: int):
+def draft_pipeline_debug(draft_id: int):
     """
-    Day 20 (Phase A): Heuristics-only AI preview.
-    Re-OCRs the original upload for this job, runs analyze_ocr_text(), and returns JSON.
-    No draft/db writes occur here — it's a read-only preview.
-
-    NOW prefers the user-rotated working image if present.
-
-    NOTE: For structured CSV/JSON imports we do NOT re-OCR; preview is only
-    available for image/PDF OCR jobs.
-    """
-    row = get_import_job(job_id)
-    if not row:
-        abort(404)
-
-    # Detect structured imports (CSV/JSON/XLSX) and bail out early
-    try:
-        source_type = (row["source_type"] or "").lower()
-    except Exception:
-        source_type = ""
-    src_name = (row["filename"] or "").strip()
-    suffix = Path(src_name).suffix.lower() if src_name else ""
-    is_structured = (
-        source_type.startswith("structured")
-        or suffix in (".csv", ".json", ".xlsx", ".xls")
-    )
-
-    if is_structured:
-        return jsonify({
-            "ok": False,
-            "error": "AI preview is only available for image/PDF OCR imports (this job is a structured CSV/JSON import)."
-        }), 400
-
-    if analyze_ocr_text is None:
-        return jsonify({"ok": False, "error": "AI helper not available"}), 501
-
-    if not src_name:
-        return jsonify({"ok": False, "error": "No source filename on job"}), 400
-
-    src_path = (UPLOAD_FOLDER / src_name).resolve()
-    if not src_path.exists():
-        return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
-
-    # Prefer working image if available (and auto-rotate if needed for images)
-    work = _get_work_image_if_any(job_id)
-    try:
-        if work and work.exists():
-            raw_text = _ocr_image_to_text(work)
-        else:
-            suffix = src_path.suffix.lower()
-            if suffix in (".png", ".jpg", ".jpeg"):
-                # NEW: auto-rotate by creating/rotating a working copy
-                wp = _auto_rotate_work_image_if_needed(job_id, src_path)
-                if wp and wp.exists():
-                    raw_text = _ocr_image_to_text(wp)
-                else:
-                    raw_text = _ocr_image_to_text(src_path)
-            elif suffix == ".pdf":
-                raw_text = _pdf_to_text(src_path)
-            else:
-                return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
-
-
-    if not raw_text:
-        return jsonify({"ok": False, "error": "Could not extract text for preview"}), 500
-
-    # Run heuristics analysis (Phase A)
-    doc = analyze_ocr_text(raw_text, layout=None, taxonomy=TAXONOMY_SEED, restaurant_profile=None)
-
-    return jsonify({
-        "ok": True,
-        "job_id": job_id,
-        "filename": src_name,
-        "extracted_chars": len(raw_text),
-        "preview": doc
-    }), 200
-
-
-def _build_price_text(ai_item: dict) -> Optional[str]:
-    """
-    Build a human-readable price_text from AI preview data.
-
-    Priority:
-      1) Use variants with explicit price_cents, e.g. "S: $9.95 / L: $13.99"
-      2) Fallback to distinct price_candidates, e.g. "$9.95 / $13.99 / $19.95"
-    """
-    pcs = ai_item.get("price_candidates") or []
-    variants = ai_item.get("variants") or []
-    parts: List[str] = []
-
-    # Prefer variants if they have explicit prices
-    for v in variants:
-        price_cents = v.get("price_cents")
-        if price_cents is None:
-            continue
-        try:
-            price_cents = int(price_cents)
-        except Exception:
-            continue
-        label = (v.get("label") or "").strip()
-        dollars = price_cents / 100.0
-        if label:
-            parts.append(f"{label}: ${dollars:0.2f}")
-        else:
-            parts.append(f"${dollars:0.2f}")
-
-    # Fallback: use price_candidates if we didn't get anything from variants
-    if not parts:
-        seen = set()
-        for pc in pcs:
-            val = pc.get("value")
-            if val is None:
-                continue
-            try:
-                dollars = float(val)
-            except Exception:
-                continue
-            key = round(dollars, 2)
-            if key in seen:
-                continue
-            seen.add(key)
-            parts.append(f"${dollars:0.2f}")
-
-    return " / ".join(parts) if parts else None
-
-# ------------------------
-# AI Heuristics → Commit into Draft (with redirect-friendly behavior)
-# ------------------------
-@app.post("/imports/<int:job_id>/ai/commit")
-@login_required
-def imports_ai_commit(job_id: int):
-    """
-    For OCR/image/PDF imports:
-      - Re-OCR the original upload (same as /ai/preview),
-      - run analyze_ocr_text(),
-      - replace the draft items for this job with the cleaned items,
-      - run AI cleanup.
-
-    For structured CSV/JSON imports:
-      - Skip OCR entirely,
-      - run AI cleanup on the existing draft items,
-      - mark the draft as finalized.
-
-    Behavior:
-      - JSON/AJAX: returns JSON.
-      - Regular form post or ?redirect=1: flashes + redirects back to Draft Editor.
-
-    NOW prefers the user-rotated working image if present for OCR jobs.
-    """
-    from storage.ai_cleanup import apply_ai_cleanup
-
-    # detect redirect vs JSON (matches fix-descriptions pattern)
-    ct = (request.headers.get("Content-Type") or "").lower()
-    is_form_post = ct.startswith("application/x-www-form-urlencoded") or ct.startswith("multipart/form-data")
-    wants_redirect = (
-        request.args.get("redirect") == "1"
-        or (request.form.get("redirect") == "1" if is_form_post else False)
-        or is_form_post
-    )
-
-    row = get_import_job(job_id)
-    if not row:
-        if wants_redirect:
-            flash("Import job not found.", "error")
-            return redirect(url_for("imports"))
-        abort(404)
-
-    # Detect structured imports vs OCR-style imports
-    try:
-        source_type = (row["source_type"] or "").lower()
-    except Exception:
-        source_type = ""
-    src_name = (row["filename"] or "").strip()
-    suffix = Path(src_name).suffix.lower() if src_name else ""
-    is_structured = (
-        source_type.startswith("structured")
-        or suffix in (".csv", ".json", ".xlsx", ".xls")
-    )
-
-    # ---------------- Structured path: no OCR, just AI cleanup on existing draft ----------------
-    if is_structured:
-        _require_drafts_storage()
-        draft_id = _ensure_draft_for_job(job_id, row=row)
-        if not draft_id:
-            if wants_redirect:
-                flash("No draft available for this job.", "error")
-                return redirect(url_for("imports_detail", job_id=job_id))
-            return jsonify({"ok": False, "error": "No draft available for this job"}), 400
-
-        draft_id = int(draft_id)
-
-        # Flip status while we run cleanup
-        try:
-            drafts_store.save_draft_metadata(draft_id, status="processing")
-        except Exception:
-            pass
-
-        try:
-            cleaned = apply_ai_cleanup(draft_id)
-            try:
-                drafts_store.save_draft_metadata(draft_id, status="finalized")
-            except Exception:
-                pass
-
-            if wants_redirect:
-                flash(
-                    f"Finalize complete — AI cleanup updated {int(cleaned)} item(s).",
-                    "success",
-                )
-                return redirect(url_for("draft_editor", draft_id=draft_id))
-
-            return jsonify(
-                {
-                    "ok": True,
-                    "job_id": job_id,
-                    "draft_id": draft_id,
-                    "inserted_count": 0,
-                    "updated_count": 0,
-                    "cleaned_count": int(cleaned),
-                    "status": "finalized",
-                }
-            ), 200
-
-        except Exception as e:
-            app.logger.exception("AI cleanup during structured imports_ai_commit failed")
-            try:
-                drafts_store.save_draft_metadata(int(draft_id), status="editing")
-            except Exception:
-                pass
-
-            if wants_redirect:
-                flash(f"AI cleanup failed: {e}", "error")
-                return redirect(url_for("draft_editor", draft_id=int(draft_id)))
-
-            return jsonify({"ok": False, "error": str(e), "status": "editing"}), 500
-
-    # ---------------- OCR path: original behavior ----------------
-    if analyze_ocr_text is None:
-        if wants_redirect:
-            flash("AI helper not available.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "AI helper not available"}), 501
-
-    if not src_name:
-        if wants_redirect:
-            flash("No source filename on job.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "No source filename on job"}), 400
-
-    src_path = (UPLOAD_FOLDER / src_name).resolve()
-    if not src_path.exists():
-        if wants_redirect:
-            flash("Upload file not found on disk.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "Upload file not found on disk"}), 404
-
-    # Extract raw text (prefers working copy; auto-rotate images if needed)
-    try:
-        work = _get_work_image_if_any(job_id)
-        if work and work.exists():
-            raw_text = _ocr_image_to_text(work)
-        else:
-            suffix = src_path.suffix.lower()
-            if suffix in (".png", ".jpg", ".jpeg"):
-                # NEW: auto-rotate by creating/rotating a working copy
-                wp = _auto_rotate_work_image_if_needed(job_id, src_path)
-                if wp and wp.exists():
-                    raw_text = _ocr_image_to_text(wp)
-                else:
-                    raw_text = _ocr_image_to_text(src_path)
-            elif suffix == ".pdf":
-                raw_text = _pdf_to_text(src_path)
-            else:
-                if wants_redirect:
-                    flash(f"Unsupported file type: {suffix}", "error")
-                    return redirect(url_for("imports_detail", job_id=job_id))
-                return jsonify({"ok": False, "error": f"Unsupported file type: {suffix}"}), 400
-    except Exception as e:
-        if wants_redirect:
-            flash(f"OCR error: {e}", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": f"OCR error: {e}"}), 500
-
-
-    if not raw_text:
-        if wants_redirect:
-            flash("Could not extract text for commit.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "Could not extract text for commit"}), 500
-
-    # Run heuristics
-    doc = analyze_ocr_text(raw_text, layout=None, taxonomy=TAXONOMY_SEED, restaurant_profile=None)
-    items_ai = (doc or {}).get("items") or []
-    new_items = _draft_items_from_ai_preview(items_ai)
-
-    # Replace items in the draft for this job
-    _require_drafts_storage()
-    draft_id = _ensure_draft_for_job(job_id, row=row)
-
-    if not draft_id:
-        if wants_redirect:
-            flash("No draft available for this job.", "error")
-            return redirect(url_for("imports_detail", job_id=job_id))
-        return jsonify({"ok": False, "error": "No draft available for this job"}), 400
- 
-    draft_id = int(draft_id)
-
-    existing = drafts_store.get_draft_items(draft_id) or []
-    existing_ids = [it.get("id") for it in existing if it.get("id") is not None]
-    if existing_ids:
-        try:
-            drafts_store.delete_draft_items(draft_id, existing_ids)
-        except Exception as e:
-            if wants_redirect:
-                flash(f"Failed to clear existing items: {e}", "error")
-                return redirect(url_for("draft_editor", draft_id=draft_id))
-            return jsonify({"ok": False, "error": f"Failed to clear existing items: {e}"}), 500
-
-    ins = drafts_store.upsert_draft_items(draft_id, new_items)
-
-    # Run AI cleanup on the freshly-committed draft
-    try:
-        cleaned = apply_ai_cleanup(int(draft_id))
-    except Exception as e:
-        cleaned = 0
-        app.logger.exception("AI cleanup during imports_ai_commit failed: %s", e)
-
-    # Nudge updated_at + status
-    try:
-        drafts_store.save_draft_metadata(
-            draft_id,
-            title=(drafts_store.get_draft(draft_id) or {}).get("title"),
-            status="finalized",
-        )
-    except TypeError:
-        try:
-            drafts_store.save_draft_metadata(
-                draft_id,
-                title=(drafts_store.get_draft(draft_id) or {}).get("title"),
-            )
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    inserted_count = len(ins.get("inserted_ids", []))
-    updated_count = len(ins.get("updated_ids", []))
-
-    if wants_redirect:
-        flash(
-            f"Finalize complete — {inserted_count} item(s) inserted, {int(cleaned)} cleaned.",
-            "success",
-        )
-        return redirect(url_for("draft_editor", draft_id=draft_id))
-
-    return jsonify({
-        "ok": True,
-        "job_id": job_id,
-        "draft_id": draft_id,
-        "inserted_count": inserted_count,
-        "updated_count": updated_count,
-        "cleaned_count": int(cleaned),
-        "status": "finalized",
-    }), 200
-
-
-
-@app.post("/imports/<int:job_id>/ai/finalize")
-@login_required
-def imports_ai_finalize(job_id: int):
-    """
-    One-click "Finalize with AI Cleanup" flow for an import job.
-
-    For OCR/image/PDF imports:
-      - delegates to /imports/<job_id>/ai/commit to re-OCR + regenerate items
-        and run AI cleanup.
-
-    For structured CSV/JSON imports:
-      - delegates to /imports/<job_id>/ai/commit which skips OCR and simply
-        runs AI cleanup on the existing draft items.
-
-    In both cases, we end in the Draft Editor for the associated draft.
-
-    IMPORTANT:
-    imports_ai_commit may return a 302 redirect on both success and failure
-    (flash + redirect). We must interpret redirects correctly so failures
-    don't look like success.
+    Day 100.5: Pipeline Debug view — shows OCR text, Claude extraction results,
+    vision verification, semantic pipeline, and pipeline metrics for a draft.
+    All data comes from the stored debug payload (saved during run_ocr_and_make_draft).
     """
     _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
 
-    # --- Step 0: ensure a DB draft exists for this job (upgrades legacy JSON draft_path -> DB) ---
-    row = get_import_job(job_id)
-    if not row:
-        flash("Import job not found.", "error")
-        return redirect(url_for("imports"))
+    dbg = {}
+    if hasattr(drafts_store, "load_ocr_debug"):
+        dbg = drafts_store.load_ocr_debug(draft_id) or {}
 
-    ensured_draft_id = _ensure_draft_for_job(job_id, row=row)
-    if not ensured_draft_id:
-        flash("No draft available for this job.", "error")
-        return redirect(url_for("imports_detail", job_id=job_id))
+    has_debug = bool(dbg and dbg.get("extraction_strategy"))
 
-
-    # --- Step 1: run AI commit (side effects only; inspect its Response) ---
-    resp = None
-    try:
-        resp = imports_ai_commit(job_id)
-    except Exception as e:
-        flash(f"AI finalize failed during commit: {e}", "error")
-        return redirect(url_for("imports_detail", job_id=job_id))
-
-    # imports_ai_commit may return:
-    #   - a Flask Response
-    #   - a (Response, status_code) tuple
-    resp_obj = resp[0] if isinstance(resp, tuple) and len(resp) >= 1 else resp
-    status_code = None
-
-    if isinstance(resp, tuple) and len(resp) >= 2:
-        try:
-            status_code = int(resp[1])
-        except Exception:
-            status_code = None
-    elif hasattr(resp_obj, "status_code"):
-        try:
-            status_code = int(resp_obj.status_code)
-        except Exception:
-            status_code = None
-
-    imports_url = url_for("imports_detail", job_id=job_id)
-
-    # If commit returned a redirect, interpret it:
-    # - Redirect to Draft Editor => success; just follow it.
-    # - Redirect back to imports_detail => failure (commit likely flashed an error).
-    try:
-        location = None
-        if hasattr(resp_obj, "headers"):
-            location = resp_obj.headers.get("Location")
-
-        if location and status_code in (301, 302, 303, 307, 308):
-            loc = str(location)
-            if "/drafts/" in loc:
-                return resp_obj
-            if loc.startswith(imports_url):
-                flash("AI finalize failed during commit.", "error")
-                return redirect(url_for("imports_detail", job_id=job_id))
-    except Exception:
-        pass
-
-    if status_code is not None and status_code >= 400:
-        flash("AI finalize failed during commit.", "error")
-        return redirect(url_for("imports_detail", job_id=job_id))
-
-    # If commit returned JSON, prefer draft_id from the payload.
-    try:
-        commit_json = None
-        if hasattr(resp_obj, "get_json"):
-            commit_json = resp_obj.get_json(silent=True)
-        if isinstance(commit_json, dict):
-            if commit_json.get("ok") is False:
-                flash("AI finalize failed during commit.", "error")
-                return redirect(url_for("imports_detail", job_id=job_id))
-            draft_id_from_commit = commit_json.get("draft_id")
-            if draft_id_from_commit:
-                flash("AI finalize complete.", "success")
-                return redirect(url_for("draft_editor", draft_id=int(draft_id_from_commit)))
-    except Exception:
-        pass
-
-    # --- Step 2: locate draft for this job ---
-    draft_id = _get_or_create_draft_for_job(job_id)
-    if not draft_id:
-        flash("No draft available for this job after AI finalize.", "error")
-        return redirect(url_for("imports_detail", job_id=job_id))
-
-    # --- Step 3: send user into the Draft Editor ---
-    flash("AI finalize complete.", "success")
-    return redirect(url_for("draft_editor", draft_id=int(draft_id)))
+    return render_template(
+        "pipeline_debug.html",
+        draft=draft,
+        debug_payload=dbg,
+        has_debug=has_debug,
+        extraction_strategy=dbg.get("extraction_strategy", "unknown"),
+        clean_ocr_chars=dbg.get("clean_ocr_chars", 0),
+        raw_ocr_text=dbg.get("raw_ocr_text", ""),
+        vision=dbg.get("vision_verification"),
+        semantic=dbg.get("semantic_pipeline"),
+        metrics=dbg.get("pipeline_metrics"),
+    )
 
 
 # ------------------------
