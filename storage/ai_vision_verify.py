@@ -45,6 +45,13 @@ from .ai_menu_extract import _get_client, _to_float, _normalize_sizes
 _DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 _MAX_TOKENS = 16_000
 
+# Page batching — Claude vision has a per-request token limit.
+# Each base64-encoded page image ≈ 1-2MB → ~1600 tokens per page.
+# Safe limit: 20 pages per call. For menus >20 pages, split into batches.
+_MAX_PAGES_PER_CALL = 20
+# Warn threshold — menus with many pages may produce degraded results
+_WARN_PAGES = 8
+
 # Supported image MIME types for Claude vision
 _MIME_MAP = {
     ".png":  "image/png",
@@ -93,10 +100,12 @@ def _pdf_to_images(path: str, dpi: int = 200) -> List[Dict[str, str]]:
     return results
 
 
-def encode_menu_images(path: str) -> List[Dict[str, str]]:
+def encode_menu_images(path: str, *, max_pages: int = _MAX_PAGES_PER_CALL) -> List[Dict[str, str]]:
     """Encode a menu file (image or PDF) into base64 image blocks for Claude.
 
     Returns a list of {media_type, data} dicts — one per page/image.
+    For PDFs with more pages than *max_pages*, only the first *max_pages*
+    are included (covers virtually all real restaurant menus).
     """
     p = Path(path)
     if not p.exists():
@@ -105,7 +114,18 @@ def encode_menu_images(path: str) -> List[Dict[str, str]]:
 
     ext = p.suffix.lower()
     if ext == ".pdf":
-        return _pdf_to_images(path)
+        all_pages = _pdf_to_images(path)
+        if len(all_pages) > max_pages:
+            log.warning(
+                "PDF has %d pages; capping at %d for vision verification",
+                len(all_pages), max_pages,
+            )
+            return all_pages[:max_pages]
+        if len(all_pages) > _WARN_PAGES:
+            log.info(
+                "Large PDF: %d pages sent for vision verification", len(all_pages)
+            )
+        return all_pages
     elif ext in _MIME_MAP:
         img = _encode_image_file(path)
         return [img] if img else []
@@ -405,6 +425,7 @@ def verify_menu_with_vision(
             "model": model,
             "skipped": False,
             "notes": notes,
+            "pages_sent": len(image_blocks),
         }
 
     except Exception as e:

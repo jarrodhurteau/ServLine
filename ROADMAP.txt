@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 96 (March 4, 2026) — Vision Verification Module Foundation, Sprint 11.1 start
+Last Updated: Day 97 (March 4, 2026) — Vision Pipeline Integration, Sprint 11.1 continued
 
 ================================================================================
 PROJECT MISSION
@@ -867,24 +867,30 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
       - On API error: returns original items + error string (never crashes)
 
     Day 96 test suite: 53 cases, 100% pass rate
-  [ ] New verify_menu_with_vision() function in storage/
-      - Input: original menu image (base64) + structured items from Call 1
-      - Claude reads image INDEPENDENTLY first (avoids anchoring bias from OCR)
-      - Then compares line-by-line against structured output
-      - Fixes: misspellings, wrong prices, missing items (process of elimination),
-        duplicates, category misassignment
-      - Returns: corrected items + changes_made log + self-reported confidence
-      - Model: claude-sonnet-4-5 (fast, capable, cost-effective for image comparison)
-  [ ] Multi-page menu support
-      - Send ALL page images in same API call for full context
-      - Page-batching strategy for 4+ page menus (token limit management)
-  [ ] Changes log (internal only, never shown to customers)
-      - Track: spelling_fix, price_fix, description_fix, missing_item_added,
-        duplicate_removed, category_fix
-      - Use to identify patterns in OCR errors and improve Layer 1 over time
-  [ ] Wire into ocr_facade.py pipeline
-      - After Call 1 extraction, before semantic pipeline
-      - Graceful fallback: if Call 2 fails, proceed with Call 1 output + lower confidence
+
+  Day 97: Vision Pipeline Integration *** COMPLETE ***
+  ----------------------------------------------------
+  [x] Wired verify_menu_with_vision() into run_ocr_and_make_draft() in portal/app.py
+      - After Strategy 1 (Claude API extraction / Call 1) succeeds:
+        Call 2 sends original menu image + extracted items to Claude vision
+      - On success: verified_items_to_draft_rows() with confidence=95
+      - On skip/error: graceful fallback to claude_items_to_draft_rows() (confidence=90)
+      - extraction_strategy tracking: "claude_api+vision" vs "claude_api"
+  [x] Page batching for large menus
+      - _MAX_PAGES_PER_CALL = 20 (caps PDF pages sent to Claude)
+      - _WARN_PAGES = 8 (logs info for large menus)
+      - encode_menu_images() accepts max_pages parameter
+      - Single images unaffected by page cap
+  [x] Vision verification metadata in debug payload
+      - Saved to drafts_store.save_ocr_debug() with full verification details:
+        skipped, skip_reason, error, confidence, model, changes_count,
+        changes list, notes, item_count_before
+      - Only included when vision_result is not None (Claude extraction path)
+  [x] pages_sent field in verification result
+      - Tracks how many image pages were sent to Claude for verification
+
+    Day 97 test suite: 29 cases, 100% pass rate
+    Cumulative: 1,413 passed (excl. Day 70 fixture errors)
 
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................

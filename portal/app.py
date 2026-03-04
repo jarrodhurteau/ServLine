@@ -2166,15 +2166,39 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         except Exception as _ocr_err:
             print(f"[Draft] Clean OCR failed: {_ocr_err}")
 
-        # Strategy 1: Claude API extraction
+        # Strategy 1: Claude API extraction (Call 1) + Vision Verification (Call 2)
+        vision_result = None
         if clean_ocr_text and not items:
             try:
                 from storage.ai_menu_extract import extract_menu_items_via_claude, claude_items_to_draft_rows
                 claude_items = extract_menu_items_via_claude(clean_ocr_text)
                 if claude_items:
-                    items = claude_items_to_draft_rows(claude_items)
                     extraction_strategy = "claude_api"
-                    print(f"[Draft] Strategy 1 (Claude API): {len(items)} items")
+                    print(f"[Draft] Strategy 1 (Claude API): {len(claude_items)} items extracted")
+
+                    # Call 2: Vision verification — send image + extracted items to Claude
+                    # for independent verification against the original menu image
+                    try:
+                        from storage.ai_vision_verify import verify_menu_with_vision, verified_items_to_draft_rows
+                        vision_result = verify_menu_with_vision(
+                            str(saved_file_path), claude_items
+                        )
+                        if not vision_result.get("skipped") and not vision_result.get("error"):
+                            items = verified_items_to_draft_rows(vision_result["items"])
+                            extraction_strategy = "claude_api+vision"
+                            n_changes = len(vision_result.get("changes", []))
+                            conf = vision_result.get("confidence", 0)
+                            print(f"[Draft] Call 2 (Vision): {len(items)} items, "
+                                  f"{n_changes} changes, confidence={conf:.2f}")
+                        else:
+                            # Vision skipped or errored — fall back to Call 1 items
+                            items = claude_items_to_draft_rows(claude_items)
+                            skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
+                            print(f"[Draft] Call 2 skipped ({skip}), using Call 1 items")
+                    except Exception as _vision_err:
+                        # Vision verification failed entirely — use Call 1 items
+                        items = claude_items_to_draft_rows(claude_items)
+                        print(f"[Draft] Call 2 (Vision) failed: {_vision_err}, using Call 1 items")
             except Exception as _claude_err:
                 print(f"[Draft] Strategy 1 (Claude API) failed: {_claude_err}")
 
@@ -2214,6 +2238,18 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     payload.setdefault("bridge", "run_ocr_and_make_draft")
                     payload["extraction_strategy"] = extraction_strategy
                     payload["clean_ocr_chars"] = len(clean_ocr_text)
+                    if vision_result is not None:
+                        payload["vision_verification"] = {
+                            "skipped": vision_result.get("skipped", False),
+                            "skip_reason": vision_result.get("skip_reason"),
+                            "error": vision_result.get("error"),
+                            "confidence": vision_result.get("confidence", 0.0),
+                            "model": vision_result.get("model"),
+                            "changes_count": len(vision_result.get("changes", [])),
+                            "changes": vision_result.get("changes", []),
+                            "notes": vision_result.get("notes"),
+                            "item_count_before": len(vision_result.get("items", [])),
+                        }
                     drafts_store.save_ocr_debug(draft_id, payload)
         except Exception as _draft_err:
             print(f"[Draft] ERROR creating draft items: {_draft_err}")

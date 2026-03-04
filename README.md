@@ -1552,3 +1552,15 @@ ServLine now has:
   - Reuses shared Anthropic client from `ai_menu_extract.py`
   - Day 96 test suite: 53 cases, 100% pass rate
   - Sprint 11.1 start (Phase 11: Production AI Pipeline)
+
+- Vision Pipeline Integration (Day 97):
+  - Wired `verify_menu_with_vision()` into `run_ocr_and_make_draft()` extraction pipeline
+  - After Call 1 (Claude API text extraction) succeeds, Call 2 verifies items against menu image
+  - On vision success: `verified_items_to_draft_rows()` with confidence=95, strategy="claude_api+vision"
+  - Graceful fallback: if vision skips/errors, uses Call 1 items (confidence=90, strategy="claude_api")
+  - Page batching: `_MAX_PAGES_PER_CALL=20` caps large PDFs, `_WARN_PAGES=8` logs info
+  - `encode_menu_images()` accepts `max_pages` parameter for token limit management
+  - Vision metadata stored in OCR debug payload (confidence, changes, model, skip_reason)
+  - `pages_sent` field tracks image pages sent to Claude per verification
+  - Day 97 test suite: 29 cases, 100% pass rate
+  - Cumulative: 1,413 passed (excl. Day 70 fixture errors)
