@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 97 (March 4, 2026) — Vision Pipeline Integration, Sprint 11.1 continued
+Last Updated: Day 98 (March 4, 2026) — Semantic Pipeline Bridge, Sprint 11.1 continued
 
 ================================================================================
 PROJECT MISSION
@@ -890,7 +890,40 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
       - Tracks how many image pages were sent to Claude for verification
 
     Day 97 test suite: 29 cases, 100% pass rate
-    Cumulative: 1,413 passed (excl. Day 70 fixture errors)
+
+  Day 98: Semantic Pipeline Bridge *** COMPLETE ***
+  -------------------------------------------------
+  [x] New storage/semantic_bridge.py module (~200 LOC)
+      - Bridge between Claude extraction output and Phase 8 semantic pipeline
+      - prepare_items_for_semantic(): converts draft items to semantic-compatible format
+        * confidence normalized from 0-100 int to 0.0-1.0 float
+        * _variants renamed to variants (semantic pipeline reads "variants")
+        * price_flags initialized, variant confidence defaults set
+        * Deep copy — original items never mutated
+      - run_semantic_pipeline(): runs full Phase 8 pipeline on draft items
+        * Step 9.1: cross-item consistency checks (duplicates, price outliers, category)
+        * Step 9.2: semantic confidence scoring (5 weighted signals)
+        * Step 9.3: confidence tier classification (high/medium/low/reject)
+        * Step 9.4: repair recommendations
+        * Step 9.5: auto-repair execution
+        * Re-score after repairs
+        * Step 9.6: generate semantic quality report
+      - extract_semantic_metadata(): per-item summary for debug payload
+      - apply_repairs_to_draft_items(): copies name/category repairs back to draft items
+  [x] Wired into run_ocr_and_make_draft() in portal/app.py
+      - Runs after Strategy 1 (Claude API ± vision) extraction succeeds
+      - Only for extraction_strategy in ("claude_api", "claude_api+vision")
+      - Strategy 2 (heuristic AI) already runs semantic pipeline internally
+      - Graceful fallback: semantic pipeline failure never blocks draft creation
+  [x] Semantic pipeline metadata in debug payload
+      - Saved alongside vision_verification in OCR debug:
+        quality_grade, mean_confidence, tier_counts, repairs_applied,
+        repair_results, items_metadata (per-item semantic summary)
+  [x] Auto-repairs flow back to draft items before DB save
+      - Name fixes and category reassignments applied to original draft items
+
+    Day 98 test suite: 68 cases, 100% pass rate
+    Cumulative: 1,481 passed (excl. Day 70 fixture errors)
 
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................

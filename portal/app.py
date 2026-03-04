@@ -2220,6 +2220,25 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             extraction_strategy = "legacy_draft_json"
             print(f"[Draft] Strategy 3 (Legacy JSON): {len(items)} items")
 
+        # =====================================================================
+        # SEMANTIC PIPELINE — Phase 8 quality checks on Claude-extracted items
+        # Runs cross-item consistency, confidence scoring, tiers, repair recs,
+        # auto-repair, and generates quality report.
+        # Strategy 2 (heuristic AI) already runs this internally.
+        # =====================================================================
+        semantic_result = None
+        if items and extraction_strategy in ("claude_api", "claude_api+vision"):
+            try:
+                from storage.semantic_bridge import run_semantic_pipeline
+                semantic_result = run_semantic_pipeline(items)
+                n_repairs = semantic_result.get("repairs_applied", 0)
+                grade = semantic_result.get("quality_grade", "?")
+                mean_conf = semantic_result.get("mean_confidence", 0.0)
+                print(f"[Draft] Semantic pipeline: grade={grade}, "
+                      f"mean_confidence={mean_conf:.2f}, repairs={n_repairs}")
+            except Exception as _sem_err:
+                print(f"[Draft] Semantic pipeline failed: {_sem_err}")
+
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         # status="done" is set AFTER items are in the DB so auto-redirect
         # lands on a populated editor.
@@ -2249,6 +2268,15 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                             "changes": vision_result.get("changes", []),
                             "notes": vision_result.get("notes"),
                             "item_count_before": len(vision_result.get("items", [])),
+                        }
+                    if semantic_result is not None:
+                        payload["semantic_pipeline"] = {
+                            "quality_grade": semantic_result.get("quality_grade"),
+                            "mean_confidence": semantic_result.get("mean_confidence", 0.0),
+                            "tier_counts": semantic_result.get("tier_counts", {}),
+                            "repairs_applied": semantic_result.get("repairs_applied", 0),
+                            "repair_results": semantic_result.get("repair_results", {}),
+                            "items_metadata": semantic_result.get("items_metadata", []),
                         }
                     drafts_store.save_ocr_debug(draft_id, payload)
         except Exception as _draft_err:

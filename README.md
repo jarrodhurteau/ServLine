@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Day 96 starts Sprint 11.1 (Vision Verification). New `storage/ai_vision_verify.py` module (~300 LOC) implements Claude Call 2 — vision-based verification of extracted menu items. `verify_menu_with_vision()` sends the menu image + Call 1 items to Claude, which independently reads the image and corrects misspellings, wrong prices, missing items, and category errors. Supports multi-page PDFs (all pages in one API call). `compute_changes_log()` diffs original vs corrected items with typed change tracking. Graceful fallback on API failure. 53 new tests, 1,457 total.
+Day 98 continues Sprint 11.1. New `storage/semantic_bridge.py` module (~200 LOC) bridges Claude-extracted items into the Phase 8 semantic pipeline (cross-item consistency, confidence scoring, tier classification, auto-repair, quality report). Confidence normalization (0-100→0.0-1.0), `_variants`→`variants` rename, and `price_flags` initialization. Wired into `run_ocr_and_make_draft()` — after Strategy 1 (Claude API ± vision) extraction, the full semantic pipeline runs before items are saved to DB. Auto-repairs flow back to draft items. Semantic metadata (quality_grade, tier_counts, per-item confidence) saved to debug payload. 68 new tests, 1,481 total.
 
 ---
 
@@ -1563,4 +1563,15 @@ ServLine now has:
   - Vision metadata stored in OCR debug payload (confidence, changes, model, skip_reason)
   - `pages_sent` field tracks image pages sent to Claude per verification
   - Day 97 test suite: 29 cases, 100% pass rate
-  - Cumulative: 1,413 passed (excl. Day 70 fixture errors)
+
+- Semantic Pipeline Bridge (Day 98):
+  - New `storage/semantic_bridge.py` (~200 LOC) — connects Claude extraction to Phase 8 semantic pipeline
+  - `prepare_items_for_semantic()`: confidence 0-100→0.0-1.0, `_variants`→`variants`, `price_flags` init
+  - `run_semantic_pipeline()`: full Phase 8 (cross-item, confidence, tiers, repair, auto-repair, report)
+  - `apply_repairs_to_draft_items()`: copies name/category fixes back to draft items
+  - Wired into `run_ocr_and_make_draft()` for Strategy 1 (claude_api / claude_api+vision)
+  - Strategy 2 (heuristic AI) already runs semantic pipeline internally — no double-run
+  - Semantic metadata saved in debug payload (quality_grade, tier_counts, repairs, per-item metadata)
+  - Graceful fallback: semantic pipeline failure never blocks draft creation
+  - Day 98 test suite: 68 cases, 100% pass rate
+  - Cumulative: 1,481 passed (excl. Day 70 fixture errors)
