@@ -802,12 +802,30 @@ Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
       time range +30, menu_type +10 (max 100)
 
     Day 94 test suite: 60 cases, 100% pass rate
-    Sprint 10.3 total: 114 tests (Days 93-94), all passing
 
     Day 94 bonus — Restaurant CRUD Fix
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Route: POST /restaurants (create_restaurant), @login_required
     Template: restaurants.html — inline create form, clickable restaurant names
+
+    Day 95 — Menu Health Dashboard & Phase 10 Capstone
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Storage: _time_overlaps(), _days_overlap(), _date_ranges_overlap(),
+      detect_schedule_conflicts(), analyze_schedule_coverage(),
+      get_menu_health(), get_phase10_summary()
+    Conflict detection: time/day/date overlap across all active menus
+    Coverage analysis: day/hour coverage, gap identification, score 0-100
+    Per-menu health: 0-100 score (versions, items, schedule, type, desc)
+    Phase summary: versions, items, conflicts, coverage, health, grade A-D
+    Routes: GET /restaurants/<id>/menu_health (dashboard),
+      GET /api/restaurants/<id>/menu_health (JSON API)
+    Templates: menu_health.html (grade card, conflicts, coverage heatmap,
+      health table), "Health" link in menus.html
+    Constants: _DAY_ORDER, _DEFAULT_HOURS
+
+    Day 95 test suite: 66 cases, 100% pass rate
+    Sprint 10.3 total: 180 tests (Days 93-95), all passing
+    Phase 10 total: 531 tests (Days 86-95), all passing
 
 Phase 11 — Production AI Pipeline (Days 96-110)
 -------------------------------------------------

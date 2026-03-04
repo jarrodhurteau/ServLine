@@ -2786,6 +2786,61 @@ def api_active_menus(rest_id):
     })
 
 
+# -----------------------------------------------
+# Day 95: Menu Health Dashboard
+# -----------------------------------------------
+@app.get("/restaurants/<int:rest_id>/menu_health")
+@login_required
+def menu_health_page(rest_id):
+    """Menu health dashboard — conflicts, coverage, scores (Day 95)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    with db_connect() as conn:
+        rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
+    if not rest:
+        abort(404)
+
+    summary = menus_store.get_phase10_summary(rest_id)
+    return _safe_render(
+        "menu_health.html",
+        restaurant=rest,
+        summary=summary,
+    )
+
+
+@app.get("/api/restaurants/<int:rest_id>/menu_health")
+def api_menu_health(rest_id):
+    """API endpoint: menu health scores, conflicts, coverage (Day 95)."""
+    if not menus_store:
+        return jsonify({"ok": False, "error": "Menus storage not available"}), 500
+
+    summary = menus_store.get_phase10_summary(rest_id)
+    return jsonify({
+        "ok": True,
+        "restaurant_id": rest_id,
+        "total_menus": summary["total_menus"],
+        "total_versions": summary["total_versions"],
+        "total_items": summary["total_items"],
+        "avg_health_score": summary["avg_health_score"],
+        "grade": summary["grade"],
+        "conflict_count": summary["conflict_count"],
+        "conflicts": summary["conflicts"],
+        "coverage_score": summary["coverage"]["coverage_score"],
+        "coverage_gaps": summary["coverage"]["gaps"],
+        "menu_health": [
+            {
+                "menu_id": h["menu_id"],
+                "name": h["name"],
+                "health_score": h["health_score"],
+                "issues": h["issues"],
+                "version_count": h["version_count"],
+                "latest_item_count": h["latest_item_count"],
+            }
+            for h in summary["menu_health"]
+        ],
+    })
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------

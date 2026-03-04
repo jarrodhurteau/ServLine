@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Menu Health · {{ restaurant.name }} · ServLine{% endblock %}
+
+{% block content %}
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a> ›
+    <a href="{{ url_for('menus_page', rest_id=restaurant.id) }}" class="underline">{{ restaurant.name }}</a> ›
+    Menu Health
+  </p>
+
+  <!-- Overview Card -->
+  <section class="card mb-4">
+    <h1 class="text-xl font-semibold mb-3">Menu Health — {{ restaurant.name }}</h1>
+    <div class="health-overview">
+      <div class="health-stat">
+        <div class="health-stat-value grade-{{ summary.grade }}">{{ summary.grade }}</div>
+        <div class="health-stat-label">Grade</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-value">{{ summary.avg_health_score }}</div>
+        <div class="health-stat-label">Avg Health</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-value">{{ summary.total_menus }}</div>
+        <div class="health-stat-label">Menus</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-value">{{ summary.total_versions }}</div>
+        <div class="health-stat-label">Versions</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-value">{{ summary.total_items }}</div>
+        <div class="health-stat-label">Items</div>
+      </div>
+      <div class="health-stat">
+        <div class="health-stat-value conflict-count">{{ summary.conflict_count }}</div>
+        <div class="health-stat-label">Conflicts</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Conflicts -->
+  {% if summary.conflicts %}
+    <section class="card mb-4">
+      <h2 class="text-lg font-semibold mb-2">Schedule Conflicts</h2>
+      <div class="conflict-list">
+        {% for c in summary.conflicts %}
+          <div class="conflict-item">
+            <span class="conflict-type-badge {{ c.overlap_type }}">{{ c.overlap_type }}</span>
+            <span class="conflict-detail">{{ c.detail }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <!-- Coverage -->
+  <section class="card mb-4">
+    <h2 class="text-lg font-semibold mb-2">
+      Schedule Coverage
+      <span class="coverage-score-badge">{{ summary.coverage.coverage_score }}%</span>
+    </h2>
+    <div class="coverage-stats mb-3">
+      <span>{{ summary.coverage.scheduled_count }} scheduled</span> ·
+      <span>{{ summary.coverage.unscheduled_count }} unscheduled</span>
+    </div>
+
+    {% if summary.coverage.gaps %}
+      <div class="coverage-gaps mb-3">
+        <strong>Gaps:</strong>
+        {% for gap in summary.coverage.gaps %}
+          <div class="gap-item">{{ gap }}</div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p style="color:#059669;">Full coverage — no gaps detected.</p>
+    {% endif %}
+
+    <div class="day-coverage">
+      {% for day, menus in summary.coverage.day_coverage.items() %}
+        <div class="day-cell {% if menus %}covered{% else %}uncovered{% endif %}">
+          <div class="day-name">{{ day|upper }}</div>
+          <div class="day-count">{{ menus|length }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Per-Menu Health -->
+  <section class="card mb-4">
+    <h2 class="text-lg font-semibold mb-2">Menu Health Scores</h2>
+    {% if summary.menu_health %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Menu</th>
+            <th>Type</th>
+            <th class="text-right">Health</th>
+            <th class="text-right">Versions</th>
+            <th class="text-right">Items</th>
+            <th>Issues</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in summary.menu_health %}
+            <tr>
+              <td><a href="/menus/{{ h.menu_id }}/detail" class="underline">{{ h.name }}</a></td>
+              <td class="text-muted">{{ (h.menu_type or '')|replace('_',' ')|title }}</td>
+              <td class="text-right">
+                <span class="health-badge {% if h.health_score >= 75 %}good{% elif h.health_score >= 50 %}ok{% else %}poor{% endif %}">
+                  {{ h.health_score }}
+                </span>
+              </td>
+              <td class="text-right">{{ h.version_count }}</td>
+              <td class="text-right">{{ h.latest_item_count }}</td>
+              <td>
+                {% if h.issues %}
+                  {% for issue in h.issues %}
+                    <span class="issue-tag">{{ issue }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span style="color:#059669;">OK</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No menus found.</p>
+    {% endif %}
+  </section>
+
+  <div class="mt-4 flex gap-2">
+    <a href="{{ url_for('active_menus_page', rest_id=restaurant.id) }}" class="btn btn-ghost">Active Menus</a>
+    <a href="{{ url_for('menus_page', rest_id=restaurant.id) }}" class="btn btn-ghost">All Menus</a>
+  </div>
+
+  <style>
+    .health-overview { display:flex; flex-wrap:wrap; gap:16px; }
+    .health-stat { text-align:center; min-width:80px; }
+    .health-stat-value { font-size:1.6rem; font-weight:700; color:#1f2937; }
+    .health-stat-label { font-size:.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .grade-A { color:#059669; }
+    .grade-B { color:#0369a1; }
+    .grade-C { color:#d97706; }
+    .grade-D { color:#dc2626; }
+    .conflict-count { color:#dc2626; }
+    .conflict-list { display:flex; flex-direction:column; gap:6px; }
+    .conflict-item { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #e5e7eb; }
+    .conflict-item:last-child { border-bottom:none; }
+    .conflict-type-badge { font-size:.7rem; padding:1px 6px; border-radius:3px; text-transform:uppercase; font-weight:600; }
+    .conflict-type-badge.time { background:#fef3c7; color:#92400e; }
+    .conflict-type-badge.full { background:#fee2e2; color:#991b1b; }
+    .conflict-type-badge.partial { background:#e0f2fe; color:#0369a1; }
+    .coverage-score-badge { display:inline-block; background:#e0f2fe; color:#0369a1; font-size:.8rem; padding:1px 8px; border-radius:10px; margin-left:6px; vertical-align:middle; }
+    .coverage-gaps { color:#dc2626; }
+    .gap-item { margin:2px 0; padding-left:12px; }
+    .day-coverage { display:flex; gap:4px; margin-top:8px; }
+    .day-cell { text-align:center; padding:6px 8px; border-radius:4px; min-width:48px; }
+    .day-cell.covered { background:#d1fae5; color:#065f46; }
+    .day-cell.uncovered { background:#fee2e2; color:#991b1b; }
+    .day-name { font-size:.7rem; font-weight:600; text-transform:uppercase; }
+    .day-count { font-size:1.1rem; font-weight:600; }
+    .health-badge { display:inline-block; padding:1px 8px; border-radius:3px; font-size:.8rem; font-weight:600; }
+    .health-badge.good { background:#d1fae5; color:#065f46; }
+    .health-badge.ok { background:#fef3c7; color:#92400e; }
+    .health-badge.poor { background:#fee2e2; color:#991b1b; }
+    .issue-tag { display:inline-block; background:#f3f4f6; border:1px solid #d1d5db; border-radius:3px; padding:0 6px; font-size:.75rem; color:#6b7280; margin:1px 2px; }
+  </style>
+{% endblock %}

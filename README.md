@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
+➡ **Phase 10 — Multi-Menu & Versioning — COMPLETE (Days 86-95)**
 
-Day 94 completes Sprint 10.3 active menu switching. Specificity scoring ranks overlapping schedules (season +15, dates +25, days +20, times +30, type +10, max 100). `get_active_menus()` resolves which menus are "live" right now with automatic datetime defaults. Rotation timeline shows full-day menu progression. `get_next_transition()` predicts upcoming switches. Active menus dashboard with query form, primary menu card, rotation display. JSON API endpoint for POS integration. 1,265 tests passing across 45 test suites.
+Day 95 completes Phase 10 with the menu health capstone. Schedule conflict detection finds overlapping menus across time, day, and date dimensions. Coverage analysis identifies gaps in weekly/hourly coverage. Per-menu health scoring (0-100) checks versions, items, schedule, type, and description. `get_phase10_summary()` aggregates versions, conflicts, coverage, health scores, and overall grade (A-D). Menu health dashboard + JSON API. Phase 10 total: 1,331 tests passing across 46 test suites.
 
 ---
 
@@ -1388,7 +1388,7 @@ ServLine now has:
   - Sprint 9.4 complete: Days 83-85, 157 tests, all passing
   - Phase 9 complete: Days 71-85, 782 tests, all passing
 
-## ⏭️ Phase 10 — Multi-Menu & Versioning (IN PROGRESS)
+## ⏭️ Phase 10 — Multi-Menu & Versioning (COMPLETE)
 
 - Multi-Menu & Versioning Foundation (Day 86):
   - New `storage/menus.py` module (~380 LOC): menu + version CRUD
@@ -1521,3 +1521,18 @@ ServLine now has:
 - Restaurant CRUD Fix (Day 94 bonus):
   - Added `POST /restaurants` route (`create_restaurant`) with `@login_required`
   - Restaurants template: inline create form (name/phone/address), clickable restaurant names linking to menus page
+
+- Menu Health Dashboard & Phase 10 Capstone (Day 95):
+  - `_time_overlaps()`, `_days_overlap()`, `_date_ranges_overlap()`: helper predicates for conflict detection
+  - `detect_schedule_conflicts()`: find menus with overlapping schedules across time, day, and date dimensions
+  - Overlap types: "time" (both timed), "full" (both scheduled, no time), "partial" (scheduled vs unscheduled)
+  - `analyze_schedule_coverage()`: weekly day coverage, hourly slot coverage, gap identification, coverage score (0-100)
+  - `get_menu_health()`: per-menu health scoring (0-100) — versions +25, items +25, schedule +25, type +10, desc +5, multi-version +10
+  - Issue tracking: "No published versions", "No schedule set", "No menu type set", etc.
+  - `get_phase10_summary()`: unified dashboard payload — versions, items, conflicts, coverage, health, grade (A-D)
+  - New routes: `GET /restaurants/<id>/menu_health` (dashboard), `GET /api/restaurants/<id>/menu_health` (JSON API)
+  - `menu_health.html` template: grade card, conflict list with type badges, day coverage heatmap, per-menu health table
+  - "Health" link added to menus list page
+  - Day 95 test suite: 66 cases, 100% pass rate
+  - Sprint 10.3 total: 180 tests (Days 93-95), all passing
+  - Phase 10 complete: Days 86-95, 531 tests, all passing

@@ -1721,3 +1721,377 @@ def get_active_menu_summary(
         "next_transition": next_trans,
         "rotation": rotation,
     }
+
+
+# ====================================================================
+# Schedule Conflicts & Coverage Analysis (Day 95)
+# ====================================================================
+
+_DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+_DEFAULT_HOURS = [
+    "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
+    "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
+    "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
+]
+
+
+def _time_overlaps(
+    start_a: Optional[str],
+    end_a: Optional[str],
+    start_b: Optional[str],
+    end_b: Optional[str],
+) -> bool:
+    """Return True if two time ranges overlap.
+
+    None on either bound means unbounded (all day).
+    """
+    sa = start_a or "00:00"
+    ea = end_a or "23:59"
+    sb = start_b or "00:00"
+    eb = end_b or "23:59"
+    return sa < eb and sb < ea
+
+
+def _days_overlap(days_a: Optional[str], days_b: Optional[str]) -> bool:
+    """Return True if two day-of-week strings share any day.
+
+    None means all days (always active).
+    """
+    if days_a is None or days_b is None:
+        return True
+    set_a = {d.strip().lower() for d in days_a.split(",") if d.strip()}
+    set_b = {d.strip().lower() for d in days_b.split(",") if d.strip()}
+    return bool(set_a & set_b)
+
+
+def _date_ranges_overlap(
+    from_a: Optional[str],
+    to_a: Optional[str],
+    from_b: Optional[str],
+    to_b: Optional[str],
+) -> bool:
+    """Return True if two date ranges overlap.
+
+    None bounds mean unbounded.
+    """
+    fa = from_a or "0000-01-01"
+    ta = to_a or "9999-12-31"
+    fb = from_b or "0000-01-01"
+    tb = to_b or "9999-12-31"
+    return fa <= tb and fb <= ta
+
+
+def detect_schedule_conflicts(
+    restaurant_id: int,
+) -> List[Dict[str, Any]]:
+    """Detect menus with overlapping schedules.
+
+    Returns a list of conflict dicts, each with:
+      - menu_a, menu_b: the conflicting menu dicts
+      - overlap_type: "time", "full", or "partial"
+      - detail: human-readable description
+
+    Only checks active menus. Two unscheduled menus are not a conflict
+    (they're both "always on" by design).
+    """
+    menus = list_menus(restaurant_id, include_inactive=False)
+    # Only consider menus that have at least one scheduling field
+    scheduled = [m for m in menus if _schedule_field_count(m) > 0]
+    unscheduled = [m for m in menus if _schedule_field_count(m) == 0]
+
+    conflicts: List[Dict[str, Any]] = []
+    seen_pairs: set = set()
+
+    all_to_check = scheduled + unscheduled
+
+    for i, ma in enumerate(all_to_check):
+        for mb in all_to_check[i + 1:]:
+            pair_key = (min(ma["id"], mb["id"]), max(ma["id"], mb["id"]))
+            if pair_key in seen_pairs:
+                continue
+
+            # Two unscheduled menus are not a conflict
+            a_sched = _schedule_field_count(ma) > 0
+            b_sched = _schedule_field_count(mb) > 0
+            if not a_sched and not b_sched:
+                continue
+
+            # Check overlap on all three dimensions
+            dates_ok = _date_ranges_overlap(
+                ma.get("effective_from"), ma.get("effective_to"),
+                mb.get("effective_from"), mb.get("effective_to"),
+            )
+            days_ok = _days_overlap(
+                ma.get("active_days"), mb.get("active_days"),
+            )
+            times_ok = _time_overlaps(
+                ma.get("active_start_time"), ma.get("active_end_time"),
+                mb.get("active_start_time"), mb.get("active_end_time"),
+            )
+
+            if dates_ok and days_ok and times_ok:
+                seen_pairs.add(pair_key)
+                # Determine overlap type
+                both_timed = (
+                    (ma.get("active_start_time") or ma.get("active_end_time"))
+                    and (mb.get("active_start_time") or mb.get("active_end_time"))
+                )
+                if both_timed:
+                    overlap_type = "time"
+                elif a_sched and b_sched:
+                    overlap_type = "full"
+                else:
+                    overlap_type = "partial"
+
+                detail_parts = []
+                if not a_sched or not b_sched:
+                    detail_parts.append(
+                        f"'{ma.get('name')}' (unscheduled) overlaps with "
+                        f"'{mb.get('name')}' (scheduled)"
+                        if not a_sched else
+                        f"'{mb.get('name')}' (unscheduled) overlaps with "
+                        f"'{ma.get('name')}' (scheduled)"
+                    )
+                else:
+                    detail_parts.append(
+                        f"'{ma.get('name')}' and '{mb.get('name')}' "
+                        f"have overlapping schedules"
+                    )
+
+                conflicts.append({
+                    "menu_a": {"id": ma["id"], "name": ma.get("name")},
+                    "menu_b": {"id": mb["id"], "name": mb.get("name")},
+                    "overlap_type": overlap_type,
+                    "detail": detail_parts[0],
+                })
+
+    return conflicts
+
+
+def analyze_schedule_coverage(
+    restaurant_id: int,
+) -> Dict[str, Any]:
+    """Analyze schedule coverage gaps for a restaurant.
+
+    Returns:
+      - total_menus: number of active menus
+      - scheduled_count: menus with at least one schedule field
+      - unscheduled_count: menus with no schedule
+      - day_coverage: dict mapping each day to list of menu names active
+      - hour_coverage: dict mapping hour slots to count of menus active
+      - gaps: list of gap descriptions (e.g., "No menu covers Saturday")
+      - coverage_score: 0-100 score of how well the week is covered
+    """
+    menus = list_menus(restaurant_id, include_inactive=False)
+    scheduled = [m for m in menus if _schedule_field_count(m) > 0]
+    unscheduled = [m for m in menus if _schedule_field_count(m) == 0]
+
+    # Day coverage
+    day_coverage: Dict[str, List[str]] = {d: [] for d in _DAY_ORDER}
+    for m in menus:
+        days = m.get("active_days")
+        if days is None:
+            # No day restriction — active every day
+            for d in _DAY_ORDER:
+                day_coverage[d].append(m.get("name", "?"))
+        else:
+            for d in [x.strip().lower() for x in days.split(",") if x.strip()]:
+                if d in day_coverage:
+                    day_coverage[d].append(m.get("name", "?"))
+
+    # Hour coverage (count of menus per hour slot)
+    hour_coverage: Dict[str, int] = {h: 0 for h in _DEFAULT_HOURS}
+    for m in menus:
+        st = m.get("active_start_time")
+        en = m.get("active_end_time")
+        for h in _DEFAULT_HOURS:
+            if _time_overlaps(st, en, h, h + ":59" if len(h) == 5 else h):
+                hour_coverage[h] += 1
+
+    # Identify gaps
+    gaps: List[str] = []
+    _day_labels = {
+        "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday",
+        "thu": "Thursday", "fri": "Friday", "sat": "Saturday",
+        "sun": "Sunday",
+    }
+    for d in _DAY_ORDER:
+        if not day_coverage[d]:
+            gaps.append(f"No menu covers {_day_labels[d]}")
+
+    uncovered_hours = [h for h, cnt in hour_coverage.items() if cnt == 0]
+    if uncovered_hours and menus:
+        # Only report hour gaps if there are scheduled menus
+        if scheduled:
+            gaps.append(
+                f"{len(uncovered_hours)} hour slot(s) with no menu: "
+                f"{uncovered_hours[0]}-{uncovered_hours[-1]}"
+            )
+
+    # Coverage score
+    if not menus:
+        coverage_score = 0
+    else:
+        days_covered = sum(1 for v in day_coverage.values() if v)
+        day_pct = (days_covered / 7) * 100
+        # If there are unscheduled menus, they cover everything
+        if unscheduled:
+            coverage_score = 100
+        else:
+            hours_covered = sum(1 for v in hour_coverage.values() if v > 0)
+            hour_pct = (hours_covered / len(_DEFAULT_HOURS)) * 100
+            coverage_score = round((day_pct * 0.5) + (hour_pct * 0.5))
+
+    return {
+        "total_menus": len(menus),
+        "scheduled_count": len(scheduled),
+        "unscheduled_count": len(unscheduled),
+        "day_coverage": day_coverage,
+        "hour_coverage": hour_coverage,
+        "gaps": gaps,
+        "coverage_score": coverage_score,
+    }
+
+
+def get_menu_health(
+    restaurant_id: int,
+) -> List[Dict[str, Any]]:
+    """Score each menu's completeness and health.
+
+    Returns a list of menu health dicts sorted by health_score desc:
+      - menu_id, name, menu_type
+      - has_versions: bool
+      - has_schedule: bool
+      - has_items: bool (based on latest version)
+      - version_count: int
+      - latest_item_count: int
+      - specificity_score: int
+      - health_score: 0-100
+      - issues: list of issue strings
+    """
+    menus = list_menus(restaurant_id, include_inactive=False)
+    results: List[Dict[str, Any]] = []
+
+    for m in menus:
+        mid = m["id"]
+        issues: List[str] = []
+        score = 0
+
+        # Version check
+        version_count = m.get("version_count", 0)
+        has_versions = version_count > 0
+        if has_versions:
+            score += 25
+        else:
+            issues.append("No published versions")
+
+        # Item check (from latest version)
+        latest_item_count = 0
+        if has_versions:
+            current = get_current_version(mid, include_items=False)
+            if current:
+                latest_item_count = current.get("item_count", 0)
+        has_items = latest_item_count > 0
+        if has_items:
+            score += 25
+        else:
+            issues.append("No items in latest version")
+
+        # Schedule check
+        has_schedule = _schedule_field_count(m) > 0
+        if has_schedule:
+            score += 25
+        else:
+            issues.append("No schedule set")
+
+        # Menu type check
+        has_type = bool(m.get("menu_type"))
+        if has_type:
+            score += 10
+        else:
+            issues.append("No menu type set")
+
+        # Description check
+        has_desc = bool(m.get("description"))
+        if has_desc:
+            score += 5
+
+        # Multiple versions (shows iteration)
+        if version_count >= 2:
+            score += 10
+
+        specificity = score_menu_specificity(m)
+
+        results.append({
+            "menu_id": mid,
+            "name": m.get("name"),
+            "menu_type": m.get("menu_type"),
+            "has_versions": has_versions,
+            "has_schedule": has_schedule,
+            "has_items": has_items,
+            "version_count": version_count,
+            "latest_item_count": latest_item_count,
+            "specificity_score": specificity,
+            "health_score": min(score, 100),
+            "issues": issues,
+        })
+
+    results.sort(key=lambda r: (-r["health_score"], r.get("name", "")))
+    return results
+
+
+def get_phase10_summary(
+    restaurant_id: int,
+) -> Dict[str, Any]:
+    """Build a unified Phase 10 summary for a restaurant.
+
+    Combines version stats, scheduling, conflicts, coverage, and health
+    into a single dashboard payload.
+    """
+    menus = list_menus(restaurant_id, include_inactive=False)
+    health = get_menu_health(restaurant_id)
+    conflicts = detect_schedule_conflicts(restaurant_id)
+    coverage = analyze_schedule_coverage(restaurant_id)
+
+    # Aggregate version stats across all menus
+    total_versions = 0
+    total_items = 0
+    total_pinned = 0
+    for m in menus:
+        total_versions += m.get("version_count", 0)
+        current = get_current_version(m["id"], include_items=False)
+        if current:
+            total_items += current.get("item_count", 0)
+            if current.get("pinned"):
+                total_pinned += 1
+
+    # Overall health
+    if health:
+        avg_health = round(sum(h["health_score"] for h in health) / len(health))
+    else:
+        avg_health = 0
+
+    # Grade
+    if avg_health >= 80:
+        grade = "A"
+    elif avg_health >= 60:
+        grade = "B"
+    elif avg_health >= 40:
+        grade = "C"
+    else:
+        grade = "D"
+
+    return {
+        "restaurant_id": restaurant_id,
+        "total_menus": len(menus),
+        "total_versions": total_versions,
+        "total_items": total_items,
+        "total_pinned": total_pinned,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts,
+        "coverage": coverage,
+        "menu_health": health,
+        "avg_health_score": avg_health,
+        "grade": grade,
+    }
