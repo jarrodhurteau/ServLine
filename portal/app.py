@@ -2279,6 +2279,28 @@ def restaurants_page():
         rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
     return _safe_render("restaurants.html", restaurants=rows)
 
+@app.post("/restaurants")
+@login_required
+def create_restaurant():
+    """Create a new restaurant."""
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Restaurant name is required.", "error")
+        return redirect(url_for("restaurants_page"))
+    phone = (request.form.get("phone") or "").strip() or None
+    address = (request.form.get("address") or "").strip() or None
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO restaurants (name, phone, address, active, created_at) VALUES (?, ?, ?, 1, datetime('now'))",
+                (name, phone, address),
+            )
+            conn.commit()
+        flash(f'Restaurant "{name}" created.', "success")
+    except Exception as e:
+        flash(f"Failed to create restaurant: {e}", "error")
+    return redirect(url_for("restaurants_page"))
+
 @app.get("/restaurants/<int:rest_id>/menus")
 def menus_page(rest_id):
     with db_connect() as conn:

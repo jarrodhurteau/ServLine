@@ -176,10 +176,10 @@
     <main class="wrap">
       <h1 class="mb-4">Restaurants</h1>
 
-      <!-- Toolbar (placeholder link so it can't 500) -->
+      <!-- Toolbar -->
       <div class="flex mb-3">
         <div class="ml-auto">
-          <a href="/restaurants" class="btn btn-primary">Add Restaurant</a>
+          <button class="btn btn-primary" onclick="document.getElementById('create-restaurant-form').style.display='block'">Add Restaurant</button>
         </div>
       </div>
 
@@ -199,7 +199,7 @@
             <tbody>
               {% for r in restaurants %}
               <tr>
-                <td>{{ r.name }}</td>
+                <td><a href="/restaurants/{{ r.id }}/menus" class="underline hover:text-brand-500">{{ r.name }}</a></td>
                 <td>{{ r.phone }}</td>
                 <td>{{ r.address }}</td>
                 <td>#{{ r.id }}</td>
@@ -209,6 +209,29 @@
           </table>
         </div>
       {% endif %}
+
+      <!-- CREATE RESTAURANT FORM (hidden by default) -->
+      <section id="create-restaurant-form" class="card mt-4" style="display:none;">
+        <h2 class="text-lg font-semibold mb-3">Add New Restaurant</h2>
+        <form action="/restaurants" method="post" style="display:grid; gap:12px; max-width:480px;">
+          <div>
+            <label for="create-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
+            <input id="create-name" name="name" type="text" required placeholder="e.g. Mario's Italian Kitchen" style="width:100%;">
+          </div>
+          <div>
+            <label for="create-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
+            <input id="create-phone" name="phone" type="text" placeholder="e.g. (555) 123-4567" style="width:100%;">
+          </div>
+          <div>
+            <label for="create-address" style="color:var(--muted); font-size:.9rem;">Address</label>
+            <input id="create-address" name="address" type="text" placeholder="e.g. 123 Main St, Anytown USA" style="width:100%;">
+          </div>
+          <div class="flex gap-2">
+            <button type="submit" class="btn btn-primary">Create Restaurant</button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('create-restaurant-form').style.display='none'">Cancel</button>
+          </div>
+        </form>
+      </section>
     </main>
 
     <!-- Footer -->

@@ -1517,3 +1517,7 @@ ServLine now has:
   - "Active Now" link in menus list page
   - Day 94 test suite: 60 cases, 100% pass rate
   - Sprint 10.3 total: 114 tests (Days 93-94), all passing
+
+- Restaurant CRUD Fix (Day 94 bonus):
+  - Added `POST /restaurants` route (`create_restaurant`) with `@login_required`
+  - Restaurants template: inline create form (name/phone/address), clickable restaurant names linking to menus page
