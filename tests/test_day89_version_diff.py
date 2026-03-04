@@ -222,6 +222,7 @@ def _make_test_db() -> sqlite3.Connection:
             variant_count   INTEGER NOT NULL DEFAULT 0,
             notes           TEXT,
             created_by      TEXT,
+            change_summary  TEXT,
             created_at      TEXT NOT NULL,
             FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE,
             FOREIGN KEY (source_draft_id) REFERENCES drafts(id) ON DELETE SET NULL,

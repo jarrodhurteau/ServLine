@@ -17,10 +17,16 @@
       {% if version.source_draft_id %}
         <span>Source: <a href="/drafts/{{ version.source_draft_id }}/edit" class="underline">Draft #{{ version.source_draft_id }}</a></span>
       {% endif %}
+      {% if version.created_by %}
+        <span>By: {{ version.created_by }}</span>
+      {% endif %}
       {% if version.created_at %}
         <span>Created: {{ version.created_at[:16] }}</span>
       {% endif %}
     </div>
+    {% if version.change_summary %}
+      <p class="mt-1" style="font-size:.85rem;"><strong>Changes:</strong> {{ version.change_summary }}</p>
+    {% endif %}
     {% if version.notes %}
       <p class="text-muted mt-1" style="font-size:.85rem;">{{ version.notes }}</p>
     {% endif %}

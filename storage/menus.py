@@ -94,6 +94,12 @@ def _ensure_menu_schema() -> None:
             )
         """)
 
+        # -- Day 91: add change_summary column if missing ------------------
+        if not _col_exists("menu_versions", "change_summary"):
+            cur.execute(
+                "ALTER TABLE menu_versions ADD COLUMN change_summary TEXT;"
+            )
+
         # -- Indexes ------------------------------------------------------
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_menu_versions_menu "
@@ -343,6 +349,16 @@ def create_menu_version(
 
         conn.commit()
 
+    # Day 91: auto-generate change summary vs previous version
+    change_summary = _auto_generate_change_summary(version_id, menu_id)
+    if change_summary:
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE menu_versions SET change_summary=? WHERE id=?",
+                (change_summary, version_id),
+            )
+            conn.commit()
+
     return {
         "id": version_id,
         "menu_id": menu_id,
@@ -354,6 +370,7 @@ def create_menu_version(
         "notes": notes,
         "created_by": created_by,
         "created_at": now,
+        "change_summary": change_summary,
     }
 
 
@@ -798,6 +815,120 @@ def restore_version_to_draft(version_id: int) -> Optional[Dict[str, Any]]:
         "item_count": item_count,
         "variant_count": variant_count,
     }
+
+
+# ====================================================================
+# Version Change Summaries (Day 91)
+# ====================================================================
+
+def generate_change_summary(diff: Dict[str, Any]) -> str:
+    """Build a human-readable one-line change summary from a diff result.
+
+    Input is the dict returned by ``compare_menu_versions()``.
+    Returns a string like "+3 added, ~2 modified, -1 removed".
+    """
+    if diff is None:
+        return ""
+    s = diff.get("summary", {})
+    parts: List[str] = []
+    added = s.get("added", 0)
+    modified = s.get("modified", 0)
+    removed = s.get("removed", 0)
+    if added:
+        parts.append(f"+{added} added")
+    if modified:
+        parts.append(f"~{modified} modified")
+    if removed:
+        parts.append(f"-{removed} removed")
+
+    # Price change aggregate
+    price_ups = 0
+    price_downs = 0
+    for change in diff.get("changes", []):
+        for fc in change.get("field_changes", []):
+            if fc.get("field") == "price_cents":
+                d = fc.get("price_direction")
+                if d == "increase":
+                    price_ups += 1
+                elif d == "decrease":
+                    price_downs += 1
+        for vc in change.get("variant_changes", {}).get("modified", []):
+            for vfc in vc.get("field_changes", []):
+                if vfc.get("field") == "price_cents":
+                    d = vfc.get("price_direction")
+                    if d == "increase":
+                        price_ups += 1
+                    elif d == "decrease":
+                        price_downs += 1
+
+    if price_ups:
+        parts.append(f"{price_ups} price increase{'s' if price_ups != 1 else ''}")
+    if price_downs:
+        parts.append(f"{price_downs} price decrease{'s' if price_downs != 1 else ''}")
+
+    if not parts:
+        unchanged = s.get("unchanged", 0)
+        if unchanged:
+            return f"{unchanged} items unchanged"
+        return "No changes"
+    return ", ".join(parts)
+
+
+def _auto_generate_change_summary(
+    version_id: int,
+    menu_id: int,
+) -> Optional[str]:
+    """Auto-generate a change summary by diffing against the previous version.
+
+    Returns the summary string, or None if this is the first version.
+    """
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT id, version_number FROM menu_versions "
+            "WHERE menu_id=? ORDER BY version_number DESC LIMIT 2",
+            (menu_id,),
+        ).fetchall()
+    if len(rows) < 2:
+        return None  # First version — no previous to diff against
+    # rows[0] is newest (the one just created), rows[1] is previous
+    prev_id = rows[1]["id"]
+    diff = compare_menu_versions(prev_id, version_id)
+    if diff is None:
+        return None
+    return generate_change_summary(diff)
+
+
+# ====================================================================
+# Update Version Metadata (Day 91)
+# ====================================================================
+
+def update_menu_version(
+    version_id: int,
+    *,
+    label: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> bool:
+    """Update mutable metadata on a version (label, notes).
+
+    Item data remains immutable. Returns True if a row was updated.
+    """
+    sets: List[str] = []
+    args: List[Any] = []
+    if label is not None:
+        sets.append("label=?")
+        args.append(label)
+    if notes is not None:
+        sets.append("notes=?")
+        args.append(notes)
+    if not sets:
+        return False
+    args.append(version_id)
+    with db_connect() as conn:
+        cur = conn.execute(
+            f"UPDATE menu_versions SET {', '.join(sets)} WHERE id=?", args
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ====================================================================

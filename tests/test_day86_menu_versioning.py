@@ -229,6 +229,7 @@ def _make_test_db() -> sqlite3.Connection:
             variant_count   INTEGER NOT NULL DEFAULT 0,
             notes           TEXT,
             created_by      TEXT,
+            change_summary  TEXT,
             created_at      TEXT NOT NULL,
             FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE,
             FOREIGN KEY (source_draft_id) REFERENCES drafts(id) ON DELETE SET NULL,
@@ -422,7 +423,8 @@ class TestSchemaVerification:
     def test_menu_versions_has_correct_columns(self, fresh_db):
         cols = {r[1] for r in fresh_db.execute("PRAGMA table_info(menu_versions)").fetchall()}
         expected = {"id", "menu_id", "version_number", "label", "source_draft_id",
-                    "item_count", "variant_count", "notes", "created_by", "created_at"}
+                    "item_count", "variant_count", "notes", "created_by",
+                    "change_summary", "created_at"}
         assert expected == cols
 
     def test_menu_version_items_table_exists(self, fresh_db):

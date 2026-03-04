@@ -1458,3 +1458,20 @@ ServLine now has:
   - "Restore to Draft" button on version detail page with confirm dialog
   - "Restore" button per version in menu detail history table
   - Day 90 test suite: 49 cases, 100% pass rate
+
+- Version Change Summaries & Annotations (Day 91):
+  - `generate_change_summary(diff)`: human-readable one-liner from diff result
+  - Counts added/modified/removed items + price increase/decrease aggregation
+  - Variant price changes included in summary counts
+  - `_auto_generate_change_summary()`: diffs new version vs previous automatically
+  - `change_summary` TEXT column added to `menu_versions` (idempotent migration)
+  - `create_menu_version()` auto-generates and stores change_summary on publish
+  - First version: no summary (nothing to diff); subsequent versions: auto-generated
+  - `update_menu_version(label=, notes=)`: edit mutable metadata post-creation
+  - New Flask route: `POST /menus/versions/<id>/edit` with flash messages
+  - Session user capture: publish route stores email/name in `created_by`
+  - `menu_detail.html`: new Changes + Published By columns, Edit button per version
+  - "Initial version" text for v1, change_summary inline for v2+
+  - Version edit modal (JS) for label/notes editing
+  - `menu_version_detail.html`: shows change_summary and created_by
+  - Day 91 test suite: 43 cases, 100% pass rate

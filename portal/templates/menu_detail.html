@@ -28,7 +28,8 @@
               <th>Label</th>
               <th class="text-right">Items</th>
               <th class="text-right">Variants</th>
-              <th>Source Draft</th>
+              <th>Changes</th>
+              <th>Published By</th>
               <th>Notes</th>
               <th>Created</th>
               <th class="text-right">Actions</th>
@@ -47,19 +48,26 @@
                 <td class="text-muted">{{ v.label or '' }}</td>
                 <td class="text-right">{{ v.item_count }}</td>
                 <td class="text-right">{{ v.variant_count }}</td>
-                <td class="text-muted">
-                  {% if v.source_draft_id %}
-                    <a href="/drafts/{{ v.source_draft_id }}/edit" class="underline">#{{ v.source_draft_id }}</a>
+                <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  {% if v.change_summary %}
+                    <span class="change-summary">{{ v.change_summary }}</span>
+                  {% elif v.version_number == 1 %}
+                    <span class="text-muted">Initial version</span>
                   {% else %}
                     —
                   {% endif %}
                 </td>
+                <td class="text-muted">{{ v.created_by or '' }}</td>
                 <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   {{ v.notes or '' }}
                 </td>
                 <td class="text-muted">{{ v.created_at[:16] if v.created_at else '' }}</td>
                 <td class="text-right" style="white-space:nowrap;">
                   <a href="/menus/versions/{{ v.id }}" class="btn btn-sm btn-ghost">View Items</a>
+                  <button type="button" class="btn btn-sm btn-ghost"
+                          onclick="openVersionEditModal({{ v.id }}, '{{ v.label|e }}', '{{ v.notes|default('',true)|e }}')">
+                    Edit
+                  </button>
                   <form method="post" action="/menus/versions/{{ v.id }}/restore" style="display:inline;">
                     <button type="submit" class="btn btn-sm btn-ghost"
                             onclick="return confirm('Create a new draft from {{ v.label }}?');">
@@ -110,4 +118,44 @@
       <a href="/menus/{{ menu.id }}/items" class="btn btn-ghost">Legacy Items</a>
     </div>
   </section>
+
+  {# Day 91: Version Edit Modal #}
+  <div id="versionEditModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:999; align-items:center; justify-content:center;">
+    <div style="background:var(--card-bg,#fff); border-radius:8px; padding:24px; min-width:360px; max-width:480px; box-shadow:0 4px 24px rgba(0,0,0,.15);">
+      <h3 class="text-lg font-semibold mb-3">Edit Version</h3>
+      <form id="versionEditForm" method="post">
+        <div class="mb-3">
+          <label for="veLabel" style="display:block; font-size:.85rem; color:var(--muted,#888); margin-bottom:4px;">Label</label>
+          <input type="text" id="veLabel" name="label" class="cell-input" style="width:100%;" />
+        </div>
+        <div class="mb-3">
+          <label for="veNotes" style="display:block; font-size:.85rem; color:var(--muted,#888); margin-bottom:4px;">Notes</label>
+          <textarea id="veNotes" name="notes" class="cell-input" rows="3" style="width:100%;"></textarea>
+        </div>
+        <div class="flex gap-2 justify-end">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="closeVersionEditModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    .change-summary { font-size:.82rem; color:var(--text,#333); }
+  </style>
+
+  <script>
+    function openVersionEditModal(versionId, label, notes) {
+      document.getElementById('versionEditForm').action = '/menus/versions/' + versionId + '/edit';
+      document.getElementById('veLabel').value = label;
+      document.getElementById('veNotes').value = notes;
+      document.getElementById('versionEditModal').style.display = 'flex';
+    }
+    function closeVersionEditModal() {
+      document.getElementById('versionEditModal').style.display = 'none';
+    }
+    document.getElementById('versionEditModal').addEventListener('click', function(e) {
+      if (e.target === this) closeVersionEditModal();
+    });
+  </script>
 {% endblock %}

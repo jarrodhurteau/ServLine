@@ -2468,6 +2468,31 @@ def menu_version_restore(version_id):
     return redirect(url_for("draft_editor", draft_id=result["draft_id"]))
 
 
+# --- Day 91: Edit Version Metadata ---
+
+@app.post("/menus/versions/<int:version_id>/edit")
+@login_required
+def menu_version_edit(version_id):
+    """Edit version label and notes (Day 91)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    version = menus_store.get_menu_version(version_id, include_items=False)
+    if not version:
+        abort(404)
+    label = request.form.get("label")
+    notes = request.form.get("notes")
+    updated = menus_store.update_menu_version(
+        version_id,
+        label=label if label is not None else None,
+        notes=notes if notes is not None else None,
+    )
+    if updated:
+        flash(f"Version {version.get('label', '')} updated.", "success")
+    else:
+        flash("No changes to save.", "info")
+    return redirect(url_for("menu_detail", menu_id=version["menu_id"]))
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------
@@ -4507,10 +4532,17 @@ def draft_publish_now(draft_id: int):
             if not menu:
                 flash("Assigned menu not found. Please reassign.", "error")
                 return redirect(url_for("draft_editor", draft_id=draft_id))
+            # Day 91: capture session user in created_by
+            _publish_user = None
+            try:
+                _publish_user = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+            except Exception:
+                pass
             version = menus_store.create_menu_version(
                 int(assigned_menu_id),
                 source_draft_id=draft_id,
                 notes=f"Published from draft #{draft_id}",
+                created_by=_publish_user,
             )
             # Mark draft as published
             try:

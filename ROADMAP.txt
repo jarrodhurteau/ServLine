@@ -2,16 +2,18 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 90 (February 27, 2026) — Price Change Highlighting & Restore from Version / Sprint 10.2
+Last Updated: Day 91 (March 4, 2026) — Version Change Summaries & Annotations, Sprint 10.2 continued
 
 ================================================================================
 PROJECT MISSION
 ================================================================================
 
 Upload a real restaurant menu -> accurately parsed -> editable draft -> POS-ready export
-No manual re-entry. No desktop dependency. No OCR surprises.
+No manual re-entry. No desktop dependency. No OCR surprises. No human review.
 
-Target Buyer: POS companies (Square, Toast, etc.)
+Two customer experiences, one engine:
+  1. POS Partner B2B — link on their site, auto-export to their editor, $500+/mo
+  2. Direct Website (servline.com) — free editor + $50 paid AI parse + theme upsells
 
 ================================================================================
 COMPLETED PHASES
@@ -691,56 +693,334 @@ Sprint 10.2 — Version History & Diff (Days 89-92)
 
     Day 90 test suite: 49 cases, 100% pass rate
 
+  Day 91: Version Change Summaries & Annotations *** COMPLETE ***
+  ---------------------------------------------------------------
+  [x] Auto-generated change summaries on publish:
+      - generate_change_summary(diff) builds human-readable one-liner
+      - Counts: "+N added, ~N modified, -N removed"
+      - Price aggregation: "N price increases, N price decreases"
+      - Includes variant price changes in counts
+      - _auto_generate_change_summary() diffs vs previous version
+  [x] Schema migration: change_summary TEXT column on menu_versions
+      - Idempotent ALTER TABLE (same pattern as Day 86)
+      - Backfill on publish: auto-generated after version creation
+  [x] create_menu_version() auto-generates change_summary:
+      - First version: no summary (nothing to diff against)
+      - Subsequent versions: diff vs previous, store summary in DB
+  [x] update_menu_version(label=, notes=) for post-creation edits:
+      - Label and notes are mutable; item data stays immutable
+      - Returns True/False for row updated
+  [x] Flask route: POST /menus/versions/<id>/edit
+      - Updates label and/or notes, redirects to menu detail
+      - Flash success/no-change messages, 404 for missing version
+  [x] Session user capture in created_by:
+      - Publish route extracts email or name from session["user"]
+      - Stored in menu_versions.created_by column
+  [x] Template updates:
+      - menu_detail.html: Changes column, Published By column, Edit button
+      - "Initial version" text for v1, change_summary for v2+
+      - Version edit modal (JS openVersionEditModal) for label/notes
+      - menu_version_detail.html: Shows change_summary and created_by
+
+    Day 91 test suite: 43 cases, 100% pass rate
+
 Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
 .................................................
   [ ] Seasonal menu management
   [ ] Menu scheduling (breakfast/lunch/dinner dayparts)
   [ ] Active menu switching
 
-Phase 11 — Advanced AI Features (Days 96-105)
-----------------------------------------------
-[ ] Allergen detection and tagging
-[ ] Nutritional estimation
-[ ] Menu item similarity detection
-[ ] Smart category suggestions
-[ ] Description generation assistance
-
-Phase 12 — Production Hardening (Days 106-115)
------------------------------------------------
-[ ] Performance optimization
-[ ] Caching layer
-[ ] Rate limiting
-[ ] Error recovery and retry logic
-[ ] Monitoring and alerting
-[ ] Load testing
-[ ] OCR garble filtering — suppress reject-tier items before draft insertion
-    - Background segment_document() path produces fragmented word-level output
-      that creates garbled items (e.g., "3ma", "OLVLOd", "YSal") under junk categories
-    - Use semantic_tier == "reject" to gate items out of upsert_draft_items()
-    - Auto-suppress categories where majority of items are reject-tier
-    - Option to unify OCR paths (background import → image_to_string instead of
-      segment_document) for root-cause fix
-
-Phase 13 — User Experience Polish (Days 116-125)
+Phase 11 — Production AI Pipeline (Days 96-110)
 -------------------------------------------------
-[ ] Drag-and-drop menu reordering
-[ ] Inline editing improvements
-[ ] Keyboard shortcuts
-[ ] Mobile-responsive editor
-[ ] Undo/redo functionality
+  CONTEXT: ServLine's core differentiator. Three Claude API calls that turn
+  a menu photo into verified, structured data. Combined with the existing
+  semantic pipeline (Phase 8), this creates a 6-step flow no competitor matches.
 
-Phase 14 — POS Connection & Live Push (Days 126-140)
------------------------------------------------------
-  TARGET: Small POS companies first. Prove the integration works, build case
-  studies, then approach larger vendors (Square, Toast, Clover).
+  See SERVLINE_IMPLEMENTATION_SPEC.md for full business spec.
 
-  OWNER EXPERIENCE:
-  Settings → "Connect POS" → redirected to POS login → authorize ServLine →
-  redirected back → POS connected. Then in editor: "Approve & Push to POS" →
-  one click → menu items appear in their POS dashboard automatically.
+  THE 6-STEP PRODUCTION PIPELINE:
+    1. Tesseract OCR → raw text (free, local — already built)
+    2. Claude Call 1: text → structured items (already built: ai_menu_extract.py)
+    3. Claude Call 2: image + structured items → verified items (NEW)
+    4. Semantic pipeline: confidence, cross-item, auto-repair (already built: Phase 8)
+    5. Claude Call 3: image + flagged items → targeted corrections (NEW)
+    6. Confidence gate → deliver or ask for better photo
 
-  Sprint 14.1 — OAuth & Token Storage (Days 126-130)
-  [ ] OAuth 2.0 Authorization Code flow (generic)
+Sprint 11.1 — Vision Verification: Claude Call 2 (Days 96-100)
+...............................................................
+  [ ] New verify_menu_with_vision() function in storage/
+      - Input: original menu image (base64) + structured items from Call 1
+      - Claude reads image INDEPENDENTLY first (avoids anchoring bias from OCR)
+      - Then compares line-by-line against structured output
+      - Fixes: misspellings, wrong prices, missing items (process of elimination),
+        duplicates, category misassignment
+      - Returns: corrected items + changes_made log + self-reported confidence
+      - Model: claude-sonnet-4-5 (fast, capable, cost-effective for image comparison)
+  [ ] Multi-page menu support
+      - Send ALL page images in same API call for full context
+      - Page-batching strategy for 4+ page menus (token limit management)
+  [ ] Changes log (internal only, never shown to customers)
+      - Track: spelling_fix, price_fix, description_fix, missing_item_added,
+        duplicate_removed, category_fix
+      - Use to identify patterns in OCR errors and improve Layer 1 over time
+  [ ] Wire into ocr_facade.py pipeline
+      - After Call 1 extraction, before semantic pipeline
+      - Graceful fallback: if Call 2 fails, proceed with Call 1 output + lower confidence
+
+Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
+....................................................................
+  [ ] New reconcile_flagged_items() function in storage/
+      - Input: original menu image + ONLY items flagged by semantic pipeline + reasons
+      - Small, cheap, surgical — reviews 3-8 items, not entire menu
+      - Catches what neither Claude alone nor pipeline alone finds
+        (e.g., pipeline flags $9.99 steak as price outlier → Claude re-checks image)
+      - Returns: confirmed or corrected items for flagged subset
+  [ ] Wire into pipeline after semantic pipeline step
+      - Only runs if semantic pipeline flagged items (skip if zero flags)
+      - Re-score confidence after reconciliation
+
+Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
+.................................................................
+  [ ] Wire Claude's self-reported confidence as signal #6 in semantic_confidence.py
+      - Add to existing 5-signal weighted scoring (grammar, name, price, variant, flags)
+      - Determine appropriate weight through testing
+  [ ] Confidence gate: binary pass/fail
+      - Threshold TBD through real-world testing (starting point: 90%)
+      - Pass: deliver data to customer
+      - Fail: "Please retake your photo with better lighting"
+      - NO confidence scores shown to customers. Ever.
+  [ ] Rejection logging system
+      - Log every failed parse: image, OCR output, Claude corrections, confidence,
+        identified issues, all pipeline signals
+      - Purpose: find patterns, harden pipeline, raise the floor
+      - This is the "learning system" — no human reviewers, system improves itself
+  [ ] End-to-end pipeline integration tests
+      - Test full 6-step flow with real menu images
+      - Verify each step's output feeds correctly into the next
+      - Test graceful degradation (API failures, low confidence, edge cases)
+
+Phase 12 — Production Platform (Days 111-125)
+----------------------------------------------
+  CONTEXT: Transform ServLine from a development tool into a production SaaS
+  with two customer experiences sharing the same engine.
+
+  BUSINESS MODEL:
+    Experience 1 — POS Company API (white-label): Restaurant owner never sees
+    ServLine. POS company sends image → gets back verified JSON → populates their
+    own editor. Restaurant confirms in POS editor. Revenue: base + per-parse fee.
+
+    Experience 2 — Direct Website (servline.com): Free tier = manual editor with
+    save/export ($0 cost to us). Paid tier = $50/batch (up to 3 menus) for
+    AI-powered parse + editor + export.
+
+    KEY RULE: NO internal human review. System handles it or asks for better photo.
+    Customer always reviews last (in ServLine editor or POS editor).
+
+Sprint 12.1 — User Accounts & Auth (Days 111-115)
+...................................................
+  [ ] Public user registration (email + password)
+      - Sign up, log in, password reset
+      - Replace current session-based auth with proper account system
+      - Email verification (optional at launch, required later)
+  [ ] User-restaurant association
+      - Users own restaurants, restaurants own menus/drafts
+      - Multi-user per restaurant (future: roles)
+  [ ] Free tier access
+      - All users get: manual editor, save menus, edit anytime, export (CSV/JSON/POS)
+      - No AI calls, no OCR — just a web editor with a database
+      - Genuinely useful standalone tool, not a crippled demo
+
+Sprint 12.2 — Stripe Payment Gate (Days 116-119)
+..................................................
+  [ ] Stripe Checkout integration
+      - $50 per batch (up to 3 menu parses)
+      - One-time payment, not subscription
+      - Stripe webhook for payment confirmation
+  [ ] Payment-gated upload
+      - Free users: editor only, no upload button
+      - Paid users: upload triggers 6-step AI pipeline
+      - Payment status tracked per user/batch
+  [ ] Re-parse flow
+      - Seasonal menu change or major overhaul → new $50 batch
+      - Existing saved menus remain editable/exportable forever (no paywall on edits)
+
+Sprint 12.3 — POS Partner Integration & B2B Go-To-Market (Days 120-125)
+......................................................................
+
+  GO-TO-MARKET STRATEGY:
+  ~~~~~~~~~~~~~~~~~~~~~~
+  Target: Small POS companies (10-50 employees, 500-5,000 restaurant clients).
+  These companies can't build AI menu extraction in-house but need a competitive
+  edge against Toast/Square/Clover. ServLine gives them "Free Instant Menu Setup"
+  — a feature the big guys don't even offer.
+
+  THE PITCH:
+  "Put a link on your onboarding page. Your new restaurants click it, upload a
+  photo of their menu, and 30 seconds later it's in their POS editor. Done.
+  You don't touch a thing."
+
+  DEAL STRUCTURE:
+  - $500/month, 6-month trial
+  - POS company's restaurants get FREE menu digitization + auto-export
+  - ServLine builds a custom export format matching their POS import schema
+  - Link on POS company's site redirects restaurants to ServLine
+  - Upload → OCR → AI pipeline → auto-export directly into POS editor
+  - POS company advertises "Free Instant Menu Setup" as THEIR feature
+  - After 6 months: regroup with real data, renegotiate real pricing
+    * They can walk away, no hard feelings
+    * But they won't — their restaurants are used to instant onboarding,
+      their sales team pitches it, their support tickets dropped to zero
+    * Real negotiation starts with receipts: menus processed, onboarding
+      conversion rate before vs after, time saved
+
+  WHY SMALL POS COMPANIES FIRST:
+  - Can't build it themselves (4-person dev team, busy with core features)
+  - $500/mo is pocket change for a business
+  - They NEED differentiation against the big players
+  - Won't try to clone you (no AI team, no resources)
+  - By the time you have 10-15 small partners, you have case studies
+    and negotiate with bigger companies from a position of proof
+
+  WHY NOT BIG POS COMPANIES YET:
+  - Toast/Square could throw 10 devs at it and clone it in 6 months
+  - Enterprise sales cycles are long and expensive
+  - You have no case studies or track record yet
+  - Lock in the little guys first, build the moat, then the big fish come to you
+
+  EARLY TARGETS (New England regional POS companies):
+  - Katalyst OS (Maine, founded 2015, restaurant-focused)
+  - PointOS (Boston, founded 2008, 11-50 employees)
+  - Boston North Company (Westford MA, POS reseller/service)
+  - Other regional/niche POS startups (food trucks, pizza shops, cafes)
+
+  REVENUE MODEL — TWO CLEAN CHANNELS:
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Direct Website (servline.com):
+    - Free editor (manual entry, exports, basic features)
+    - $50 paid AI parse (photo → structured menu)
+    - Theme skins ($5-$7 each, $30 bundle)
+    - QR code digital menus
+    - Seasonal theme drops ($3 each)
+    → Individual restaurants, one-time purchases, impulse buys
+
+  POS Partner B2B:
+    - $500/mo trial → renegotiate after 6 months with data
+    - Custom export format per partner (one-time build, ~1 day each)
+    - Restaurant uploads on ServLine, auto-pushes to POS editor
+    - POS company's restaurants use it for free (included in partner fee)
+    - Upsell later: Premium tier adds allergens, dietary, nutrition fields
+    - Intelligence tier adds pricing benchmarks, modifier suggestions
+    → Monthly recurring revenue, long-term contracts, predictable income
+
+  TECHNICAL IMPLEMENTATION:
+  ~~~~~~~~~~~~~~~~~~~~~~~~~
+  [ ] Extend existing REST API (Day 84 foundation) for POS partner flow
+      - POST /api/parse — receive image(s), return verified JSON
+      - Uses full 6-step pipeline internally
+      - Partner authentication (existing api_key_required decorator)
+  [ ] Partner-specific export format builder
+      - Configurable output schema per POS partner
+      - Auto-export: upload completes → formatted data pushed to POS editor
+      - Redirect-back: restaurant lands in their POS editor with data loaded
+      - Support CSV, JSON, and direct API push (per partner capability)
+  [ ] Co-branded upload page
+      - /upload/<partner_slug> — ServLine page with partner's logo
+      - Restaurant uploads menu photo, sees processing status
+      - On completion: auto-redirect to POS editor with data pre-loaded
+      - No ServLine branding visible to restaurant (white-label feel)
+  [ ] Partner dashboard
+      - Partner registration + API key provisioning
+      - Usage stats: menus processed, restaurants served, export counts
+      - Per-partner rate limits and tracking
+  [ ] Production hardening
+      - Error recovery and retry logic for pipeline failures
+      - Request queuing for high-volume partners
+      - Usage logging for renegotiation data (the receipts)
+
+Sprint 12.4 — QR Code Digital Menus (Days 126-130)
+...................................................
+  CONTEXT: You already have clean, structured menu data. Generating a hosted
+  digital menu with a QR code is trivial on top of that — and it's a killer
+  upsell. Paid users ($50 batch) get it as a bonus. Free-tier users get it
+  too (their manually-entered menu, hosted as a webpage). Every restaurant
+  wants a scannable menu — COVID proved that.
+
+  Unlike MENU TIGER / FoodScan (type it in yourself), ServLine's pitch is:
+  "Snap a photo → get a QR-scannable digital menu." Nobody else does that.
+
+  [ ] QR code generation
+      - Python `qrcode` library (or `segno`) — generates QR image from URL
+      - Each published menu version gets a unique public URL
+      - QR image downloadable as PNG, SVG, and print-ready PDF
+      - Stable URL: QR code never changes even when menu content updates
+        (URL points to "current version" of that menu)
+  [ ] Public digital menu page (NEW template — the customer-facing webpage)
+      - GET /m/<menu_slug> — public, no login required
+      - Clean, mobile-first design (restaurants print QR for table use)
+      - Restaurant name + logo (if uploaded) at top
+      - Categories as sections with item cards: name, description, price, variants
+      - Allergen/dietary badges (when Phase 14 is built, auto-wired)
+      - Light/dark theme toggle for readability
+      - No ServLine branding on the page (or small "Powered by ServLine" footer)
+      - Responsive: looks great on phones, tablets, and desktop
+  [ ] QR code management UI
+      - Menu detail page: "QR Code" section with preview, download buttons
+      - Draft editor: "Generate QR Menu" option after publish
+      - Customization: menu slug (auto-generated from restaurant name, editable)
+      - Preview link to see the public page before sharing
+  [ ] Menu slug system
+      - Unique, URL-safe slugs: /m/joes-pizza, /m/thai-garden
+      - Auto-generated from restaurant name + menu type (editable by user)
+      - Collision handling: append number if slug taken
+      - Slug stored in menus table (new column)
+  [ ] Menu theme skins (REVENUE — microtransaction upsell)
+      - 1 free default theme ("Classic" — clean white, simple typography)
+      - STANDARD TIER ($5 each) — color/font/layout themes:
+        * Midnight — dark background, light text, upscale feel
+        * Chalkboard — blackboard texture, chalk-style fonts
+        * Rustic — kraft paper tones, serif fonts, warm earth colors
+        * Neon — dark with bright accents, modern street food vibe
+        * Minimalist — heavy whitespace, monospace font, ultra-clean
+      - PREMIUM TIER ($7 each) — themes with decorative background imagery:
+        * Elegant — cream/gold palette, script headers, floral accents
+        * Pizzeria — pizza slice & Italian motif background patterns
+        * Cafe — coffee bean illustrations, warm brown tones, steam accents
+        * Sweet Tooth — ice cream sprinkles, candy colors, dessert patterns
+        * Garden Fresh — botanical illustrations, green/herb watercolor touches
+      - BUNDLE DEAL: "Get All Skins" for $30 (saves ~$10 vs individual)
+        * Anchor: show full individual price (~$40) crossed out
+        * Bundle buyers get discount on future seasonal theme releases
+        * Upsell prompt at bottom of theme picker page
+      - SEASONAL LIMITED DROPS ($3 each, available for limited time):
+        * Valentine's, St. Patrick's, Summer, Halloween, Thanksgiving, Christmas
+        * Creates urgency + re-engagement email touchpoint every holiday
+        * Bundle owners get $1 off seasonal drops ($2 instead of $3)
+      - Implementation: same public_menu.html template, theme-specific CSS files
+        * `theme` column on menus table (default: "classic")
+        * Template loads /static/themes/{theme}.css — colors, fonts, spacing, backgrounds
+        * Standard themes: ~50-100 lines CSS (colors, fonts, layout)
+        * Premium themes: CSS + background SVG/PNG assets (decorative imagery)
+        * All designed once, sold infinitely (near-zero marginal cost, pure margin)
+      - Theme picker UI in menu settings: live preview before purchase
+      - Stripe one-time payment integration (per-theme or bundle)
+      - Theme owned forever — applies across all of that account's menus
+      - Revenue math: $5-$7 individual, $30 bundle, $2-$3 seasonal adds
+  [ ] Print-ready QR assets
+      - Table tent template (PDF): QR code + "Scan to view our menu" + restaurant name
+      - Multiple sizes: small (table sticker), medium (tent card), large (poster)
+      - Instructions page: "How to use your QR code menu"
+
+Phase 13 — POS OAuth & Live Push (Days 131-150)
+-------------------------------------------------
+  TARGET: Square first (simplest API, best docs), then Toast, then Clover.
+  Apply for Toast Developer Program early — approval takes time.
+
+  Both experiences use these integrations: POS API customers get JSON they can
+  push themselves, website customers get "Push to POS" button.
+
+Sprint 13.1 — OAuth & Integration Architecture (Days 131-135)
+..............................................................
+  [ ] OAuth 2.0 Authorization Code flow (generic base)
       - GET /connect/<provider> → redirect to provider's authorize URL
       - GET /oauth/<provider>/callback → exchange code for access token
       - Configurable per provider: auth URL, token URL, scopes, client ID/secret
@@ -749,62 +1029,168 @@ Phase 14 — POS Connection & Live Push (Days 126-140)
         token_expires_at, scopes, connected_at, status
   [ ] POS provider adapter pattern (pluggable)
       - Base class: authorize(), callback(), push_menu(), disconnect()
-      - Each POS company gets its own adapter module
+      - Each POS gets its own adapter in integrations/ directory
       - Config-driven: provider settings in DB or .env
-  [ ] Connect/disconnect UI in restaurant settings page
-      - "Connect to [Provider]" button per available provider
-      - Show connection status, connected date, last sync
-      - "Disconnect" with confirmation
+  [ ] Connect/disconnect UI in restaurant settings
+      - "Connect to [Provider]" button, connection status, "Disconnect" with confirm
 
-  Sprint 14.2 — Live Menu Push (Days 131-135)
-  [ ] Generic push interface: convert POS JSON → provider API calls
-      - Create/update categories
-      - Create/update items with modifiers (variants)
-      - Price sync (cents → provider format)
-      - Idempotent: re-push updates existing items, doesn't duplicate
-  [ ] Push status tracking per export
-      - push_history table: draft_id, provider, status, items_pushed,
-        errors, started_at, completed_at
-      - Success/partial/failed states with error details
-  [ ] Retry logic for failed pushes
-      - Automatic retry with exponential backoff
-      - Manual "Retry Failed Items" button
-  [ ] Replace download with live push when POS connected
-      - "Approve & Push to POS" button detects connection
-      - Connected: pushes via API, shows progress + confirmation
-      - Not connected: falls back to Generic POS JSON download
+Sprint 13.2 — Square Integration (Days 136-140)
+.................................................
+  [ ] Square Developer account + sandbox setup
+  [ ] Square OAuth flow (authorize, callback, token refresh)
+  [ ] Data mapper: ServLine universal JSON → Square Catalog API schema
+      - Categories → Square categories
+      - Items → Square catalog items with variations
+      - Variants → Square item variations (size/price)
+      - Modifiers → Square modifier lists + options
+  [ ] Square API client: create categories, items, modifiers in correct order
+  [ ] Push status tracking + error handling + idempotent re-push
 
-  Sprint 14.3 — First POS Partner Integration (Days 136-140)
-  [ ] Onboard first small POS company partner
-      - Build their specific adapter
-      - Test with real restaurant data
-      - Document integration for their team
-  [ ] Integration health dashboard
-      - Sync status per restaurant per provider
-      - Last push timestamp, success rate, error log
-  [ ] Provider onboarding guide
-      - How to register as a ServLine POS partner
-      - API documentation for adapter development
-      - Sandbox testing environment
+Sprint 13.3 — Toast Integration (Days 141-145)
+................................................
+  [ ] Toast Developer Program access + sandbox (apply early!)
+  [ ] Toast OAuth flow
+  [ ] Data mapper: ServLine JSON → Toast Configuration API schema
+      - Note: Toast has nested hierarchy (Menu > MenuGroup > MenuItem >
+        MenuOptionGroup > MenuItem). More complex than Square.
+  [ ] Toast API client + push logic
+  [ ] Push status tracking + error handling
+
+Sprint 13.4 — Clover Integration (Days 146-150)
+.................................................
+  [ ] Clover Developer account + sandbox
+  [ ] Clover OAuth flow
+  [ ] Data mapper: ServLine JSON → Clover REST API schema
+  [ ] Clover API client + push logic
+  [ ] Push status tracking + error handling
+
+Phase 14 — Menu Intelligence Features (Days 151-170)
+------------------------------------------------------
+  CONTEXT: These features are the competitive moat. Any engineer can build
+  OCR + AI verification. What they can't replicate is a system that truly
+  UNDERSTANDS menus — allergens, nutrition, smart suggestions, quality
+  descriptions. This is what makes restaurant owners say "this thing gets it"
+  and what makes POS companies pay premium rates.
+
+  These features enhance BOTH experiences: website users see them in the
+  ServLine editor, POS API partners get them as additional data fields in
+  the JSON response (upsell opportunity).
+
+Sprint 14.1 — Allergen & Dietary Detection (Days 151-155)
+..........................................................
+  [ ] Allergen detection from menu item names + descriptions
+      - Common allergens: gluten, dairy, nuts, shellfish, soy, eggs
+      - Ingredient-aware: "pesto" → nuts+dairy, "tempura" → gluten
+      - Confidence-tagged: detected vs inferred vs unknown
+  [ ] Dietary classification
+      - Vegetarian, vegan, gluten-free, keto, halal, kosher
+      - Based on ingredient analysis, not just keyword matching
+      - "Likely" vs "confirmed" distinction
+  [ ] Allergen data in export formats
+      - JSON: allergens[] and dietary[] arrays per item
+      - POS formats: mapped to each POS system's allergen fields
+      - CSV: additional columns
+  [ ] Editor UI: allergen badges per item (auto-detected, manually overridable)
+
+Sprint 14.2 — Nutritional Estimation (Days 156-160)
+.....................................................
+  [ ] Calorie and macro estimation from item names + descriptions
+      - Portion-aware: "half portion" vs "family size"
+      - Cooking method-aware: "fried" vs "grilled" vs "steamed"
+      - Ingredient-based estimation for common dishes
+  [ ] Confidence ranges (not false precision)
+      - "Estimated 450-550 calories" not "487 calories"
+      - Clear "estimate" labeling — never presented as fact
+  [ ] Nutritional data in exports (optional field, POS systems that support it)
+  [ ] Editor UI: nutritional panel per item (collapsible, non-intrusive)
+
+Sprint 14.3 — Smart Menu Suggestions (Days 161-165)
+.....................................................
+  [ ] Description generation assistance
+      - AI-generated descriptions for items with no description
+      - Based on item name, category, price point, and surrounding items
+      - Owner reviews and approves (never auto-published)
+  [ ] Menu item similarity detection (cross-restaurant intelligence)
+      - "Your Margherita Pizza is priced 30% below average for your area"
+      - Pricing intelligence based on aggregated (anonymized) data
+      - Category gap detection: "Most similar restaurants have a dessert section"
+  [ ] Smart category suggestions
+      - "These 3 items might belong in Appetizers instead of Entrees"
+      - Builds on existing category_infer.py + cross-item consistency
+  [ ] Modifier suggestions
+      - "Items like Buffalo Wings typically have a sauce choice modifier"
+      - Based on common patterns in restaurant menus
+
+Sprint 14.4 — Menu Quality Score (Days 166-170)
+.................................................
+  [ ] Overall menu quality assessment (for restaurant owners)
+      - Completeness: % of items with descriptions, prices, allergens
+      - Balance: category distribution, price range coverage
+      - Clarity: naming consistency, description quality
+  [ ] Actionable improvement suggestions
+      - "Add descriptions to these 12 items to increase customer engagement"
+      - "Your appetizer section has no vegetarian options"
+      - Priority-ranked by impact
+  [ ] Quality score in API response (POS companies can surface to restaurants)
+  [ ] Quality dashboard in ServLine editor
+
+Phase 15 — Production Hardening & Polish (Days 171-185)
+--------------------------------------------------------
+  [ ] Performance optimization and caching layer
+  [ ] Monitoring, alerting, and error dashboards
+  [ ] Load testing (concurrent API requests, large menus)
+  [ ] OCR garble filtering — suppress reject-tier items before draft insertion
+      - Use semantic_tier == "reject" to gate items out of upsert_draft_items()
+      - Auto-suppress categories where majority of items are reject-tier
+  [ ] Mobile-responsive editor
+  [ ] Drag-and-drop menu reordering
+  [ ] Undo/redo functionality
+  [ ] Keyboard shortcuts
 
 ================================================================================
 LONG-TERM VISION
 ================================================================================
 
+Two Products, One Engine:
+  Direct Website — servline.com, free editor + $50 paid AI parse + theme upsells
+  POS Partner B2B — embedded onboarding link, $500+/mo subscription, auto-export
+
 Year 1 Goals:
-- 95%+ accuracy on standard pizza/Italian menus
-- Support for 5+ POS export formats
-- < 2 minute processing time for typical menu
-- Zero manual intervention for clean menus
-- Live POS integration with 1-3 small POS partners
+- 95%+ accuracy on standard menus (all cuisine types)
+- Full 6-step AI pipeline live (3 Claude calls + semantic pipeline + confidence gate)
+- < 60 second processing time for single-page menu
+- Zero internal human review — system self-improves through rejection logging
+- $50/batch pricing live on servline.com with Stripe
+- QR code digital menus: photo → parsed menu → scannable QR in under 2 minutes
+- Theme skins marketplace live (10 themes + seasonal drops)
+- First 2-3 small POS partners signed ($500/mo trial deals)
+  * Target: New England regional POS companies (Katalyst OS, PointOS, etc.)
+  * Each partner = custom export format (~1 day build) + link on their site
+  * Restaurants get "Free Instant Menu Setup" — uploads auto-push to POS editor
+- 6-month trial data collected → renegotiate real pricing with proof
 
 Year 2 Goals:
-- Expand to all restaurant types (Asian, Mexican, American, etc.)
-- Real-time menu sync with POS systems
-- Multi-language menu support
-- White-label solution for POS vendors
-- 10+ POS partner integrations (scale from small → mid-tier → enterprise)
+- Renegotiate POS partner pricing with data ($2-5k/mo based on usage/value)
+- Scale to 10-15 small/mid POS partners across US regions
+- Add premium API tiers: allergens, dietary, nutrition (Phase 14 features)
+  * POS partners pay more for enriched JSON fields
+  * They build the UI for fields they want — they consume what they pay for
+  * Standard ($X/mo) → Premium ($XX/mo) → Intelligence ($XXX/mo)
+- Live POS push: Square + Toast + Clover via OAuth (for direct website users)
+- Menu intelligence features: allergen detection, nutritional estimates,
+  smart suggestions, quality scoring — the moat that copycats can't replicate
+- Cross-restaurant intelligence: anonymized pricing benchmarks, category gap
+  analysis, industry-specific insights
+- Case studies from Year 1 partners → leverage for bigger POS company pitches
+
+Year 3 Goals:
+- Expand to multi-language menu support
+- Real-time menu sync with POS systems (webhook-driven updates)
 - Self-service POS partner onboarding portal
+- Mid-tier POS companies ($5-10k/mo contracts)
+- Approach enterprise POS companies from position of strength
+  * 15+ active partners, proven reliability, pricing anchors established
+  * They come to you, not the other way around
 
 ================================================================================
 KEY PRINCIPLES
@@ -814,18 +1200,26 @@ KEY PRINCIPLES
    - All OCR/AI logic in /storage
    - No duplicate pipelines
    - Single source of truth
+   - Core engine has ZERO knowledge of POS systems or delivery targets
 
-2. DETERMINISTIC PROCESSING
-   - Same input = same output
-   - Full debug artifacts
-   - Auditable decisions
+2. NO HUMAN REVIEW — EVER
+   - No ServLine employees reviewing menus
+   - System handles it or asks for better photo
+   - Customer (restaurant owner) always does final review
+   - Edge cases improve the pipeline, not headcount
 
 3. SAFE AI
    - Never hallucinate prices
    - Never invent categories
    - Preserve original when uncertain
+   - 3 Claude calls: extract → verify → reconcile flagged items
 
-4. INCREMENTAL PROGRESS
+4. DETERMINISTIC PROCESSING
+   - Same input = same output
+   - Full debug artifacts
+   - Auditable decisions (changes_made logs from every Claude call)
+
+5. INCREMENTAL PROGRESS
    - Daily commits with verified progress
    - Each phase builds on previous
    - No skipping validation
@@ -834,6 +1228,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 91: Version Change Summaries & Annotations — generate_change_summary(), auto-summary on publish, update_menu_version(), edit route+modal, session user in created_by, change_summary+published_by in templates, Sprint 10.2 continued (43 tests)
 Day 90: Price Change Highlighting & Restore from Version — price_direction in diffs, ▲/▼ arrows in compare template, restore_version_to_draft(), restore route+buttons, Sprint 10.2 continued (49 tests)
 Day 89: Version Comparison & Diff Engine — compare_menu_versions(), item matching, field+variant diffs, compare route+template, menu detail compare form, Sprint 10.2 start (52 tests)
 Day 86: Multi-Menu & Versioning Foundation — storage/menus.py module, menu CRUD, version CRUD with draft snapshot, migration, draft-menu linking, Phase 10 start (59 tests)
