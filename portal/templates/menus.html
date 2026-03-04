@@ -55,6 +55,7 @@
 
     <div class="mt-4 flex gap-2">
       <a href="/restaurants" class="btn btn-ghost">Back to Restaurants</a>
+      <a href="{{ url_for('active_menus_page', rest_id=restaurant.id) }}" class="btn btn-ghost">Active Now</a>
       <button class="btn btn-primary" onclick="document.getElementById('create-form').style.display='block'">Add Menu</button>
     </div>
   </section>

@@ -1397,3 +1397,327 @@ def get_menu_schedule_summary(menu: Dict[str, Any]) -> Optional[str]:
         en = menu.get("active_end_time") or "..."
         parts.append(f"{st} - {en}")
     return " | ".join(parts) if parts else None
+
+
+# ====================================================================
+# Active Menu Switching & Rotation (Day 94)
+# ====================================================================
+
+def _schedule_field_count(menu: Dict[str, Any]) -> int:
+    """Count how many scheduling constraints a menu has set.
+
+    More constraints = more specific schedule.
+    """
+    count = 0
+    if menu.get("season"):
+        count += 1
+    if menu.get("effective_from") or menu.get("effective_to"):
+        count += 1
+    if menu.get("active_days"):
+        count += 1
+    if menu.get("active_start_time") or menu.get("active_end_time"):
+        count += 1
+    return count
+
+
+def score_menu_specificity(menu: Dict[str, Any]) -> int:
+    """Score a menu by how specific its schedule is (0-100).
+
+    Higher score = more specific / higher priority when multiple
+    menus are active at the same time.
+
+    Scoring:
+      - season set: +15
+      - date range (both from+to): +25, partial: +10
+      - active_days set: +20
+      - time range (both start+end): +30, partial: +10
+      - menu_type set: +10
+    """
+    score = 0
+    if menu.get("season"):
+        score += 15
+    frm = menu.get("effective_from")
+    to = menu.get("effective_to")
+    if frm and to:
+        score += 25
+    elif frm or to:
+        score += 10
+    if menu.get("active_days"):
+        score += 20
+    st = menu.get("active_start_time")
+    en = menu.get("active_end_time")
+    if st and en:
+        score += 30
+    elif st or en:
+        score += 10
+    if menu.get("menu_type"):
+        score += 10
+    return score
+
+
+def get_active_menus(
+    restaurant_id: int,
+    *,
+    now_date: Optional[str] = None,
+    now_time: Optional[str] = None,
+    now_day: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return currently active menus for a restaurant, ranked by specificity.
+
+    Uses the provided date/time/day, or defaults to the current moment.
+    Results are sorted by specificity score (highest first), then by name.
+
+    Each returned menu dict includes ``specificity_score`` and
+    ``is_scheduled`` (bool) fields.
+    """
+    import datetime
+
+    if now_date is None:
+        now_date = datetime.date.today().isoformat()
+    if now_time is None:
+        now_time = datetime.datetime.now().strftime("%H:%M")
+    if now_day is None:
+        _day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu",
+                    4: "fri", 5: "sat", 6: "sun"}
+        now_day = _day_map[datetime.date.today().weekday()]
+
+    menus = get_scheduled_menus(
+        restaurant_id,
+        date=now_date,
+        time=now_time,
+        day_of_week=now_day,
+    )
+
+    for m in menus:
+        m["specificity_score"] = score_menu_specificity(m)
+        m["is_scheduled"] = _schedule_field_count(m) > 0
+
+    menus.sort(key=lambda m: (-m["specificity_score"], m.get("name", "")))
+    return menus
+
+
+def get_menu_rotation(
+    restaurant_id: int,
+    *,
+    date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Build a full-day rotation timeline for a restaurant.
+
+    Returns a list of time slots sorted by start_time, each with:
+      - start_time, end_time (str or None for "always")
+      - menus: list of menu dicts active during that window
+      - label: human-readable description (e.g. "11:00 - 14:00")
+
+    Menus with no time constraints appear in an "All Day" slot.
+    """
+    import datetime
+
+    if date is None:
+        date = datetime.date.today().isoformat()
+
+    # Get day_of_week from date string
+    try:
+        dt = datetime.date.fromisoformat(date)
+        _day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu",
+                    4: "fri", 5: "sat", 6: "sun"}
+        day_of_week = _day_map[dt.weekday()]
+    except (ValueError, KeyError):
+        day_of_week = None
+
+    # Fetch all active menus for this restaurant on this date/day
+    with db_connect() as conn:
+        qs = "SELECT * FROM menus WHERE restaurant_id = ? AND active = 1"
+        args: List[Any] = [restaurant_id]
+
+        if date:
+            qs += (
+                " AND (effective_from IS NULL OR effective_from <= ?)"
+                " AND (effective_to IS NULL OR effective_to >= ?)"
+            )
+            args.extend([date, date])
+
+        qs += " ORDER BY active_start_time ASC NULLS FIRST, id ASC"
+        rows = conn.execute(qs, args).fetchall()
+        all_menus = [_row_to_dict(r) for r in rows]
+
+    # Filter by day_of_week in Python
+    if day_of_week:
+        filtered = []
+        for m in all_menus:
+            days = m.get("active_days")
+            if days is None:
+                filtered.append(m)
+            else:
+                day_list = [d.strip().lower() for d in days.split(",")]
+                if day_of_week in day_list:
+                    filtered.append(m)
+        all_menus = filtered
+
+    # Group into time slots
+    all_day: List[Dict[str, Any]] = []
+    timed: Dict[str, Dict[str, Any]] = {}  # key = "start-end"
+
+    for m in all_menus:
+        st = m.get("active_start_time")
+        en = m.get("active_end_time")
+        if not st and not en:
+            all_day.append(m)
+        else:
+            key = f"{st or '00:00'}-{en or '23:59'}"
+            if key not in timed:
+                timed[key] = {
+                    "start_time": st or "00:00",
+                    "end_time": en or "23:59",
+                    "label": f"{st or '00:00'} - {en or '23:59'}",
+                    "menus": [],
+                }
+            timed[key]["menus"].append(m)
+
+    slots: List[Dict[str, Any]] = []
+
+    if all_day:
+        slots.append({
+            "start_time": None,
+            "end_time": None,
+            "label": "All Day",
+            "menus": all_day,
+        })
+
+    # Sort timed slots by start_time
+    for key in sorted(timed.keys()):
+        slots.append(timed[key])
+
+    return slots
+
+
+def get_next_transition(
+    restaurant_id: int,
+    *,
+    now_date: Optional[str] = None,
+    now_time: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Find the next menu transition (start or end) after now.
+
+    Returns dict with:
+      - time: the transition time (HH:MM)
+      - type: "starts" or "ends"
+      - menu: the menu dict that starts/ends
+      - label: human-readable description
+
+    Returns None if no transitions are scheduled today.
+    """
+    import datetime
+
+    if now_date is None:
+        now_date = datetime.date.today().isoformat()
+    if now_time is None:
+        now_time = datetime.datetime.now().strftime("%H:%M")
+
+    # Get day_of_week
+    try:
+        dt = datetime.date.fromisoformat(now_date)
+        _day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu",
+                    4: "fri", 5: "sat", 6: "sun"}
+        day_of_week = _day_map[dt.weekday()]
+    except (ValueError, KeyError):
+        day_of_week = None
+
+    # Fetch all date-matching menus with time constraints
+    with db_connect() as conn:
+        qs = (
+            "SELECT * FROM menus WHERE restaurant_id = ? AND active = 1"
+            " AND (active_start_time IS NOT NULL OR active_end_time IS NOT NULL)"
+        )
+        args: List[Any] = [restaurant_id]
+
+        qs += (
+            " AND (effective_from IS NULL OR effective_from <= ?)"
+            " AND (effective_to IS NULL OR effective_to >= ?)"
+        )
+        args.extend([now_date, now_date])
+
+        rows = conn.execute(qs, args).fetchall()
+        menus = [_row_to_dict(r) for r in rows]
+
+    # Filter by day
+    if day_of_week:
+        filtered = []
+        for m in menus:
+            days = m.get("active_days")
+            if days is None:
+                filtered.append(m)
+            else:
+                day_list = [d.strip().lower() for d in days.split(",")]
+                if day_of_week in day_list:
+                    filtered.append(m)
+        menus = filtered
+
+    # Collect all transitions after now_time
+    transitions: List[Dict[str, Any]] = []
+    for m in menus:
+        st = m.get("active_start_time")
+        en = m.get("active_end_time")
+        if st and st > now_time:
+            transitions.append({
+                "time": st,
+                "type": "starts",
+                "menu": m,
+                "label": f"{m.get('name', 'Menu')} starts at {st}",
+            })
+        if en and en > now_time:
+            transitions.append({
+                "time": en,
+                "type": "ends",
+                "menu": m,
+                "label": f"{m.get('name', 'Menu')} ends at {en}",
+            })
+
+    if not transitions:
+        return None
+
+    # Return the soonest
+    transitions.sort(key=lambda t: t["time"])
+    return transitions[0]
+
+
+def get_active_menu_summary(
+    restaurant_id: int,
+    *,
+    now_date: Optional[str] = None,
+    now_time: Optional[str] = None,
+    now_day: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a complete active-menu status summary for display.
+
+    Returns:
+      - active_menus: list of currently active menus (ranked)
+      - active_count: number of active menus
+      - primary_menu: the highest-specificity menu (or None)
+      - next_transition: next scheduled change (or None)
+      - rotation: full day rotation timeline
+    """
+    active = get_active_menus(
+        restaurant_id,
+        now_date=now_date,
+        now_time=now_time,
+        now_day=now_day,
+    )
+
+    next_trans = get_next_transition(
+        restaurant_id,
+        now_date=now_date,
+        now_time=now_time,
+    )
+
+    rotation = get_menu_rotation(
+        restaurant_id,
+        date=now_date,
+    )
+
+    return {
+        "active_menus": active,
+        "active_count": len(active),
+        "primary_menu": active[0] if active else None,
+        "next_transition": next_trans,
+        "rotation": rotation,
+    }

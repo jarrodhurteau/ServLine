@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Active Menus · {{ restaurant.name }} · ServLine{% endblock %}
+
+{% block content %}
+  <p class="crumbs">
+    <a href="/restaurants" class="underline">Restaurants</a> ›
+    <a href="{{ url_for('menus_page', rest_id=restaurant.id) }}" class="underline">{{ restaurant.name }}</a> ›
+    Active Menus
+  </p>
+
+  <!-- Query controls -->
+  <section class="card mb-4">
+    <h1 class="text-xl font-semibold mb-3">Active Menus — {{ restaurant.name }}</h1>
+    <form method="get" class="flex gap-3 items-end flex-wrap">
+      <div>
+        <label for="q-date" style="color:var(--muted); font-size:.85rem;">Date</label>
+        <input id="q-date" name="date" type="date" class="cell-input" value="{{ query_date or '' }}">
+      </div>
+      <div>
+        <label for="q-time" style="color:var(--muted); font-size:.85rem;">Time</label>
+        <input id="q-time" name="time" type="time" class="cell-input" value="{{ query_time or '' }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Check</button>
+      <a href="{{ url_for('active_menus_page', rest_id=restaurant.id) }}" class="btn btn-ghost">Reset</a>
+    </form>
+  </section>
+
+  <!-- Primary / Active Menus -->
+  <section class="card mb-4">
+    <h2 class="text-lg font-semibold mb-2">
+      Currently Active
+      <span class="active-count-badge">{{ summary.active_count }}</span>
+    </h2>
+
+    {% if summary.primary_menu %}
+      <div class="primary-menu-card mb-3">
+        <span class="primary-label">Primary</span>
+        <a href="/menus/{{ summary.primary_menu.id }}/detail" class="underline text-lg">
+          {{ summary.primary_menu.name }}
+        </a>
+        {% if summary.primary_menu.menu_type %}
+          <span class="text-muted" style="margin-left:8px;">{{ summary.primary_menu.menu_type|replace('_',' ')|title }}</span>
+        {% endif %}
+        <span class="specificity-badge" title="Specificity score">{{ summary.primary_menu.specificity_score }}</span>
+      </div>
+    {% endif %}
+
+    {% if summary.active_menus %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Menu</th>
+            <th>Type</th>
+            <th class="text-right">Specificity</th>
+            <th>Scheduled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in summary.active_menus %}
+            <tr>
+              <td>
+                <a href="/menus/{{ m.id }}/detail" class="underline">{{ m.name }}</a>
+                {% if loop.first and summary.active_count > 1 %}
+                  <span class="primary-label">Primary</span>
+                {% endif %}
+              </td>
+              <td class="text-muted">{{ (m.menu_type or '')|replace('_',' ')|title }}</td>
+              <td class="text-right">
+                <span class="specificity-badge">{{ m.specificity_score }}</span>
+              </td>
+              <td>
+                {% if m.is_scheduled %}
+                  <span style="color:#059669;">Yes</span>
+                {% else %}
+                  <span class="text-muted">No (always on)</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No menus are currently active.</p>
+    {% endif %}
+  </section>
+
+  <!-- Next Transition -->
+  {% if summary.next_transition %}
+    <section class="card mb-4">
+      <h2 class="text-lg font-semibold mb-2">Next Transition</h2>
+      <div class="next-transition">
+        <span class="transition-time">{{ summary.next_transition.time }}</span>
+        <span class="transition-label">{{ summary.next_transition.label }}</span>
+      </div>
+    </section>
+  {% endif %}
+
+  <!-- Day Rotation Timeline -->
+  {% if summary.rotation %}
+    <section class="card mb-4">
+      <h2 class="text-lg font-semibold mb-2">Day Rotation</h2>
+      <div class="rotation-timeline">
+        {% for slot in summary.rotation %}
+          <div class="rotation-slot">
+            <div class="slot-time">{{ slot.label }}</div>
+            <div class="slot-menus">
+              {% for m in slot.menus %}
+                <a href="/menus/{{ m.id }}/detail" class="rotation-menu-chip">{{ m.name }}</a>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <div class="mt-4 flex gap-2">
+    <a href="{{ url_for('menus_page', rest_id=restaurant.id) }}" class="btn btn-ghost">Back to Menus</a>
+  </div>
+
+  <style>
+    .active-count-badge { display:inline-block; background:#059669; color:#fff; font-size:.8rem; padding:1px 8px; border-radius:10px; margin-left:6px; vertical-align:middle; }
+    .primary-menu-card { background:var(--card-bg, #f8fafc); border:1px solid #d1d5db; border-radius:6px; padding:12px 16px; display:flex; align-items:center; gap:8px; }
+    .primary-label { font-size:.7rem; background:#059669; color:#fff; padding:1px 6px; border-radius:3px; text-transform:uppercase; letter-spacing:.04em; }
+    .specificity-badge { display:inline-block; background:#e0f2fe; color:#0369a1; font-size:.75rem; padding:1px 6px; border-radius:3px; }
+    .next-transition { display:flex; align-items:center; gap:12px; }
+    .transition-time { font-size:1.4rem; font-weight:600; color:#0369a1; }
+    .transition-label { color:var(--muted); }
+    .rotation-timeline { display:flex; flex-direction:column; gap:8px; }
+    .rotation-slot { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid #e5e7eb; }
+    .rotation-slot:last-child { border-bottom:none; }
+    .slot-time { min-width:120px; font-weight:500; color:#374151; }
+    .slot-menus { display:flex; flex-wrap:wrap; gap:6px; }
+    .rotation-menu-chip { display:inline-block; background:#f3f4f6; border:1px solid #d1d5db; border-radius:4px; padding:2px 10px; font-size:.85rem; color:#1f2937; text-decoration:none; }
+    .rotation-menu-chip:hover { background:#e5e7eb; }
+  </style>
+{% endblock %}

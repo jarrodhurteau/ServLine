@@ -2682,6 +2682,88 @@ def menu_schedule(menu_id):
     return redirect(url_for("menu_detail", menu_id=menu_id))
 
 
+# --- Day 94: Active Menu Switching ---
+
+@app.get("/restaurants/<int:rest_id>/active_menus")
+@login_required
+def active_menus_page(rest_id):
+    """Active menu switching dashboard (Day 94)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    with db_connect() as conn:
+        rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
+    if not rest:
+        abort(404)
+
+    now_date = request.args.get("date") or None
+    now_time = request.args.get("time") or None
+
+    summary = menus_store.get_active_menu_summary(
+        rest_id,
+        now_date=now_date,
+        now_time=now_time,
+    )
+    return _safe_render(
+        "active_menus.html",
+        restaurant=rest,
+        summary=summary,
+        query_date=now_date,
+        query_time=now_time,
+    )
+
+
+@app.get("/api/restaurants/<int:rest_id>/active_menus")
+def api_active_menus(rest_id):
+    """API endpoint: get currently active menus for a restaurant (Day 94)."""
+    if not menus_store:
+        return jsonify({"ok": False, "error": "Menus storage not available"}), 500
+
+    now_date = request.args.get("date") or None
+    now_time = request.args.get("time") or None
+    now_day = request.args.get("day") or None
+
+    active = menus_store.get_active_menus(
+        rest_id,
+        now_date=now_date,
+        now_time=now_time,
+        now_day=now_day,
+    )
+
+    primary = active[0] if active else None
+    next_trans = menus_store.get_next_transition(
+        rest_id,
+        now_date=now_date,
+        now_time=now_time,
+    )
+
+    return jsonify({
+        "ok": True,
+        "restaurant_id": rest_id,
+        "active_count": len(active),
+        "active_menus": [
+            {
+                "id": m["id"],
+                "name": m.get("name"),
+                "menu_type": m.get("menu_type"),
+                "specificity_score": m.get("specificity_score", 0),
+                "is_scheduled": m.get("is_scheduled", False),
+            }
+            for m in active
+        ],
+        "primary_menu": {
+            "id": primary["id"],
+            "name": primary.get("name"),
+            "menu_type": primary.get("menu_type"),
+        } if primary else None,
+        "next_transition": {
+            "time": next_trans["time"],
+            "type": next_trans["type"],
+            "menu_name": next_trans["menu"].get("name"),
+            "label": next_trans["label"],
+        } if next_trans else None,
+    })
+
+
 # ------------------------
 # Day 6: Auth (Login / Logout)
 # ------------------------

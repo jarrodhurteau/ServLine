@@ -773,7 +773,7 @@ Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
 .................................................
   [x] Seasonal menu management
   [x] Menu scheduling (breakfast/lunch/dinner dayparts)
-  [ ] Active menu switching
+  [x] Active menu switching
 
     Day 93 — Seasonal Menu Management & Daypart Scheduling
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -788,6 +788,21 @@ Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
     Activity: schedule_updated action type
 
     Day 93 test suite: 54 cases, 100% pass rate
+
+    Day 94 — Active Menu Switching & Rotation
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Storage: _schedule_field_count(), score_menu_specificity(),
+      get_active_menus(), get_menu_rotation(),
+      get_next_transition(), get_active_menu_summary()
+    Routes: GET /restaurants/<id>/active_menus (dashboard),
+      GET /api/restaurants/<id>/active_menus (JSON API)
+    Templates: active_menus.html (query form, primary menu, rotation timeline,
+      next transition), "Active Now" link in menus list
+    Specificity scoring: season +15, date range +25, days +20,
+      time range +30, menu_type +10 (max 100)
+
+    Day 94 test suite: 60 cases, 100% pass rate
+    Sprint 10.3 total: 114 tests (Days 93-94), all passing
 
 Phase 11 — Production AI Pipeline (Days 96-110)
 -------------------------------------------------

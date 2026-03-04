@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 93 begins Sprint 10.3 (Seasonal & Scheduling) with seasonal menu management and daypart scheduling. Menus can now have season (spring/summer/fall/winter), effective date ranges, active days of week, and active time ranges. Schedule queries filter menus by date, time, and day. Schedule form in menu detail page with season dropdown, date pickers, day checkboxes, and time inputs. Season badges in menu list. Activity tracking for schedule changes. 1,205 tests passing across 44 test suites.
+Day 94 completes Sprint 10.3 active menu switching. Specificity scoring ranks overlapping schedules (season +15, dates +25, days +20, times +30, type +10, max 100). `get_active_menus()` resolves which menus are "live" right now with automatic datetime defaults. Rotation timeline shows full-day menu progression. `get_next_transition()` predicts upcoming switches. Active menus dashboard with query form, primary menu card, rotation display. JSON API endpoint for POS integration. 1,265 tests passing across 45 test suites.
 
 ---
 
@@ -1504,4 +1504,16 @@ ServLine now has:
   - Season badges in `menus.html` with color coding (spring=green, summer=yellow, fall=orange, winter=blue)
   - `schedule_updated` activity action with detail summary
   - Day 93 test suite: 54 cases, 100% pass rate
-  - Sprint 10.3 started: Day 93, 54 tests passing
+
+- Active Menu Switching & Rotation (Day 94):
+  - `_schedule_field_count()`: count scheduling constraints on a menu (0-4)
+  - `score_menu_specificity()`: rank menus by schedule specificity (0-100)
+  - `get_active_menus()`: resolve currently active menus, ranked by specificity, with auto-datetime defaults
+  - `get_menu_rotation()`: full-day rotation timeline (All Day + timed slots)
+  - `get_next_transition()`: find next start/end transition after current time
+  - `get_active_menu_summary()`: complete status (active menus, primary, next transition, rotation)
+  - New routes: `GET /restaurants/<id>/active_menus` (dashboard), `GET /api/restaurants/<id>/active_menus` (JSON API)
+  - `active_menus.html` template: date/time query form, primary menu card, specificity table, rotation timeline, next transition
+  - "Active Now" link in menus list page
+  - Day 94 test suite: 60 cases, 100% pass rate
+  - Sprint 10.3 total: 114 tests (Days 93-94), all passing
