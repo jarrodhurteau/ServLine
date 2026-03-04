@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 99 (March 4, 2026) — Pipeline Metrics & Observability, Sprint 11.1 continued
+Last Updated: Day 100 (March 4, 2026) — Sprint 11.1 Capstone, End-to-End Pipeline Integration
 
 ================================================================================
 PROJECT MISSION
@@ -950,6 +950,45 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
 
     Day 99 test suite: 72 cases, 100% pass rate
     Cumulative: 1,553 passed (excl. Day 70 fixture errors)
+
+  Day 100: Sprint 11.1 Capstone — End-to-End Pipeline Integration *** COMPLETE ***
+  ---------------------------------------------------------------------------------
+  [x] Comprehensive integration test suite: tests/test_day100_pipeline_capstone.py
+      - 13 test classes, 56 test cases validating all 4 Sprint 11.1 components together
+  [x] Full happy path: OCR → Call 1 → Call 2 (Vision) → Semantic → draft items + payload
+      - All 4 stages succeed, producing complete debug payload with 3 metadata blocks
+      - Vision-verified items at confidence=95, Call 1 fallback at confidence=90
+  [x] Fallback paths: vision-skipped (no API key), vision-failed (API error),
+      Call 1 failed (heuristic fallback), parse failure, empty response
+  [x] Strategy gating validation: semantic pipeline only runs on claude_api strategies
+      - heuristic_ai and legacy_draft_json correctly skip semantic (already internal/N/A)
+  [x] Debug payload completeness: vision_verification + semantic_pipeline + pipeline_metrics
+      - All fields verified: 9 vision fields, 6 semantic fields, 6 metrics fields
+      - Per-item semantic metadata count matches item count
+  [x] Pipeline metrics integration: all 4 stages tracked with correct extras
+      - Bottleneck detection, canonical item flow order, chars/items/confidence/quality
+  [x] Confidence flow validation: 95 → 0.95 normalization, 90 → 0.9, deep-copy safety
+  [x] Semantic repair flow: repairs_applied count, tier distribution, item mutation
+  [x] JSON round-trip: full payload survives serialize → deserialize (save_ocr_debug)
+  [x] Component interop: vision output → semantic input, variant items survive pipeline
+  [x] Edge cases: empty OCR, empty items, single item, 50-item large menu,
+      all stages fail, missing start_step, empty response
+  [x] Sprint 11.1 module imports: all 4 modules import cleanly with correct exports
+
+    Day 100 test suite: 56 cases, 100% pass rate
+    Sprint 11.1 total: 278 tests (53+29+68+72+56), 277 passed (1 pre-existing timing flake)
+    Cumulative: 1,609 passed (excl. Day 70 fixture errors)
+
+  Sprint 11.1 Summary — Vision Verification Pipeline *** COMPLETE ***
+  -------------------------------------------------------------------
+  Delivered 4 production-ready modules (~900 LOC) + 278 tests across 5 days:
+    - ai_vision_verify.py: Claude Call 2 vision verification (~514 LOC)
+    - semantic_bridge.py: Phase 8 semantic pipeline bridge (~229 LOC)
+    - pipeline_metrics.py: PipelineTracker observability (~178 LOC)
+    - Portal wiring: run_ocr_and_make_draft() orchestrates all 4 stages
+  Full pipeline: OCR → Call 1 (text extraction) → Call 2 (vision verification) →
+    Semantic pipeline (quality/repair) → draft items with rich debug metadata.
+  Graceful fallback at every stage — pipeline never crashes on API/parsing errors.
 
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................

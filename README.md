@@ -1586,3 +1586,16 @@ ServLine now has:
   - Graceful fallback: tracker failure never blocks draft creation
   - Day 99 test suite: 72 cases, 100% pass rate
   - Cumulative: 1,553 passed (excl. Day 70 fixture errors)
+
+- **Sprint 11.1 Capstone — End-to-End Pipeline Integration (Day 100):**
+  - Comprehensive integration test suite: `tests/test_day100_pipeline_capstone.py` (56 tests)
+  - 13 test classes validating all 4 Sprint 11.1 components working together
+  - Full happy path: OCR → Call 1 → Call 2 (Vision) → Semantic → draft items + debug payload
+  - Fallback paths: vision-skipped, vision-failed, Call 1 failed, parse failure, empty response
+  - Strategy gating: semantic pipeline only runs on claude_api strategies
+  - Debug payload completeness: vision_verification + semantic_pipeline + pipeline_metrics blocks
+  - Confidence flow: 95→0.95 normalization, 90→0.9, deep-copy safety, repair flow-back
+  - JSON round-trip, component interop, variant items, edge cases (empty/single/50-item)
+  - **Sprint 11.1 complete: 278 tests (Days 96-100), 4 production modules (~900 LOC)**
+  - Day 100 test suite: 56 cases, 100% pass rate
+  - Cumulative: 1,609 passed (excl. Day 70 fixture errors)
