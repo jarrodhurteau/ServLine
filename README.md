@@ -1575,3 +1575,14 @@ ServLine now has:
   - Graceful fallback: semantic pipeline failure never blocks draft creation
   - Day 98 test suite: 68 cases, 100% pass rate
   - Cumulative: 1,481 passed (excl. Day 70 fixture errors)
+
+- Pipeline Metrics & Observability (Day 99):
+  - New `storage/pipeline_metrics.py` (~170 LOC) — `PipelineTracker` class for per-step timing & item counts
+  - Step lifecycle: `start_step()`, `end_step(**extra)`, `skip_step(reason)`, `fail_step(error)`
+  - `summary()` returns total_duration_ms, steps dict, item_flow, bottleneck, extraction_strategy
+  - `format_duration(ms)` → human-readable ("450ms", "1.2s", "1m 5.0s")
+  - Wired into `run_ocr_and_make_draft()` — tracks OCR, Call 1, Call 2, and semantic pipeline steps
+  - Pipeline metrics saved in debug payload alongside vision_verification and semantic_pipeline blocks
+  - Graceful fallback: tracker failure never blocks draft creation
+  - Day 99 test suite: 72 cases, 100% pass rate
+  - Cumulative: 1,553 passed (excl. Day 70 fixture errors)

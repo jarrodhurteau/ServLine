@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 98 (March 4, 2026) — Semantic Pipeline Bridge, Sprint 11.1 continued
+Last Updated: Day 99 (March 4, 2026) — Pipeline Metrics & Observability, Sprint 11.1 continued
 
 ================================================================================
 PROJECT MISSION
@@ -924,6 +924,32 @@ n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
 
     Day 98 test suite: 68 cases, 100% pass rate
     Cumulative: 1,481 passed (excl. Day 70 fixture errors)
+
+  Day 99: Pipeline Metrics & Observability *** COMPLETE ***
+  --------------------------------------------------------
+  [x] New storage/pipeline_metrics.py module (~170 LOC)
+      - PipelineTracker class: records per-step timing, item counts, and metadata
+      - Step lifecycle: start_step(), end_step(**extra), skip_step(reason), fail_step(error)
+      - summary() returns full metrics dict: total_duration_ms, total_duration_human,
+        steps (per-step status/duration/items/extras), item_flow (canonical order),
+        bottleneck (slowest successful step), extraction_strategy
+      - format_duration(ms) → human-readable string ("450ms", "1.2s", "1m 5.0s")
+      - 4 step constants: STEP_OCR_TEXT, STEP_CALL1_EXTRACT, STEP_CALL2_VISION, STEP_SEMANTIC
+  [x] Wired into run_ocr_and_make_draft() in portal/app.py
+      - Tracks all 4 pipeline stages: OCR text extraction, Call 1 Claude extraction,
+        Call 2 vision verification, semantic pipeline
+      - Each step tracked with appropriate extras (chars, items, confidence, changes,
+        quality_grade, repairs, mean_confidence)
+      - Skip/fail paths handled: vision skipped → skip_step, API error → fail_step
+      - Graceful fallback: tracker failure never blocks draft creation
+  [x] Pipeline metrics in debug payload
+      - New "pipeline_metrics" block alongside existing vision_verification and
+        semantic_pipeline blocks in OCR debug JSON
+      - JSON-serializable, round-trips through save_ocr_debug/load_ocr_debug
+      - Includes bottleneck identification and human-readable total duration
+
+    Day 99 test suite: 72 cases, 100% pass rate
+    Cumulative: 1,553 passed (excl. Day 70 fixture errors)
 
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................

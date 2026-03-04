@@ -2154,31 +2154,53 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         items = []
         extraction_strategy = "none"
 
+        # Pipeline metrics tracker (Day 99) — records per-step timing & counts
+        try:
+            from storage.pipeline_metrics import (
+                PipelineTracker, STEP_OCR_TEXT, STEP_CALL1_EXTRACT,
+                STEP_CALL2_VISION, STEP_SEMANTIC,
+            )
+            tracker = PipelineTracker()
+        except Exception:
+            tracker = None
+
         # Get clean OCR text via simple Tesseract (same path as /ai/preview)
         clean_ocr_text = ""
         try:
+            if tracker:
+                tracker.start_step(STEP_OCR_TEXT)
             _suffix = saved_file_path.suffix.lower()
             if _suffix == ".pdf":
                 clean_ocr_text = _pdf_to_text(saved_file_path)
             elif _suffix in (".png", ".jpg", ".jpeg"):
                 clean_ocr_text = _ocr_image_to_text(src_for_ocr)
             print(f"[Draft] Clean OCR text: {len(clean_ocr_text)} chars")
+            if tracker:
+                tracker.end_step(STEP_OCR_TEXT, chars=len(clean_ocr_text))
         except Exception as _ocr_err:
             print(f"[Draft] Clean OCR failed: {_ocr_err}")
+            if tracker:
+                tracker.fail_step(STEP_OCR_TEXT, str(_ocr_err))
 
         # Strategy 1: Claude API extraction (Call 1) + Vision Verification (Call 2)
         vision_result = None
         if clean_ocr_text and not items:
             try:
+                if tracker:
+                    tracker.start_step(STEP_CALL1_EXTRACT)
                 from storage.ai_menu_extract import extract_menu_items_via_claude, claude_items_to_draft_rows
                 claude_items = extract_menu_items_via_claude(clean_ocr_text)
                 if claude_items:
                     extraction_strategy = "claude_api"
+                    if tracker:
+                        tracker.end_step(STEP_CALL1_EXTRACT, items=len(claude_items))
                     print(f"[Draft] Strategy 1 (Claude API): {len(claude_items)} items extracted")
 
                     # Call 2: Vision verification — send image + extracted items to Claude
                     # for independent verification against the original menu image
                     try:
+                        if tracker:
+                            tracker.start_step(STEP_CALL2_VISION)
                         from storage.ai_vision_verify import verify_menu_with_vision, verified_items_to_draft_rows
                         vision_result = verify_menu_with_vision(
                             str(saved_file_path), claude_items
@@ -2188,18 +2210,30 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                             extraction_strategy = "claude_api+vision"
                             n_changes = len(vision_result.get("changes", []))
                             conf = vision_result.get("confidence", 0)
+                            if tracker:
+                                tracker.end_step(STEP_CALL2_VISION, items=len(items),
+                                                 changes=n_changes, confidence=conf)
                             print(f"[Draft] Call 2 (Vision): {len(items)} items, "
                                   f"{n_changes} changes, confidence={conf:.2f}")
                         else:
                             # Vision skipped or errored — fall back to Call 1 items
                             items = claude_items_to_draft_rows(claude_items)
                             skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
+                            if tracker:
+                                tracker.skip_step(STEP_CALL2_VISION, skip)
                             print(f"[Draft] Call 2 skipped ({skip}), using Call 1 items")
                     except Exception as _vision_err:
                         # Vision verification failed entirely — use Call 1 items
                         items = claude_items_to_draft_rows(claude_items)
+                        if tracker:
+                            tracker.fail_step(STEP_CALL2_VISION, str(_vision_err))
                         print(f"[Draft] Call 2 (Vision) failed: {_vision_err}, using Call 1 items")
+                else:
+                    if tracker:
+                        tracker.end_step(STEP_CALL1_EXTRACT, items=0)
             except Exception as _claude_err:
+                if tracker:
+                    tracker.fail_step(STEP_CALL1_EXTRACT, str(_claude_err))
                 print(f"[Draft] Strategy 1 (Claude API) failed: {_claude_err}")
 
         # Strategy 2: Heuristic AI (same as /ai/preview endpoint)
@@ -2229,14 +2263,22 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         semantic_result = None
         if items and extraction_strategy in ("claude_api", "claude_api+vision"):
             try:
+                if tracker:
+                    tracker.start_step(STEP_SEMANTIC)
                 from storage.semantic_bridge import run_semantic_pipeline
                 semantic_result = run_semantic_pipeline(items)
                 n_repairs = semantic_result.get("repairs_applied", 0)
                 grade = semantic_result.get("quality_grade", "?")
                 mean_conf = semantic_result.get("mean_confidence", 0.0)
+                if tracker:
+                    tracker.end_step(STEP_SEMANTIC, items=len(items),
+                                     quality_grade=grade, repairs=n_repairs,
+                                     mean_confidence=mean_conf)
                 print(f"[Draft] Semantic pipeline: grade={grade}, "
                       f"mean_confidence={mean_conf:.2f}, repairs={n_repairs}")
             except Exception as _sem_err:
+                if tracker:
+                    tracker.fail_step(STEP_SEMANTIC, str(_sem_err))
                 print(f"[Draft] Semantic pipeline failed: {_sem_err}")
 
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
@@ -2278,6 +2320,9 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                             "repair_results": semantic_result.get("repair_results", {}),
                             "items_metadata": semantic_result.get("items_metadata", []),
                         }
+                    if tracker:
+                        tracker.strategy = extraction_strategy
+                        payload["pipeline_metrics"] = tracker.summary()
                     drafts_store.save_ocr_debug(draft_id, payload)
         except Exception as _draft_err:
             print(f"[Draft] ERROR creating draft items: {_draft_err}")
