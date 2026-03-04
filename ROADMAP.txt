@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 94 (March 4, 2026) — Active Menu Switching & Rotation + Restaurant CRUD fix, Sprint 10.3 continued
+Last Updated: Day 96 (March 4, 2026) — Vision Verification Module Foundation, Sprint 11.1 start
 
 ================================================================================
 PROJECT MISSION
@@ -553,10 +553,10 @@ Sprint 9.4 — Approve & Export + API Foundation (Days 83-85)
     Phase 9 complete: Days 71-85, 782 tests, all passing
 
 ================================================================================
-CURRENT PHASE: Phase 10 — Multi-Menu & Versioning
+CURRENT PHASE: Phase 11 — Production AI Pipeline
 ================================================================================
 
-Status: IN PROGRESS (Days 86-95)
+Status: IN PROGRESS (Days 96-110)
 
   PROBLEM STATEMENT:
   Restaurants have at most one implicit menu. There is no way to manage
@@ -845,6 +845,28 @@ Phase 11 — Production AI Pipeline (Days 96-110)
 
 Sprint 11.1 — Vision Verification: Claude Call 2 (Days 96-100)
 ...............................................................
+n  Day 96: Vision Verification Module Foundation *** COMPLETE ***
+  -------------------------------------------------------------
+  [x] New storage/ai_vision_verify.py module (~300 LOC)
+      - Image encoding helpers: _encode_image_file, _pdf_to_images, encode_menu_images
+      - Supports PNG, JPEG, GIF, WebP direct + PDF via pdf2image
+      - Multi-page PDF support: all pages sent as separate image blocks
+      - Verification prompt: Claude independently reads menu image, compares against
+        extracted items, fixes misspellings/prices/categories/missing items
+      - verify_menu_with_vision(image_path, extracted_items) main function
+      - Graceful fallback: returns original items on API failure/no key/bad image
+      - _parse_verification_response() with markdown fence stripping
+      - compute_changes_log() diffs original vs corrected items
+        Tracks: name_fixed, price_fixed, description_fixed, category_fixed,
+        item_added, item_removed, sizes_changed
+      - _normalize_items() ensures consistent structure
+      - verified_items_to_draft_rows() converts to DB format (confidence=95)
+      - Reuses shared Anthropic client from ai_menu_extract.py
+  [x] Result structure: items, changes, confidence, model, skipped, error
+      - skipped=True with skip_reason for no_items/no_api_key/image_encode_failed
+      - On API error: returns original items + error string (never crashes)
+
+    Day 96 test suite: 53 cases, 100% pass rate
   [ ] New verify_menu_with_vision() function in storage/
       - Input: original menu image (base64) + structured items from Call 1
       - Claude reads image INDEPENDENTLY first (avoids anchoring bias from OCR)

@@ -1186,9 +1186,9 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 10 — Multi-Menu & Versioning — COMPLETE (Days 86-95)**
+➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Day 95 completes Phase 10 with the menu health capstone. Schedule conflict detection finds overlapping menus across time, day, and date dimensions. Coverage analysis identifies gaps in weekly/hourly coverage. Per-menu health scoring (0-100) checks versions, items, schedule, type, and description. `get_phase10_summary()` aggregates versions, conflicts, coverage, health scores, and overall grade (A-D). Menu health dashboard + JSON API. Phase 10 total: 1,331 tests passing across 46 test suites.
+Day 96 starts Sprint 11.1 (Vision Verification). New `storage/ai_vision_verify.py` module (~300 LOC) implements Claude Call 2 — vision-based verification of extracted menu items. `verify_menu_with_vision()` sends the menu image + Call 1 items to Claude, which independently reads the image and corrects misspellings, wrong prices, missing items, and category errors. Supports multi-page PDFs (all pages in one API call). `compute_changes_log()` diffs original vs corrected items with typed change tracking. Graceful fallback on API failure. 53 new tests, 1,457 total.
 
 ---
 
@@ -1216,6 +1216,7 @@ ServLine now has:
 - ✅ Clean OCR text path (7,736 chars via image_to_string vs 762 chars fragmented)
 - ✅ Price-safe, category-safe AI cleanup (non-hallucinating text surgeon)
 - ✅ Auto-redirect from import view to draft editor on completion
+- ✅ Vision verification module (Claude Call 2) — image-based item verification with changes log
 
 **Semantic Intelligence (Phase 8):**
 - ✅ Menu item grammar parser — multi-pass classification, 100% on real menus
@@ -1536,3 +1537,18 @@ ServLine now has:
   - Day 95 test suite: 66 cases, 100% pass rate
   - Sprint 10.3 total: 180 tests (Days 93-95), all passing
   - Phase 10 complete: Days 86-95, 531 tests, all passing
+
+- Vision Verification Module Foundation (Day 96):
+  - New `storage/ai_vision_verify.py` (~300 LOC) — Claude Call 2 in production pipeline
+  - `encode_menu_images(path)`: image/PDF to base64 for Claude vision API (PNG, JPEG, GIF, WebP, PDF)
+  - Multi-page PDF support: all pages sent as separate image blocks in one API call
+  - `verify_menu_with_vision(image_path, extracted_items)`: sends image + Call 1 items to Claude
+  - Claude independently reads menu image, compares against extracted items, fixes errors
+  - Corrects: misspellings, wrong prices, missing items, phantom items, category misassignments
+  - `_parse_verification_response()`: JSON extraction with markdown fence stripping
+  - `compute_changes_log()`: diffs original vs corrected with typed changes (name_fixed, price_fixed, item_added, item_removed, category_fixed, description_fixed, sizes_changed)
+  - `verified_items_to_draft_rows()`: converts verified items to DB format (confidence=95)
+  - Graceful fallback: returns original items on no API key, bad image, or API error
+  - Reuses shared Anthropic client from `ai_menu_extract.py`
+  - Day 96 test suite: 53 cases, 100% pass rate
+  - Sprint 11.1 start (Phase 11: Production AI Pipeline)
