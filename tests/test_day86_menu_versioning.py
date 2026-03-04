@@ -230,6 +230,7 @@ def _make_test_db() -> sqlite3.Connection:
             notes           TEXT,
             created_by      TEXT,
             change_summary  TEXT,
+            pinned          INTEGER NOT NULL DEFAULT 0,
             created_at      TEXT NOT NULL,
             FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE,
             FOREIGN KEY (source_draft_id) REFERENCES drafts(id) ON DELETE SET NULL,
@@ -259,6 +260,19 @@ def _make_test_db() -> sqlite3.Connection:
             position    INTEGER DEFAULT 0,
             created_at  TEXT NOT NULL,
             FOREIGN KEY (item_id) REFERENCES menu_version_items(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS menu_activity (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            menu_id     INTEGER NOT NULL,
+            version_id  INTEGER,
+            action      TEXT NOT NULL,
+            detail      TEXT,
+            actor       TEXT,
+            created_at  TEXT NOT NULL,
+            FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE,
+            FOREIGN KEY (version_id) REFERENCES menu_versions(id) ON DELETE SET NULL
         )
     """)
 
@@ -424,7 +438,7 @@ class TestSchemaVerification:
         cols = {r[1] for r in fresh_db.execute("PRAGMA table_info(menu_versions)").fetchall()}
         expected = {"id", "menu_id", "version_number", "label", "source_draft_id",
                     "item_count", "variant_count", "notes", "created_by",
-                    "change_summary", "created_at"}
+                    "change_summary", "pinned", "created_at"}
         assert expected == cols
 
     def test_menu_version_items_table_exists(self, fresh_db):

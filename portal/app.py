@@ -2381,12 +2381,17 @@ def menu_detail(menu_id):
         ).fetchone()
     versions = menus_store.list_menu_versions(menu_id)
     current = menus_store.get_current_version(menu_id) if versions else None
+    # Day 92: activity log + stats
+    activities = menus_store.list_menu_activity(menu_id, limit=10)
+    stats = menus_store.get_version_stats(menu_id)
     return _safe_render(
         "menu_detail.html",
         restaurant=rest,
         menu=menu,
         versions=versions,
         current_version=current,
+        activities=activities,
+        stats=stats,
     )
 
 
@@ -2457,9 +2462,24 @@ def menu_version_restore(version_id):
     """Restore a menu version to a new draft (Day 90)."""
     if not menus_store:
         abort(500, description="Menus storage not available.")
+    # Fetch version to get menu_id before restore
+    _ver = menus_store.get_menu_version(version_id, include_items=False)
+    if not _ver:
+        abort(404)
     result = menus_store.restore_version_to_draft(version_id)
     if result is None:
         abort(404)
+    # Day 92: record restore activity
+    try:
+        _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+        menus_store.record_menu_activity(
+            _ver["menu_id"], "version_restored",
+            version_id=version_id,
+            detail=f"Restored {result['version_label']} → draft #{result['draft_id']}",
+            actor=_actor,
+        )
+    except Exception:
+        pass
     flash(
         f"Created draft #{result['draft_id']} from {result['version_label']} "
         f"({result['item_count']} items, {result['variant_count']} variants).",
@@ -2487,10 +2507,110 @@ def menu_version_edit(version_id):
         notes=notes if notes is not None else None,
     )
     if updated:
+        # Day 92: record edit activity
+        try:
+            _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+            menus_store.record_menu_activity(
+                version["menu_id"], "version_edited",
+                version_id=version_id,
+                detail=f"Edited {label or version.get('label', '')}",
+                actor=_actor,
+            )
+        except Exception:
+            pass
         flash(f"Version {version.get('label', '')} updated.", "success")
     else:
         flash("No changes to save.", "info")
     return redirect(url_for("menu_detail", menu_id=version["menu_id"]))
+
+
+# --- Day 92: Version Lifecycle — Pin, Delete & Activity ---
+
+@app.post("/menus/versions/<int:version_id>/pin")
+@login_required
+def menu_version_pin(version_id):
+    """Toggle pin/unpin on a version (Day 92)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    version = menus_store.get_menu_version(version_id, include_items=False)
+    if not version:
+        abort(404)
+    _actor = None
+    try:
+        _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+    except Exception:
+        pass
+    if version.get("pinned"):
+        menus_store.unpin_menu_version(version_id)
+        menus_store.record_menu_activity(
+            version["menu_id"], "version_unpinned",
+            version_id=version_id,
+            detail=f"Unpinned {version.get('label', '')}",
+            actor=_actor,
+        )
+        flash(f"Unpinned {version.get('label', '')}.", "success")
+    else:
+        menus_store.pin_menu_version(version_id)
+        menus_store.record_menu_activity(
+            version["menu_id"], "version_pinned",
+            version_id=version_id,
+            detail=f"Pinned {version.get('label', '')}",
+            actor=_actor,
+        )
+        flash(f"Pinned {version.get('label', '')}.", "success")
+    return redirect(url_for("menu_detail", menu_id=version["menu_id"]))
+
+
+@app.post("/menus/versions/<int:version_id>/delete")
+@login_required
+def menu_version_delete(version_id):
+    """Delete a menu version (Day 92). Safety: no pinned, not sole version."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    version = menus_store.get_menu_version(version_id, include_items=False)
+    if not version:
+        abort(404)
+    _actor = None
+    try:
+        _actor = session.get("user", {}).get("email") or session.get("user", {}).get("name")
+    except Exception:
+        pass
+    menu_id = version["menu_id"]
+    try:
+        result = menus_store.delete_menu_version(version_id)
+        if result is None:
+            abort(404)
+        menus_store.record_menu_activity(
+            menu_id, "version_deleted",
+            detail=f"Deleted {result.get('label', '')} (v{result.get('version_number', '?')})",
+            actor=_actor,
+        )
+        flash(f"Deleted {result.get('label', '')}.", "success")
+    except ValueError as e:
+        flash(str(e), "error")
+    return redirect(url_for("menu_detail", menu_id=menu_id))
+
+
+@app.get("/menus/<int:menu_id>/activity")
+@login_required
+def menu_activity_feed(menu_id):
+    """Menu activity log page (Day 92)."""
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404)
+    with db_connect() as conn:
+        rest = conn.execute(
+            "SELECT * FROM restaurants WHERE id=?", (menu["restaurant_id"],)
+        ).fetchone()
+    activities = menus_store.list_menu_activity(menu_id)
+    return _safe_render(
+        "menu_activity.html",
+        restaurant=rest,
+        menu=menu,
+        activities=activities,
+    )
 
 
 # ------------------------
@@ -4550,6 +4670,17 @@ def draft_publish_now(draft_id: int):
                     drafts_store.approve_publish(draft_id)
                 else:
                     drafts_store.save_draft_metadata(draft_id, status="published")
+            except Exception:
+                pass
+
+            # Day 92: record publish activity
+            try:
+                menus_store.record_menu_activity(
+                    int(assigned_menu_id), "version_published",
+                    version_id=version["id"],
+                    detail=f"{version['label']} ({version['item_count']} items, {version['variant_count']} variants)",
+                    actor=_publish_user,
+                )
             except Exception:
                 pass
 

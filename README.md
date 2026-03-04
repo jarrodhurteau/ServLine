@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 10 — Multi-Menu & Versioning — IN PROGRESS (Days 86-95)**
 
-Day 90 adds price change highlighting and version restore. The diff engine now includes `price_direction` metadata on price changes, rendered in the compare template with ▲/▼ arrows, color-coded classes (red increase, green decrease), and old-price strikethrough. New `restore_version_to_draft()` creates an editable draft from any historical menu version, copying all items and variants. Restore buttons appear on both version detail and menu detail pages. 3,532 tests passing across 41 test suites.
+Day 92 completes Sprint 10.2 with version lifecycle management. Pin/unpin important versions, delete unneeded versions (with safety: can't delete pinned or sole version), and a full menu activity log tracking all version events (published, pinned, deleted, restored, edited). Version stats provide item trends and price change totals. All routes wired with activity recording. 1,151 tests passing across 43 test suites.
 
 ---
 
@@ -1475,3 +1475,18 @@ ServLine now has:
   - Version edit modal (JS) for label/notes editing
   - `menu_version_detail.html`: shows change_summary and created_by
   - Day 91 test suite: 43 cases, 100% pass rate
+
+- Version Lifecycle — Pin, Delete & Activity Log (Day 92):
+  - `pin_menu_version()` / `unpin_menu_version()`: mark versions as important
+  - `delete_menu_version()`: remove versions with safety checks (no pinned, no sole version)
+  - New `menu_activity` table: tracks version events (published, pinned, unpinned, deleted, restored, edited)
+  - `record_menu_activity()`: inserts event with menu_id, version_id, action, detail, actor
+  - `list_menu_activity()`: newest-first, supports limit/offset
+  - `get_version_stats()`: total versions, pinned count, item trend, price change totals
+  - Flask routes: `POST /menus/versions/<id>/pin`, `POST /menus/versions/<id>/delete`, `GET /menus/<id>/activity`
+  - Activity wiring: publish, restore, edit, pin, delete all record activity
+  - `menu_detail.html`: pin/delete buttons, pin badge, stats bar, recent activity section
+  - New `menu_activity.html`: dedicated activity log page with color-coded action badges
+  - Schema: `pinned` column on menu_versions, `menu_activity` table (idempotent migrations)
+  - Day 92 test suite: 53 cases, 100% pass rate
+  - Sprint 10.2 total: 197 tests (Days 89-92), all passing

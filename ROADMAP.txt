@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 91 (March 4, 2026) — Version Change Summaries & Annotations, Sprint 10.2 continued
+Last Updated: Day 92 (March 4, 2026) — Version Lifecycle: Pin, Delete & Activity Log, Sprint 10.2 complete
 
 ================================================================================
 PROJECT MISSION
@@ -723,6 +723,51 @@ Sprint 10.2 — Version History & Diff (Days 89-92)
       - menu_version_detail.html: Shows change_summary and created_by
 
     Day 91 test suite: 43 cases, 100% pass rate
+
+  Day 92: Version Lifecycle — Pin, Delete & Activity Log *** COMPLETE ***
+  -----------------------------------------------------------------------
+  [x] Pin/unpin versions (mark important versions):
+      - pin_menu_version(version_id) → sets pinned=1
+      - unpin_menu_version(version_id) → sets pinned=0
+      - Idempotent: re-pin/re-unpin returns False
+      - New pinned INTEGER NOT NULL DEFAULT 0 column on menu_versions
+      - Pinned flag visible in list_menu_versions and get_menu_version
+  [x] Delete versions with safety checks:
+      - delete_menu_version(version_id) → CASCADE deletes items + variants
+      - Cannot delete pinned version (raises ValueError)
+      - Cannot delete sole version of a menu (raises ValueError)
+      - Returns info dict on success, None if not found
+  [x] Menu activity log:
+      - New menu_activity table: id, menu_id, version_id, action, detail, actor, created_at
+      - 6 valid actions: version_published, version_pinned, version_unpinned,
+        version_deleted, version_restored, version_edited
+      - record_menu_activity() inserts event, invalid action falls back
+      - list_menu_activity() returns newest first, supports limit/offset
+  [x] Version statistics:
+      - get_version_stats(menu_id) → total_versions, total_pinned,
+        latest_version, item_trend (oldest-first), price change totals
+      - Price totals parsed from change_summary strings
+  [x] Flask routes:
+      - POST /menus/versions/<id>/pin — toggle pin/unpin, records activity
+      - POST /menus/versions/<id>/delete — delete with safety, records activity
+      - GET /menus/<id>/activity — full activity log page
+  [x] Activity wiring in existing routes:
+      - Publish (draft_publish_now) records version_published
+      - Restore records version_restored
+      - Edit records version_edited
+      - Pin/unpin records version_pinned/version_unpinned
+      - Delete records version_deleted
+  [x] Template updates:
+      - menu_detail.html: Pin/Unpin button per version, Delete button (disabled when pinned)
+      - Pin badge icon shown for pinned versions
+      - Version stats bar (total versions, pinned count, price change totals)
+      - Recent Activity section with color-coded action badges
+      - "Full Activity Log" and "View All Activity" links
+      - New menu_activity.html: dedicated activity log page
+  [x] Schema migrations: pinned column + menu_activity table (idempotent)
+
+    Day 92 test suite: 53 cases, 100% pass rate
+    Sprint 10.2 total: 197 tests (Days 89-92), all passing
 
 Sprint 10.3 — Seasonal & Scheduling (Days 93-95)
 .................................................

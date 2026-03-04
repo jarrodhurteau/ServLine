@@ -100,6 +100,31 @@ def _ensure_menu_schema() -> None:
                 "ALTER TABLE menu_versions ADD COLUMN change_summary TEXT;"
             )
 
+        # -- Day 92: add pinned column if missing -------------------------
+        if not _col_exists("menu_versions", "pinned"):
+            cur.execute(
+                "ALTER TABLE menu_versions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;"
+            )
+
+        # -- Day 92: menu_activity table for event log --------------------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS menu_activity (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              menu_id     INTEGER NOT NULL,
+              version_id  INTEGER,
+              action      TEXT NOT NULL,
+              detail      TEXT,
+              actor       TEXT,
+              created_at  TEXT NOT NULL,
+              FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE CASCADE,
+              FOREIGN KEY (version_id) REFERENCES menu_versions(id) ON DELETE SET NULL
+            )
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_menu_activity_menu "
+            "ON menu_activity(menu_id)"
+        )
+
         # -- Indexes ------------------------------------------------------
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_menu_versions_menu "
@@ -1006,3 +1031,175 @@ def migrate_existing_menus() -> Dict[str, int]:
         conn.commit()
 
     return {"menus_migrated": menus_migrated, "items_copied": items_copied}
+
+
+# ====================================================================
+# Version Lifecycle — Pin, Delete & Activity Log (Day 92)
+# ====================================================================
+
+# Valid activity action types
+VALID_ACTIVITY_ACTIONS = frozenset({
+    "version_published",
+    "version_pinned",
+    "version_unpinned",
+    "version_deleted",
+    "version_restored",
+    "version_edited",
+})
+
+
+def pin_menu_version(version_id: int) -> bool:
+    """Pin a version (mark as important). Returns True if updated."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            "UPDATE menu_versions SET pinned=1 WHERE id=? AND pinned=0",
+            (version_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def unpin_menu_version(version_id: int) -> bool:
+    """Unpin a version. Returns True if updated."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            "UPDATE menu_versions SET pinned=0 WHERE id=? AND pinned=1",
+            (version_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_menu_version(version_id: int) -> Optional[Dict[str, Any]]:
+    """Delete a menu version.
+
+    Safety checks:
+    - Cannot delete a pinned version (unpin first).
+    - Cannot delete the only version of a menu.
+
+    Returns dict with deleted version info on success,
+    or ``None`` if the version was not found.
+    Raises ``ValueError`` if the delete is blocked by a safety rule.
+    """
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM menu_versions WHERE id=?", (version_id,)
+        ).fetchone()
+        if not row:
+            return None
+        version = _row_to_dict(row)
+
+        if version.get("pinned"):
+            raise ValueError("Cannot delete a pinned version. Unpin it first.")
+
+        # Check if it's the only version
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM menu_versions WHERE menu_id=?",
+            (version["menu_id"],),
+        ).fetchone()
+        if count_row["cnt"] <= 1:
+            raise ValueError("Cannot delete the only version of a menu.")
+
+        # CASCADE deletes items + variants
+        conn.execute("DELETE FROM menu_versions WHERE id=?", (version_id,))
+        conn.commit()
+
+    return {
+        "id": version_id,
+        "menu_id": version["menu_id"],
+        "version_number": version["version_number"],
+        "label": version.get("label"),
+    }
+
+
+def record_menu_activity(
+    menu_id: int,
+    action: str,
+    *,
+    version_id: Optional[int] = None,
+    detail: Optional[str] = None,
+    actor: Optional[str] = None,
+) -> int:
+    """Record an activity event for a menu. Returns the activity row id."""
+    if action not in VALID_ACTIVITY_ACTIONS:
+        action = "version_published"  # safe fallback
+    now = _now()
+    with db_connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO menu_activity
+                (menu_id, version_id, action, detail, actor, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (menu_id, version_id, action, detail, actor, now),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def list_menu_activity(
+    menu_id: int,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """List activity events for a menu, newest first."""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM menu_activity WHERE menu_id=? "
+            "ORDER BY id DESC LIMIT ? OFFSET ?",
+            (menu_id, limit, offset),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def get_version_stats(menu_id: int) -> Dict[str, Any]:
+    """Compute version statistics for a menu.
+
+    Returns counts, item/variant trends, and price change totals.
+    """
+    versions = list_menu_versions(menu_id, limit=1000)
+    if not versions:
+        return {
+            "total_versions": 0,
+            "total_pinned": 0,
+            "latest_version": None,
+            "item_trend": [],
+            "total_price_increases": 0,
+            "total_price_decreases": 0,
+        }
+
+    total_pinned = sum(1 for v in versions if v.get("pinned"))
+
+    # Item trend: (version_number, item_count, variant_count)
+    item_trend = [
+        {
+            "version_number": v["version_number"],
+            "item_count": v.get("item_count", 0),
+            "variant_count": v.get("variant_count", 0),
+        }
+        for v in reversed(versions)  # oldest first for trend
+    ]
+
+    # Price change totals from change summaries
+    total_price_up = 0
+    total_price_down = 0
+    for v in versions:
+        summary = v.get("change_summary") or ""
+        # Parse from summary strings like "1 price increase, 2 price decreases"
+        import re
+        up_match = re.search(r"(\d+) price increase", summary)
+        down_match = re.search(r"(\d+) price decrease", summary)
+        if up_match:
+            total_price_up += int(up_match.group(1))
+        if down_match:
+            total_price_down += int(down_match.group(1))
+
+    return {
+        "total_versions": len(versions),
+        "total_pinned": total_pinned,
+        "latest_version": versions[0] if versions else None,
+        "item_trend": item_trend,
+        "total_price_increases": total_price_up,
+        "total_price_decreases": total_price_down,
+    }

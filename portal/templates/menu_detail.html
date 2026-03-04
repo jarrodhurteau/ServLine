@@ -17,6 +17,22 @@
       <p class="text-muted mt-1">{{ menu.description }}</p>
     {% endif %}
 
+    {# Day 92: Version Stats #}
+    {% if stats and stats.total_versions > 0 %}
+      <div class="mt-3 flex gap-4" style="font-size:.85rem; color:var(--muted,#888);">
+        <span><strong>{{ stats.total_versions }}</strong> version{{ 's' if stats.total_versions != 1 else '' }}</span>
+        {% if stats.total_pinned %}
+          <span>{{ stats.total_pinned }} pinned</span>
+        {% endif %}
+        {% if stats.total_price_increases %}
+          <span style="color:#dc2626;">{{ stats.total_price_increases }} price increase{{ 's' if stats.total_price_increases != 1 else '' }} total</span>
+        {% endif %}
+        {% if stats.total_price_decreases %}
+          <span style="color:#16a34a;">{{ stats.total_price_decreases }} price decrease{{ 's' if stats.total_price_decreases != 1 else '' }} total</span>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <div class="mt-4">
       <h2 class="text-lg font-semibold mb-3">Version History</h2>
 
@@ -44,6 +60,9 @@
                   {% else %}
                     v{{ v.version_number }}
                   {% endif %}
+                  {% if v.pinned %}
+                    <span class="pin-badge" title="Pinned">&#128204;</span>
+                  {% endif %}
                 </td>
                 <td class="text-muted">{{ v.label or '' }}</td>
                 <td class="text-right">{{ v.item_count }}</td>
@@ -68,10 +87,22 @@
                           onclick="openVersionEditModal({{ v.id }}, '{{ v.label|e }}', '{{ v.notes|default('',true)|e }}')">
                     Edit
                   </button>
+                  <form method="post" action="/menus/versions/{{ v.id }}/pin" style="display:inline;">
+                    <button type="submit" class="btn btn-sm btn-ghost" title="{{ 'Unpin' if v.pinned else 'Pin' }}">
+                      {{ 'Unpin' if v.pinned else 'Pin' }}
+                    </button>
+                  </form>
                   <form method="post" action="/menus/versions/{{ v.id }}/restore" style="display:inline;">
                     <button type="submit" class="btn btn-sm btn-ghost"
                             onclick="return confirm('Create a new draft from {{ v.label }}?');">
                       Restore
+                    </button>
+                  </form>
+                  <form method="post" action="/menus/versions/{{ v.id }}/delete" style="display:inline;">
+                    <button type="submit" class="btn btn-sm btn-ghost btn-danger"
+                            onclick="return confirm('Delete {{ v.label }}? This cannot be undone.');"
+                            {% if v.pinned %}disabled title="Unpin before deleting"{% endif %}>
+                      Delete
                     </button>
                   </form>
                 </td>
@@ -113,9 +144,36 @@
       {% endif %}
     </div>
 
+    {# Day 92: Recent Activity #}
+    {% if activities %}
+      <div class="mt-4">
+        <h2 class="text-lg font-semibold mb-3">Recent Activity</h2>
+        <ul class="activity-list">
+          {% for a in activities %}
+            <li class="activity-item">
+              <span class="activity-action activity-{{ a.action }}">{{ a.action|replace('_',' ')|title }}</span>
+              {% if a.detail %}
+                <span class="text-muted">{{ a.detail }}</span>
+              {% endif %}
+              {% if a.actor %}
+                <span class="text-muted">by {{ a.actor }}</span>
+              {% endif %}
+              <span class="text-muted" style="font-size:.78rem;">{{ a.created_at[:16] if a.created_at else '' }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if activities|length >= 10 %}
+          <a href="/menus/{{ menu.id }}/activity" class="btn btn-ghost btn-sm mt-2">View All Activity</a>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <div class="mt-4 flex gap-2">
       <a href="/restaurants/{{ restaurant.id }}/menus" class="btn btn-ghost">Back to Menus</a>
       <a href="/menus/{{ menu.id }}/items" class="btn btn-ghost">Legacy Items</a>
+      {% if activities %}
+        <a href="/menus/{{ menu.id }}/activity" class="btn btn-ghost">Full Activity Log</a>
+      {% endif %}
     </div>
   </section>
 
@@ -142,6 +200,19 @@
 
   <style>
     .change-summary { font-size:.82rem; color:var(--text,#333); }
+    .pin-badge { font-size:.75rem; vertical-align:super; }
+    .btn-danger { color:#dc2626; }
+    .btn-danger:hover { background:#fef2f2; }
+    .btn-danger:disabled { opacity:.4; cursor:not-allowed; }
+    .activity-list { list-style:none; padding:0; margin:0; }
+    .activity-item { padding:6px 0; border-bottom:1px solid var(--border,#e5e7eb); font-size:.85rem; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .activity-action { font-weight:600; font-size:.78rem; padding:2px 6px; border-radius:4px; background:#f3f4f6; }
+    .activity-version_published { background:#dcfce7; color:#166534; }
+    .activity-version_pinned { background:#fef3c7; color:#92400e; }
+    .activity-version_unpinned { background:#f3f4f6; color:#374151; }
+    .activity-version_deleted { background:#fef2f2; color:#991b1b; }
+    .activity-version_restored { background:#dbeafe; color:#1e40af; }
+    .activity-version_edited { background:#f3f4f6; color:#374151; }
   </style>
 
   <script>
