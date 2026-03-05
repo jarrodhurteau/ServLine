@@ -137,23 +137,6 @@
                     Edit
                   </a>
 
-                  {# One-click Finalize with AI Cleanup — disabled until draft is ready #}
-                  <form
-                    action="{{ url_for('imports_ai_finalize', job_id=j.id) }}"
-                    method="post"
-                    style="display:inline"
-                    onsubmit="return confirm('Run AI Finalize for job #{{ j.id }} and open its draft?');"
-                  >
-                    <button
-                      type="submit"
-                      class="btn btn-secondary"
-                      data-finalize
-                      aria-disabled="{{ 'true' if st in ['pending','processing'] else 'false' }}"
-                    >
-                      Finalize with AI
-                    </button>
-                  </form>
-
                   <form
                     action="/imports/{{ j.id }}/delete"
                     method="post"

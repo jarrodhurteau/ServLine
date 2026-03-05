@@ -1889,7 +1889,11 @@
       const rows = $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`);
       if (!rows.length) return;
       const isCollapsed = rows[0].classList.contains("variant-collapsed");
-      rows.forEach(r => r.classList.toggle("variant-collapsed", !isCollapsed));
+      rows.forEach(r => {
+        r.classList.toggle("variant-collapsed", !isCollapsed);
+        // Clear inline display style so CSS class takes effect
+        r.style.display = isCollapsed ? "" : "none";
+      });
       // Update toggle button text
       const toggleBtn = $(`button.toggle-variants-btn[data-parent-id="${CSS.escape(String(parentId))}"]`);
       if (toggleBtn){
