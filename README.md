@@ -1635,8 +1635,14 @@ ServLine now has:
   - Day 102 test suite: 36 cases, 100% pass rate
   - Cumulative: 1,705 passed (excl. Day 70 fixture errors)
 
-- **Live Test Fixes + Multimodal Call 1 (Day 102.5):**
+- **Multimodal Call 1 (Day 102.5):** *** COMPLETE ***
   - Fixed imports.html: removed dead "Finalize with AI" button (route removed in Day 100.5)
   - Fixed draft_editor.html: variant toggle dropdown not responding (inline style override)
-  - Live 200-item menu test: root cause — Call 1 is text-only, receives garbled Tesseract OCR
-  - Multimodal Call 1: send menu image as primary input + Tesseract text as secondary hint
+  - Live 200-item menu test: root cause — Call 1 was text-only, received garbled Tesseract OCR
+  - Implemented multimodal Call 1: menu image as primary input + OCR text as secondary hint
+  - extract_menu_items_via_claude() accepts image_path= kwarg, builds multimodal content
+  - Dual prompts: _SYSTEM_PROMPT_MULTIMODAL (image-first) vs _SYSTEM_PROMPT_TEXT_ONLY (fallback)
+  - Reuses encode_menu_images() from ai_vision_verify.py (lazy import, no circular deps)
+  - All 3 Claude calls now multimodal: Call 1 (extract) + Call 2 (verify) + Call 3 (reconcile)
+  - Day 102.5 test suite: 23 cases, 100% pass rate
+  - Cumulative: 1,728 passed (excl. Day 70 fixture errors)

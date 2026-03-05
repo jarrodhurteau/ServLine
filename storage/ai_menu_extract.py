@@ -1,16 +1,22 @@
 # storage/ai_menu_extract.py
 """
-Claude API Menu Extraction — sends raw OCR text to Claude for structured extraction.
+Claude API Menu Extraction — multimodal menu item extraction.
 
-Replaces the heuristic parser for draft item creation. Claude understands menu
-context (names, descriptions, prices, categories) far better than regex/heuristics
-can, especially with noisy OCR input.
+Primary mode (Day 102.5): sends menu IMAGE as primary input + Tesseract OCR text
+as a secondary hint.  Claude reads the image directly, using the OCR text only to
+disambiguate ambiguous regions.  This eliminates the root cause of garbled OCR
+being faithfully extracted as garbage.
+
+Fallback mode: text-only extraction when no image is available (original behavior).
 
 Usage:
     from storage.ai_menu_extract import extract_menu_items_via_claude
 
+    # Multimodal (preferred):
+    items = extract_menu_items_via_claude(raw_ocr_text, image_path="/path/to/menu.jpg")
+
+    # Text-only fallback:
     items = extract_menu_items_via_claude(raw_ocr_text)
-    # Returns list of dicts: [{name, description, price, category}, ...]
 
 Requires ANTHROPIC_API_KEY in environment (loaded via .env).
 """
@@ -24,6 +30,22 @@ import re
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
+
+# Lazy import — encode_menu_images is only needed when an image is provided
+_encode_menu_images = None
+
+
+def _get_encoder():
+    """Lazy-load encode_menu_images from ai_vision_verify to avoid circular imports."""
+    global _encode_menu_images
+    if _encode_menu_images is not None:
+        return _encode_menu_images
+    try:
+        from .ai_vision_verify import encode_menu_images
+        _encode_menu_images = encode_menu_images
+        return _encode_menu_images
+    except Exception:
+        return None
 
 # ---------------------------------------------------------------------------
 # Claude API client (lazy init)
@@ -51,7 +73,8 @@ def _get_client():
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
-_SYSTEM_PROMPT = """\
+# -- Text-only prompt (fallback when no image available) -----------------------
+_SYSTEM_PROMPT_TEXT_ONLY = """\
 You are a restaurant menu data extraction expert. You receive raw OCR text from \
 a scanned restaurant menu. The text may contain OCR artifacts, garbled characters, \
 merged words, and formatting noise.
@@ -84,8 +107,60 @@ Rules:
    No markdown, no explanation, just the JSON object.\
 """
 
+# -- Multimodal prompt (image-first, OCR text as hint) -------------------------
+_SYSTEM_PROMPT_MULTIMODAL = """\
+You are a restaurant menu data extraction expert. You receive:
+1. An image of a restaurant menu (PRIMARY — read this directly)
+2. OCR text extracted from the same image (SECONDARY — use as a hint only)
+
+IMPORTANT: Read item names, prices, and descriptions directly from the menu image. \
+The OCR text may contain garbled characters, merged words, and artifacts. Use it \
+only to disambiguate hard-to-read areas — never trust it over what you can clearly \
+see in the image.
+
+Your job is to extract every real menu item and return structured JSON.
+
+Rules:
+1. Extract ONLY actual menu items that a customer can order. Skip:
+   - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
+   - Topping/ingredient lists (e.g., "Pepperoni, Sausage, Bacon, Ham")
+   - Sauce choices (e.g., "Choice of Sauce: Red, White, Pesto")
+   - Size headers (e.g., "10 inch  12 inch  16 inch")
+   - Informational text (e.g., "All pizzas come with mozzarella")
+   - Phone numbers, addresses, hours
+
+2. For each item, provide:
+   - "name": Clean, properly capitalized item name as shown on the menu. Use title case.
+   - "description": Brief description if ingredients/details are listed. Null if none.
+   - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
+   - "category": One of these categories: "Pizza", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", or "Other".
+   - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
+
+3. Price association:
+   - Prices often appear AFTER item names, sometimes on the next line
+   - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
+   - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
+
+4. Output ONLY valid JSON: {"items": [...]}
+   No markdown, no explanation, just the JSON object.\
+"""
+
 _USER_PROMPT_TEMPLATE = """\
 Extract menu items from this OCR text:
+
+---
+{ocr_text}
+---
+
+Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": []}}]}}"""
+
+_USER_PROMPT_MULTIMODAL_TEMPLATE = """\
+Extract every menu item from the menu image above. \
+Read names, prices, and descriptions directly from the image.
+
+The following OCR text was extracted from the same image and may help \
+disambiguate hard-to-read areas, but DO NOT trust it blindly — the image \
+is the source of truth:
 
 ---
 {ocr_text}
@@ -100,13 +175,21 @@ Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "
 def extract_menu_items_via_claude(
     ocr_text: str,
     *,
+    image_path: Optional[str] = None,
     model: str = "claude-sonnet-4-5-20250929",
     max_tokens: int = 16000,
 ) -> Optional[List[Dict[str, Any]]]:
-    """Send raw OCR text to Claude API and get structured menu items back.
+    """Extract structured menu items via Claude API.
+
+    Multimodal mode (preferred): when *image_path* is provided and the image
+    can be encoded, the menu image is sent as the primary input and the OCR
+    text is included only as a disambiguation hint.
+
+    Text-only mode (fallback): when no image is available, the raw OCR text
+    is sent as the sole input (original Day 96 behaviour).
 
     Returns a list of item dicts on success, or None if the API is unavailable
-    or the call fails (so the caller can fall back to the heuristic pipeline).
+    or the call fails (so the caller can fall back gracefully).
     """
     client = _get_client()
     if client is None:
@@ -114,7 +197,12 @@ def extract_menu_items_via_claude(
         return None
 
     if not ocr_text or not ocr_text.strip():
-        return None
+        # In multimodal mode we still need *some* text to include as hint;
+        # if the OCR produced nothing, send a minimal placeholder.
+        if image_path:
+            ocr_text = "(OCR produced no text)"
+        else:
+            return None
 
     # Truncate extremely long text to stay within token limits
     # ~4 chars per token, leave room for system prompt + response
@@ -123,15 +211,52 @@ def extract_menu_items_via_claude(
     if len(text) > max_chars:
         text = text[:max_chars] + "\n[... truncated ...]"
 
+    # --- Determine mode: multimodal vs text-only ---
+    image_blocks: List[Dict[str, str]] = []
+    multimodal = False
+    if image_path:
+        encoder = _get_encoder()
+        if encoder:
+            image_blocks = encoder(image_path)
+        if image_blocks:
+            multimodal = True
+            log.info("Call 1 multimodal: %d image(s) + OCR hint (%d chars)",
+                     len(image_blocks), len(text))
+        else:
+            log.info("Call 1: image encode failed, falling back to text-only")
+
+    # --- Build messages ---
+    if multimodal:
+        system_prompt = _SYSTEM_PROMPT_MULTIMODAL
+        # Images first, then text prompt
+        content: List[Dict[str, Any]] = []
+        for img in image_blocks:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img["media_type"],
+                    "data": img["data"],
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": _USER_PROMPT_MULTIMODAL_TEMPLATE.format(ocr_text=text),
+        })
+        messages = [{"role": "user", "content": content}]
+    else:
+        system_prompt = _SYSTEM_PROMPT_TEXT_ONLY
+        messages = [
+            {"role": "user", "content": _USER_PROMPT_TEMPLATE.format(ocr_text=text)},
+        ]
+
     try:
         message = client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=0,
-            system=_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": _USER_PROMPT_TEMPLATE.format(ocr_text=text)},
-            ],
+            system=system_prompt,
+            messages=messages,
         )
 
         # Extract text from response
@@ -174,7 +299,8 @@ def extract_menu_items_via_claude(
                 "sizes": _normalize_sizes(it.get("sizes")),
             })
 
-        log.info("Claude extracted %d menu items", len(result))
+        mode_label = "multimodal" if multimodal else "text-only"
+        log.info("Claude extracted %d menu items (%s)", len(result), mode_label)
         return result if result else None
 
     except json.JSONDecodeError as e:

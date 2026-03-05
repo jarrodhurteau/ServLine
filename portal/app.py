@@ -2106,7 +2106,9 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 if tracker:
                     tracker.start_step(STEP_CALL1_EXTRACT)
                 from storage.ai_menu_extract import extract_menu_items_via_claude, claude_items_to_draft_rows
-                claude_items = extract_menu_items_via_claude(clean_ocr_text)
+                claude_items = extract_menu_items_via_claude(
+                    clean_ocr_text, image_path=str(saved_file_path)
+                )
                 if claude_items:
                     extraction_strategy = "claude_api"
                     if tracker:

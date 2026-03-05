@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 102.5 (March 5, 2026) — Live Test Fixes + Multimodal Call 1 Plan
+Last Updated: Day 102.5 (March 5, 2026) — Multimodal Call 1 Complete
 
 ================================================================================
 PROJECT MISSION
@@ -1096,8 +1096,8 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102 test suite: 36 cases, 100% pass rate
     Cumulative: 1,705 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
-  Day 102.5: Live Test Fixes + Multimodal Call 1
-  -----------------------------------------------
+  Day 102.5: Live Test Fixes + Multimodal Call 1 *** COMPLETE ***
+  ---------------------------------------------------------------
   [x] Fixed imports.html: removed dead "Finalize with AI" button
       referencing imports_ai_finalize route (removed in Day 100.5)
   [x] Fixed draft_editor.html: variant toggle dropdown not working
@@ -1110,11 +1110,21 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
         "Vals" category (garbled), "Fresh Soups & Buffalo Wings" merged category
       - Call 2 + Call 3 are multimodal (receive image) but can only fix items already extracted
       - Root cause: Tesseract garble is fed to Claude as truth, Claude extracts garbage faithfully
-  [ ] Implement multimodal Call 1 (Option A):
-      - Send menu IMAGE as primary input + Tesseract text as secondary hint
-      - Minimal code change to ai_menu_extract.py (add image content block)
-      - Fallback: text-only extraction still works when no image available
-      - Tesseract text kept as hint (free disambiguation signal), not primary source
+  [x] Implement multimodal Call 1:
+      - extract_menu_items_via_claude() now accepts optional image_path= parameter
+      - When image provided + encodes successfully: multimodal mode
+        Image sent as primary input, OCR text as secondary hint
+        New _SYSTEM_PROMPT_MULTIMODAL instructs Claude to read image directly
+        New _USER_PROMPT_MULTIMODAL_TEMPLATE frames OCR as disambiguation aid
+      - When no image or encode fails: text-only fallback (original behaviour)
+        Uses _SYSTEM_PROMPT_TEXT_ONLY (renamed from _SYSTEM_PROMPT)
+      - Reuses encode_menu_images() from ai_vision_verify.py (lazy import)
+      - Empty OCR text + image = "(OCR produced no text)" placeholder
+      - portal/app.py: run_ocr_and_make_draft() passes image_path=str(saved_file_path)
+      - All 3 Claude calls now multimodal: Call 1 (extraction), Call 2 (vision), Call 3 (reconciliation)
+
+    Day 102.5 test suite: 23 cases, 100% pass rate
+    Cumulative: 1,728 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
