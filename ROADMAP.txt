@@ -1126,6 +1126,46 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102.5 test suite: 23 cases, 100% pass rate
     Cumulative: 1,728 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
+  Day 102.6: Opus Upgrade + Goal-Oriented Prompt Rewrite
+  ------------------------------------------------------
+  CONTEXT: Live testing revealed Sonnet produces correct items but misses size
+  variants for non-pizza sections (wings piece counts, burger Regular/Deluxe,
+  calzone Small/Large, wraps multi-column pricing). Root cause: Sonnet follows
+  explicit rules well but doesn't reason about menu layout structure the way
+  Opus does. Over-constraining the prompt with enumerated patterns makes it
+  worse — model matches specific examples instead of understanding the menu.
+
+  PHILOSOPHY SHIFT: Stop micromanaging with rules. Give Opus the goal and trust
+  the model. A concise, goal-oriented prompt outperforms a 150-line rule list.
+
+  [ ] Switch Call 1 model from claude-sonnet-4-5 to claude-opus-4-6
+      - Only Call 1 (extraction) — Call 2 (vision verify) and Call 3
+        (reconciliation) stay on Sonnet (verification tasks, Sonnet is fine)
+      - Cost impact: ~$0.18 more per menu (~$0.93 vs $0.75 for full pipeline)
+      - Negligible against $50/batch price point
+  [ ] Rewrite extraction prompt — goal-oriented, not rule-heavy:
+      - Short system prompt: "You are a POS import expert. Extract every
+        orderable item with ALL price variants exactly as shown on the menu."
+      - Trust Opus to understand menu structure without enumerating every
+        pattern (Regular/Deluxe columns, piece counts, size grids, etc.)
+      - Keep only essential structural guidance: JSON output format, category
+        list, POS-ready splitting, toppings/sauces as individual items
+      - Remove: prescriptive size pattern enumeration (a-f), verbose price
+        association rules, OCR typo examples — Opus doesn't need hand-holding
+  [ ] Consolidate prompts: single _SYSTEM_PROMPT used for both multimodal
+      and text-only modes (multimodal preamble + shared extraction goal)
+  [ ] Live test with same menu image — verify:
+      - Wings: piece count sizes (10 pc, 20 pc, 30 pc, 50 pc + w/ Fries)
+      - Burgers: Regular/Deluxe sizes
+      - Melts: Regular/Deluxe sizes
+      - Calzones: Small/Large sizes
+      - Wraps: multi-column pricing captured
+      - Sauces: wing sauces extracted as individual items
+      - Categories: no merged headings ("Fresh Soups & Buffalo Wings" split)
+      - Descriptions: no fabricated text
+  [ ] Update tests for new model constant and prompt structure
+  [ ] Run full test suite — all 1,728+ tests pass
+
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
   [ ] Wire Claude's self-reported confidence as signal #6 in semantic_confidence.py

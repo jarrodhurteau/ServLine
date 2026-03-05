@@ -71,6 +71,89 @@ def _get_client():
 
 
 # ---------------------------------------------------------------------------
+# Shared extraction rules (used in both text-only and multimodal prompts)
+# ---------------------------------------------------------------------------
+_EXTRACTION_RULES = """\
+Rules:
+1. Extract ONLY actual menu items that a customer can order. Skip:
+   - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
+   - Size headers (e.g., "10 inch  12 inch  16 inch")
+   - Informational text (e.g., "All pizzas come with mozzarella")
+   - Phone numbers, addresses, hours
+
+2. POS-ready item splitting:
+   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
+split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
+same price. POS systems need one button per orderable product.
+   - Similarly, "Grilled or Fried Calamari" -> two items: "Grilled Calamari" and \
+"Fried Calamari".
+
+3. Toppings/add-ons as individual items:
+   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
+Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
+Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
+   - Each topping item gets the same per-size prices from the "Each Topping Add" \
+line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
+grid, every individual topping gets those exact prices as sizes.
+   - Category for all toppings: "Toppings".
+   - Do the same for veggie toppings, calzone toppings, etc.
+
+4. Sauces, dressings, and dipping options as individual items:
+   - Wing sauce flavors (e.g., "Hot", "Mild", "BBQ", "Honey BBQ", "Garlic Parmesan", \
+"Teriyaki") should each be a SEPARATE item: "Hot Sauce", "Mild Sauce", "BBQ Sauce", etc.
+   - Salad dressings (e.g., "Ranch", "Blue Cheese", "Caesar", "Italian") should each \
+be a SEPARATE item: "Ranch Dressing", "Blue Cheese Dressing", etc.
+   - Category for all sauces/dressings: "Sauces".
+   - Price is 0 if no extra charge, otherwise use the listed price.
+
+5. For each item, provide:
+   - "name": Clean, properly capitalized item name. Fix OCR typos \
+(e.g., "Homburg" -> "Hamburg", "88Q" -> "BBQ", "Tomatoe" -> "Tomato"). Use title case.
+   - "description": Only include descriptions that ACTUALLY appear on the menu next \
+to the item. Do NOT infer or fabricate descriptions. Null if none shown on menu. \
+Always null for toppings and sauces.
+   - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE \
+price if multiple sizes exist. 0 if no price is visible.
+   - "category": Use ONLY one of these categories -- do NOT create new ones or merge \
+section headings:
+     "Pizza", "Toppings", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", \
+"Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sauces", "Sides", \
+"Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", \
+or "Other".
+     IMPORTANT: If a menu section heading combines multiple concepts (e.g., \
+"Fresh Soups & Buffalo Wings"), split items into the correct individual categories \
+("Soups" for soup items, "Wings" for wing items). Never use the raw section heading \
+as a category.
+   - "sizes": Array of size/price pairs when an item has MULTIPLE prices. \
+Each entry: {"label": "...", "price": 12.95}. Empty array ONLY if truly single-priced.
+     IMPORTANT: Many menu sections use multi-price layouts. You MUST create sizes for ALL of these patterns:
+     a) Pizza size grids: {"label": "10\\"", "price": 8.00}, {"label": "12\\"", "price": 11.50}, etc.
+     b) Piece-count pricing (wings, tenders, nuggets): {"label": "10 pc", "price": 9.95}, \
+{"label": "20 pc", "price": 17.95}, {"label": "30 pc", "price": 25.95}, {"label": "50 pc", "price": 39.95}
+     c) Regular/Deluxe columns (burgers, melts, sandwiches): {"label": "Regular", "price": 9.00}, \
+{"label": "Deluxe", "price": 13.00}
+     d) Small/Large columns (calzones, etc.): {"label": "Small", "price": 9.50}, {"label": "Large", "price": 12.95}
+     e) "w/ Fries" variants: if wings/tenders show separate "w/ Fries" prices, include them: \
+{"label": "10 pc", "price": 9.95}, {"label": "10 pc w/ Fries", "price": 13.50}
+     f) Any other two-column or multi-column price layout: use the column headers as labels.
+     If an item has 2+ prices on the menu, it MUST have a sizes array -- never flatten to a single price.
+
+6. Price association:
+   - Prices often appear AFTER item names, sometimes on the next line
+   - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
+   - Column headers like "Regular  Deluxe" or "Naked  W/ Fries" apply to ALL items below until a new section
+   - Prices like "17.95  25.95  34.75" map left-to-right to the size/column headers above
+   - "$4.75" could be an OCR error for "$34.75" if context suggests higher prices
+   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
+ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
+   - Piece count sections (e.g., "10 PCS.....  15.00  W/ FRIES  17.95") — the piece count \
+is the label, and "w/ Fries" is a second size variant at the higher price.
+
+7. Output ONLY valid JSON: {"items": [...]}
+   No markdown, no explanation, just the JSON object."""
+
+
+# ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 # -- Text-only prompt (fallback when no image available) -----------------------
@@ -83,113 +166,24 @@ Your job is to extract every real menu item and return structured JSON. \
 The output will be imported into a Point-of-Sale (POS) system, so each item must \
 be a distinct orderable product.
 
-Rules:
-1. Extract ONLY actual menu items that a customer can order. Skip:
-   - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
-   - Sauce choices (e.g., "Choice of Sauce: Red, White, Pesto")
-   - Size headers (e.g., "10 inch  12 inch  16 inch")
-   - Informational text (e.g., "All pizzas come with mozzarella")
-   - Phone numbers, addresses, hours
-
-2. POS-ready item splitting:
-   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
-split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
-same price. POS systems need one button per orderable product.
-   - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
-"Fried Calamari".
-
-3. Toppings/add-ons as individual items:
-   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
-Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
-Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
-   - Each topping item gets the same per-size prices from the "Each Topping Add" \
-line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
-grid, every individual topping gets those exact prices as sizes.
-   - Category for all toppings: "Toppings".
-   - Do the same for veggie toppings, calzone toppings, etc.
-
-4. For each item, provide:
-   - "name": Clean, properly capitalized item name. Fix OCR typos (e.g., "Homburg" → "Hamburg", "88Q" → "BBQ", "Tomatoe" → "Tomato"). Use title case.
-   - "description": Null for toppings. Brief description for other items if listed. Null if none.
-   - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
-   - "category": One of these categories: "Pizza", "Toppings", "Appetizers", "Salads", \
-"Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", \
-"Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", \
-"Subs", "Platters", or "Other".
-   - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
-
-5. Price association:
-   - Prices often appear AFTER item names, sometimes on the next line
-   - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
-   - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
-   - "$4.75" could be an OCR error for "$34.75" if context suggests higher prices
-   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
-ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
-
-6. Output ONLY valid JSON: {"items": [...]}
-   No markdown, no explanation, just the JSON object.\
-"""
+""" + _EXTRACTION_RULES
 
 # -- Multimodal prompt (image-first, OCR text as hint) -------------------------
 _SYSTEM_PROMPT_MULTIMODAL = """\
 You are a restaurant menu data extraction expert. You receive:
-1. An image of a restaurant menu (PRIMARY — read this directly)
-2. OCR text extracted from the same image (SECONDARY — use as a hint only)
+1. An image of a restaurant menu (PRIMARY -- read this directly)
+2. OCR text extracted from the same image (SECONDARY -- use as a hint only)
 
 IMPORTANT: Read item names, prices, and descriptions directly from the menu image. \
 The OCR text may contain garbled characters, merged words, and artifacts. Use it \
-only to disambiguate hard-to-read areas — never trust it over what you can clearly \
+only to disambiguate hard-to-read areas -- never trust it over what you can clearly \
 see in the image.
 
 Your job is to extract every real menu item and return structured JSON. \
 The output will be imported into a Point-of-Sale (POS) system, so each item must \
 be a distinct orderable product.
 
-Rules:
-1. Extract ONLY actual menu items that a customer can order. Skip:
-   - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
-   - Sauce choices (e.g., "Choice of Sauce: Red, White, Pesto")
-   - Size headers (e.g., "10 inch  12 inch  16 inch")
-   - Informational text (e.g., "All pizzas come with mozzarella")
-   - Phone numbers, addresses, hours
-
-2. POS-ready item splitting:
-   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
-split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
-same price. POS systems need one button per orderable product.
-   - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
-"Fried Calamari".
-
-3. Toppings/add-ons as individual items:
-   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
-Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
-Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
-   - Each topping item gets the same per-size prices from the "Each Topping Add" \
-line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
-grid, every individual topping gets those exact prices as sizes.
-   - Category for all toppings: "Toppings".
-   - Do the same for veggie toppings, calzone toppings, etc.
-
-4. For each item, provide:
-   - "name": Clean, properly capitalized item name as shown on the menu. Use title case.
-   - "description": Null for toppings. Brief description for other items if listed. Null if none.
-   - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
-   - "category": One of these categories: "Pizza", "Toppings", "Appetizers", "Salads", \
-"Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", \
-"Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", \
-"Subs", "Platters", or "Other".
-   - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
-
-5. Price association:
-   - Prices often appear AFTER item names, sometimes on the next line
-   - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
-   - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
-   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
-ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
-
-6. Output ONLY valid JSON: {"items": [...]}
-   No markdown, no explanation, just the JSON object.\
-"""
+""" + _EXTRACTION_RULES
 
 _USER_PROMPT_TEMPLATE = """\
 Extract menu items from this OCR text:
@@ -205,7 +199,7 @@ Extract every menu item from the menu image above. \
 Read names, prices, and descriptions directly from the image.
 
 The following OCR text was extracted from the same image and may help \
-disambiguate hard-to-read areas, but DO NOT trust it blindly — the image \
+disambiguate hard-to-read areas, but DO NOT trust it blindly -- the image \
 is the source of truth:
 
 ---
