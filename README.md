@@ -1635,9 +1635,8 @@ ServLine now has:
   - Day 102 test suite: 36 cases, 100% pass rate
   - Cumulative: 1,705 passed (excl. Day 70 fixture errors)
 
-- **Live Test Fixes + Multimodal Call 1 Plan (Day 102.5):**
+- **Live Test Fixes + Multimodal Call 1 (Day 102.5):**
   - Fixed imports.html: removed dead "Finalize with AI" button (route removed in Day 100.5)
   - Fixed draft_editor.html: variant toggle dropdown not responding (inline style override)
-  - Live 200-item menu test: identified root cause of extraction errors — Call 1 is text-only,
-    receives garbled Tesseract OCR text instead of menu image
-  - Decision: Day 103 will make Call 1 multimodal (image primary + OCR text as hint)
+  - Live 200-item menu test: root cause — Call 1 is text-only, receives garbled Tesseract OCR
+  - Multimodal Call 1: send menu image as primary input + Tesseract text as secondary hint

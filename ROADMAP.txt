@@ -1096,8 +1096,8 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102 test suite: 36 cases, 100% pass rate
     Cumulative: 1,705 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
-  Day 102.5: Live Test Fixes + Multimodal Call 1 Plan *** COMPLETE ***
-  -------------------------------------------------------------------
+  Day 102.5: Live Test Fixes + Multimodal Call 1
+  -----------------------------------------------
   [x] Fixed imports.html: removed dead "Finalize with AI" button
       referencing imports_ai_finalize route (removed in Day 100.5)
   [x] Fixed draft_editor.html: variant toggle dropdown not working
@@ -1110,8 +1110,8 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
         "Vals" category (garbled), "Fresh Soups & Buffalo Wings" merged category
       - Call 2 + Call 3 are multimodal (receive image) but can only fix items already extracted
       - Root cause: Tesseract garble is fed to Claude as truth, Claude extracts garbage faithfully
-  [x] Decision: Make Call 1 multimodal (Day 103)
-      - Option A chosen: send menu IMAGE as primary input + Tesseract text as secondary hint
+  [ ] Implement multimodal Call 1 (Option A):
+      - Send menu IMAGE as primary input + Tesseract text as secondary hint
       - Minimal code change to ai_menu_extract.py (add image content block)
       - Fallback: text-only extraction still works when no image available
       - Tesseract text kept as hint (free disambiguation signal), not primary source
