@@ -86,7 +86,6 @@ be a distinct orderable product.
 Rules:
 1. Extract ONLY actual menu items that a customer can order. Skip:
    - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
-   - Topping/ingredient lists (e.g., "Pepperoni, Sausage, Bacon, Ham")
    - Sauce choices (e.g., "Choice of Sauce: Red, White, Pesto")
    - Size headers (e.g., "10 inch  12 inch  16 inch")
    - Informational text (e.g., "All pizzas come with mozzarella")
@@ -99,14 +98,27 @@ same price. POS systems need one button per orderable product.
    - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
 "Fried Calamari".
 
-3. For each item, provide:
+3. Toppings/add-ons as individual items:
+   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
+Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
+Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
+   - Each topping item gets the same per-size prices from the "Each Topping Add" \
+line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
+grid, every individual topping gets those exact prices as sizes.
+   - Category for all toppings: "Toppings".
+   - Do the same for veggie toppings, calzone toppings, etc.
+
+4. For each item, provide:
    - "name": Clean, properly capitalized item name. Fix OCR typos (e.g., "Homburg" → "Hamburg", "88Q" → "BBQ", "Tomatoe" → "Tomato"). Use title case.
-   - "description": Brief description if ingredients/details are listed. Null if none.
+   - "description": Null for toppings. Brief description for other items if listed. Null if none.
    - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
-   - "category": One of these categories: "Pizza", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", or "Other".
+   - "category": One of these categories: "Pizza", "Toppings", "Appetizers", "Salads", \
+"Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", \
+"Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", \
+"Subs", "Platters", or "Other".
    - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
 
-4. Price association:
+5. Price association:
    - Prices often appear AFTER item names, sometimes on the next line
    - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
    - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
@@ -114,7 +126,7 @@ same price. POS systems need one button per orderable product.
    - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
 ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
 
-5. Output ONLY valid JSON: {"items": [...]}
+6. Output ONLY valid JSON: {"items": [...]}
    No markdown, no explanation, just the JSON object.\
 """
 
@@ -136,7 +148,6 @@ be a distinct orderable product.
 Rules:
 1. Extract ONLY actual menu items that a customer can order. Skip:
    - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
-   - Topping/ingredient lists (e.g., "Pepperoni, Sausage, Bacon, Ham")
    - Sauce choices (e.g., "Choice of Sauce: Red, White, Pesto")
    - Size headers (e.g., "10 inch  12 inch  16 inch")
    - Informational text (e.g., "All pizzas come with mozzarella")
@@ -149,21 +160,34 @@ same price. POS systems need one button per orderable product.
    - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
 "Fried Calamari".
 
-3. For each item, provide:
+3. Toppings/add-ons as individual items:
+   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
+Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
+Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
+   - Each topping item gets the same per-size prices from the "Each Topping Add" \
+line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
+grid, every individual topping gets those exact prices as sizes.
+   - Category for all toppings: "Toppings".
+   - Do the same for veggie toppings, calzone toppings, etc.
+
+4. For each item, provide:
    - "name": Clean, properly capitalized item name as shown on the menu. Use title case.
-   - "description": Brief description if ingredients/details are listed. Null if none.
+   - "description": Null for toppings. Brief description for other items if listed. Null if none.
    - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
-   - "category": One of these categories: "Pizza", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", or "Other".
+   - "category": One of these categories: "Pizza", "Toppings", "Appetizers", "Salads", \
+"Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", \
+"Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", \
+"Subs", "Platters", or "Other".
    - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
 
-4. Price association:
+5. Price association:
    - Prices often appear AFTER item names, sometimes on the next line
    - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
    - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
    - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
 ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
 
-5. Output ONLY valid JSON: {"items": [...]}
+6. Output ONLY valid JSON: {"items": [...]}
    No markdown, no explanation, just the JSON object.\
 """
 
@@ -238,14 +262,21 @@ def extract_menu_items_via_claude(
     multimodal = False
     if image_path:
         encoder = _get_encoder()
+        print(f"[Call 1] image_path={image_path}, encoder={'loaded' if encoder else 'FAILED'}")
         if encoder:
-            image_blocks = encoder(image_path)
+            try:
+                image_blocks = encoder(image_path)
+                print(f"[Call 1] encode_menu_images returned {len(image_blocks)} image block(s)")
+            except Exception as _enc_err:
+                print(f"[Call 1] encode_menu_images EXCEPTION: {_enc_err}")
+                image_blocks = []
         if image_blocks:
             multimodal = True
-            log.info("Call 1 multimodal: %d image(s) + OCR hint (%d chars)",
-                     len(image_blocks), len(text))
+            print(f"[Call 1] MULTIMODAL mode: {len(image_blocks)} image(s) + OCR hint ({len(text)} chars)")
         else:
-            log.info("Call 1: image encode failed, falling back to text-only")
+            print(f"[Call 1] TEXT-ONLY fallback (image encode failed or returned empty)")
+    else:
+        print(f"[Call 1] TEXT-ONLY mode (no image_path provided)")
 
     # --- Build messages ---
     if multimodal:

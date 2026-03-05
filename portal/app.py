@@ -2282,6 +2282,18 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
                 if draft_id and hasattr(drafts_store, "upsert_draft_items"):
                     if items:
+                        # Clear any heuristic items loaded by _get_or_create_draft_for_job
+                        # before inserting Claude pipeline items.  Without this, garbage
+                        # items from the Tesseract heuristic path persist in the draft.
+                        try:
+                            existing = drafts_store.get_draft_items(draft_id, include_variants=False)
+                            if existing:
+                                old_ids = [it["id"] for it in existing if "id" in it]
+                                if old_ids:
+                                    drafts_store.delete_draft_items(draft_id, old_ids)
+                                    print(f"[Draft] Cleared {len(old_ids)} heuristic items before Claude upsert")
+                        except Exception as _clear_err:
+                            print(f"[Draft] Warning: could not clear old items: {_clear_err}")
                         drafts_store.upsert_draft_items(draft_id, items)
 
                 if draft_id and hasattr(drafts_store, "save_ocr_debug"):
