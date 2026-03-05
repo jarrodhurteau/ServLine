@@ -2075,7 +2075,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         try:
             from storage.pipeline_metrics import (
                 PipelineTracker, STEP_OCR_TEXT, STEP_CALL1_EXTRACT,
-                STEP_CALL2_VISION, STEP_SEMANTIC,
+                STEP_CALL2_VISION, STEP_SEMANTIC, STEP_CALL3_RECONCILE,
             )
             tracker = PipelineTracker()
         except Exception:
@@ -2182,6 +2182,95 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     tracker.fail_step(STEP_SEMANTIC, str(_sem_err))
                 print(f"[Draft] Semantic pipeline failed: {_sem_err}")
 
+        # =====================================================================
+        # CALL 3: TARGETED RECONCILIATION — Sprint 11.2 (Day 102)
+        # Reviews ONLY items flagged by semantic pipeline (3-10 items max).
+        # Surgical, cheap Claude call that re-checks flagged items against
+        # the original menu image.  Re-scores confidence after corrections.
+        # =====================================================================
+        reconcile_result = None
+        if items and semantic_result and semantic_result.get("items"):
+            try:
+                if tracker:
+                    tracker.start_step(STEP_CALL3_RECONCILE)
+                from storage.ai_reconcile import (
+                    collect_flagged_items, reconcile_flagged_items,
+                    merge_reconciled_items,
+                )
+                from storage.semantic_confidence import (
+                    score_semantic_confidence as _rescore,
+                    classify_confidence_tiers as _reclassify,
+                )
+
+                # Collect items flagged by semantic pipeline
+                flagged = collect_flagged_items(semantic_result["items"])
+
+                if flagged:
+                    reconcile_result = reconcile_flagged_items(
+                        str(saved_file_path), flagged
+                    )
+                    if (not reconcile_result.get("skipped")
+                            and not reconcile_result.get("error")):
+                        # Merge corrections back into the semantic-processed items
+                        # (which are deep copies, not the draft_items list itself)
+                        sem_items = semantic_result["items"]
+                        sem_items, merge_changes = merge_reconciled_items(
+                            sem_items, reconcile_result["items"]
+                        )
+                        reconcile_result["merge_changes"] = merge_changes
+
+                        # Re-score confidence after reconciliation corrections
+                        _rescore(sem_items)
+                        _reclassify(sem_items)
+
+                        # Apply reconciliation field fixes back to draft items
+                        # Draft items are matched by position (1:1 with sem_items)
+                        for draft_it, sem_it in zip(items, sem_items):
+                            for field in ("name", "category", "description"):
+                                new_val = sem_it.get(field)
+                                if new_val and new_val != draft_it.get(field):
+                                    draft_it[field] = new_val
+                            # Price: sem_items store price_cents directly
+                            new_price = sem_it.get("price_cents")
+                            if new_price and new_price != draft_it.get("price_cents"):
+                                draft_it["price_cents"] = new_price
+                            # Confidence: convert 0-100 back from 0-1 semantic scale
+                            new_conf = sem_it.get("confidence")
+                            if new_conf is not None:
+                                if isinstance(new_conf, (int, float)) and new_conf <= 1.0:
+                                    draft_it["confidence"] = int(round(new_conf * 100))
+                                else:
+                                    draft_it["confidence"] = int(round(new_conf))
+
+                        confirmed = reconcile_result.get("items_confirmed", 0)
+                        corrected = reconcile_result.get("items_corrected", 0)
+                        not_found = reconcile_result.get("items_not_found", 0)
+                        if tracker:
+                            tracker.end_step(
+                                STEP_CALL3_RECONCILE, items=len(flagged),
+                                confirmed=confirmed, corrected=corrected,
+                                not_found=not_found,
+                                confidence=reconcile_result.get("confidence", 0),
+                            )
+                        print(f"[Draft] Call 3 (Reconciliation): {len(flagged)} flagged → "
+                              f"{confirmed} confirmed, {corrected} corrected, "
+                              f"{not_found} not_found")
+                    else:
+                        skip = (reconcile_result.get("skip_reason")
+                                or reconcile_result.get("error", "unknown"))
+                        if tracker:
+                            tracker.skip_step(STEP_CALL3_RECONCILE, skip)
+                        print(f"[Draft] Call 3 skipped ({skip})")
+                else:
+                    reconcile_result = {"skipped": True, "skip_reason": "no_flagged_items"}
+                    if tracker:
+                        tracker.skip_step(STEP_CALL3_RECONCILE, "no_flagged_items")
+                    print("[Draft] Call 3 skipped (no flagged items)")
+            except Exception as _recon_err:
+                if tracker:
+                    tracker.fail_step(STEP_CALL3_RECONCILE, str(_recon_err))
+                print(f"[Draft] Call 3 (Reconciliation) failed: {_recon_err}")
+
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         # status="done" is set AFTER items are in the DB so auto-redirect
         # lands on a populated editor.
@@ -2220,6 +2309,20 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                             "repairs_applied": semantic_result.get("repairs_applied", 0),
                             "repair_results": semantic_result.get("repair_results", {}),
                             "items_metadata": semantic_result.get("items_metadata", []),
+                        }
+                    if reconcile_result is not None:
+                        payload["targeted_reconciliation"] = {
+                            "skipped": reconcile_result.get("skipped", False),
+                            "skip_reason": reconcile_result.get("skip_reason"),
+                            "error": reconcile_result.get("error"),
+                            "confidence": reconcile_result.get("confidence", 0.0),
+                            "model": reconcile_result.get("model"),
+                            "items_confirmed": reconcile_result.get("items_confirmed", 0),
+                            "items_corrected": reconcile_result.get("items_corrected", 0),
+                            "items_not_found": reconcile_result.get("items_not_found", 0),
+                            "changes": reconcile_result.get("changes", []),
+                            "merge_changes": reconcile_result.get("merge_changes", []),
+                            "notes": reconcile_result.get("notes"),
                         }
                     if tracker:
                         tracker.strategy = extraction_strategy

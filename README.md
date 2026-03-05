@@ -1612,3 +1612,25 @@ ServLine now has:
   - Net: ~390 LOC removed, ~320 LOC added (template + route + tests)
   - Day 100.5 test suite: 26 cases, 100% pass rate
   - Cumulative: 1,635 passed (excl. Day 70 fixture errors)
+
+- **Targeted Reconciliation Module (Day 101):**
+  - New `storage/ai_reconcile.py` (~637 LOC): Claude Call 3 targeted reconciliation
+  - Surgically reviews only 3-10 items flagged by semantic pipeline against original menu image
+  - `collect_flagged_items()`: filter/prioritize by tier (reject→low→medium), cap at 10
+  - `reconcile_flagged_items()`: send image + flagged items → confirmed/corrected/not_found
+  - `merge_reconciled_items()`: merge corrections back (confirmed: +5 confidence, corrected: set 92)
+  - Graceful skip on no flagged items, no API key, bad image; error handling returns originals
+  - Day 101 test suite: 34 cases, 100% pass rate
+  - Sprint 11.2 start (Phase 11: Production AI Pipeline)
+
+- **Call 3 Pipeline Integration (Day 102):**
+  - Wired `reconcile_flagged_items()` into `run_ocr_and_make_draft()` as pipeline Step 5
+  - Full 5-stage flow: OCR → Call 1 → Call 2 (Vision) → Semantic → Call 3 (Reconciliation)
+  - Gate: only runs when semantic pipeline flagged items (skip if zero flags)
+  - Re-scores confidence after corrections (score + classify tiers)
+  - Corrected fields propagate back to draft items (name, price, category, description)
+  - Debug payload: new `targeted_reconciliation` block with full change log
+  - Pipeline metrics: `STEP_CALL3_RECONCILE` tracked in success/skip/fail scenarios
+  - Graceful degradation: Call 3 failure never blocks pipeline
+  - Day 102 test suite: 36 cases, 100% pass rate
+  - Cumulative: 1,705 passed (excl. Day 70 fixture errors)

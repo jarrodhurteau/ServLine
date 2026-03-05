@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 100.5 (March 4, 2026) — Pipeline Cleanup & Debug View
+Last Updated: Day 102 (March 5, 2026) — Call 3 Pipeline Integration
 
 ================================================================================
 PROJECT MISSION
@@ -1051,15 +1051,50 @@ KNOWN ISSUES (discovered during live testing, Mar 4 2026)
 
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................
-  [ ] New reconcile_flagged_items() function in storage/
-      - Input: original menu image + ONLY items flagged by semantic pipeline + reasons
-      - Small, cheap, surgical — reviews 3-8 items, not entire menu
-      - Catches what neither Claude alone nor pipeline alone finds
-        (e.g., pipeline flags $9.99 steak as price outlier → Claude re-checks image)
-      - Returns: confirmed or corrected items for flagged subset
-  [ ] Wire into pipeline after semantic pipeline step
-      - Only runs if semantic pipeline flagged items (skip if zero flags)
-      - Re-score confidence after reconciliation
+
+  Day 101: Reconciliation Module Foundation *** COMPLETE ***
+  ----------------------------------------------------------
+  [x] New storage/ai_reconcile.py module (~637 LOC):
+      - collect_flagged_items(): filter/prioritize items by tier (reject→low→medium)
+      - _summarize_item_concerns(): extract human-readable concern strings
+      - _build_reconciliation_prompt(): build multimodal prompt with flagged items + concerns
+      - _parse_reconciliation_response(): JSON parsing with code fence stripping
+      - reconcile_flagged_items(): main entry — image + flagged items → Claude Call 3
+      - merge_reconciled_items(): merge corrections back into full item list
+      - _normalize_reconciled_items(): normalize Claude response items
+      - _compute_reconciliation_changes(): build detailed changes log
+  [x] Constants: MAX_RECONCILE_ITEMS=10, CONFIDENCE_BUMP_CONFIRMED=+5,
+      CONFIDENCE_CORRECTED_VALUE=92
+  [x] Three reconciliation statuses: confirmed, corrected, not_found
+  [x] Graceful skip: no flagged items, no API key, bad image path
+  [x] Error handling: API errors, empty response, bad JSON → return originals
+  [x] Reuses shared Anthropic client from ai_menu_extract.py + encode_menu_images
+      from ai_vision_verify.py
+
+    Day 101 test suite: 34 cases, 100% pass rate
+
+  Day 102: Call 3 Pipeline Integration *** COMPLETE ***
+  -----------------------------------------------------
+  [x] Wired reconciliation into run_ocr_and_make_draft() in portal/app.py:
+      - New pipeline step after semantic pipeline (Step 5 of 5)
+      - Gate: only runs when semantic pipeline produced items with flags
+      - collect_flagged_items() from semantic result → reconcile → merge → re-score
+  [x] Re-score confidence after reconciliation corrections:
+      - score_semantic_confidence() + classify_confidence_tiers() re-run
+      - Corrected fields propagate back to draft items (name, price, category, description)
+      - Confidence values convert between 0-100 (draft) and 0-1 (semantic) scales
+  [x] Debug payload: new "targeted_reconciliation" block with:
+      - skipped, skip_reason, error, confidence, model
+      - items_confirmed, items_corrected, items_not_found
+      - changes, merge_changes, notes
+  [x] Pipeline metrics: STEP_CALL3_RECONCILE tracked in all scenarios
+      - Success: confirmed/corrected/not_found counts + confidence
+      - Skipped: reason logged (no_flagged_items, no_api_key, etc.)
+      - Failed: error message captured
+  [x] Graceful degradation: Call 3 failure never blocks pipeline
+
+    Day 102 test suite: 36 cases, 100% pass rate
+    Cumulative: 1,705 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
