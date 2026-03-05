@@ -1019,6 +1019,36 @@ Day 100.5 — Pipeline Cleanup & Debug View  ✅
   sesssee"). Decision: free tier = manual input only; heuristic path removed
   to protect credibility. Debug view preserved for internal diagnostics.
 
+KNOWN ISSUES (discovered during live testing, Mar 4 2026)
+..........................................................
+  These were identified during a real 200-item pizza menu import after the
+  Day 100.5 pipeline cleanup. The Claude extraction path is dramatically
+  better than the removed heuristic path, but edge cases remain:
+
+  1. Category merging — "Soups" and "Fresh Buffalo Wings" are separate
+     sections on the real menu but Claude merged them into a single
+     "Fresh Soups & Buffalo Wings" category. The extraction prompt needs
+     better guidance on section boundary detection.
+
+  2. Piece-count variants — Wing items came out as separate items per
+     piece count ("12 Pcs Bone-In Wings", "24 Pcs Boneless Wings") instead
+     of recognizing piece counts as size variants of "Buffalo Wings" and
+     "Boneless Wings". The extraction prompt should detect quantity-based
+     pricing tables and emit variants.
+
+  3. Multi-column pricing — The real menu has "plain" and "W/ Fries"
+     price columns for wings. These should become variant axes (e.g.,
+     kind=style, labels="Plain"/"W/ Fries") but are currently lost or
+     partially captured.
+
+  4. Heuristic OCR-only path (ai_preview) — Confirmed completely garbled
+     on this menu (names like "OLVLOd", "YSal", "3ma", "VZZid", category
+     "Vals"). Validates the Day 100.5 decision to remove it. The old
+     segment_document() word-level OCR path produces unusable output.
+
+  Target: Sprint 11.2 prompt engineering + Sprint 11.3 confidence gate
+  should catch and correct issues 1-3 via Claude Call 3 reconciliation.
+
 Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 ....................................................................
   [ ] New reconcile_flagged_items() function in storage/

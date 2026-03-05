@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Day 98 continues Sprint 11.1. New `storage/semantic_bridge.py` module (~200 LOC) bridges Claude-extracted items into the Phase 8 semantic pipeline (cross-item consistency, confidence scoring, tier classification, auto-repair, quality report). Confidence normalization (0-100→0.0-1.0), `_variants`→`variants` rename, and `price_flags` initialization. Wired into `run_ocr_and_make_draft()` — after Strategy 1 (Claude API ± vision) extraction, the full semantic pipeline runs before items are saved to DB. Auto-repairs flow back to draft items. Semantic metadata (quality_grade, tier_counts, per-item confidence) saved to debug payload. 68 new tests, 1,481 total.
+Sprint 11.1 COMPLETE (Days 96-100.5). Full 4-stage pipeline operational: OCR → Claude Call 1 (text extraction) → Claude Call 2 (vision verification) → Semantic pipeline (quality/repair). Day 100.5 removed heuristic AI fallback and legacy JSON fallback — no API key = empty draft for manual input (free tier). New Pipeline Debug view replaces old heuristic preview. Live-tested on real 200-item pizza menu: Claude path produced clean structured items with variants. Known issues logged for Sprint 11.2: category boundary merging (Soups + Wings), piece-count variant detection, multi-column pricing. 1,635 tests pass.
 
 ---
 
@@ -1212,7 +1212,7 @@ ServLine now has:
 
 **AI & Extraction:**
 - ✅ Claude API menu extraction — 106 items from single menu, 90% confidence
-- ✅ Three-strategy extraction: Claude API → Heuristic AI → Legacy JSON
+- ✅ Single-strategy extraction: Claude API only (heuristic/legacy paths removed Day 100.5)
 - ✅ Clean OCR text path (7,736 chars via image_to_string vs 762 chars fragmented)
 - ✅ Price-safe, category-safe AI cleanup (non-hallucinating text surgeon)
 - ✅ Auto-redirect from import view to draft editor on completion
