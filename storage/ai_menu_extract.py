@@ -79,7 +79,9 @@ You are a restaurant menu data extraction expert. You receive raw OCR text from 
 a scanned restaurant menu. The text may contain OCR artifacts, garbled characters, \
 merged words, and formatting noise.
 
-Your job is to extract every real menu item and return structured JSON.
+Your job is to extract every real menu item and return structured JSON. \
+The output will be imported into a Point-of-Sale (POS) system, so each item must \
+be a distinct orderable product.
 
 Rules:
 1. Extract ONLY actual menu items that a customer can order. Skip:
@@ -90,20 +92,29 @@ Rules:
    - Informational text (e.g., "All pizzas come with mozzarella")
    - Phone numbers, addresses, hours
 
-2. For each item, provide:
+2. POS-ready item splitting:
+   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
+split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
+same price. POS systems need one button per orderable product.
+   - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
+"Fried Calamari".
+
+3. For each item, provide:
    - "name": Clean, properly capitalized item name. Fix OCR typos (e.g., "Homburg" → "Hamburg", "88Q" → "BBQ", "Tomatoe" → "Tomato"). Use title case.
    - "description": Brief description if ingredients/details are listed. Null if none.
    - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
    - "category": One of these categories: "Pizza", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", or "Other".
    - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
 
-3. Price association:
+4. Price association:
    - Prices often appear AFTER item names, sometimes on the next line
    - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
    - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
    - "$4.75" could be an OCR error for "$34.75" if context suggests higher prices
+   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
+ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
 
-4. Output ONLY valid JSON: {"items": [...]}
+5. Output ONLY valid JSON: {"items": [...]}
    No markdown, no explanation, just the JSON object.\
 """
 
@@ -118,7 +129,9 @@ The OCR text may contain garbled characters, merged words, and artifacts. Use it
 only to disambiguate hard-to-read areas — never trust it over what you can clearly \
 see in the image.
 
-Your job is to extract every real menu item and return structured JSON.
+Your job is to extract every real menu item and return structured JSON. \
+The output will be imported into a Point-of-Sale (POS) system, so each item must \
+be a distinct orderable product.
 
 Rules:
 1. Extract ONLY actual menu items that a customer can order. Skip:
@@ -129,19 +142,28 @@ Rules:
    - Informational text (e.g., "All pizzas come with mozzarella")
    - Phone numbers, addresses, hours
 
-2. For each item, provide:
+2. POS-ready item splitting:
+   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
+split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
+same price. POS systems need one button per orderable product.
+   - Similarly, "Grilled or Fried Calamari" → two items: "Grilled Calamari" and \
+"Fried Calamari".
+
+3. For each item, provide:
    - "name": Clean, properly capitalized item name as shown on the menu. Use title case.
    - "description": Brief description if ingredients/details are listed. Null if none.
    - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE price if multiple sizes exist. 0 if no price is visible.
    - "category": One of these categories: "Pizza", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", or "Other".
    - "sizes": Array of size/price pairs if the item has multiple sizes. Each entry: {"label": "10\\"", "price": 12.95}. Empty array if single-priced.
 
-3. Price association:
+4. Price association:
    - Prices often appear AFTER item names, sometimes on the next line
    - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
    - Prices like "17.95  25.95  34.75" map left-to-right to the size columns above
+   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
+ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
 
-4. Output ONLY valid JSON: {"items": [...]}
+5. Output ONLY valid JSON: {"items": [...]}
    No markdown, no explanation, just the JSON object.\
 """
 
