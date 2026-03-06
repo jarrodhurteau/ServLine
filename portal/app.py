@@ -2099,54 +2099,68 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             if tracker:
                 tracker.fail_step(STEP_OCR_TEXT, str(_ocr_err))
 
-        # Strategy 1: Claude API extraction (Call 1) + Vision Verification (Call 2)
+        # Strategy 1: Claude API extraction (Call 1) with extended thinking
+        # Day 102.6: Single Opus call with thinking replaces the 3-call pipeline.
+        # Call 2 (vision verify) and Call 3 (reconciliation) are bypassed when
+        # thinking is active — Opus reasons through the menu internally.
         vision_result = None
+        _thinking_active = False
         if clean_ocr_text and not items:
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL1_EXTRACT)
-                from storage.ai_menu_extract import extract_menu_items_via_claude, claude_items_to_draft_rows
+                from storage.ai_menu_extract import (
+                    extract_menu_items_via_claude, claude_items_to_draft_rows,
+                    EXTENDED_THINKING,
+                )
+                _thinking_active = EXTENDED_THINKING
                 claude_items = extract_menu_items_via_claude(
                     clean_ocr_text, image_path=str(saved_file_path)
                 )
                 if claude_items:
-                    extraction_strategy = "claude_api"
                     if tracker:
                         tracker.end_step(STEP_CALL1_EXTRACT, items=len(claude_items))
-                    print(f"[Draft] Strategy 1 (Claude API): {len(claude_items)} items extracted")
+                    print(f"[Draft] Strategy 1 (Claude API): {len(claude_items)} items extracted"
+                          f"{' (with thinking)' if _thinking_active else ''}")
 
-                    # Call 2: Vision verification — send image + extracted items to Claude
-                    # for independent verification against the original menu image
-                    try:
-                        if tracker:
-                            tracker.start_step(STEP_CALL2_VISION)
-                        from storage.ai_vision_verify import verify_menu_with_vision, verified_items_to_draft_rows
-                        vision_result = verify_menu_with_vision(
-                            str(saved_file_path), claude_items
-                        )
-                        if not vision_result.get("skipped") and not vision_result.get("error"):
-                            items = verified_items_to_draft_rows(vision_result["items"])
-                            extraction_strategy = "claude_api+vision"
-                            n_changes = len(vision_result.get("changes", []))
-                            conf = vision_result.get("confidence", 0)
-                            if tracker:
-                                tracker.end_step(STEP_CALL2_VISION, items=len(items),
-                                                 changes=n_changes, confidence=conf)
-                            print(f"[Draft] Call 2 (Vision): {len(items)} items, "
-                                  f"{n_changes} changes, confidence={conf:.2f}")
-                        else:
-                            # Vision skipped or errored — fall back to Call 1 items
-                            items = claude_items_to_draft_rows(claude_items)
-                            skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
-                            if tracker:
-                                tracker.skip_step(STEP_CALL2_VISION, skip)
-                            print(f"[Draft] Call 2 skipped ({skip}), using Call 1 items")
-                    except Exception as _vision_err:
-                        # Vision verification failed entirely — use Call 1 items
+                    if _thinking_active:
+                        # Extended thinking: Opus self-verifies, skip Call 2
                         items = claude_items_to_draft_rows(claude_items)
+                        extraction_strategy = "claude_api+thinking"
                         if tracker:
-                            tracker.fail_step(STEP_CALL2_VISION, str(_vision_err))
-                        print(f"[Draft] Call 2 (Vision) failed: {_vision_err}, using Call 1 items")
+                            tracker.skip_step(STEP_CALL2_VISION, "extended_thinking")
+                        print("[Draft] Call 2 skipped (extended thinking self-verifies)")
+                    else:
+                        # Legacy 3-call mode: Call 2 vision verification
+                        extraction_strategy = "claude_api"
+                        try:
+                            if tracker:
+                                tracker.start_step(STEP_CALL2_VISION)
+                            from storage.ai_vision_verify import verify_menu_with_vision, verified_items_to_draft_rows
+                            vision_result = verify_menu_with_vision(
+                                str(saved_file_path), claude_items
+                            )
+                            if not vision_result.get("skipped") and not vision_result.get("error"):
+                                items = verified_items_to_draft_rows(vision_result["items"])
+                                extraction_strategy = "claude_api+vision"
+                                n_changes = len(vision_result.get("changes", []))
+                                conf = vision_result.get("confidence", 0)
+                                if tracker:
+                                    tracker.end_step(STEP_CALL2_VISION, items=len(items),
+                                                     changes=n_changes, confidence=conf)
+                                print(f"[Draft] Call 2 (Vision): {len(items)} items, "
+                                      f"{n_changes} changes, confidence={conf:.2f}")
+                            else:
+                                items = claude_items_to_draft_rows(claude_items)
+                                skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
+                                if tracker:
+                                    tracker.skip_step(STEP_CALL2_VISION, skip)
+                                print(f"[Draft] Call 2 skipped ({skip}), using Call 1 items")
+                        except Exception as _vision_err:
+                            items = claude_items_to_draft_rows(claude_items)
+                            if tracker:
+                                tracker.fail_step(STEP_CALL2_VISION, str(_vision_err))
+                            print(f"[Draft] Call 2 (Vision) failed: {_vision_err}, using Call 1 items")
                 else:
                     if tracker:
                         tracker.end_step(STEP_CALL1_EXTRACT, items=0)
@@ -2187,11 +2201,17 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         # =====================================================================
         # CALL 3: TARGETED RECONCILIATION — Sprint 11.2 (Day 102)
         # Reviews ONLY items flagged by semantic pipeline (3-10 items max).
-        # Surgical, cheap Claude call that re-checks flagged items against
-        # the original menu image.  Re-scores confidence after corrections.
+        # Day 102.6: Bypassed when extended thinking is active — Opus
+        # already self-verified during Call 1 thinking phase.
         # =====================================================================
         reconcile_result = None
-        if items and semantic_result and semantic_result.get("items"):
+        if _thinking_active and items:
+            # Extended thinking mode: skip Call 3
+            reconcile_result = {"skipped": True, "skip_reason": "extended_thinking"}
+            if tracker:
+                tracker.skip_step(STEP_CALL3_RECONCILE, "extended_thinking")
+            print("[Draft] Call 3 skipped (extended thinking self-verifies)")
+        elif items and semantic_result and semantic_result.get("items"):
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL3_RECONCILE)

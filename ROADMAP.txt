@@ -1179,31 +1179,35 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
       - Called after every API response (success or failure)
   [ ] Keep existing print() statements for quick console visibility
 
-  Step 2: Sonnet 4.6 + adaptive thinking (opt-in flag)
-  ....................................................
+  Step 2: Adaptive thinking (opt-in flag, Sonnet first → Opus fallback)
+  ....................................................................
   [ ] Keep EXTENDED_THINKING = False (default = 3-call Sonnet pipeline)
-  [ ] Add THINKING_MODEL constant = "claude-sonnet-4-6"
+  [ ] Add THINKING_MODEL constant = "claude-sonnet-4-6" (try Sonnet first)
   [ ] When EXTENDED_THINKING = True:
-      - model = THINKING_MODEL (Sonnet 4.6, NOT Opus)
+      - model = THINKING_MODEL
       - thinking = {"type": "adaptive"}
       - temperature = 1
-      - max_tokens = 16000 (Sonnet doesn't need 32k)
+      - max_tokens = 16000
       - Pipeline bypasses Call 2 & 3 (existing portal/app.py logic)
   [ ] Keep the minimal prompt — do NOT tighten it
   [ ] Update tests for new THINKING_MODEL constant
 
   Step 3: Live A/B comparison
   ...........................
-  [ ] Run import with EXTENDED_THINKING = False (3-call Sonnet)
+  [ ] Run import with EXTENDED_THINKING = False (3-call Sonnet 4.5)
       - Record: item count, categories, missing sizes, processing time
-  [ ] Flip EXTENDED_THINKING = True (single-call Sonnet+thinking)
+  [ ] Flip EXTENDED_THINKING = True (single-call Sonnet 4.6 + thinking)
       - Record: same metrics
       - Check debug log file for full Claude response
   [ ] Compare results side-by-side
       - Does thinking mode capture more size variants?
       - Does thinking mode handle multi-column pricing better?
       - Is processing time acceptable (target: under 2 minutes)?
-  [ ] If thinking wins: keep it on. If not: revert flag, investigate log.
+  [ ] If Sonnet thinking has issues (missing items, slow, errors):
+      - Switch THINKING_MODEL to "claude-opus-4-6" and re-test
+      - Opus thinks deeper but slower — acceptable if quality is better
+      - Debug log will show exactly what each model returns
+  [ ] Decision: keep whichever model+mode produces the best results
 
   Step 4: Tests
   .............
