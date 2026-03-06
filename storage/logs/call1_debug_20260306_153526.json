@@ -1,0 +1,33 @@
+{
+  "timestamp": "20260306_153526",
+  "model": "claude-opus-4-6",
+  "thinking_active": true,
+  "multimodal": true,
+  "ocr_text_length": 7736,
+  "image_blocks_count": 1,
+  "api_kwargs": {
+    "model": "claude-opus-4-6",
+    "max_tokens": 32000,
+    "system": "You are extracting menu items from a restaurant menu image for POS import.\nRead the image carefully \u2014 it is the primary source of truth.\nOCR text is provided as a hint but often contains errors \u2014 always trust the image.\n\nExtract every orderable item from this restaurant menu for POS system import.\n\nEach item = one product a customer can order in a POS system.\nSplit compound items: \"Beef or Chicken Empanadas\" \u2192 two separate items.\nIndividual toppings, sauces, and dressings each get their own item.\nSection-wide choices (e.g., \"Naked or Breaded\", \"White or Wheat\") \u2192 size variants on each item, not descriptions.\nSection-wide notes (e.g., \"All sandwiches come with lettuce, tomato...\") \u2192 include in each item's description.\nUse Title Case for names even if the menu is printed in ALL CAPS.\n\nFor each item return:\n- \"name\": exact full name as printed on the menu\n- \"description\": menu description if shown, null otherwise\n- \"price\": price as float, 0 if not visible\n- \"category\": one of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other\n- \"sizes\": [{\"label\": \"...\", \"price\": N.NN}] for items with multiple price points\n\nOutput ONLY valid JSON: {\"items\": [...]}",
+    "temperature": 1,
+    "thinking": {
+      "type": "enabled",
+      "budget_tokens": 10000
+    }
+  },
+  "response": {
+    "stop_reason": "end_turn",
+    "input_tokens": 7079,
+    "output_tokens": 14020,
+    "block_types": [
+      "thinking",
+      "text"
+    ],
+    "thinking_chars": 5055,
+    "response_text_preview": "```json\n{\"items\": [\n  {\"name\": \"Cheese Pizza\", \"description\": null, \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 8.00}, {\"label\": \"12\\\" Set\", \"price\": 11.50}, {\"label\": \"14\\\" Lg\", \"price\": 13.95}, {\"label\": \"Family Size\", \"price\": 22.50}]},\n  {\"name\": \"Each Topping Add\", \"description\": null, \"price\": 0, \"category\": \"Toppings\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 1.50}, {\"label\": \"12\\\" Set\", \"price\": 2.25}, {\"label\": \"14\\\" Lg\", \"price\": 2.75}, {\"label\": \"Family Size\", \"price\": 4.00}]},\n  {\"name\": \"4 Cheese Pizza\", \"description\": \"Provolone, Mozzarella, Parmesan, Ricotta\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 14.75}, {\"label\": \"14\\\" Lg\", \"price\": 16.95}, {\"label\": \"Family Size\", \"price\": 25.95}]},\n  {\"name\": \"Meat Lovers\", \"description\": \"Pepperoni, Sausage, Bacon, Ham & Hamburger\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Set\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Combination\", \"description\": \"Pepperoni, Sausage, Hamburger, Onions, Peppers & Mushrooms\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Set\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Mexican\", \"description\": \"Hamburger, Onions, Hot Peppers & Cheddar Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Set\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Hawaiian\", \"description\": \"Pineapple & Ham, Bacon, Tomato Red or White\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Set\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Gyro Special\", \"description\": \"Gyro Meat, Tomatoes, Onions, Feta Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Set\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50},"
+  },
+  "result": {
+    "parsed_item_count": 114,
+    "error": null
+  }
+}

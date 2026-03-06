@@ -215,8 +215,8 @@ def _normalize_category(cat: str) -> str:
 # ---------------------------------------------------------------------------
 # Extended thinking configuration
 # ---------------------------------------------------------------------------
-EXTENDED_THINKING = False  # Default: 3-call Sonnet pipeline. Set True for single-call thinking.
-THINKING_MODEL = "claude-sonnet-4-6"  # Model used when EXTENDED_THINKING=True
+EXTENDED_THINKING = True  # A/B test: single-call Sonnet 4.6 + adaptive thinking
+THINKING_MODEL = "claude-opus-4-6"  # Model used when EXTENDED_THINKING=True
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +349,12 @@ def extract_menu_items_via_claude(
     if thinking_active:
         # Override model to THINKING_MODEL when thinking is active
         model = THINKING_MODEL
-        print(f"[Call 1] Extended thinking ENABLED (adaptive, model={model})")
+        # max_tokens = total budget for thinking + response (combined).
+        # budget_tokens caps thinking so the response has room.
+        # Baseline needed ~12.5k tokens for 169-item JSON response.
+        # 32k total - 10k thinking = 22k for response (ample headroom).
+        max_tokens = 32000
+        print(f"[Call 1] Extended thinking ENABLED (budget=10k, model={model})")
 
     # --- Build messages ---
     if multimodal:
@@ -385,7 +390,10 @@ def extract_menu_items_via_claude(
     }
     if thinking_active:
         api_kwargs["temperature"] = 1  # required for extended thinking
-        api_kwargs["thinking"] = {"type": "adaptive"}
+        # "enabled" + budget_tokens: guarantees thinking IS used, but CAPS it.
+        # "adaptive" mode let the model spend ALL max_tokens on thinking
+        # (68k thinking chars, 0 text response) — budget_tokens prevents that.
+        api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
     else:
         api_kwargs["temperature"] = 0
 
