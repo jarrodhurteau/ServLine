@@ -2115,7 +2115,8 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 )
                 _thinking_active = EXTENDED_THINKING
                 claude_items = extract_menu_items_via_claude(
-                    clean_ocr_text, image_path=str(saved_file_path)
+                    clean_ocr_text, image_path=str(saved_file_path),
+                    use_thinking=_thinking_active,
                 )
                 if claude_items:
                     if tracker:

@@ -1161,15 +1161,15 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102.6 test suite: 52 cases, 100% pass rate
     Cumulative: 1,780 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
-  Day 102.7: Sonnet Thinking + File Debug + Live Validation
-  ---------------------------------------------------------
+  Day 102.7: Sonnet Thinking + File Debug + Live Validation — COMPLETE
+  -------------------------------------------------------------------
   GOAL: Get adaptive thinking working on Sonnet 4.6 (fast + smart) with
   file-based debug logging so we can actually see what Claude returns.
   Then validate with the live pizza menu import.
 
   Step 1: File-based debug logging
   ................................
-  [ ] Add _write_debug_log() to ai_menu_extract.py
+  [x] Add _write_debug_log() to ai_menu_extract.py
       - Writes to storage/logs/call1_debug_{timestamp}.json
       - Captures: model, thinking_active, multimodal, ocr_text_length,
         image_blocks_count, api_kwargs (sans image data), response metadata
@@ -1177,20 +1177,21 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
         response_text (first 2000 chars), parsed_item_count or error
       - Auto-creates storage/logs/ directory
       - Called after every API response (success or failure)
-  [ ] Keep existing print() statements for quick console visibility
+  [x] Keep existing print() statements for quick console visibility
 
   Step 2: Adaptive thinking (opt-in flag, Sonnet first → Opus fallback)
   ....................................................................
-  [ ] Keep EXTENDED_THINKING = False (default = 3-call Sonnet pipeline)
-  [ ] Add THINKING_MODEL constant = "claude-sonnet-4-6" (try Sonnet first)
-  [ ] When EXTENDED_THINKING = True:
-      - model = THINKING_MODEL
+  [x] Keep EXTENDED_THINKING = False (default = 3-call Sonnet pipeline)
+  [x] Add THINKING_MODEL constant = "claude-sonnet-4-6" (try Sonnet first)
+  [x] When EXTENDED_THINKING = True:
+      - model = THINKING_MODEL (auto-overrides caller's model param)
       - thinking = {"type": "adaptive"}
       - temperature = 1
       - max_tokens = 16000
       - Pipeline bypasses Call 2 & 3 (existing portal/app.py logic)
-  [ ] Keep the minimal prompt — do NOT tighten it
-  [ ] Update tests for new THINKING_MODEL constant
+  [x] Keep the minimal prompt — do NOT tighten it
+  [x] Portal wired: use_thinking=_thinking_active passed to Call 1
+  [x] Update tests for new THINKING_MODEL constant
 
   Step 3: Live A/B comparison
   ...........................
@@ -1211,11 +1212,14 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 
   Step 4: Tests
   .............
-  [ ] Test _write_debug_log creates file with expected fields
-  [ ] Test THINKING_MODEL defaults to sonnet-4-6
-  [ ] Test thinking opt-in sends correct API params
-  [ ] Test 3-call pipeline still works as default
-  [ ] Run full suite — all 1,780+ tests pass
+  [x] Test _write_debug_log creates file with expected fields
+  [x] Test THINKING_MODEL defaults to sonnet-4-6
+  [x] Test thinking opt-in sends correct API params (model override, temp=1, adaptive)
+  [x] Test debug log called on success, JSON error, empty response, exception
+  [x] Test debug log excludes messages (no image data in logs)
+  [x] Test portal wiring passes use_thinking=_thinking_active
+  [x] Test 3-call pipeline still works as default
+  [x] Run full suite — 1,806 passed (26 new Day 102.7 tests)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................

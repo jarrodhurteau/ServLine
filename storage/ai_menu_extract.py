@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
@@ -214,7 +215,70 @@ def _normalize_category(cat: str) -> str:
 # ---------------------------------------------------------------------------
 # Extended thinking configuration
 # ---------------------------------------------------------------------------
-EXTENDED_THINKING = False  # Reverted: Opus+thinking too slow/unreliable; use 3-call pipeline
+EXTENDED_THINKING = False  # Default: 3-call Sonnet pipeline. Set True for single-call thinking.
+THINKING_MODEL = "claude-sonnet-4-6"  # Model used when EXTENDED_THINKING=True
+
+
+# ---------------------------------------------------------------------------
+# File-based debug logging — captures full API response for post-mortem analysis
+# ---------------------------------------------------------------------------
+_LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
+
+
+def _write_debug_log(
+    *,
+    model: str,
+    thinking_active: bool,
+    multimodal: bool,
+    ocr_text_length: int,
+    image_blocks_count: int,
+    api_kwargs_summary: Dict[str, Any],
+    stop_reason: str = "unknown",
+    input_tokens: Any = "?",
+    output_tokens: Any = "?",
+    block_types: List[str] | None = None,
+    thinking_chars: int = 0,
+    response_text: str = "",
+    parsed_item_count: int | None = None,
+    error: str | None = None,
+) -> str | None:
+    """Write a JSON debug log for a Call 1 API interaction.
+
+    Returns the path to the written file, or None on failure.
+    """
+    try:
+        os.makedirs(_LOGS_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"call1_debug_{ts}.json"
+        path = os.path.join(_LOGS_DIR, filename)
+        entry = {
+            "timestamp": ts,
+            "model": model,
+            "thinking_active": thinking_active,
+            "multimodal": multimodal,
+            "ocr_text_length": ocr_text_length,
+            "image_blocks_count": image_blocks_count,
+            "api_kwargs": api_kwargs_summary,
+            "response": {
+                "stop_reason": stop_reason,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "block_types": block_types or [],
+                "thinking_chars": thinking_chars,
+                "response_text_preview": response_text[:2000],
+            },
+            "result": {
+                "parsed_item_count": parsed_item_count,
+                "error": error,
+            },
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(entry, f, indent=2, default=str)
+        print(f"[Call 1] Debug log written: {path}")
+        return path
+    except Exception as exc:
+        print(f"[Call 1] Failed to write debug log: {exc}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +347,9 @@ def extract_menu_items_via_claude(
 
     thinking_active = use_thinking and EXTENDED_THINKING
     if thinking_active:
-        print(f"[Call 1] Extended thinking ENABLED (adaptive)")
+        # Override model to THINKING_MODEL when thinking is active
+        model = THINKING_MODEL
+        print(f"[Call 1] Extended thinking ENABLED (adaptive, model={model})")
 
     # --- Build messages ---
     if multimodal:
@@ -323,6 +389,19 @@ def extract_menu_items_via_claude(
     else:
         api_kwargs["temperature"] = 0
 
+    # --- Shared debug log kwargs (populated after API call) ---
+    _debug_base = {
+        "model": model,
+        "thinking_active": thinking_active,
+        "multimodal": multimodal,
+        "ocr_text_length": len(text),
+        "image_blocks_count": len(image_blocks),
+        "api_kwargs_summary": {
+            k: v for k, v in api_kwargs.items()
+            if k not in ("messages",)  # exclude bulky image data
+        },
+    }
+
     try:
         # Use streaming — required for Opus + thinking which can exceed 10 min
         print("[Call 1] Streaming API call started...")
@@ -341,8 +420,10 @@ def extract_menu_items_via_claude(
         # Extract text from response (skip thinking blocks)
         resp_text = ""
         thinking_chars = 0
+        block_types: List[str] = []
         for block in message.content:
             block_type = getattr(block, "type", None)
+            block_types.append(block_type or "unknown")
             if block_type == "thinking":
                 thinking_chars += len(getattr(block, "thinking", ""))
             elif hasattr(block, "text"):
@@ -357,6 +438,12 @@ def extract_menu_items_via_claude(
 
         if not resp_text.strip():
             print("[Call 1] ERROR: Claude returned empty response text")
+            _write_debug_log(
+                **_debug_base, stop_reason=stop, input_tokens=in_tok,
+                output_tokens=out_tok, block_types=block_types,
+                thinking_chars=thinking_chars, response_text=resp_text,
+                error="empty_response_text",
+            )
             return None
 
         # Parse JSON from response (handle markdown code blocks if present)
@@ -371,6 +458,12 @@ def extract_menu_items_via_claude(
         items = data.get("items") if isinstance(data, dict) else None
         if not isinstance(items, list):
             print(f"[Call 1] ERROR: missing 'items' list. Keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            _write_debug_log(
+                **_debug_base, stop_reason=stop, input_tokens=in_tok,
+                output_tokens=out_tok, block_types=block_types,
+                thinking_chars=thinking_chars, response_text=resp_text,
+                error="missing_items_list",
+            )
             return None
 
         # Normalize items + code-level category guardrail
@@ -392,15 +485,29 @@ def extract_menu_items_via_claude(
         mode_label = "multimodal+thinking" if (multimodal and thinking_active) else \
                      "multimodal" if multimodal else "text-only"
         print(f"[Call 1] SUCCESS: {len(result)} items extracted ({mode_label})")
+
+        _write_debug_log(
+            **_debug_base, stop_reason=stop, input_tokens=in_tok,
+            output_tokens=out_tok, block_types=block_types,
+            thinking_chars=thinking_chars, response_text=resp_text,
+            parsed_item_count=len(result),
+        )
         return result if result else None
 
     except json.JSONDecodeError as e:
         print(f"[Call 1] JSON PARSE ERROR: {e}")
         if resp_text:
             print(f"[Call 1] Last 200 chars: {resp_text[-200:]!r}")
+        _write_debug_log(
+            **_debug_base, stop_reason=stop, input_tokens=in_tok,
+            output_tokens=out_tok, block_types=block_types,
+            thinking_chars=thinking_chars, response_text=resp_text,
+            error=f"json_parse_error: {e}",
+        )
         return None
     except Exception as e:
         print(f"[Call 1] EXCEPTION: {type(e).__name__}: {e}")
+        _write_debug_log(**_debug_base, error=f"{type(e).__name__}: {e}")
         return None
 
 

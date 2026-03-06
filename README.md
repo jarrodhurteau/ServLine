@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 IN PROGRESS (Days 101-104). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 102.5: Call 1 upgraded to multimodal (image-first + OCR hint). Day 102.6: minimal prompt rewrite + category normalizer kept, Opus+thinking reverted to Sonnet. Next: Day 102.7 — Sonnet 4.6 adaptive thinking + file-based debug logging + live A/B comparison. 1,780 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 IN PROGRESS (Days 101-104). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 102.7: file-based debug logging (_write_debug_log → storage/logs/) + THINKING_MODEL="claude-sonnet-4-6" wired for adaptive thinking opt-in. Portal passes use_thinking flag. 3-call Sonnet pipeline remains default. Next: live A/B comparison (3-call vs thinking). 1,806 tests pass.
 
 ---
 
@@ -1656,3 +1656,17 @@ ServLine now has:
     streaming API (messages.stream), debug prints. Reverted: back to Sonnet 3-call pipeline
   - Day 102.6 test suite: 52 cases, 100% pass rate
   - Cumulative: 1,780 passed (excl. Day 70 fixture errors)
+
+- **Sonnet Thinking + File Debug Logging (Day 102.7):** *** COMPLETE ***
+  - File-based debug logging: `_write_debug_log()` writes JSON to `storage/logs/call1_debug_{ts}.json`
+    - Captures: model, thinking_active, multimodal, ocr_text_length, image_blocks_count,
+      api_kwargs (sans image data), response metadata (stop_reason, tokens, block types),
+      thinking_chars, response_text (first 2000 chars), parsed_item_count or error
+    - Auto-creates `storage/logs/` directory, called on every API response (success or failure)
+  - `THINKING_MODEL = "claude-sonnet-4-6"` — model used when `EXTENDED_THINKING=True`
+    - Auto-overrides caller's model param when thinking is active
+    - Portal wired: `use_thinking=_thinking_active` passed to Call 1
+  - `EXTENDED_THINKING = False` remains default — 3-call Sonnet pipeline unchanged
+  - Ready for live A/B comparison: flip flag to test single-call thinking vs 3-call pipeline
+  - Day 102.7 test suite: 26 cases, 100% pass rate
+  - Cumulative: 1,806 passed (excl. Day 70 fixture errors)
