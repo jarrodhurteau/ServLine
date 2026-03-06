@@ -36,10 +36,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 def _make_fake_response(items_json: str) -> MagicMock:
     """Build a fake Anthropic message response with the given JSON text."""
     block = MagicMock()
+    block.type = "text"
     block.text = items_json
     resp = MagicMock()
     resp.content = [block]
     return resp
+
+
+def _make_stream_cm(response: MagicMock) -> MagicMock:
+    """Wrap a fake response in a context manager mock for messages.stream()."""
+    stream = MagicMock()
+    stream.get_final_message.return_value = response
+    stream.__enter__ = MagicMock(return_value=stream)
+    stream.__exit__ = MagicMock(return_value=False)
+    return stream
 
 
 _SAMPLE_ITEMS_JSON = json.dumps({
@@ -67,27 +77,27 @@ class TestMultimodalPromptSelection(unittest.TestCase):
     def test_multimodal_uses_multimodal_prompt(self, mock_client_fn, mock_enc_fn):
         """When image encodes successfully, the multimodal system prompt is used."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
         from storage.ai_menu_extract import extract_menu_items_via_claude, _SYSTEM_PROMPT_MULTIMODAL
         extract_menu_items_via_claude("some ocr text", image_path="/fake/menu.jpg")
 
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         self.assertEqual(create_call.kwargs["system"], _SYSTEM_PROMPT_MULTIMODAL)
 
     @patch("storage.ai_menu_extract._get_client")
     def test_text_only_uses_text_prompt(self, mock_client_fn):
         """When no image_path is provided, the text-only system prompt is used."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
 
         from storage.ai_menu_extract import extract_menu_items_via_claude, _SYSTEM_PROMPT_TEXT_ONLY
         extract_menu_items_via_claude("some ocr text")
 
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         self.assertEqual(create_call.kwargs["system"], _SYSTEM_PROMPT_TEXT_ONLY)
 
 
@@ -102,14 +112,14 @@ class TestMultimodalMessageBuilding(unittest.TestCase):
     def test_image_blocks_come_first(self, mock_client_fn, mock_enc_fn):
         """Image content blocks appear before the text prompt."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
         from storage.ai_menu_extract import extract_menu_items_via_claude
         extract_menu_items_via_claude("menu text here", image_path="/fake/menu.jpg")
 
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         messages = create_call.kwargs["messages"]
         content = messages[0]["content"]
 
@@ -133,14 +143,14 @@ class TestMultimodalMessageBuilding(unittest.TestCase):
             {"media_type": "image/png", "data": "PAGE3"},
         ]
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: multi_images
 
         from storage.ai_menu_extract import extract_menu_items_via_claude
         extract_menu_items_via_claude("ocr text", image_path="/fake/menu.pdf")
 
-        content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        content = client.messages.stream.call_args.kwargs["messages"][0]["content"]
         image_blocks = [b for b in content if b["type"] == "image"]
         text_blocks = [b for b in content if b["type"] == "text"]
 
@@ -154,14 +164,14 @@ class TestMultimodalMessageBuilding(unittest.TestCase):
     def test_multimodal_prompt_contains_ocr_hint(self, mock_client_fn, mock_enc_fn):
         """The multimodal user prompt includes the OCR text as a hint."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
         from storage.ai_menu_extract import extract_menu_items_via_claude
         extract_menu_items_via_claude("Garbled OCR text here", image_path="/fake/img.jpg")
 
-        content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        content = client.messages.stream.call_args.kwargs["messages"][0]["content"]
         text_block = [b for b in content if b["type"] == "text"][0]
         self.assertIn("Garbled OCR text here", text_block["text"])
         self.assertIn("source of truth", text_block["text"])
@@ -177,13 +187,13 @@ class TestTextOnlyFallback(unittest.TestCase):
     def test_text_only_sends_string_content(self, mock_client_fn):
         """Text-only mode sends a plain string as content, not a list."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
 
         from storage.ai_menu_extract import extract_menu_items_via_claude
         extract_menu_items_via_claude("Some menu text")
 
-        content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        content = client.messages.stream.call_args.kwargs["messages"][0]["content"]
         # Text-only sends a plain string, not a list of content blocks
         self.assertIsInstance(content, str)
         self.assertIn("Some menu text", content)
@@ -218,7 +228,7 @@ class TestImageEncodeFallback(unittest.TestCase):
     def test_encoder_returns_empty_falls_back(self, mock_client_fn, mock_enc_fn):
         """encode_menu_images returns [] → text-only mode."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: []  # encode failed
 
@@ -230,7 +240,7 @@ class TestImageEncodeFallback(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
         # Should have used text-only prompt
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         self.assertEqual(create_call.kwargs["system"], _SYSTEM_PROMPT_TEXT_ONLY)
 
     @patch("storage.ai_menu_extract._get_encoder")
@@ -238,7 +248,7 @@ class TestImageEncodeFallback(unittest.TestCase):
     def test_encoder_not_available_falls_back(self, mock_client_fn, mock_enc_fn):
         """_get_encoder returns None → text-only mode."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = None  # encoder unavailable
 
@@ -246,7 +256,7 @@ class TestImageEncodeFallback(unittest.TestCase):
         result = extract_menu_items_via_claude("ocr text", image_path="/fake.jpg")
 
         self.assertIsNotNone(result)
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         self.assertEqual(create_call.kwargs["system"], _SYSTEM_PROMPT_TEXT_ONLY)
 
 
@@ -261,7 +271,7 @@ class TestEmptyOcrWithImage(unittest.TestCase):
     def test_empty_ocr_with_image_sends_placeholder(self, mock_client_fn, mock_enc_fn):
         """Empty OCR + image → placeholder hint text, still multimodal."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -269,7 +279,7 @@ class TestEmptyOcrWithImage(unittest.TestCase):
         result = extract_menu_items_via_claude("", image_path="/fake/menu.jpg")
 
         self.assertIsNotNone(result)
-        create_call = client.messages.create.call_args
+        create_call = client.messages.stream.call_args
         self.assertEqual(create_call.kwargs["system"], _SYSTEM_PROMPT_MULTIMODAL)
 
         content = create_call.kwargs["messages"][0]["content"]
@@ -281,7 +291,7 @@ class TestEmptyOcrWithImage(unittest.TestCase):
     def test_whitespace_only_ocr_with_image(self, mock_client_fn, mock_enc_fn):
         """Whitespace-only OCR + image → placeholder, still works."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -316,7 +326,7 @@ class TestEndToEndMultimodal(unittest.TestCase):
             ]
         })
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(rich_response)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(rich_response))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -342,7 +352,7 @@ class TestEndToEndMultimodal(unittest.TestCase):
         """Response wrapped in ```json fences is parsed correctly."""
         fenced = '```json\n' + _SAMPLE_ITEMS_JSON + '\n```'
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(fenced)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(fenced))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -357,7 +367,7 @@ class TestEndToEndMultimodal(unittest.TestCase):
     def test_multimodal_api_error_returns_none(self, mock_client_fn, mock_enc_fn):
         """API exception in multimodal mode → returns None gracefully."""
         client = MagicMock()
-        client.messages.create.side_effect = Exception("API timeout")
+        client.messages.stream.side_effect = Exception("API timeout")
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -370,7 +380,7 @@ class TestEndToEndMultimodal(unittest.TestCase):
     def test_multimodal_empty_response_returns_none(self, mock_client_fn, mock_enc_fn):
         """Empty API response in multimodal mode → returns None."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response("   ")
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response("   "))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -383,7 +393,7 @@ class TestEndToEndMultimodal(unittest.TestCase):
     def test_multimodal_invalid_json_returns_none(self, mock_client_fn, mock_enc_fn):
         """Malformed JSON response → returns None."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response("not valid json {{{")
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response("not valid json {{{"))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -468,7 +478,7 @@ class TestTextTruncation(unittest.TestCase):
     def test_long_ocr_text_truncated_multimodal(self, mock_client_fn, mock_enc_fn):
         """OCR text > 30k chars is truncated even in multimodal mode."""
         client = MagicMock()
-        client.messages.create.return_value = _make_fake_response(_SAMPLE_ITEMS_JSON)
+        client.messages.stream.return_value = _make_stream_cm(_make_fake_response(_SAMPLE_ITEMS_JSON))
         mock_client_fn.return_value = client
         mock_enc_fn.return_value = lambda path: _SAMPLE_IMAGE_BLOCKS
 
@@ -476,7 +486,7 @@ class TestTextTruncation(unittest.TestCase):
         long_text = "x" * 35_000
         extract_menu_items_via_claude(long_text, image_path="/fake/menu.jpg")
 
-        content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        content = client.messages.stream.call_args.kwargs["messages"][0]["content"]
         text_block = [b for b in content if b["type"] == "text"][0]
         self.assertIn("[... truncated ...]", text_block["text"])
         # Text should be much shorter than 35k

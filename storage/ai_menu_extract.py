@@ -2,12 +2,9 @@
 """
 Claude API Menu Extraction — multimodal menu item extraction.
 
-Primary mode (Day 102.5): sends menu IMAGE as primary input + Tesseract OCR text
-as a secondary hint.  Claude reads the image directly, using the OCR text only to
-disambiguate ambiguous regions.  This eliminates the root cause of garbled OCR
-being faithfully extracted as garbage.
-
-Fallback mode: text-only extraction when no image is available (original behavior).
+Architecture: 3-call pipeline (extract → vision verify → reconcile).
+Call 1 (this module): sends menu IMAGE + OCR hint for structured extraction.
+Fallback mode: text-only extraction when no image is available.
 
 Usage:
     from storage.ai_menu_extract import extract_menu_items_via_claude
@@ -71,119 +68,47 @@ def _get_client():
 
 
 # ---------------------------------------------------------------------------
-# Shared extraction rules (used in both text-only and multimodal prompts)
+# Prompt — structured extraction for POS import
 # ---------------------------------------------------------------------------
-_EXTRACTION_RULES = """\
-Rules:
-1. Extract ONLY actual menu items that a customer can order. Skip:
-   - Section headings (e.g., "GOURMET PIZZA", "APPETIZERS")
-   - Size headers (e.g., "10 inch  12 inch  16 inch")
-   - Informational text (e.g., "All pizzas come with mozzarella")
-   - Phone numbers, addresses, hours
+_EXTRACTION_GOAL = """\
+Extract every orderable item from this restaurant menu for POS system import.
 
-2. POS-ready item splitting:
-   - If a menu lists "X or Y" as one item (e.g., "Beef or Chicken Empanadas"), \
-split it into SEPARATE items ("Beef Empanadas", "Chicken Empanadas") at the \
-same price. POS systems need one button per orderable product.
-   - Similarly, "Grilled or Fried Calamari" -> two items: "Grilled Calamari" and \
-"Fried Calamari".
+Each item = one product a customer can order in a POS system.
+Split compound items: "Beef or Chicken Empanadas" → two separate items.
+Individual toppings, sauces, and dressings each get their own item.
+Section-wide choices (e.g., "Naked or Breaded", "White or Wheat") → size variants on each item, not descriptions.
+Section-wide notes (e.g., "All sandwiches come with lettuce, tomato...") → include in each item's description.
+Use Title Case for names even if the menu is printed in ALL CAPS.
 
-3. Toppings/add-ons as individual items:
-   - When a menu lists available toppings (e.g., "MEAT TOPPINGS: Pepperoni, Chicken, \
-Bacon, Hamburger, Sausage, Meatball"), create a SEPARATE item for EACH topping. \
-Example: "Pepperoni Topping", "Chicken Topping", "Bacon Topping", etc.
-   - Each topping item gets the same per-size prices from the "Each Topping Add" \
-line. If the menu shows "EACH TOPPING ADD  1.50  2.25  2.75  4.00" under a size \
-grid, every individual topping gets those exact prices as sizes.
-   - Category for all toppings: "Toppings".
-   - Do the same for veggie toppings, calzone toppings, etc.
+For each item return:
+- "name": exact full name as printed on the menu
+- "description": menu description if shown, null otherwise
+- "price": price as float, 0 if not visible
+- "category": one of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, \
+Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, \
+Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other
+- "sizes": [{"label": "...", "price": N.NN}] for items with multiple price points
 
-4. Sauces, dressings, and dipping options as individual items:
-   - Wing sauce flavors (e.g., "Hot", "Mild", "BBQ", "Honey BBQ", "Garlic Parmesan", \
-"Teriyaki") should each be a SEPARATE item: "Hot Sauce", "Mild Sauce", "BBQ Sauce", etc.
-   - Salad dressings (e.g., "Ranch", "Blue Cheese", "Caesar", "Italian") should each \
-be a SEPARATE item: "Ranch Dressing", "Blue Cheese Dressing", etc.
-   - Category for all sauces/dressings: "Sauces".
-   - Price is 0 if no extra charge, otherwise use the listed price.
+Output ONLY valid JSON: {"items": [...]}"""
 
-5. For each item, provide:
-   - "name": Clean, properly capitalized item name. Fix OCR typos \
-(e.g., "Homburg" -> "Hamburg", "88Q" -> "BBQ", "Tomatoe" -> "Tomato"). Use title case.
-   - "description": Only include descriptions that ACTUALLY appear on the menu next \
-to the item. Do NOT infer or fabricate descriptions. Null if none shown on menu. \
-Always null for toppings and sauces.
-   - "price": The primary price as a float (e.g., 17.95). Use the FIRST or BASE \
-price if multiple sizes exist. 0 if no price is visible.
-   - "category": Use ONLY one of these categories -- do NOT create new ones or merge \
-section headings:
-     "Pizza", "Toppings", "Appetizers", "Salads", "Soups", "Sandwiches", "Burgers", \
-"Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings", "Sauces", "Sides", \
-"Desserts", "Beverages", "Kids Menu", "Breakfast", "Calzones", "Subs", "Platters", \
-or "Other".
-     IMPORTANT: If a menu section heading combines multiple concepts (e.g., \
-"Fresh Soups & Buffalo Wings"), split items into the correct individual categories \
-("Soups" for soup items, "Wings" for wing items). Never use the raw section heading \
-as a category.
-   - "sizes": Array of size/price pairs when an item has MULTIPLE prices. \
-Each entry: {"label": "...", "price": 12.95}. Empty array ONLY if truly single-priced.
-     IMPORTANT: Many menu sections use multi-price layouts. You MUST create sizes for ALL of these patterns:
-     a) Pizza size grids: {"label": "10\\"", "price": 8.00}, {"label": "12\\"", "price": 11.50}, etc.
-     b) Piece-count pricing (wings, tenders, nuggets): {"label": "10 pc", "price": 9.95}, \
-{"label": "20 pc", "price": 17.95}, {"label": "30 pc", "price": 25.95}, {"label": "50 pc", "price": 39.95}
-     c) Regular/Deluxe columns (burgers, melts, sandwiches): {"label": "Regular", "price": 9.00}, \
-{"label": "Deluxe", "price": 13.00}
-     d) Small/Large columns (calzones, etc.): {"label": "Small", "price": 9.50}, {"label": "Large", "price": 12.95}
-     e) "w/ Fries" variants: if wings/tenders show separate "w/ Fries" prices, include them: \
-{"label": "10 pc", "price": 9.95}, {"label": "10 pc w/ Fries", "price": 13.50}
-     f) Any other two-column or multi-column price layout: use the column headers as labels.
-     If an item has 2+ prices on the menu, it MUST have a sizes array -- never flatten to a single price.
+# -- Multimodal preamble (used when image is available) -------------------------
+_MULTIMODAL_PREAMBLE = """\
+You are extracting menu items from a restaurant menu image for POS import.
+Read the image carefully — it is the primary source of truth.
+OCR text is provided as a hint but often contains errors — always trust the image.
 
-6. Price association:
-   - Prices often appear AFTER item names, sometimes on the next line
-   - Size grids (e.g., "10\\" 12\\" 16\\"" header) apply to items below them until a new section
-   - Column headers like "Regular  Deluxe" or "Naked  W/ Fries" apply to ALL items below until a new section
-   - Prices like "17.95  25.95  34.75" map left-to-right to the size/column headers above
-   - "$4.75" could be an OCR error for "$34.75" if context suggests higher prices
-   - Add-on/topping items (e.g., "Each Topping") that appear under a size grid \
-ALSO have per-size prices. Capture ALL size prices for toppings, not just the first.
-   - Piece count sections (e.g., "10 PCS.....  15.00  W/ FRIES  17.95") — the piece count \
-is the label, and "w/ Fries" is a second size variant at the higher price.
+"""
 
-7. Output ONLY valid JSON: {"items": [...]}
-   No markdown, no explanation, just the JSON object."""
+# -- Text-only preamble (fallback when no image available) ----------------------
+_TEXT_ONLY_PREAMBLE = """\
+You are extracting menu items from OCR text of a restaurant menu for POS import.
+The text may contain OCR artifacts and formatting noise — use your judgment.
 
+"""
 
-# ---------------------------------------------------------------------------
-# Prompt
-# ---------------------------------------------------------------------------
-# -- Text-only prompt (fallback when no image available) -----------------------
-_SYSTEM_PROMPT_TEXT_ONLY = """\
-You are a restaurant menu data extraction expert. You receive raw OCR text from \
-a scanned restaurant menu. The text may contain OCR artifacts, garbled characters, \
-merged words, and formatting noise.
-
-Your job is to extract every real menu item and return structured JSON. \
-The output will be imported into a Point-of-Sale (POS) system, so each item must \
-be a distinct orderable product.
-
-""" + _EXTRACTION_RULES
-
-# -- Multimodal prompt (image-first, OCR text as hint) -------------------------
-_SYSTEM_PROMPT_MULTIMODAL = """\
-You are a restaurant menu data extraction expert. You receive:
-1. An image of a restaurant menu (PRIMARY -- read this directly)
-2. OCR text extracted from the same image (SECONDARY -- use as a hint only)
-
-IMPORTANT: Read item names, prices, and descriptions directly from the menu image. \
-The OCR text may contain garbled characters, merged words, and artifacts. Use it \
-only to disambiguate hard-to-read areas -- never trust it over what you can clearly \
-see in the image.
-
-Your job is to extract every real menu item and return structured JSON. \
-The output will be imported into a Point-of-Sale (POS) system, so each item must \
-be a distinct orderable product.
-
-""" + _EXTRACTION_RULES
+# Consolidated system prompts
+_SYSTEM_PROMPT_MULTIMODAL = _MULTIMODAL_PREAMBLE + _EXTRACTION_GOAL
+_SYSTEM_PROMPT_TEXT_ONLY = _TEXT_ONLY_PREAMBLE + _EXTRACTION_GOAL
 
 _USER_PROMPT_TEMPLATE = """\
 Extract menu items from this OCR text:
@@ -195,12 +120,10 @@ Extract menu items from this OCR text:
 Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": []}}]}}"""
 
 _USER_PROMPT_MULTIMODAL_TEMPLATE = """\
-Extract every menu item from the menu image above. \
-Read names, prices, and descriptions directly from the image.
+Extract every menu item from the menu image above.
 
 The following OCR text was extracted from the same image and may help \
-disambiguate hard-to-read areas, but DO NOT trust it blindly -- the image \
-is the source of truth:
+disambiguate hard-to-read areas, but the image is the source of truth:
 
 ---
 {ocr_text}
@@ -210,14 +133,100 @@ Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "
 
 
 # ---------------------------------------------------------------------------
+# Category normalizer — code-level guardrail (deterministic, no AI needed)
+# ---------------------------------------------------------------------------
+VALID_CATEGORIES = frozenset([
+    "Pizza", "Toppings", "Appetizers", "Salads", "Soups", "Sandwiches",
+    "Burgers", "Wraps", "Entrees", "Seafood", "Pasta", "Steaks", "Wings",
+    "Sauces", "Sides", "Desserts", "Beverages", "Kids Menu", "Breakfast",
+    "Calzones", "Subs", "Platters", "Other",
+])
+
+_CATEGORY_ALIASES: Dict[str, str] = {
+    # Common menu section headings → canonical POS category
+    "club sandwiches": "Sandwiches",
+    "melt sandwiches": "Sandwiches",
+    "melts": "Sandwiches",
+    "clubs": "Sandwiches",
+    "hot sandwiches": "Sandwiches",
+    "cold sandwiches": "Sandwiches",
+    "gourmet pizza": "Pizza",
+    "specialty pizza": "Pizza",
+    "brick oven pizza": "Pizza",
+    "wraps city": "Wraps",
+    "fresh buffalo wings": "Wings",
+    "buffalo wings": "Wings",
+    "chicken wings": "Wings",
+    "fresh soups": "Soups",
+    "homemade soups": "Soups",
+    "hot subs": "Subs",
+    "cold subs": "Subs",
+    "hot heroes": "Subs",
+    "cold heroes": "Subs",
+    "dinner entrees": "Entrees",
+    "dinner platters": "Platters",
+    "kid's menu": "Kids Menu",
+    "kids": "Kids Menu",
+    "children's menu": "Kids Menu",
+    "dessert": "Desserts",
+    "drink": "Beverages",
+    "drinks": "Beverages",
+    "beverage": "Beverages",
+    "salad": "Salads",
+    "soup": "Soups",
+    "burger": "Burgers",
+    "wrap": "Wraps",
+    "calzone": "Calzones",
+    "sub": "Subs",
+    "topping": "Toppings",
+    "sauce": "Sauces",
+    "side": "Sides",
+    "steak": "Steaks",
+    "wing": "Wings",
+    "entree": "Entrees",
+    "platter": "Platters",
+    "appetizer": "Appetizers",
+}
+
+
+def _normalize_category(cat: str) -> str:
+    """Map a category string to the canonical whitelist value.
+
+    Handles raw section headings, common aliases, and fuzzy substring matches.
+    Always returns a valid category from VALID_CATEGORIES.
+    """
+    if not cat:
+        return "Other"
+    cat = cat.strip()
+    if cat in VALID_CATEGORIES:
+        return cat
+    # Exact alias lookup (case-insensitive)
+    lower = cat.lower()
+    if lower in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[lower]
+    # Substring match: check if any valid category appears in the string
+    for valid in VALID_CATEGORIES:
+        if valid.lower() in lower:
+            return valid
+    return "Other"
+
+
+# ---------------------------------------------------------------------------
+# Extended thinking configuration
+# ---------------------------------------------------------------------------
+EXTENDED_THINKING = False  # Reverted: Opus+thinking too slow/unreliable; use 3-call pipeline
+
+
+# ---------------------------------------------------------------------------
 # Main extraction function
 # ---------------------------------------------------------------------------
 def extract_menu_items_via_claude(
     ocr_text: str,
     *,
     image_path: Optional[str] = None,
-    model: str = "claude-sonnet-4-5-20250929",
+    model: str = "claude-sonnet-4-5",
     max_tokens: int = 16000,
+    use_thinking: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
     """Extract structured menu items via Claude API.
 
@@ -226,7 +235,7 @@ def extract_menu_items_via_claude(
     text is included only as a disambiguation hint.
 
     Text-only mode (fallback): when no image is available, the raw OCR text
-    is sent as the sole input (original Day 96 behaviour).
+    is sent as the sole input.
 
     Returns a list of item dicts on success, or None if the API is unavailable
     or the call fails (so the caller can fall back gracefully).
@@ -272,6 +281,10 @@ def extract_menu_items_via_claude(
     else:
         print(f"[Call 1] TEXT-ONLY mode (no image_path provided)")
 
+    thinking_active = use_thinking and EXTENDED_THINKING
+    if thinking_active:
+        print(f"[Call 1] Extended thinking ENABLED (adaptive)")
+
     # --- Build messages ---
     if multimodal:
         system_prompt = _SYSTEM_PROMPT_MULTIMODAL
@@ -297,23 +310,53 @@ def extract_menu_items_via_claude(
             {"role": "user", "content": _USER_PROMPT_TEMPLATE.format(ocr_text=text)},
         ]
 
-    try:
-        message = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=0,
-            system=system_prompt,
-            messages=messages,
-        )
+    # --- Build API kwargs ---
+    api_kwargs: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system_prompt,
+        "messages": messages,
+    }
+    if thinking_active:
+        api_kwargs["temperature"] = 1  # required for extended thinking
+        api_kwargs["thinking"] = {"type": "adaptive"}
+    else:
+        api_kwargs["temperature"] = 0
 
-        # Extract text from response
+    try:
+        # Use streaming — required for Opus + thinking which can exceed 10 min
+        print("[Call 1] Streaming API call started...")
+        with client.messages.stream(**api_kwargs) as stream:
+            message = stream.get_final_message()
+
+        # Debug: show response metadata
+        stop = getattr(message, "stop_reason", "unknown")
+        usage = getattr(message, "usage", None)
+        in_tok = getattr(usage, "input_tokens", "?") if usage else "?"
+        out_tok = getattr(usage, "output_tokens", "?") if usage else "?"
+        n_blocks = len(message.content) if message.content else 0
+        print(f"[Call 1] Response received: stop_reason={stop}, "
+              f"blocks={n_blocks}, input_tokens={in_tok}, output_tokens={out_tok}")
+
+        # Extract text from response (skip thinking blocks)
         resp_text = ""
+        thinking_chars = 0
         for block in message.content:
-            if hasattr(block, "text"):
+            block_type = getattr(block, "type", None)
+            if block_type == "thinking":
+                thinking_chars += len(getattr(block, "thinking", ""))
+            elif hasattr(block, "text"):
                 resp_text += block.text
 
+        if thinking_chars > 0:
+            print(f"[Call 1] Thinking: {thinking_chars} chars")
+
+        print(f"[Call 1] Response text: {len(resp_text)} chars")
+        if resp_text:
+            print(f"[Call 1] First 200 chars: {resp_text[:200]!r}")
+
         if not resp_text.strip():
-            log.warning("Claude returned empty response")
+            print("[Call 1] ERROR: Claude returned empty response text")
             return None
 
         # Parse JSON from response (handle markdown code blocks if present)
@@ -327,10 +370,10 @@ def extract_menu_items_via_claude(
 
         items = data.get("items") if isinstance(data, dict) else None
         if not isinstance(items, list):
-            log.warning("Claude response missing 'items' list")
+            print(f"[Call 1] ERROR: missing 'items' list. Keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
             return None
 
-        # Normalize items
+        # Normalize items + code-level category guardrail
         result = []
         for it in items:
             if not isinstance(it, dict):
@@ -342,19 +385,22 @@ def extract_menu_items_via_claude(
                 "name": name,
                 "description": (it.get("description") or "").strip() or None,
                 "price": _to_float(it.get("price")),
-                "category": (it.get("category") or "Other").strip(),
+                "category": _normalize_category(it.get("category") or "Other"),
                 "sizes": _normalize_sizes(it.get("sizes")),
             })
 
-        mode_label = "multimodal" if multimodal else "text-only"
-        log.info("Claude extracted %d menu items (%s)", len(result), mode_label)
+        mode_label = "multimodal+thinking" if (multimodal and thinking_active) else \
+                     "multimodal" if multimodal else "text-only"
+        print(f"[Call 1] SUCCESS: {len(result)} items extracted ({mode_label})")
         return result if result else None
 
     except json.JSONDecodeError as e:
-        log.warning("Failed to parse Claude JSON response: %s", e)
+        print(f"[Call 1] JSON PARSE ERROR: {e}")
+        if resp_text:
+            print(f"[Call 1] Last 200 chars: {resp_text[-200:]!r}")
         return None
     except Exception as e:
-        log.warning("Claude API call failed: %s", e)
+        print(f"[Call 1] EXCEPTION: {type(e).__name__}: {e}")
         return None
 
 
