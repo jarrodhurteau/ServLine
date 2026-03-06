@@ -85,10 +85,10 @@ class TestModelDefaults(unittest.TestCase):
         default = sig.parameters["use_thinking"].default
         self.assertFalse(default)
 
-    def test_extended_thinking_module_flag_off(self):
-        """EXTENDED_THINKING module constant is False (3-call pipeline active)."""
+    def test_extended_thinking_module_flag_on_for_ab_test(self):
+        """EXTENDED_THINKING module constant is True during A/B testing."""
         from storage.ai_menu_extract import EXTENDED_THINKING
-        self.assertFalse(EXTENDED_THINKING)
+        self.assertTrue(EXTENDED_THINKING)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ class TestExtendedThinkingParams(unittest.TestCase):
     @patch("storage.ai_menu_extract.EXTENDED_THINKING", True)
     @patch("storage.ai_menu_extract._get_client")
     def test_thinking_sends_thinking_config(self, mock_client_fn):
-        """Extended thinking config is sent (adaptive, no budget_tokens)."""
+        """Extended thinking config uses enabled + budget_tokens."""
         client = MagicMock()
         client.messages.stream.return_value = _make_stream_cm(_make_fake_response(
             _SAMPLE_ITEMS_JSON, include_thinking=True))
@@ -179,8 +179,8 @@ class TestExtendedThinkingParams(unittest.TestCase):
 
         kwargs = client.messages.stream.call_args.kwargs
         self.assertIn("thinking", kwargs)
-        self.assertEqual(kwargs["thinking"]["type"], "adaptive")
-        self.assertNotIn("budget_tokens", kwargs["thinking"])
+        self.assertEqual(kwargs["thinking"]["type"], "enabled")
+        self.assertIn("budget_tokens", kwargs["thinking"])
 
     @patch("storage.ai_menu_extract._get_client")
     def test_default_uses_temperature_0(self, mock_client_fn):
@@ -198,8 +198,8 @@ class TestExtendedThinkingParams(unittest.TestCase):
 
     @patch("storage.ai_menu_extract.EXTENDED_THINKING", True)
     @patch("storage.ai_menu_extract._get_client")
-    def test_adaptive_thinking_is_minimal(self, mock_client_fn):
-        """Adaptive thinking config has only 'type' key, no budget_tokens."""
+    def test_enabled_thinking_has_budget(self, mock_client_fn):
+        """Enabled thinking config includes budget_tokens to cap thinking."""
         client = MagicMock()
         client.messages.stream.return_value = _make_stream_cm(_make_fake_response(
             _SAMPLE_ITEMS_JSON, include_thinking=True))
@@ -209,7 +209,8 @@ class TestExtendedThinkingParams(unittest.TestCase):
         extract_menu_items_via_claude("menu text", use_thinking=True)
 
         thinking = client.messages.stream.call_args.kwargs["thinking"]
-        self.assertEqual(thinking, {"type": "adaptive"})
+        self.assertEqual(thinking["type"], "enabled")
+        self.assertGreater(thinking["budget_tokens"], 0)
 
 
 # ---------------------------------------------------------------------------
@@ -505,10 +506,10 @@ class TestEndToEndExtraction(unittest.TestCase):
 class TestPipelineConfig(unittest.TestCase):
     """Default config uses 3-call pipeline (Call 2 & 3 active)."""
 
-    def test_extended_thinking_off_by_default(self):
-        """EXTENDED_THINKING is False — 3-call pipeline is active."""
+    def test_extended_thinking_on_for_ab_test(self):
+        """EXTENDED_THINKING is True during A/B testing phase."""
         from storage.ai_menu_extract import EXTENDED_THINKING
-        self.assertFalse(EXTENDED_THINKING)
+        self.assertTrue(EXTENDED_THINKING)
 
     def test_call2_module_exists(self):
         """ai_vision_verify.py still exists and defaults to Sonnet."""

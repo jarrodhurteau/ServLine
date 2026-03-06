@@ -73,11 +73,11 @@ _SAMPLE_ITEMS_JSON = json.dumps({
 # 1. THINKING_MODEL constant
 # ---------------------------------------------------------------------------
 class TestThinkingModelConstant(unittest.TestCase):
-    """THINKING_MODEL defaults to Sonnet 4.6."""
+    """THINKING_MODEL defaults to Opus 4.6."""
 
-    def test_thinking_model_is_sonnet_4_6(self):
+    def test_thinking_model_is_opus_4_6(self):
         from storage.ai_menu_extract import THINKING_MODEL
-        self.assertEqual(THINKING_MODEL, "claude-sonnet-4-6")
+        self.assertEqual(THINKING_MODEL, "claude-opus-4-6")
 
     def test_thinking_model_differs_from_default(self):
         """THINKING_MODEL is different from the default Call 1 model."""
@@ -87,9 +87,10 @@ class TestThinkingModelConstant(unittest.TestCase):
         default_model = sig.parameters["model"].default
         self.assertNotEqual(THINKING_MODEL, default_model)
 
-    def test_extended_thinking_still_off_by_default(self):
+    def test_extended_thinking_on_for_ab_test(self):
+        """EXTENDED_THINKING is True during A/B testing phase."""
         from storage.ai_menu_extract import EXTENDED_THINKING
-        self.assertFalse(EXTENDED_THINKING)
+        self.assertTrue(EXTENDED_THINKING)
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +117,8 @@ class TestThinkingModelOverride(unittest.TestCase):
 
     @patch("storage.ai_menu_extract.EXTENDED_THINKING", True)
     @patch("storage.ai_menu_extract._get_client")
-    def test_thinking_sends_adaptive_config(self, mock_client_fn):
-        """Thinking config is adaptive (no budget_tokens)."""
+    def test_thinking_sends_enabled_with_budget(self, mock_client_fn):
+        """Thinking config uses enabled + budget_tokens to cap thinking."""
         client = MagicMock()
         client.messages.stream.return_value = _make_stream_cm(
             _make_fake_response(_SAMPLE_ITEMS_JSON, include_thinking=True))
@@ -128,7 +129,8 @@ class TestThinkingModelOverride(unittest.TestCase):
             extract_menu_items_via_claude("menu text", use_thinking=True)
 
         kwargs = client.messages.stream.call_args.kwargs
-        self.assertEqual(kwargs["thinking"], {"type": "adaptive"})
+        self.assertEqual(kwargs["thinking"]["type"], "enabled")
+        self.assertIn("budget_tokens", kwargs["thinking"])
         self.assertEqual(kwargs["temperature"], 1)
 
     @patch("storage.ai_menu_extract._get_client")
@@ -249,7 +251,7 @@ class TestWriteDebugLog(unittest.TestCase):
         self.assertEqual(data["result"]["error"], "json_parse_error: Expecting value")
         self.assertIsNone(data["result"]["parsed_item_count"])
 
-    def test_response_text_truncated_at_2000(self):
+    def test_response_text_preview_truncated_at_500(self):
         from storage.ai_menu_extract import _write_debug_log
         long_text = "x" * 5000
         with patch("storage.ai_menu_extract._LOGS_DIR", self.tmpdir):
@@ -261,7 +263,48 @@ class TestWriteDebugLog(unittest.TestCase):
 
         with open(path, "r") as f:
             data = json.load(f)
-        self.assertEqual(len(data["response"]["response_text_preview"]), 2000)
+        self.assertEqual(len(data["response"]["response_text_preview"]), 500)
+        self.assertEqual(data["response"]["response_text_length"], 5000)
+
+    def test_thinking_text_captured_in_full(self):
+        from storage.ai_menu_extract import _write_debug_log
+        thinking = "Let me analyze each section of this menu image carefully..." * 50
+        with patch("storage.ai_menu_extract._LOGS_DIR", self.tmpdir):
+            path = _write_debug_log(
+                model="test", thinking_active=True, multimodal=True,
+                ocr_text_length=5000, image_blocks_count=1,
+                api_kwargs_summary={},
+                thinking_chars=len(thinking), thinking_text=thinking,
+            )
+
+        with open(path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["response"]["thinking_text"], thinking)
+        self.assertEqual(data["response"]["thinking_chars"], len(thinking))
+
+    def test_items_manifest_and_category_breakdown(self):
+        from storage.ai_menu_extract import _write_debug_log
+        manifest = [
+            {"name": "Cheese Pizza", "category": "Pizza", "price": 8.0, "n_sizes": 4},
+            {"name": "Caesar Salad", "category": "Salads", "price": 9.5, "n_sizes": 0},
+            {"name": "Pepperoni Pizza", "category": "Pizza", "price": 10.0, "n_sizes": 4},
+        ]
+        breakdown = {"Pizza": 2, "Salads": 1}
+        with patch("storage.ai_menu_extract._LOGS_DIR", self.tmpdir):
+            path = _write_debug_log(
+                model="test", thinking_active=True, multimodal=True,
+                ocr_text_length=5000, image_blocks_count=1,
+                api_kwargs_summary={},
+                parsed_item_count=3,
+                items_manifest=manifest,
+                category_breakdown=breakdown,
+            )
+
+        with open(path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["result"]["items_manifest"], manifest)
+        self.assertEqual(data["result"]["category_breakdown"], breakdown)
+        self.assertEqual(data["result"]["parsed_item_count"], 3)
 
     def test_filename_pattern(self):
         from storage.ai_menu_extract import _write_debug_log
@@ -313,6 +356,11 @@ class TestDebugLogIntegration(unittest.TestCase):
         kwargs = mock_log.call_args.kwargs
         self.assertEqual(kwargs["parsed_item_count"], 2)
         self.assertIsNone(kwargs.get("error"))
+        # New: items_manifest and category_breakdown are passed
+        self.assertIsNotNone(kwargs.get("items_manifest"))
+        self.assertEqual(len(kwargs["items_manifest"]), 2)
+        self.assertIn("Pizza", kwargs["category_breakdown"])
+        self.assertIn("Salads", kwargs["category_breakdown"])
 
     @patch("storage.ai_menu_extract._write_debug_log")
     @patch("storage.ai_menu_extract._get_client")
@@ -393,6 +441,24 @@ class TestDebugLogIntegration(unittest.TestCase):
         kwargs = mock_log.call_args.kwargs
         self.assertEqual(kwargs["block_types"], ["thinking", "text"])
 
+    @patch("storage.ai_menu_extract._write_debug_log")
+    @patch("storage.ai_menu_extract._get_client")
+    def test_debug_log_captures_thinking_text(self, mock_client_fn, mock_log):
+        """Debug log captures the full thinking text, not just char count."""
+        client = MagicMock()
+        client.messages.stream.return_value = _make_stream_cm(
+            _make_fake_response(_SAMPLE_ITEMS_JSON, include_thinking=True))
+        mock_client_fn.return_value = client
+
+        from storage.ai_menu_extract import extract_menu_items_via_claude
+        extract_menu_items_via_claude("menu text")
+
+        kwargs = mock_log.call_args.kwargs
+        self.assertEqual(kwargs["thinking_text"],
+                         "Let me analyze this menu carefully...")
+        self.assertEqual(kwargs["thinking_chars"],
+                         len("Let me analyze this menu carefully..."))
+
 
 # ---------------------------------------------------------------------------
 # 5. _LOGS_DIR points to storage/logs/
@@ -407,11 +473,7 @@ class TestLogsDir(unittest.TestCase):
 # 6. 3-call pipeline default unchanged
 # ---------------------------------------------------------------------------
 class TestPipelineDefaults(unittest.TestCase):
-    """Default configuration still uses the 3-call Sonnet pipeline."""
-
-    def test_extended_thinking_is_false(self):
-        from storage.ai_menu_extract import EXTENDED_THINKING
-        self.assertFalse(EXTENDED_THINKING)
+    """Default model is still Sonnet 4.5 for non-thinking path."""
 
     def test_default_model_is_sonnet_4_5(self):
         import inspect

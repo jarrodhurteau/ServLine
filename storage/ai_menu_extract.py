@@ -238,11 +238,18 @@ def _write_debug_log(
     output_tokens: Any = "?",
     block_types: List[str] | None = None,
     thinking_chars: int = 0,
+    thinking_text: str = "",
     response_text: str = "",
     parsed_item_count: int | None = None,
+    items_manifest: List[Dict[str, Any]] | None = None,
+    category_breakdown: Dict[str, int] | None = None,
     error: str | None = None,
 ) -> str | None:
     """Write a JSON debug log for a Call 1 API interaction.
+
+    Captures the full Opus reasoning (thinking_text) and a compact manifest
+    of every extracted item so post-mortem analysis can see exactly what
+    happened without re-running the API call.
 
     Returns the path to the written file, or None on failure.
     """
@@ -265,10 +272,14 @@ def _write_debug_log(
                 "output_tokens": output_tokens,
                 "block_types": block_types or [],
                 "thinking_chars": thinking_chars,
-                "response_text_preview": response_text[:2000],
+                "thinking_text": thinking_text,
+                "response_text_preview": response_text[:500],
+                "response_text_length": len(response_text),
             },
             "result": {
                 "parsed_item_count": parsed_item_count,
+                "category_breakdown": category_breakdown,
+                "items_manifest": items_manifest,
                 "error": error,
             },
         }
@@ -428,12 +439,15 @@ def extract_menu_items_via_claude(
         # Extract text from response (skip thinking blocks)
         resp_text = ""
         thinking_chars = 0
+        thinking_text = ""
         block_types: List[str] = []
         for block in message.content:
             block_type = getattr(block, "type", None)
             block_types.append(block_type or "unknown")
             if block_type == "thinking":
-                thinking_chars += len(getattr(block, "thinking", ""))
+                t = getattr(block, "thinking", "")
+                thinking_chars += len(t)
+                thinking_text += t
             elif hasattr(block, "text"):
                 resp_text += block.text
 
@@ -449,7 +463,8 @@ def extract_menu_items_via_claude(
             _write_debug_log(
                 **_debug_base, stop_reason=stop, input_tokens=in_tok,
                 output_tokens=out_tok, block_types=block_types,
-                thinking_chars=thinking_chars, response_text=resp_text,
+                thinking_chars=thinking_chars, thinking_text=thinking_text,
+                response_text=resp_text,
                 error="empty_response_text",
             )
             return None
@@ -469,7 +484,8 @@ def extract_menu_items_via_claude(
             _write_debug_log(
                 **_debug_base, stop_reason=stop, input_tokens=in_tok,
                 output_tokens=out_tok, block_types=block_types,
-                thinking_chars=thinking_chars, response_text=resp_text,
+                thinking_chars=thinking_chars, thinking_text=thinking_text,
+                response_text=resp_text,
                 error="missing_items_list",
             )
             return None
@@ -494,11 +510,25 @@ def extract_menu_items_via_claude(
                      "multimodal" if multimodal else "text-only"
         print(f"[Call 1] SUCCESS: {len(result)} items extracted ({mode_label})")
 
+        # Build compact items manifest + category breakdown for debug log
+        _manifest = [
+            {"name": it["name"], "category": it["category"],
+             "price": it["price"], "n_sizes": len(it.get("sizes", []))}
+            for it in result
+        ]
+        _cat_counts: Dict[str, int] = {}
+        for it in result:
+            c = it["category"]
+            _cat_counts[c] = _cat_counts.get(c, 0) + 1
+
         _write_debug_log(
             **_debug_base, stop_reason=stop, input_tokens=in_tok,
             output_tokens=out_tok, block_types=block_types,
-            thinking_chars=thinking_chars, response_text=resp_text,
+            thinking_chars=thinking_chars, thinking_text=thinking_text,
+            response_text=resp_text,
             parsed_item_count=len(result),
+            items_manifest=_manifest,
+            category_breakdown=_cat_counts,
         )
         return result if result else None
 
@@ -509,7 +539,8 @@ def extract_menu_items_via_claude(
         _write_debug_log(
             **_debug_base, stop_reason=stop, input_tokens=in_tok,
             output_tokens=out_tok, block_types=block_types,
-            thinking_chars=thinking_chars, response_text=resp_text,
+            thinking_chars=thinking_chars, thinking_text=thinking_text,
+            response_text=resp_text,
             error=f"json_parse_error: {e}",
         )
         return None
