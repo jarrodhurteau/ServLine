@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Full 4-stage pipeline operational: OCR → Claude Call 1 (text extraction) → Claude Call 2 (vision verification) → Semantic pipeline (quality/repair). Day 100.5 removed heuristic AI fallback and legacy JSON fallback — no API key = empty draft for manual input (free tier). New Pipeline Debug view replaces old heuristic preview. Live-tested on real 200-item pizza menu: Claude path produced clean structured items with variants. Known issues logged for Sprint 11.2: category boundary merging (Soups + Wings), piece-count variant detection, multi-column pricing. 1,635 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 IN PROGRESS (Days 101-104). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 102.5: Call 1 upgraded to multimodal (image-first + OCR hint). Day 102.6: minimal prompt rewrite + category normalizer kept, Opus+thinking reverted to Sonnet. Next: Day 102.7 — Sonnet 4.6 adaptive thinking + file-based debug logging + live A/B comparison. 1,780 tests pass.
 
 ---
 
@@ -1646,3 +1646,13 @@ ServLine now has:
   - All 3 Claude calls now multimodal: Call 1 (extract) + Call 2 (verify) + Call 3 (reconcile)
   - Day 102.5 test suite: 23 cases, 100% pass rate
   - Cumulative: 1,728 passed (excl. Day 70 fixture errors)
+
+- **Prompt Rewrite + Category Normalizer (Day 102.6):** *** PARTIAL — REVERTED ***
+  - Attempted Opus + adaptive thinking as single-call replacement for 3-call pipeline
+  - First test (Draft #203) produced 259 items, but subsequent prompt tightening broke it
+  - Root cause: Opus + thinking works with loose goal prompts, breaks with prescriptive rules
+  - Debug blindspot: 50k-char log truncation hid Claude's actual response
+  - Kept: minimal prompt (~1100 chars), category normalizer (22 categories + aliases),
+    streaming API (messages.stream), debug prints. Reverted: back to Sonnet 3-call pipeline
+  - Day 102.6 test suite: 52 cases, 100% pass rate
+  - Cumulative: 1,780 passed (excl. Day 70 fixture errors)

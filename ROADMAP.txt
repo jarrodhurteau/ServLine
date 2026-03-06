@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 102.5 (March 5, 2026) — Multimodal Call 1 Complete
+Last Updated: Day 102.6 (March 5, 2026) — Prompt Rewrite + Category Normalizer (Opus reverted)
 
 ================================================================================
 PROJECT MISSION
@@ -1126,45 +1126,92 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102.5 test suite: 23 cases, 100% pass rate
     Cumulative: 1,728 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
 
-  Day 102.6: Opus Upgrade + Goal-Oriented Prompt Rewrite
-  ------------------------------------------------------
+  Day 102.6: Prompt Rewrite + Category Normalizer *** PARTIAL — REVERTED ***
+  -----------------------------------------------------------------------
   CONTEXT: Live testing revealed Sonnet produces correct items but misses size
   variants for non-pizza sections (wings piece counts, burger Regular/Deluxe,
-  calzone Small/Large, wraps multi-column pricing). Root cause: Sonnet follows
-  explicit rules well but doesn't reason about menu layout structure the way
-  Opus does. Over-constraining the prompt with enumerated patterns makes it
-  worse — model matches specific examples instead of understanding the menu.
+  calzone Small/Large, wraps multi-column pricing). Attempted Opus + extended
+  thinking as single-call replacement for the 3-call pipeline.
 
-  PHILOSOPHY SHIFT: Stop micromanaging with rules. Give Opus the goal and trust
-  the model. A concise, goal-oriented prompt outperforms a 150-line rule list.
+  RESULTS: Opus + adaptive thinking produced 259 items on first test (Draft
+  #203) but subsequent runs after prompt tightening returned nothing — Claude
+  response was invisible due to 50k-char log truncation. Every draft after
+  the prompt changes showed 9 garbled heuristic OCR fallback items.
 
-  [ ] Switch Call 1 model from claude-sonnet-4-5 to claude-opus-4-6
-      - Only Call 1 (extraction) — Call 2 (vision verify) and Call 3
-        (reconciliation) stay on Sonnet (verification tasks, Sonnet is fine)
-      - Cost impact: ~$0.18 more per menu (~$0.93 vs $0.75 for full pipeline)
-      - Negligible against $50/batch price point
-  [ ] Rewrite extraction prompt — goal-oriented, not rule-heavy:
-      - Short system prompt: "You are a POS import expert. Extract every
-        orderable item with ALL price variants exactly as shown on the menu."
-      - Trust Opus to understand menu structure without enumerating every
-        pattern (Regular/Deluxe columns, piece counts, size grids, etc.)
-      - Keep only essential structural guidance: JSON output format, category
-        list, POS-ready splitting, toppings/sauces as individual items
-      - Remove: prescriptive size pattern enumeration (a-f), verbose price
-        association rules, OCR typo examples — Opus doesn't need hand-holding
-  [ ] Consolidate prompts: single _SYSTEM_PROMPT used for both multimodal
-      and text-only modes (multimodal preamble + shared extraction goal)
-  [ ] Live test with same menu image — verify:
-      - Wings: piece count sizes (10 pc, 20 pc, 30 pc, 50 pc + w/ Fries)
-      - Burgers: Regular/Deluxe sizes
-      - Melts: Regular/Deluxe sizes
-      - Calzones: Small/Large sizes
-      - Wraps: multi-column pricing captured
-      - Sauces: wing sauces extracted as individual items
-      - Categories: no merged headings ("Fresh Soups & Buffalo Wings" split)
-      - Descriptions: no fabricated text
-  [ ] Update tests for new model constant and prompt structure
-  [ ] Run full test suite — all 1,728+ tests pass
+  DECISION: Reverted to Sonnet 3-call pipeline. Kept the good parts:
+  [x] Minimal goal-oriented prompt (~1100 chars, down from ~3100)
+      - Removed prescriptive rules, pattern enumeration, OCR typo examples
+      - Kept: JSON format, category whitelist, splitting guidance, Title Case
+  [x] Code-level category normalizer (_normalize_category)
+      - VALID_CATEGORIES frozenset (22 canonical POS categories)
+      - _CATEGORY_ALIASES dict for common menu headings
+      - Substring matching fallback → "Other" default
+      - Applied post-extraction, deterministic, no AI needed
+  [x] Consolidated prompts: _MULTIMODAL_PREAMBLE + _EXTRACTION_GOAL shared core
+  [x] Streaming API (messages.stream) — safe for all models, prevents timeouts
+  [x] Debug print statements for API response visibility
+  [x] Reverted: EXTENDED_THINKING=False, model=sonnet, max_tokens=16000
+      - 3-call pipeline re-enabled (Call 2 vision + Call 3 reconcile active)
+  [x] Tests updated: 52 tests for prompt/normalizer, 23 for multimodal stream mocks
+
+  LESSON LEARNED: Opus + thinking works with loose goal prompts but breaks when
+  tightened. The model reasons best when given goals, not rules. Debugging is
+  impossible when logs truncate before showing the API response.
+
+    Day 102.6 test suite: 52 cases, 100% pass rate
+    Cumulative: 1,780 passed (excl. Day 70 fixture errors, 1 pre-existing timing flake)
+
+  Day 102.7: Sonnet Thinking + File Debug + Live Validation
+  ---------------------------------------------------------
+  GOAL: Get adaptive thinking working on Sonnet 4.6 (fast + smart) with
+  file-based debug logging so we can actually see what Claude returns.
+  Then validate with the live pizza menu import.
+
+  Step 1: File-based debug logging
+  ................................
+  [ ] Add _write_debug_log() to ai_menu_extract.py
+      - Writes to storage/logs/call1_debug_{timestamp}.json
+      - Captures: model, thinking_active, multimodal, ocr_text_length,
+        image_blocks_count, api_kwargs (sans image data), response metadata
+        (stop_reason, token counts, block types), thinking_chars,
+        response_text (first 2000 chars), parsed_item_count or error
+      - Auto-creates storage/logs/ directory
+      - Called after every API response (success or failure)
+  [ ] Keep existing print() statements for quick console visibility
+
+  Step 2: Sonnet 4.6 + adaptive thinking (opt-in flag)
+  ....................................................
+  [ ] Keep EXTENDED_THINKING = False (default = 3-call Sonnet pipeline)
+  [ ] Add THINKING_MODEL constant = "claude-sonnet-4-6"
+  [ ] When EXTENDED_THINKING = True:
+      - model = THINKING_MODEL (Sonnet 4.6, NOT Opus)
+      - thinking = {"type": "adaptive"}
+      - temperature = 1
+      - max_tokens = 16000 (Sonnet doesn't need 32k)
+      - Pipeline bypasses Call 2 & 3 (existing portal/app.py logic)
+  [ ] Keep the minimal prompt — do NOT tighten it
+  [ ] Update tests for new THINKING_MODEL constant
+
+  Step 3: Live A/B comparison
+  ...........................
+  [ ] Run import with EXTENDED_THINKING = False (3-call Sonnet)
+      - Record: item count, categories, missing sizes, processing time
+  [ ] Flip EXTENDED_THINKING = True (single-call Sonnet+thinking)
+      - Record: same metrics
+      - Check debug log file for full Claude response
+  [ ] Compare results side-by-side
+      - Does thinking mode capture more size variants?
+      - Does thinking mode handle multi-column pricing better?
+      - Is processing time acceptable (target: under 2 minutes)?
+  [ ] If thinking wins: keep it on. If not: revert flag, investigate log.
+
+  Step 4: Tests
+  .............
+  [ ] Test _write_debug_log creates file with expected fields
+  [ ] Test THINKING_MODEL defaults to sonnet-4-6
+  [ ] Test thinking opt-in sends correct API params
+  [ ] Test 3-call pipeline still works as default
+  [ ] Run full suite — all 1,780+ tests pass
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
