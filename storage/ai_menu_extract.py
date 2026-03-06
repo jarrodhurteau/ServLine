@@ -76,10 +76,17 @@ Extract every orderable item from this restaurant menu for POS system import.
 
 Each item = one product a customer can order in a POS system.
 Split compound items: "Beef or Chicken Empanadas" → two separate items.
-Individual toppings, sauces, and dressings each get their own item.
+Each named topping (Pepperoni, Mushrooms, etc.) and each named sauce (Ranch, BBQ, etc.) \
+is a separate item — do not combine them into one "Each Topping Add" item.
 Section-wide choices (e.g., "Naked or Breaded", "White or Wheat") → size variants on each item, not descriptions.
 Section-wide notes (e.g., "All sandwiches come with lettuce, tomato...") → include in each item's description.
+When a section has multiple price columns (e.g., "Regular/Deluxe", "W/Fries", "W/Cheese"), \
+capture each column as a size variant.
 Use Title Case for names even if the menu is printed in ALL CAPS.
+
+IMPORTANT: Match each description to its correct item. Menu descriptions often appear on \
+the line below the item name — verify the pairing is right. If uncertain, set description to null.
+Do not skip items — check every section of the menu for completeness.
 
 For each item return:
 - "name": exact full name as printed on the menu
@@ -213,6 +220,44 @@ def _normalize_category(cat: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Post-processing: description-name mismatch detector
+# ---------------------------------------------------------------------------
+# Catches systematic description shifting (e.g., veggie item with steak desc)
+_MEAT_TERMS = {"steak", "beef", "chicken", "bacon", "ham", "sausage",
+               "pepperoni", "hamburger", "meatball", "gyro"}
+_VEGGIE_NAMES = {"veggie", "vegetable", "vegan"}
+
+
+def _validate_descriptions(items: List[Dict[str, Any]]) -> int:
+    """Null out descriptions that obviously don't match the item name.
+
+    Returns the number of descriptions that were nulled.
+    """
+    fixed = 0
+    for it in items:
+        desc = it.get("description")
+        if not desc:
+            continue
+        name_lower = it["name"].lower()
+        desc_lower = desc.lower()
+
+        # Veggie items should not have meat in their description
+        if any(v in name_lower for v in _VEGGIE_NAMES):
+            if any(m in desc_lower for m in _MEAT_TERMS):
+                it["description"] = None
+                fixed += 1
+                continue
+
+        # Caesar items should not have pesto in their description
+        if "caesar" in name_lower and "pesto" in desc_lower:
+            it["description"] = None
+            fixed += 1
+            continue
+
+    return fixed
+
+
+# ---------------------------------------------------------------------------
 # Extended thinking configuration
 # ---------------------------------------------------------------------------
 EXTENDED_THINKING = True  # A/B test: single-call Sonnet 4.6 + adaptive thinking
@@ -275,6 +320,7 @@ def _write_debug_log(
                 "thinking_text": thinking_text,
                 "response_text_preview": response_text[:500],
                 "response_text_length": len(response_text),
+                "response_text_full": response_text,
             },
             "result": {
                 "parsed_item_count": parsed_item_count,
@@ -402,8 +448,8 @@ def extract_menu_items_via_claude(
     if thinking_active:
         api_kwargs["temperature"] = 1  # required for extended thinking
         # "enabled" + budget_tokens: guarantees thinking IS used, but CAPS it.
-        # "adaptive" mode let the model spend ALL max_tokens on thinking
-        # (68k thinking chars, 0 text response) — budget_tokens prevents that.
+        # Day 102.8 finding: "adaptive" without budget lets Opus spend ALL 32k
+        # tokens on thinking (0 chars response). budget_tokens prevents that.
         api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
     else:
         api_kwargs["temperature"] = 0
@@ -506,16 +552,34 @@ def extract_menu_items_via_claude(
                 "sizes": _normalize_sizes(it.get("sizes")),
             })
 
+        # Post-processing: catch description-name mismatches
+        n_fixed = _validate_descriptions(result)
+        if n_fixed:
+            print(f"[Call 1] Description validator: nulled {n_fixed} mismatched description(s)")
+
         mode_label = "multimodal+thinking" if (multimodal and thinking_active) else \
                      "multimodal" if multimodal else "text-only"
         print(f"[Call 1] SUCCESS: {len(result)} items extracted ({mode_label})")
 
-        # Build compact items manifest + category breakdown for debug log
-        _manifest = [
-            {"name": it["name"], "category": it["category"],
-             "price": it["price"], "n_sizes": len(it.get("sizes", []))}
-            for it in result
-        ]
+        # Build items manifest + category breakdown for debug log
+        _manifest = []
+        for it in result:
+            entry = {
+                "name": it["name"],
+                "category": it["category"],
+                "price": it["price"],
+                "n_sizes": len(it.get("sizes", [])),
+            }
+            desc = (it.get("description") or "")[:80]
+            if desc:
+                entry["desc"] = desc
+            sizes = it.get("sizes", [])
+            if sizes:
+                entry["sizes"] = [
+                    {"label": s.get("label", ""), "price": s.get("price", 0)}
+                    for s in sizes
+                ]
+            _manifest.append(entry)
         _cat_counts: Dict[str, int] = {}
         for it in result:
             c = it["category"]

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 102.6 (March 5, 2026) — Prompt Rewrite + Category Normalizer (Opus reverted)
+Last Updated: Day 102.8 (March 6, 2026) — Opus Live Testing + Prompt Tuning (114→142 items)
 
 ================================================================================
 PROJECT MISSION
@@ -1220,6 +1220,76 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
   [x] Test portal wiring passes use_thinking=_thinking_active
   [x] Test 3-call pipeline still works as default
   [x] Run full suite — 1,806 passed (26 new Day 102.7 tests)
+
+  Day 102.7b: Enhanced Debug Logging — COMPLETE
+  ----------------------------------------------
+  [x] Full thinking text captured (thinking_text, not just char count)
+  [x] Items manifest: every extracted item with name/category/price/n_sizes
+  [x] Category breakdown: {category: count} for quick analysis
+  [x] Response text preview shortened to 500 chars + response_text_length
+  [x] All error paths capture thinking_text
+  [x] Fixed stale tests: Opus 4.6, EXTENDED_THINKING=True, enabled+budget_tokens
+  [x] 3 new tests (thinking_text, items_manifest, category_breakdown)
+  [x] Run full suite — 1,808 passed (28 Day 102.7 tests)
+
+  Day 102.8: Opus Live Testing & Prompt Tuning *** COMPLETE ***
+  ---------------------------------------------
+  GOAL: Use enhanced debug logging to analyze Opus extraction quality on
+  real menus, review thinking text + items manifest, and tune the prompt
+  to improve completeness and accuracy.
+
+  RESULTS: 4 live extraction runs on real 200-item pizza menu.
+  Baseline (Run 1): 114 items. Final (Run 4): 142 items (+25%).
+
+  [x] Enhanced debug logging for analysis:
+      - response_text_full: complete JSON response (was truncated to 500 chars)
+      - Enriched items_manifest: description + size labels + prices per item
+      - CLI extraction tool: tools/run_extraction.py (loads .env, runs OCR+Claude)
+  [x] Analyzed Opus extraction vs OCR ground truth:
+      - Description shifting: calzone/wrap descriptions misaligned with item names
+      - Missing items: Mega Fries, 30 PCS Wings, some wraps/calzones
+      - Toppings collapsed into 1 "Each Topping Add" (should be 20+ items)
+      - Sauces not enumerated (should be 8+ items)
+      - W/ Cheese variants for fries not captured
+  [x] Prompt tuning (4 targeted additions to _EXTRACTION_GOAL):
+      - Topping/sauce enumeration: "Each named topping... is a separate item"
+      - Description alignment: "Match each description to its correct item"
+      - Multi-column pricing: "W/Fries, W/Cheese → size variants"
+      - Completeness: "Do not skip items — check every section"
+  [x] Post-processing description validator (_validate_descriptions):
+      - Catches veggie items with meat descriptions → nulls them
+      - Catches caesar items with pesto descriptions → nulls them
+      - Called automatically during extraction flow
+  [x] Adaptive thinking finding (IMPORTANT):
+      - type="adaptive" without budget_tokens → Opus spent ALL 32k tokens
+        on thinking, 0 chars for JSON response. Run 3 = total failure.
+      - MUST use type="enabled" + budget_tokens=10000 to cap thinking.
+      - Documented in code comment for future reference.
+  [x] 23 new tests (test_day102_8_prompt_tuning.py):
+      - 12 description validator tests (veggie+meat, caesar+pesto, mixed batch)
+      - 5 prompt content tests (topping enum, desc alignment, pricing, completeness)
+      - 2 thinking config tests (enabled+budget, no-thinking default)
+      - 1 debug log full response test
+      - 1 manifest enrichment test
+      - 2 validator integration tests (called during flow, actually nulls in extraction)
+
+  CATEGORY COMPARISON (baseline → final):
+    Toppings:    1 →  20 (+19)  — individual topping enumeration ✅
+    Sauces:      0 →   9 (+9)   — new category ✅
+    Calzones:   10 →  11 (+1)   — Combination Calzone found ✅
+    Burgers:     7 →   8 (+1)   — Cheeseburger found ✅
+    Salads:      0 →   1 (+1)   — new category ✅
+    Total:     114 → 142 (+28)  — 25% improvement
+
+  REMAINING KNOWN ISSUES:
+    - Description shifting persists for some calzones/wraps (hard visual parsing)
+    - ~7 items still missing (Mega Fries, Cambridge Wrap, 30 PCS Wings, etc.)
+    - Wrap W/ Fries pricing inconsistent between runs
+    - Some price reading errors (wing tenders show wrong base prices)
+    Target: Sprint 11.3 confidence gate will catch remaining quality issues.
+
+    Day 102.8 test suite: 23 cases, 100% pass rate
+    Cumulative: 1,831 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
