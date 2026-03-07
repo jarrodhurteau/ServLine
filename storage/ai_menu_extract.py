@@ -77,15 +77,24 @@ Extract every orderable item from this restaurant menu for POS system import.
 Each item = one product a customer can order in a POS system.
 Split compound items: "Beef or Chicken Empanadas" → two separate items.
 Each named topping (Pepperoni, Mushrooms, etc.) and each named sauce (Ranch, BBQ, etc.) \
-is a separate item — do not combine them into one "Each Topping Add" item.
-Section-wide choices (e.g., "Naked or Breaded", "White or Wheat") → size variants on each item, not descriptions.
-Section-wide notes (e.g., "All sandwiches come with lettuce, tomato...") → include in each item's description.
-When a section has multiple price columns (e.g., "Regular/Deluxe", "W/Fries", "W/Cheese"), \
-capture each column as a size variant.
+is a separate item — do not combine them into one "Each Topping Add" item. \
+If the menu lists available toppings by name, create one item per topping with the per-topping price.
+Sauce/flavor options listed within a section (e.g., "Hot, Mild, BBQ, Honey BBQ" under wings) \
+should also be extracted as individual items in the Sauces category, not placed in descriptions.
+When items are sold by quantity (e.g., wings: 6 Pcs, 10 Pcs, 20 Pcs), each quantity is its own item — \
+do not collapse them into one item with quantity-based size variants.
+Pay close attention to section headers — they often contain info that applies to every item below:
+- Shared pricing (e.g., "Wraps — Regular $10 / W/ Fries $14") → apply as size variants to all items in that section.
+- Shared options (e.g., "White or Wheat", "Naked or Breaded") → add as size variants on each item, not in descriptions.
+- Shared descriptions (e.g., "All sandwiches come with lettuce, tomato...") → include in each item's description.
+- Multiple price columns (e.g., "Regular/Deluxe", "W/Fries", "W/Cheese") → capture each column as a size variant.
 Use Title Case for names even if the menu is printed in ALL CAPS.
 
-IMPORTANT: Match each description to its correct item. Menu descriptions often appear on \
-the line below the item name — verify the pairing is right. If uncertain, set description to null.
+IMPORTANT: Descriptions shift easily — menus often print the description on the line below \
+the item name, so it looks like it belongs to the next item down. Before assigning a description, \
+verify it makes sense for that item (e.g., a Veggie Calzone should not have "Grilled Chicken" \
+in its description). If uncertain, set description to null — a missing description is better \
+than a wrong one.
 Do not skip items — check every section of the menu for completeness.
 
 For each item return:
@@ -247,12 +256,6 @@ def _validate_descriptions(items: List[Dict[str, Any]]) -> int:
                 it["description"] = None
                 fixed += 1
                 continue
-
-        # Caesar items should not have pesto in their description
-        if "caesar" in name_lower and "pesto" in desc_lower:
-            it["description"] = None
-            fixed += 1
-            continue
 
     return fixed
 

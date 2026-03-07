@@ -4,13 +4,16 @@ Day 102.8 — Opus Live Testing & Prompt Tuning.
 
 Tests that:
   1. _validate_descriptions() catches veggie items with meat descriptions
-  2. _validate_descriptions() catches caesar items with pesto descriptions
+  2. _validate_descriptions() leaves caesar+pesto alone (not universally wrong)
   3. _validate_descriptions() leaves valid descriptions unchanged
   4. _validate_descriptions() handles None/empty descriptions safely
   5. Prompt includes topping enumeration guidance
   6. Prompt includes description alignment warning
   7. Prompt includes multi-column pricing guidance
   8. Prompt includes completeness check guidance
+  8b. Prompt includes section header pricing/options/descriptions guidance
+  8c. Prompt includes sauce extraction guidance
+  8d. Prompt includes quantity-based item split guidance
   9. Thinking mode uses adaptive (not enabled)
   10. Debug log includes response_text_full field
   11. Items manifest includes description and sizes fields
@@ -90,12 +93,13 @@ class TestValidateDescriptions(unittest.TestCase):
         self.assertEqual(fixed, 1)
         self.assertIsNone(items[0]["description"])
 
-    def test_caesar_with_pesto_desc_is_nulled(self):
+    def test_caesar_with_pesto_desc_left_alone(self):
+        """Caesar + pesto is not universally wrong — some restaurants do this."""
         from storage.ai_menu_extract import _validate_descriptions
         items = [{"name": "Chicken Caesar Wrap", "description": "Pesto Sauce, Lettuce, Tomato"}]
         fixed = _validate_descriptions(items)
-        self.assertEqual(fixed, 1)
-        self.assertIsNone(items[0]["description"])
+        self.assertEqual(fixed, 0)
+        self.assertEqual(items[0]["description"], "Pesto Sauce, Lettuce, Tomato")
 
     def test_valid_veggie_desc_left_alone(self):
         from storage.ai_menu_extract import _validate_descriptions
@@ -140,10 +144,10 @@ class TestValidateDescriptions(unittest.TestCase):
             {"name": "Veggie Calzone", "description": "Broccoli, Tomato, Olives"},
         ]
         fixed = _validate_descriptions(items)
-        self.assertEqual(fixed, 2)
+        self.assertEqual(fixed, 1)  # Only veggie+steak is universally wrong
         self.assertIsNone(items[0]["description"])
         self.assertEqual(items[1]["description"], "Mozzarella")
-        self.assertIsNone(items[2]["description"])
+        self.assertEqual(items[2]["description"], "Pesto, Lettuce")  # Caesar+pesto is valid
         self.assertEqual(items[3]["description"], "Broccoli, Tomato, Olives")
 
     def test_empty_list(self):
@@ -172,7 +176,7 @@ class TestPromptContent(unittest.TestCase):
 
     def test_prompt_has_description_alignment_warning(self):
         from storage.ai_menu_extract import _EXTRACTION_GOAL
-        self.assertIn("match each description", _EXTRACTION_GOAL.lower())
+        self.assertIn("descriptions shift easily", _EXTRACTION_GOAL.lower())
 
     def test_prompt_has_multi_column_pricing(self):
         from storage.ai_menu_extract import _EXTRACTION_GOAL
@@ -182,9 +186,29 @@ class TestPromptContent(unittest.TestCase):
         from storage.ai_menu_extract import _EXTRACTION_GOAL
         self.assertIn("do not skip", _EXTRACTION_GOAL.lower())
 
+    def test_prompt_has_section_header_pricing(self):
+        from storage.ai_menu_extract import _EXTRACTION_GOAL
+        self.assertIn("shared pricing", _EXTRACTION_GOAL.lower())
+
+    def test_prompt_has_section_header_options(self):
+        from storage.ai_menu_extract import _EXTRACTION_GOAL
+        self.assertIn("shared options", _EXTRACTION_GOAL.lower())
+
+    def test_prompt_has_section_header_descriptions(self):
+        from storage.ai_menu_extract import _EXTRACTION_GOAL
+        self.assertIn("shared descriptions", _EXTRACTION_GOAL.lower())
+
+    def test_prompt_has_sauce_extraction(self):
+        from storage.ai_menu_extract import _EXTRACTION_GOAL
+        self.assertIn("sauces category", _EXTRACTION_GOAL.lower())
+
+    def test_prompt_has_quantity_split(self):
+        from storage.ai_menu_extract import _EXTRACTION_GOAL
+        self.assertIn("each quantity is its own item", _EXTRACTION_GOAL.lower())
+
     def test_prompt_has_valid_categories(self):
         from storage.ai_menu_extract import _EXTRACTION_GOAL, VALID_CATEGORIES
-        for cat in ["Pizza", "Toppings", "Wings", "Calzones", "Wraps"]:
+        for cat in ["Pizza", "Toppings", "Wings", "Calzones", "Wraps", "Sauces"]:
             self.assertIn(cat, _EXTRACTION_GOAL)
 
 

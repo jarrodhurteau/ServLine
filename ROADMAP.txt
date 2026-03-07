@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 102.8 (March 6, 2026) — Opus Live Testing + Prompt Tuning (114→142 items)
+Last Updated: Day 102.8b (March 7, 2026) — Prompt Iteration (section headers, sauces, quantity split)
 
 ================================================================================
 PROJECT MISSION
@@ -1258,7 +1258,7 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
       - Completeness: "Do not skip items — check every section"
   [x] Post-processing description validator (_validate_descriptions):
       - Catches veggie items with meat descriptions → nulls them
-      - Catches caesar items with pesto descriptions → nulls them
+      - Removed caesar+pesto rule (too menu-specific, false positives)
       - Called automatically during extraction flow
   [x] Adaptive thinking finding (IMPORTANT):
       - type="adaptive" without budget_tokens → Opus spent ALL 32k tokens
@@ -1281,15 +1281,41 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Salads:      0 →   1 (+1)   — new category ✅
     Total:     114 → 142 (+28)  — 25% improvement
 
-  REMAINING KNOWN ISSUES:
-    - Description shifting persists for some calzones/wraps (hard visual parsing)
-    - ~7 items still missing (Mega Fries, Cambridge Wrap, 30 PCS Wings, etc.)
-    - Wrap W/ Fries pricing inconsistent between runs
-    - Some price reading errors (wing tenders show wrong base prices)
-    Target: Sprint 11.3 confidence gate will catch remaining quality issues.
+  Day 102.8b: Live Website Testing & Prompt Iteration (108→133 items)
+  ---------------------------------------------------------------
+  Tested on live website (not CLI). 3 live uploads with iterative prompt fixes.
 
-    Day 102.8 test suite: 23 cases, 100% pass rate
-    Cumulative: 1,831 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+  [x] Removed caesar+pesto description validator (too menu-specific)
+  [x] Section header guidance consolidated — pricing, options, descriptions:
+      - "Wraps — Regular $10 / W/ Fries $14" → size variants on all items
+      - "White or Wheat" → size variants, not descriptions
+      - "All sandwiches come with..." → included in each description
+  [x] Sauce extraction: wing sauces extracted as individual Sauces items
+  [x] Quantity split: wings split by quantity (6/10/20/30/50 Pcs)
+  [x] Stronger description shift warning with concrete example
+  [x] Individual topping extraction: 1 → 19 separate topping items
+
+  RESULTS (3 iterations on live website):
+    Run 1 (baseline): 108 items
+    Run 2 (section headers + quantity split): 133 items (+23%)
+    Run 3 (+ sauces): 133 items (same count, +8 Sauces, better quality)
+
+  CATEGORY COMPARISON (Run 1 → Run 3):
+    Toppings:    1 → 19 (+18) — individual toppings ✅
+    Sauces:      0 →  8 (+8)  — wing sauces extracted ✅
+    Wings:       5 →  9 (+4)  — split by quantity ✅
+    Wraps:      21 → 20 (-1)  — gained pricing ($10.99 + White/Wheat) ✅
+    Calzones:   10 →  9 (-1)  — better descriptions (fewer hallucinations) ✅
+
+  REMAINING KNOWN ISSUES:
+    - Wraps missing W/Fries $14 variant (only captured Regular $10.99)
+    - Calzone description shifting still persists for some items
+    - "Each Topping Add" still present alongside individual toppings
+    - Some wing price swaps (10 Pcs Tender: Regular > W/Fries)
+    Target: Call 2 (vision verification) may catch remaining description issues.
+
+    Day 102.8 test suite: 28 cases, 100% pass rate
+    Cumulative: 1,764 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................

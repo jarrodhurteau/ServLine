@@ -97,16 +97,16 @@ class TestModelDefaults(unittest.TestCase):
 class TestMinimalPrompt(unittest.TestCase):
     """New prompt is dramatically smaller — lets Opus think instead of rule-following."""
 
-    def test_prompt_under_2000_chars(self):
+    def test_prompt_under_3500_chars(self):
         """System prompt (multimodal) should be well under old 3500 char limit."""
         from storage.ai_menu_extract import _SYSTEM_PROMPT_MULTIMODAL
-        self.assertLess(len(_SYSTEM_PROMPT_MULTIMODAL), 2000,
+        self.assertLess(len(_SYSTEM_PROMPT_MULTIMODAL), 3500,
                         f"Prompt is {len(_SYSTEM_PROMPT_MULTIMODAL)} chars — should stay concise")
 
-    def test_extraction_goal_under_1700_chars(self):
-        """Core extraction goal is concise but includes targeted accuracy guidance."""
+    def test_extraction_goal_under_2600_chars(self):
+        """Core extraction goal includes section-header, sauce, and quantity guidance."""
         from storage.ai_menu_extract import _EXTRACTION_GOAL
-        self.assertLess(len(_EXTRACTION_GOAL), 1700,
+        self.assertLess(len(_EXTRACTION_GOAL), 2600,
                         f"Goal is {len(_EXTRACTION_GOAL)} chars — should stay concise")
 
     def test_no_prescriptive_rules(self):
