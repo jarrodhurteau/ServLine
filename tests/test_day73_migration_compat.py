@@ -74,6 +74,7 @@ def _make_test_db() -> sqlite3.Connection:
             category TEXT,
             position INTEGER,
             confidence INTEGER,
+            kitchen_name TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE

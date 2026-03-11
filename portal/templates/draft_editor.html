@@ -302,6 +302,23 @@
     .name-cell {
       max-width: 100%;
     }
+    .kitchen-name-row {
+      margin-top: 3px;
+    }
+    .kitchen-name-row .kitchen-name {
+      font-size: 0.78rem;
+      color: #666;
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 2px 4px;
+      background: #fafafa;
+    }
+    .kitchen-name-row .kitchen-name:focus {
+      outline: none;
+      border-color: var(--brand, #3b82f6);
+      background: #fff;
+    }
     .cell-textarea {
       width: 100%;
       min-height: 2.1rem;
@@ -805,6 +822,12 @@
                       <span class="variant-count-pill">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
                     {% endif %}
                   </div>
+                  <div class="kitchen-name-row">
+                    <input class="cell-input kitchen-name"
+                           placeholder="Kitchen name…"
+                           value="{{ (it.kitchen_name or '')|e }}"
+                           {% if draft.status != 'editing' %}disabled{% endif %} />
+                  </div>
                   {% if it.quality is not none %}
                     <div class="quality-meta">
                       Quality: {{ it.quality }}/100
@@ -1254,6 +1277,7 @@
         const priceEl = $(".price", tr);
         const catEl = $(".category", tr);
         const posEl = $(".position", tr);
+        const kitchenEl = $(".kitchen-name", tr);
 
         const name = (nameEl && nameEl.value || "").trim();
         const description = (descEl && descEl.value || "").trim();
@@ -1261,6 +1285,7 @@
         const category = (catEl && catEl.value || "").trim();
         const posStr = (posEl && posEl.value || "").trim();
         const confStr=tr.getAttribute("data-confidence");
+        const kitchen_name = (kitchenEl && kitchenEl.value || "").trim() || null;
 
         // Phase 5 safety: completely blank rows are ignored instead of causing errors
         const allBlank = !name && !description && !priceStr && !category && !posStr;
@@ -1319,7 +1344,8 @@
           price_cents,
           category: category || null,
           position,
-          confidence
+          confidence,
+          kitchen_name
         };
         if (_variants.length) item._variants = _variants;
         items.push(item);
@@ -1430,6 +1456,7 @@
               ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
               ${prefill.low_confidence ? `<span class="pill-low-mini">⚠ Low</span>` : ``}
             </div>
+            ${prefill.kitchen_name ? `<div class="kitchen-name-row"><input class="cell-input kitchen-name" placeholder="Kitchen name…" value="${(prefill.kitchen_name||'').replace(/"/g,'&quot;')}" /></div>` : `<div class="kitchen-name-row"><input class="cell-input kitchen-name" placeholder="Kitchen name…" value="" /></div>`}
             <span class="prov-pin"
                   title="Source & confidence"
                   data-prov-name="${(prefill.name||'').replace(/"/g,'&quot;')}"

@@ -103,10 +103,10 @@ class TestMinimalPrompt(unittest.TestCase):
         self.assertLess(len(_SYSTEM_PROMPT_MULTIMODAL), 3500,
                         f"Prompt is {len(_SYSTEM_PROMPT_MULTIMODAL)} chars — should stay concise")
 
-    def test_extraction_goal_under_2600_chars(self):
-        """Core extraction goal includes section-header, sauce, and quantity guidance."""
+    def test_extraction_goal_under_3200_chars(self):
+        """Core extraction goal includes section-header, sauce, quantity, and modifier-group guidance."""
         from storage.ai_menu_extract import _EXTRACTION_GOAL
-        self.assertLess(len(_EXTRACTION_GOAL), 2600,
+        self.assertLess(len(_EXTRACTION_GOAL), 3200,
                         f"Goal is {len(_EXTRACTION_GOAL)} chars — should stay concise")
 
     def test_no_prescriptive_rules(self):

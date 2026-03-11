@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 111 (March 11, 2026) — Sprint 12.1 Nested Groups + Template Library (40 tests, 2,200 total)
+Last Updated: Day 112 (March 12, 2026) — Sprint 12.1 Extraction Pipeline + Kitchen Name Editor (40 tests, 2,241 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1578,6 +1578,32 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 111 test suite: 40 cases, 100% pass rate
     Cumulative: 2,200 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  Day 112: Sprint 12.1 — Extraction Pipeline + Kitchen Name Editor Wiring *** COMPLETE ***
+  ------------------------------------------------------------------------------------------
+  [x] _build_modifier_groups_from_claude(raw_groups) — converts Claude "modifier_groups"
+        list into _modifier_groups format: name, required, min_select, max_select,
+        position, _modifiers[]. Skips nameless groups + nameless/non-dict modifiers.
+  [x] claude_items_to_draft_rows() updated:
+        - Reads modifier_groups from Claude output → _modifier_groups key on row
+        - sizes still produce _variants (ungrouped, backward compat)
+        - Both keys can coexist on the same item
+  [x] _insert_modifier_groups_with_cursor(cur, item_id, raw_groups, replace=False):
+        - Inline helper for use inside existing DB transactions
+        - replace=True: nullifies variant modifier_group_id refs, deletes groups, re-inserts
+        - Inserts group rows + variant rows with modifier_group_id FK set
+  [x] _insert_items_bulk() updated: kitchen_name + _modifier_groups
+  [x] upsert_draft_items() updated: kitchen_name INSERT+UPDATE + _modifier_groups replace
+  [x] _normalize_item_for_db() updated: extracts kitchen_name (strips, None if empty)
+  [x] draft_editor.html kitchen name wiring:
+        - .kitchen-name-row input field in every item row (server-rendered + addRow())
+        - collectPayload() includes kitchen_name (null when empty)
+        - CSS: .kitchen-name-row subtle gray input under item name
+  [x] test_day102_6_opus_prompt_rewrite.py: threshold bumped to 3200 for modifier_groups
+  [x] 7 older test schemas backfilled with kitchen_name TEXT column
+
+    Day 112 test suite: 40 cases, 100% pass rate
+    Cumulative: 2,241 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
   CONTEXT: Research into Square, Toast, Clover, Lightspeed, and SpotOn reveals
@@ -1657,19 +1683,24 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
         - kind=flavor → ModifierGroup("Flavor", required=false, max=1)
         - kind=style → ModifierGroup("Style", required=false, max=1)
         - Idempotent: skip items that already have groups
-  [ ] Update extraction pipeline to produce modifier groups:
-        - Claude Call 1 prompt → extract modifier groups with names + rules
-        - claude_items_to_draft_rows() → include modifier group structure
-        - Backward compat: items without explicit groups still work
+  [x] Update extraction pipeline to produce modifier groups (Day 112):
+        - Claude Call 1 prompt → extract modifier_groups with names + rules
+        - _build_modifier_groups_from_claude() — converts Claude output to _modifier_groups
+        - claude_items_to_draft_rows() → produces _modifier_groups key when present
+        - _insert_items_bulk() + upsert_draft_items() persist _modifier_groups to DB
+        - Variants in groups linked via modifier_group_id FK
+        - Backward compat: items without modifier_groups still work (sizes → _variants)
   [x] Reusable modifier group library (per restaurant) (Day 111):
         - draft_modifier_group_templates table
         - 4 built-in presets: size_sml, temperature, sauce_choice, protein_add
         - apply_modifier_template(item_id, template_id) — one-click group creation
         - seed_modifier_template_presets() — idempotent seeder
-  [x] Dual naming — kitchen_name column (Day 111):
+  [x] Dual naming — kitchen_name column (Day 111+112):
         - kitchen_name TEXT column on draft_items (nullable, ALTER guard)
         - Included in nested get_draft_items() output
-        - Editor wiring deferred to Day 112
+        - _normalize_item_for_db() extracts kitchen_name from payloads
+        - _insert_items_bulk() + upsert_draft_items() persist kitchen_name
+        - draft_editor.html: kitchen-name input field + collectPayload() wiring
 
 Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 ........................................................

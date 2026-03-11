@@ -493,6 +493,13 @@ def _normalize_item_for_db(raw: Any) -> Optional[Dict[str, Any]]:
             elif confidence > 100:
                 confidence = 100
 
+    # Kitchen name (optional, nullable)
+    kitchen_name_raw = raw.get("kitchen_name")
+    if kitchen_name_raw is None:
+        kitchen_name: Optional[str] = None
+    else:
+        kitchen_name = str(kitchen_name_raw).strip() or None
+
     return {
         "name": name,
         "description": description,
@@ -500,6 +507,7 @@ def _normalize_item_for_db(raw: Any) -> Optional[Dict[str, Any]]:
         "category": category,
         "position": position,
         "confidence": confidence,
+        "kitchen_name": kitchen_name,
     }
 
 
@@ -1276,6 +1284,86 @@ def _insert_draft(
         return int(cur.lastrowid)
 
 
+def _insert_modifier_groups_with_cursor(
+    cur: Any,
+    item_id: int,
+    raw_groups: List[Dict[str, Any]],
+    replace: bool = False,
+) -> None:
+    """Insert _modifier_groups for an item using an existing cursor.
+
+    Each group dict must have: name, required, min_select, max_select,
+    position, and _modifiers list.
+
+    If replace=True, deletes existing groups+variants for the item first.
+    Variants in each group are inserted into draft_item_variants with
+    modifier_group_id set to the newly created group row.
+    """
+    if replace:
+        # Nullify variants that reference our groups so cascade doesn't
+        # remove them; then delete the groups themselves.
+        cur.execute(
+            "UPDATE draft_item_variants SET modifier_group_id=NULL "
+            "WHERE item_id=? AND modifier_group_id IS NOT NULL",
+            (item_id,),
+        )
+        cur.execute(
+            "DELETE FROM draft_modifier_groups WHERE item_id=?",
+            (item_id,),
+        )
+
+    for g in raw_groups:
+        if not isinstance(g, dict):
+            continue
+        gname = (g.get("name") or "").strip()
+        if not gname:
+            continue
+        try:
+            required = 1 if g.get("required") else 0
+            min_select = int(g.get("min_select") or 0)
+            max_select = int(g.get("max_select") or 0)
+            gpos = int(g.get("position") or 0)
+        except (ValueError, TypeError):
+            required, min_select, max_select, gpos = 0, 0, 0, 0
+
+        cur.execute(
+            """
+            INSERT INTO draft_modifier_groups
+                (item_id, name, required, min_select, max_select, position,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (item_id, gname, required, min_select, max_select, gpos,
+             _now(), _now()),
+        )
+        group_id = int(cur.lastrowid)
+
+        for m in (g.get("_modifiers") or []):
+            if not isinstance(m, dict):
+                continue
+            vnorm = _normalize_variant_for_db(m)
+            if not vnorm:
+                continue
+            cur.execute(
+                """
+                INSERT INTO draft_item_variants
+                    (item_id, label, price_cents, kind, position,
+                     modifier_group_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    vnorm["label"],
+                    vnorm["price_cents"],
+                    vnorm["kind"],
+                    vnorm["position"],
+                    group_id,
+                    _now(),
+                    _now(),
+                ),
+            )
+
+
 def _insert_items_bulk(
     draft_id: int, items: Iterable[Dict[str, Any]]
 ) -> List[int]:
@@ -1294,6 +1382,7 @@ def _insert_items_bulk(
             category = norm["category"]
             position = norm["position"]
             confidence = norm["confidence"]
+            kitchen_name = norm["kitchen_name"]
 
             cur.execute(
                 """
@@ -1305,10 +1394,11 @@ def _insert_items_bulk(
                     category,
                     position,
                     confidence,
+                    kitchen_name,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(draft_id),
@@ -1318,6 +1408,7 @@ def _insert_items_bulk(
                     category,
                     position,
                     confidence,
+                    kitchen_name,
                     _now(),
                     _now(),
                 ),
@@ -1348,6 +1439,12 @@ def _insert_items_bulk(
                         _now(),
                     ),
                 )
+
+            # Day 112: insert modifier groups if present
+            raw_groups = it.get("_modifier_groups") or []
+            if raw_groups:
+                _insert_modifier_groups_with_cursor(cur, item_id, raw_groups)
+
         conn.commit()
     return ids
 
@@ -1396,6 +1493,7 @@ def upsert_draft_items(
             category = norm["category"]
             position = norm["position"]
             confidence = norm["confidence"]
+            kitchen_name = norm["kitchen_name"]
 
             effective_id: Optional[int] = None
 
@@ -1409,6 +1507,7 @@ def upsert_draft_items(
                         category=?,
                         position=?,
                         confidence=?,
+                        kitchen_name=?,
                         updated_at=?
                     WHERE id=? AND draft_id=?
                     """,
@@ -1419,6 +1518,7 @@ def upsert_draft_items(
                         category,
                         position,
                         confidence,
+                        kitchen_name,
                         _now(),
                         item_id,
                         int(draft_id),
@@ -1439,10 +1539,11 @@ def upsert_draft_items(
                             category,
                             position,
                             confidence,
+                            kitchen_name,
                             created_at,
                             updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             int(draft_id),
@@ -1452,6 +1553,7 @@ def upsert_draft_items(
                             category,
                             position,
                             confidence,
+                            kitchen_name,
                             _now(),
                             _now(),
                         ),
@@ -1469,10 +1571,11 @@ def upsert_draft_items(
                         category,
                         position,
                         confidence,
+                        kitchen_name,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         int(draft_id),
@@ -1482,6 +1585,7 @@ def upsert_draft_items(
                         category,
                         position,
                         confidence,
+                        kitchen_name,
                         _now(),
                         _now(),
                     ),
@@ -1519,6 +1623,14 @@ def upsert_draft_items(
                             _now(),
                         ),
                     )
+
+            # Day 112: insert/replace modifier groups if present
+            raw_groups = it.get("_modifier_groups") or []
+            if raw_groups and effective_id is not None:
+                is_update = has_int_id and item_id in updated
+                _insert_modifier_groups_with_cursor(
+                    cur, effective_id, raw_groups, replace=is_update
+                )
 
         conn.commit()
 

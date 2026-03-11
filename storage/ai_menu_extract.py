@@ -105,6 +105,11 @@ For each item return:
 Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, \
 Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other
 - "sizes": [{"label": "...", "price": N.NN}] for items with multiple price points
+- "modifier_groups": groups of options/add-ons attached to this item. Use when the menu \
+shows explicit option groups with names (e.g., "Sauce Choice", "Bread", "Add-Ons"). \
+Each group: {"name": "...", "required": true/false, "min_select": 0, "max_select": 0, \
+"modifiers": [{"label": "...", "price": N.NN}]}. \
+Omit "modifier_groups" entirely if no named option groups are shown.
 
 Output ONLY valid JSON: {"items": [...]}"""
 
@@ -134,7 +139,7 @@ Extract menu items from this OCR text:
 {ocr_text}
 ---
 
-Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": []}}]}}"""
+Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": [], "modifier_groups": []}}]}}"""
 
 _USER_PROMPT_MULTIMODAL_TEMPLATE = """\
 Extract every menu item from the menu image above.
@@ -146,7 +151,7 @@ disambiguate hard-to-read areas, but the image is the source of truth:
 {ocr_text}
 ---
 
-Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": []}}]}}"""
+Return JSON: {{"items": [{{"name": "...", "description": "...", "price": 0.00, "category": "...", "sizes": [], "modifier_groups": []}}]}}"""
 
 
 # ---------------------------------------------------------------------------
@@ -651,12 +656,69 @@ def _normalize_sizes(sizes) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Convert Claude items to draft DB rows
 # ---------------------------------------------------------------------------
+def _build_modifier_groups_from_claude(
+    raw_groups: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Convert Claude modifier_groups list to _modifier_groups format.
+
+    Each output group has: name, required, min_select, max_select, position,
+    and _modifiers list with: label, price_cents, kind, position.
+    """
+    result = []
+    for gi, g in enumerate(raw_groups):
+        if not isinstance(g, dict):
+            continue
+        name = (g.get("name") or "").strip()
+        if not name:
+            continue
+        required = bool(g.get("required", False))
+        try:
+            min_select = int(g.get("min_select") or 0)
+        except (ValueError, TypeError):
+            min_select = 0
+        try:
+            max_select = int(g.get("max_select") or 0)
+        except (ValueError, TypeError):
+            max_select = 0
+
+        raw_mods = g.get("modifiers") or []
+        modifiers: List[Dict[str, Any]] = []
+        for mi, m in enumerate(raw_mods):
+            if not isinstance(m, dict):
+                continue
+            lbl = (m.get("label") or m.get("name") or "").strip()
+            pr = _to_float(m.get("price"))
+            pr_cents = int(round(pr * 100))
+            if not lbl:
+                continue
+            modifiers.append({
+                "label": lbl,
+                "price_cents": pr_cents,
+                "kind": "other",
+                "position": mi,
+            })
+
+        result.append({
+            "name": name,
+            "required": required,
+            "min_select": min_select,
+            "max_select": max_select,
+            "position": gi,
+            "_modifiers": modifiers,
+        })
+    return result
+
+
 def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert Claude-extracted items to the draft_items DB row format.
 
     Returns list of dicts ready for drafts_store.upsert_draft_items().
-    Each item may include a '_variants' key with structured variant data
-    that upsert_draft_items() will insert into draft_item_variants.
+    Each item may include:
+      - '_variants' key with flat variant data (from "sizes" in Claude output)
+      - '_modifier_groups' key with named option groups (from "modifier_groups")
+
+    If modifier_groups are present, sizes are still converted to _variants
+    (ungrouped) for backward compat with items that mix both.
     """
     rows = []
     for pos, it in enumerate(items, start=1):
@@ -667,7 +729,7 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
         price = _to_float(it.get("price"))
         price_cents = int(round(price * 100))
 
-        # Build structured variants from sizes
+        # Build structured variants from sizes (ungrouped, backward compat)
         sizes = it.get("sizes") or []
         variants: List[Dict[str, Any]] = []
         if sizes:
@@ -686,6 +748,10 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
             if price_cents == 0 and variants:
                 price_cents = variants[0]["price_cents"]
 
+        # Build modifier groups (named option groups from Claude)
+        raw_groups = it.get("modifier_groups") or []
+        modifier_groups = _build_modifier_groups_from_claude(raw_groups)
+
         row: Dict[str, Any] = {
             "name": name,
             "description": it.get("description"),
@@ -696,5 +762,7 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
         }
         if variants:
             row["_variants"] = variants
+        if modifier_groups:
+            row["_modifier_groups"] = modifier_groups
         rows.append(row)
     return rows
