@@ -5076,6 +5076,126 @@ def draft_save(draft_id: int):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
+# ---------------------------------------------------------------------------
+# Day 114 — Modifier Group Reorder, Template Apply, Bulk Migration
+# ---------------------------------------------------------------------------
+
+
+def _parse_ordered_ids(payload: dict):
+    """
+    Extract and coerce 'ordered_ids' from a JSON payload.
+
+    Returns (ids: List[int], error_response) where exactly one value is None.
+    On success: (list_of_ints, None).
+    On failure: (None, (jsonify_response, http_status)).
+    """
+    raw = payload.get("ordered_ids") or []
+    if not isinstance(raw, list):
+        return None, (jsonify({"ok": False, "error": "ordered_ids must be a list"}), 400)
+    try:
+        return [int(x) for x in raw], None
+    except (TypeError, ValueError):
+        return None, (jsonify({"ok": False, "error": "ordered_ids must contain integers"}), 400)
+
+
+@app.post("/drafts/<int:draft_id>/items/<int:item_id>/modifier_groups/reorder")
+@login_required
+def modifier_groups_reorder(draft_id: int, item_id: int):
+    """
+    Bulk-update modifier group positions for *item_id*.
+
+    Body: {"ordered_ids": [<group_id>, ...]}
+    The array index becomes the new position value.
+    IDs not belonging to item_id are silently ignored.
+
+    Returns: {"ok": true, "updated": <int>}
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+    ordered_ids, err = _parse_ordered_ids(payload)
+    if err:
+        return err
+    updated = drafts_store.reorder_modifier_groups(item_id, ordered_ids)
+    return jsonify({"ok": True, "updated": updated}), 200
+
+
+@app.post("/drafts/<int:draft_id>/modifier_groups/<int:group_id>/modifiers/reorder")
+@login_required
+def modifiers_reorder(draft_id: int, group_id: int):
+    """
+    Bulk-update modifier (variant) positions within *group_id*.
+
+    Body: {"ordered_ids": [<variant_id>, ...]}
+    The array index becomes the new position value.
+    IDs not belonging to group_id are silently ignored.
+
+    Returns: {"ok": true, "updated": <int>}
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+    ordered_ids, err = _parse_ordered_ids(payload)
+    if err:
+        return err
+    updated = drafts_store.reorder_modifiers(group_id, ordered_ids)
+    return jsonify({"ok": True, "updated": updated}), 200
+
+
+@app.get("/restaurants/<int:restaurant_id>/modifier_templates")
+@login_required
+def list_modifier_templates(restaurant_id: int):
+    """
+    List modifier group templates for *restaurant_id* (+ global templates).
+
+    Returns: {"ok": true, "templates": [...], "count": <int>}
+    """
+    _require_drafts_storage()
+    templates = drafts_store.list_modifier_templates(restaurant_id)
+    return jsonify({"ok": True, "templates": templates, "count": len(templates)}), 200
+
+
+@app.post("/drafts/<int:draft_id>/items/<int:item_id>/apply_template")
+@login_required
+def apply_modifier_template(draft_id: int, item_id: int):
+    """
+    Apply a modifier group template to *item_id*, creating a new group + modifiers.
+
+    Body: {"template_id": <int>}
+    Non-idempotent: calling twice creates two independent groups.
+
+    Returns: {"ok": true, "group_id": <int>, "modifier_ids": [...]}
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+    template_id = payload.get("template_id")
+    if template_id is None:
+        return jsonify({"ok": False, "error": "template_id required"}), 400
+    try:
+        template_id = int(template_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "template_id must be an integer"}), 400
+    try:
+        result = drafts_store.apply_modifier_template(item_id, template_id)
+        return jsonify({"ok": True, **result}), 200
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@app.post("/drafts/<int:draft_id>/migrate_modifier_groups")
+@login_required
+def draft_migrate_modifier_groups(draft_id: int):
+    """
+    Batch-migrate all items in *draft_id* that have ungrouped variants.
+
+    Groups existing variants by kind → creates named modifier groups.
+    Items that already have groups are skipped (idempotent per item).
+
+    Returns: {"ok": true, "item_count": <int>, "migrated_count": <int>}
+    """
+    _require_drafts_storage()
+    result = drafts_store.migrate_draft_modifier_groups(draft_id)
+    return jsonify({"ok": True, **result}), 200
+
+
 @app.post("/drafts/<int:draft_id>/submit")
 @login_required
 def draft_submit(draft_id: int):

@@ -1198,6 +1198,8 @@ Day 112: Extraction pipeline now produces modifier groups. _build_modifier_group
 
 Day 113: Modifier group contract + save/load cycle closed. validate_draft_payload() validates _modifier_groups[] per item (name, required, min/max_select, _modifiers[]) + kitchen_name + deleted_modifier_group_ids at top level. draft_save() endpoint handles deleted_modifier_group_ids → delete_modifier_group() + returns deleted_mg_count. draft_editor() now loads items with include_modifier_groups=True. Template: green modifier-group-pill badge next to variant pill, shows group count + names in tooltip. 4 older test schemas backfilled (draft_modifier_groups + kitchen_name). 2,290 tests pass.
 
+Day 114: Reorder + template/migration endpoints round out Sprint 12.1 API surface. Storage: reorder_modifier_groups(item_id, ordered_ids) + reorder_modifiers(group_id, ordered_ids) (both backed by _bulk_reorder_by_position() executemany helper) + migrate_draft_modifier_groups(draft_id) → {item_count, migrated_count}. Portal: POST modifier_groups/reorder, POST modifiers/reorder, GET modifier_templates, POST apply_template (404 on missing item/template), POST migrate_modifier_groups. 2,326 tests pass.
+
 ---
 
 ## 🌄 System State Summary

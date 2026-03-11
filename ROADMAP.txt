@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 113 (March 13, 2026) — Sprint 12.1 Modifier Group Contract + Save/Load Cycle (49 tests, 2,290 total)
+Last Updated: Day 114 (March 11, 2026) — Sprint 12.1 Reorder + Template/Migration Endpoints (37 tests, 2,326 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1630,6 +1630,41 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 113 test suite: 49 cases, 100% pass rate
     Cumulative: 2,290 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  Day 114: Sprint 12.1 — Modifier Group Reorder + Template/Migration Endpoints *** COMPLETE ***
+  -----------------------------------------------------------------------------------------------
+  [x] reorder_modifier_groups(item_id, ordered_ids) → int (storage/drafts.py):
+        - Bulk position update for modifier groups belonging to item_id
+        - ordered_ids index = new position value
+        - Groups not belonging to item_id silently skipped
+        - Returns count of rows updated
+  [x] reorder_modifiers(group_id, ordered_ids) → int (storage/drafts.py):
+        - Bulk position update for variants (modifiers) belonging to group_id
+        - Modifiers in other groups or ungrouped variants silently skipped
+        - Returns count of rows updated
+  [x] migrate_draft_modifier_groups(draft_id) → {item_count, migrated_count}:
+        - Batch-migrates all items in a draft (calls migrate_variants_to_modifier_groups per item)
+        - Items already having groups skipped (idempotent per item)
+        - Returns item_count (total) and migrated_count (groups created)
+  [x] POST /drafts/<id>/items/<iid>/modifier_groups/reorder (portal/app.py):
+        - Body: {"ordered_ids": [...]}. Returns {ok, updated}
+        - Validates ordered_ids is a list of integers
+  [x] POST /drafts/<id>/modifier_groups/<gid>/modifiers/reorder (portal/app.py):
+        - Body: {"ordered_ids": [...]}. Returns {ok, updated}
+        - Validates ordered_ids is a list of integers
+  [x] GET /restaurants/<rid>/modifier_templates (portal/app.py):
+        - Returns restaurant-scoped + global templates
+        - Returns {ok, templates, count}
+  [x] POST /drafts/<id>/items/<iid>/apply_template (portal/app.py):
+        - Body: {"template_id": int}. Returns {ok, group_id, modifier_ids}
+        - 400 if template_id missing, 404 if template or item not found
+        - Non-idempotent: two calls create two independent groups
+  [x] POST /drafts/<id>/migrate_modifier_groups (portal/app.py):
+        - Batch migrates all ungrouped items in the draft
+        - Returns {ok, item_count, migrated_count}
+
+    Day 114 test suite: 37 cases, 100% pass rate
+    Cumulative: 2,326 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
   CONTEXT: Research into Square, Toast, Clover, Lightspeed, and SpotOn reveals
@@ -1727,6 +1762,15 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
         - _normalize_item_for_db() extracts kitchen_name from payloads
         - _insert_items_bulk() + upsert_draft_items() persist kitchen_name
         - draft_editor.html: kitchen-name input field + collectPayload() wiring
+  [x] Modifier group reorder + template API + bulk migration (Day 114):
+        - reorder_modifier_groups(item_id, ordered_ids) — bulk position update for groups
+        - reorder_modifiers(group_id, ordered_ids) — bulk position update for modifiers
+        - migrate_draft_modifier_groups(draft_id) → {item_count, migrated_count}
+        - POST /drafts/<id>/items/<iid>/modifier_groups/reorder
+        - POST /drafts/<id>/modifier_groups/<gid>/modifiers/reorder
+        - GET  /restaurants/<rid>/modifier_templates
+        - POST /drafts/<id>/items/<iid>/apply_template
+        - POST /drafts/<id>/migrate_modifier_groups
 
 Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 ........................................................

@@ -3033,3 +3033,96 @@ def apply_modifier_template(item_id: int, template_id: int) -> Dict[str, Any]:
         conn.commit()
 
     return {"group_id": group_id, "modifier_ids": modifier_ids}
+
+
+# ---------------------------------------------------------------------------
+# Day 114 — Modifier Group Reorder + Bulk Migration
+# ---------------------------------------------------------------------------
+
+
+def _bulk_reorder_by_position(
+    table: str,
+    parent_col: str,
+    parent_id: int,
+    ordered_ids: List[int],
+) -> int:
+    """
+    Bulk-update the *position* column for rows in *table* whose id appears in
+    *ordered_ids* and whose *parent_col* equals *parent_id*.
+
+    The index of each id in *ordered_ids* becomes its new position value.
+    IDs that do not belong to *parent_id* are silently skipped.
+
+    Returns the total number of rows updated.
+    """
+    if not ordered_ids:
+        return 0
+    now = _now()
+    rows = [(pos, now, int(gid), int(parent_id)) for pos, gid in enumerate(ordered_ids)]
+    with db_connect() as conn:
+        cur = conn.executemany(
+            f"UPDATE {table} SET position=?, updated_at=? WHERE id=? AND {parent_col}=?",
+            rows,
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def reorder_modifier_groups(item_id: int, ordered_ids: List[int]) -> int:
+    """
+    Bulk-update position for modifier groups belonging to *item_id*.
+
+    *ordered_ids* is the desired display order (index = new position).
+    Only IDs that actually belong to *item_id* are updated; unknown IDs
+    are silently skipped.
+
+    Returns the number of rows updated.
+    """
+    return _bulk_reorder_by_position(
+        "draft_modifier_groups", "item_id", int(item_id), ordered_ids
+    )
+
+
+def reorder_modifiers(group_id: int, ordered_ids: List[int]) -> int:
+    """
+    Bulk-update position for modifiers (variants) belonging to *group_id*.
+
+    *ordered_ids* is the desired display order (index = new position).
+    Only IDs whose modifier_group_id matches *group_id* are updated;
+    unknown IDs are silently skipped.
+
+    Returns the number of rows updated.
+    """
+    return _bulk_reorder_by_position(
+        "draft_item_variants", "modifier_group_id", int(group_id), ordered_ids
+    )
+
+
+def migrate_draft_modifier_groups(draft_id: int) -> Dict[str, int]:
+    """
+    Batch-migrate all items in *draft_id* that have ungrouped variants.
+
+    Calls migrate_variants_to_modifier_groups() per item (idempotent per
+    item — items that already have groups are skipped).
+
+    Returns {"item_count": int, "migrated_count": int} where:
+      item_count    — total items in the draft
+      migrated_count — number of items that had groups created
+    """
+    draft_id = int(draft_id)
+    with db_connect() as conn:
+        item_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM draft_items WHERE draft_id=? ORDER BY id",
+                (draft_id,),
+            ).fetchall()
+        ]
+
+    migrated = 0
+    for iid in item_ids:
+        created = migrate_variants_to_modifier_groups(iid)
+        if created > 0:
+            migrated += 1
+
+    return {"item_count": len(item_ids), "migrated_count": migrated}
