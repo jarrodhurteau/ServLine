@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 105: confidence gate module + signal #6 (Claude call confidence) + rejection logging table. Gate wiring into live pipeline is next (Days 106-107). 1,979 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. 2,081 tests pass.
 
 ---
 
@@ -1715,3 +1715,23 @@ ServLine now has:
     - `get_pipeline_rejections(restaurant_id, limit)` — retrieve for analysis/hardening
   - Day 105 test suite: 40 cases, 100% pass rate
   - Cumulative: 1,979 passed (excl. Day 70 fixture errors)
+
+- **Gate Wiring into Live Pipeline (Day 106):** *** COMPLETE ***
+  - `stamp_claude_confidence()` wired after Call 2 (before semantic pipeline) and after Call 3 (before re-score)
+  - `evaluate_confidence_gate()` wired at end of pipeline — uses semantic items + both call confidences
+  - Gate fail → `status="rejected"`, `error=customer_message`, rejection logged in `pipeline_rejections`
+  - Gate pass → `status="done"` (unchanged behavior)
+  - Debug payload includes `confidence_gate` block: passed, score, threshold, signals, reason
+  - **Live-tested: Import #248 exposed false gate failure in thinking mode** (semantic pipeline skipped → score=0.10)
+    - Fix: `if items and not _thinking_active:` guard mirrors existing Call 2/3 bypass logic
+    - Import #249 confirmed fix: 145 items, status="done"
+  - Day 106 test suite: 37 cases, 100% pass rate
+
+- **Frontend Rejection UI (Day 107):** *** COMPLETE ***
+  - `import_view.html`: rejection banner shown server-side on page load when `job.status == "rejected"`
+    - `pollStatus()` also shows banner + populates customer_message from `data.error` on live transition
+    - `rejected` → pill-red in JS `PILL_CLASSES`, added to `terminal` Set (polling stops)
+    - No auto-redirect on rejected (only "done" triggers redirect to editor)
+  - `imports.html`: "rejected" → red pill + "Rejected" label in Jinja2 and JS PILL_CLASS/LABEL
+  - Day 107 test suite: 30 cases, 100% pass rate
+  - Cumulative: 2,081 passed (excl. Day 70 fixture errors, Day 99 timing flakes)

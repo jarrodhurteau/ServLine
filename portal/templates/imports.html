@@ -54,7 +54,7 @@
               'pill-green'  if st in ['done', 'published', 'approved'] else
               'pill-yellow' if st in ['submitted', 'review'] else
               'pill-purple' if st in ['editing'] else
-              'pill-red'    if st in ['deleted', 'discarded', 'failed'] else
+              'pill-red'    if st in ['deleted', 'discarded', 'failed', 'rejected'] else
               'pill-gray'
             %}
             {% set status_label =
@@ -68,6 +68,7 @@
               'Restored'    if st == 'restored' else
               'Deleted'     if st == 'deleted' else
               'Discarded'   if st == 'discarded' else
+              'Rejected'    if st == 'rejected' else
               (st|capitalize if st else '—')
             %}
 
@@ -182,7 +183,7 @@
         if (['done','published','approved'].includes(st)) return 'pill-green';
         if (['submitted','review'].includes(st)) return 'pill-yellow';
         if (['editing'].includes(st)) return 'pill-purple';
-        if (['deleted','discarded','failed'].includes(st)) return 'pill-red';
+        if (['deleted','discarded','failed','rejected'].includes(st)) return 'pill-red';
         return 'pill-gray';
       };
       const LABEL = (st) => {
@@ -191,7 +192,7 @@
           pending: 'Pending', processing: 'Processing', done: 'Ready',
           submitted: 'Submitted', editing: 'Editing', published: 'Published',
           approved: 'Approved', restored: 'Restored', deleted: 'Deleted',
-          discarded: 'Discarded', failed: 'Failed'
+          discarded: 'Discarded', failed: 'Failed', rejected: 'Rejected'
         };
         return map[st] || (st ? (st[0].toUpperCase()+st.slice(1)) : '—');
       };

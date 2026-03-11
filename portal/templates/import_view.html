@@ -35,6 +35,14 @@
       100% { transform: translateX(140%); }
     }
 
+    /* Rejection banner (Day 107) */
+    .rejection-banner { display:none; background:#fee2e2; border:1px solid #fca5a5; border-radius:12px; padding:12px 16px; color:#991b1b; margin-top:12px; }
+    .rejection-banner.visible { display:block; }
+    .rejection-banner strong { font-weight:700; }
+    .rejection-banner p { margin-top:4px; font-size:.95rem; }
+    .rejection-banner .retry-hint { margin-top:8px; font-size:.9rem; color:#7f1d1d; }
+    .rejection-banner a { color:#7f1d1d; text-decoration:underline; }
+
     .preview-placeholder { color:var(--muted); font-size:.9rem; padding:.5rem 0; }
   </style>
 
@@ -70,6 +78,13 @@
     <!-- live progress (indeterminate while processing) -->
     <div id="progress-wrap" class="progress-wrap mt-3" aria-hidden="true">
       <div class="progress-bar"></div>
+    </div>
+
+    <!-- Rejection banner (Day 107): shown when confidence gate fails -->
+    <div id="rejection-banner" class="rejection-banner{% if job.status == 'rejected' %} visible{% endif %}" role="alert">
+      <strong>Menu scan could not be completed.</strong>
+      <p id="rejection-message">{% if job.status == 'rejected' and job.error %}{{ job.error }}{% endif %}</p>
+      <p class="retry-hint">The draft may have partial results. <a href="{{ url_for('imports_draft', job_id=job.id) }}">Open the editor</a> to review, or upload a clearer photo and try again.</p>
     </div>
 
     <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -195,18 +210,19 @@
 
     // map status → pill class
     const PILL_CLASSES = {
-      pending:  'pill-gray',
-      deleted:  'pill-gray',
+      pending:   'pill-gray',
+      deleted:   'pill-gray',
       processing:'pill-blue',
-      restored: 'pill-blue',
-      done:     'pill-green',
-      approved: 'pill-green',
-      published:'pill-green',
-      editing:  'pill-purple',
-      submitted:'pill-yellow',
-      review:   'pill-yellow',
-      failed:   'pill-red',
-      error:    'pill-red'
+      restored:  'pill-blue',
+      done:      'pill-green',
+      approved:  'pill-green',
+      published: 'pill-green',
+      editing:   'pill-purple',
+      submitted: 'pill-yellow',
+      review:    'pill-yellow',
+      failed:    'pill-red',
+      error:     'pill-red',
+      rejected:  'pill-red'
     };
 
     const jobId = Number((document.getElementById('page-data') || {}).dataset.jobId || '0');
@@ -280,7 +296,7 @@
     })();
 
     // live status poller
-    const terminal = new Set(['done','approved','published','discarded','failed','error']);
+    const terminal = new Set(['done','approved','published','discarded','failed','error','rejected']);
     const pollMs = 1500;
     const initialStatus = '{{ (job.status or "")|lower }}';
     // Only auto-redirect if we started in a non-terminal state (i.e. we were waiting)
@@ -321,6 +337,16 @@
           if (editorBtn && editorBtn.href){
             window.location.href = editorBtn.href;
             return;
+          }
+        }
+
+        // show rejection banner when gate fails (Day 107)
+        if (st === 'rejected' && shouldAutoRedirect){
+          const banner = document.getElementById('rejection-banner');
+          const msgEl  = document.getElementById('rejection-message');
+          if (banner){
+            if (msgEl && data.error) msgEl.textContent = data.error;
+            banner.classList.add('visible');
           }
         }
 

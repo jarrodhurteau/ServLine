@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 104 (March 11, 2026) — Sprint 11.2 Capstone (59 tests, 1,867 total)
+Last Updated: Day 107 (March 11, 2026) — Sprint 11.3 Rejection UI (30 tests, 2,081 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1416,12 +1416,60 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
   [x] 40 tests — 8 classes covering signal #6, stamp helper, gate signals,
       gate pass/fail, optional signal redistribution, DB round-trip, integration
 
-  PENDING (Days 106-110):
-  [ ] Wire gate into live pipeline (ai_ocr_helper.py + ocr_pipeline.py)
-      - Call stamp_claude_confidence() after Call 2 and Call 3 results merge
-      - Evaluate gate at end of pipeline, log rejections automatically
-  [ ] Flask rejection response path (/ai/preview returns customer_message on fail)
-  [ ] End-to-end pipeline integration tests with real menu images
+  Day 106: Gate Wiring into Live Pipeline *** COMPLETE ***
+  --------------------------------------------------------
+  [x] stamp_claude_confidence() wired after Call 2 (vision verify):
+      - Stamps vision confidence onto draft items BEFORE the semantic pipeline
+      - Signal #6 activates in score_semantic_confidence() for all items
+      - Guard: only stamps when conf > 0 (skipped/failed Call 2 stays neutral)
+  [x] stamp_claude_confidence() wired after Call 3 (reconciliation):
+      - Stamps reconcile confidence onto semantic items BEFORE re-scoring
+      - Overwrites Call 2 stamp — most recent Claude signal wins
+      - Guard: only stamps when _c3_conf > 0
+  [x] evaluate_confidence_gate() wired at end of pipeline (portal/app.py):
+      - Uses semantic_result["items"] when available, else raw draft items
+      - call2_confidence from vision_result (None if skipped/failed)
+      - call3_confidence from reconcile_result (None if skipped/failed)
+      - ocr_char_count from len(clean_ocr_text)
+  [x] Gate fail → rejection logged + status "rejected":
+      - log_pipeline_rejection() called via drafts_store on gate fail
+      - update_import_job(status="rejected", error=customer_message)
+      - Status endpoint returns customer_message in "error" field
+  [x] Gate pass → status "done" (unchanged behavior)
+  [x] Debug payload includes "confidence_gate" block:
+      - {passed, score, threshold, signals, reason}
+      - JSON-serializable, included on every run with items
+  [x] 37 tests — 8 classes covering stamp wiring, gate signal flow, pass/fail
+      status, rejection logging, edge cases, integration
+
+    Day 106 test suite: 37 cases, 100% pass rate
+    Cumulative: 2,051 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Day 107: Frontend Rejection UI *** COMPLETE ***
+  -----------------------------------------------
+  [x] import_view.html — rejection banner on gate fail:
+      - "rejected" → pill-red in JS PILL_CLASSES
+      - "rejected" added to terminal Set (polling stops)
+      - Rejection banner div (id="rejection-banner") with .visible class
+        rendered server-side when job.status == "rejected" (page load)
+      - pollStatus() shows banner + populates customer_message from data.error
+        when poll returns st === "rejected" (live transition)
+      - No auto-redirect on "rejected" (only "done" triggers redirect)
+      - CSS: .rejection-banner hidden by default, .visible shows it
+  [x] imports.html — rejected status in list view:
+      - Jinja2 pill_class: "rejected" added to pill-red condition
+      - Jinja2 status_label: 'Rejected' if st == 'rejected'
+      - JS PILL_CLASS(): "rejected" added to pill-red list
+      - JS LABEL(): rejected: 'Rejected' in label map
+  [x] 30 tests — 7 classes covering endpoint error passthrough,
+      JS template constants, page load rendering, imports list,
+      banner content, score non-exposure, other statuses unaffected
+
+    Day 107 test suite: 30 cases, 100% pass rate
+    Cumulative: 2,081 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  PENDING (Days 108-110):
+  [ ] End-to-end live pipeline test with real menu image + gate threshold check
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------

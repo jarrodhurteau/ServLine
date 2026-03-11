@@ -2152,6 +2152,13 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                                                      changes=n_changes, confidence=conf)
                                 print(f"[Draft] Call 2 (Vision): {len(items)} items, "
                                       f"{n_changes} changes, confidence={conf:.2f}")
+                                # Stamp Call 2 confidence for semantic signal #6 (Day 106)
+                                try:
+                                    from storage.semantic_confidence import stamp_claude_confidence as _stamp_c2
+                                    if conf:
+                                        _stamp_c2(items, conf)
+                                except Exception:
+                                    pass
                             else:
                                 items = claude_items_to_draft_rows(claude_items)
                                 skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
@@ -2243,6 +2250,15 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                         )
                         reconcile_result["merge_changes"] = merge_changes
 
+                        # Stamp Call 3 confidence for signal #6 in re-scoring (Day 106)
+                        try:
+                            from storage.semantic_confidence import stamp_claude_confidence as _stamp_c3
+                            _c3_conf = reconcile_result.get("confidence", 0)
+                            if _c3_conf:
+                                _stamp_c3(sem_items, _c3_conf)
+                        except Exception:
+                            pass
+
                         # Re-score confidence after reconciliation corrections
                         _rescore(sem_items)
                         _reclassify(sem_items)
@@ -2294,6 +2310,67 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                 if tracker:
                     tracker.fail_step(STEP_CALL3_RECONCILE, str(_recon_err))
                 print(f"[Draft] Call 3 (Reconciliation) failed: {_recon_err}")
+
+        # =====================================================================
+        # CONFIDENCE GATE — Sprint 11.3 (Day 106)
+        # Evaluates binary pass/fail at the menu level.  Failed gates log a
+        # rejection entry and set job status to "rejected" so the frontend
+        # can surface the customer_message retry prompt instead of the editor.
+        # =====================================================================
+        gate_result = None
+        if items and not _thinking_active:
+            try:
+                from storage.confidence_gate import evaluate_confidence_gate
+                _gate_items = (
+                    semantic_result["items"]
+                    if semantic_result and semantic_result.get("items")
+                    else items
+                )
+                _call2_conf = (
+                    vision_result.get("confidence") or None
+                    if vision_result and not vision_result.get("skipped")
+                       and not vision_result.get("error")
+                    else None
+                )
+                _call3_conf = (
+                    reconcile_result.get("confidence") or None
+                    if reconcile_result and not reconcile_result.get("skipped")
+                       and not reconcile_result.get("error")
+                    else None
+                )
+                gate_result = evaluate_confidence_gate(
+                    _gate_items,
+                    call2_confidence=_call2_conf,
+                    call3_confidence=_call3_conf,
+                    ocr_char_count=len(clean_ocr_text),
+                )
+                if gate_result.passed:
+                    print(f"[Draft] Gate PASS: score={gate_result.score:.4f}")
+                else:
+                    print(f"[Draft] Gate FAIL: score={gate_result.score:.4f} [{gate_result.reason}]")
+                    if drafts_store is not None and hasattr(drafts_store, "log_pipeline_rejection"):
+                        try:
+                            _draft_id_for_gate = None
+                            try:
+                                _draft_id_for_gate = _get_or_create_draft_for_job(
+                                    job_id, allow_create=False
+                                )
+                            except Exception:
+                                pass
+                            drafts_store.log_pipeline_rejection(
+                                restaurant_id=None,
+                                draft_id=_draft_id_for_gate,
+                                image_path=str(saved_file_path),
+                                ocr_chars=len(clean_ocr_text),
+                                item_count=len(items),
+                                gate_score=gate_result.score,
+                                gate_reason=gate_result.reason,
+                                pipeline_signals=gate_result.signals,
+                            )
+                        except Exception as _rej_err:
+                            print(f"[Draft] Rejection log failed: {_rej_err}")
+            except Exception as _gate_err:
+                print(f"[Draft] Confidence gate failed: {_gate_err}")
 
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         # status="done" is set AFTER items are in the DB so auto-redirect
@@ -2360,6 +2437,14 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                             "merge_changes": reconcile_result.get("merge_changes", []),
                             "notes": reconcile_result.get("notes"),
                         }
+                    if gate_result is not None:
+                        payload["confidence_gate"] = {
+                            "passed": gate_result.passed,
+                            "score": round(gate_result.score, 4),
+                            "threshold": gate_result.threshold,
+                            "signals": gate_result.signals,
+                            "reason": gate_result.reason,
+                        }
                     if tracker:
                         tracker.strategy = extraction_strategy
                         payload["pipeline_metrics"] = tracker.summary()
@@ -2369,7 +2454,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             import traceback; traceback.print_exc()
 
         # Mark done AFTER items are in DB so auto-redirect shows populated editor
-        update_import_job(job_id, status="done")
+        if gate_result is not None and not gate_result.passed:
+            update_import_job(job_id, status="rejected", error=gate_result.customer_message)
+        else:
+            update_import_job(job_id, status="done")
 
 
     except Exception as e:
