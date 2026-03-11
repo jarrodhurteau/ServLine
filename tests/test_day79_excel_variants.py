@@ -100,6 +100,7 @@ def _make_test_db() -> sqlite3.Connection:
             price_cents INTEGER NOT NULL DEFAULT 0,
             kind TEXT DEFAULT 'size',
             position INTEGER DEFAULT 0,
+            modifier_group_id   INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE

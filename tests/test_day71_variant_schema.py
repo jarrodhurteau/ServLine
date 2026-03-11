@@ -103,7 +103,8 @@ class TestTableExists(VariantSchemaTestBase):
             "PRAGMA table_info(draft_item_variants)"
         ).fetchall()
         col_names = {r[1] for r in cols}
-        expected = {"id", "item_id", "label", "price_cents", "kind", "position", "created_at", "updated_at"}
+        expected = {"id", "item_id", "label", "price_cents", "kind", "position",
+                    "modifier_group_id", "created_at", "updated_at"}
         self.assertEqual(col_names, expected)
 
     def test_item_id_not_null(self):
@@ -326,7 +327,7 @@ class TestGetItemVariants(VariantSchemaTestBase):
         ])
         v = drafts_mod.get_item_variants(self.item_ids[0])[0]
         expected_keys = {"id", "item_id", "label", "price_cents", "kind",
-                         "position", "created_at", "updated_at"}
+                         "position", "modifier_group_id", "created_at", "updated_at"}
         self.assertEqual(set(v.keys()), expected_keys)
 
 

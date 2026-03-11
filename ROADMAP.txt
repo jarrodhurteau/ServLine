@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 109 (March 11, 2026) — Sprint 11.3 Gate Calibration Utility (39 tests, 2,153 total)
+Last Updated: Day 110 (March 11, 2026) — Sprint 11.3 Capstone / Sprint 12.1 Schema Kickoff (42 tests, 2,195 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1522,8 +1522,35 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 109 test suite: 39 cases, 100% pass rate
     Cumulative: 2,153 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  PENDING (Day 110):
-  [ ] Sprint 11.3 capstone: Sprint 12.1 schema kickoff (modifier group foundation)
+  Day 110: Sprint 11.3 Capstone — Sprint 12.1 Schema Kickoff *** COMPLETE ***
+  ---------------------------------------------------------------------------
+  [x] draft_modifier_groups table — new table in storage/drafts.py db_init():
+        id, item_id (FK → draft_items), name, required, min_select, max_select,
+        position, created_at, updated_at
+  [x] modifier_group_id column added to draft_item_variants:
+        - In CREATE TABLE for new databases
+        - ALTER TABLE + _col_exists() guard for existing databases
+        - idx_variants_group index (placed AFTER ALTER to avoid col-not-found error)
+        - idx_modifier_groups_item index on draft_modifier_groups(item_id)
+  [x] Modifier group CRUD (storage/drafts.py):
+        - insert_modifier_group(item_id, name, *, required, min_select, max_select, position)
+        - get_modifier_group(group_id) → Optional[Dict]
+        - get_modifier_groups(item_id) → List[Dict] (ordered by position)
+        - update_modifier_group(group_id, **fields) — allowed: name/required/min_select/max_select/position
+        - delete_modifier_group(group_id) — NULLs variant modifier_group_id before delete
+  [x] _KIND_TO_GROUP_DEFAULTS: kind → (name, required, max_select) mapping
+        size→Size(req=True,max=1), combo→Add-ons, flavor→Flavor(max=1),
+        style→Style(max=1), other→Options
+  [x] migrate_variants_to_modifier_groups(item_id) → int:
+        - Groups existing variants by kind, creates one group per kind
+        - Updates variant modifier_group_id to link to new group
+        - Idempotent: returns 0 if item already has groups
+  [x] get_draft_items() — variants now include modifier_group_id field (backward compat)
+  [x] Updated 23 old test schemas (Days 71-93) to include modifier_group_id column
+      — zero pre-existing tests broken
+
+    Day 110 test suite: 42 cases, 100% pass rate
+    Cumulative: 2,195 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
@@ -1577,7 +1604,7 @@ Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 
 Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
 ...............................................................
-  [ ] New draft_modifier_groups table:
+  [x] New draft_modifier_groups table (Day 110):
         id              INTEGER PRIMARY KEY AUTOINCREMENT
         item_id         INTEGER NOT NULL (FK → draft_items.id ON DELETE CASCADE)
         name            TEXT NOT NULL          -- "Size", "Add a Side", "Sauce Choice"
@@ -1587,17 +1614,18 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
         position        INTEGER DEFAULT 0      -- ordering within parent item
         created_at      TEXT NOT NULL
         updated_at      TEXT NOT NULL
-  [ ] Refactor draft_item_variants to add modifier_group_id:
+  [x] Refactor draft_item_variants to add modifier_group_id (Day 110):
         - New column: modifier_group_id INTEGER (FK → draft_modifier_groups.id)
         - Nullable for backward compat (existing variants without groups)
         - Index on modifier_group_id for JOIN performance
-  [ ] Modifier group CRUD functions:
+  [x] Modifier group CRUD functions (Day 110):
         - insert_modifier_group(), update_modifier_group(), delete_modifier_group()
         - get_modifier_groups(item_id), get_modifier_group(group_id)
-  [ ] Update get_draft_items() to include modifier groups:
+  [ ] Update get_draft_items() to include modifier groups (nested structure):
         - LEFT JOIN modifier_groups + variants grouped by group
         - items[].modifier_groups[].modifiers[] nested structure
-  [ ] Migration: auto-group existing variants by (item_id, kind):
+        (Day 110 adds modifier_group_id to flat variant output; full nesting in Day 111)
+  [x] Migration: auto-group existing variants by (item_id, kind) (Day 110):
         - kind=size → ModifierGroup("Size", required=true, max=1)
         - kind=combo → ModifierGroup("Add-ons", required=false)
         - kind=flavor → ModifierGroup("Flavor", required=false, max=1)

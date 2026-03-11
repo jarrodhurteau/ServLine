@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS draft_item_variants (
     price_cents INTEGER DEFAULT 0,
     kind TEXT DEFAULT 'size',
     position INTEGER DEFAULT 0,
+            modifier_group_id   INTEGER,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

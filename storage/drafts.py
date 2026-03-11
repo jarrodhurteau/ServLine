@@ -199,14 +199,15 @@ def _ensure_schema() -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS draft_item_variants (
-              id          INTEGER PRIMARY KEY AUTOINCREMENT,
-              item_id     INTEGER NOT NULL,
-              label       TEXT NOT NULL,
-              price_cents INTEGER NOT NULL DEFAULT 0,
-              kind        TEXT DEFAULT 'size',
-              position    INTEGER DEFAULT 0,
-              created_at  TEXT NOT NULL,
-              updated_at  TEXT NOT NULL,
+              id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+              item_id             INTEGER NOT NULL,
+              label               TEXT NOT NULL,
+              price_cents         INTEGER NOT NULL DEFAULT 0,
+              kind                TEXT DEFAULT 'size',
+              position            INTEGER DEFAULT 0,
+              modifier_group_id   INTEGER,
+              created_at          TEXT NOT NULL,
+              updated_at          TEXT NOT NULL,
               FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
             )
             """
@@ -279,6 +280,24 @@ def _ensure_schema() -> None:
             """
         )
 
+        # draft_modifier_groups (Day 110 — Phase 12.1 schema kickoff)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_modifier_groups (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              item_id     INTEGER NOT NULL,
+              name        TEXT NOT NULL,
+              required    INTEGER DEFAULT 0,
+              min_select  INTEGER DEFAULT 0,
+              max_select  INTEGER DEFAULT 0,
+              position    INTEGER DEFAULT 0,
+              created_at  TEXT NOT NULL,
+              updated_at  TEXT NOT NULL,
+              FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -316,6 +335,9 @@ def _ensure_schema() -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_rejections_created ON pipeline_rejections(created_at)"
         )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_modifier_groups_item ON draft_modifier_groups(item_id)"
+        )
 
         # in case existing DBs predate Day-14+ columns, patch them
         def _col_exists(table: str, col: str) -> bool:
@@ -334,6 +356,15 @@ def _ensure_schema() -> None:
             cur.execute("ALTER TABLE draft_items ADD COLUMN confidence INTEGER;")
         if not _col_exists("drafts", "menu_id"):
             cur.execute("ALTER TABLE drafts ADD COLUMN menu_id INTEGER;")
+        if not _col_exists("draft_item_variants", "modifier_group_id"):
+            cur.execute(
+                "ALTER TABLE draft_item_variants ADD COLUMN modifier_group_id INTEGER;"
+            )
+        # idx_variants_group must come AFTER the ALTER that adds modifier_group_id
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_variants_group "
+            "ON draft_item_variants(modifier_group_id)"
+        )
 
         conn.commit()
 
@@ -669,13 +700,14 @@ def get_draft_items(
             """
             SELECT
                 di.*,
-                v.id          AS v_id,
-                v.label       AS v_label,
-                v.price_cents AS v_price_cents,
-                v.kind        AS v_kind,
-                v.position    AS v_position,
-                v.created_at  AS v_created_at,
-                v.updated_at  AS v_updated_at
+                v.id                AS v_id,
+                v.label             AS v_label,
+                v.price_cents       AS v_price_cents,
+                v.kind              AS v_kind,
+                v.position          AS v_position,
+                v.modifier_group_id AS v_modifier_group_id,
+                v.created_at        AS v_created_at,
+                v.updated_at        AS v_updated_at
             FROM draft_items di
             LEFT JOIN draft_item_variants v ON v.item_id = di.id
             WHERE di.draft_id = ?
@@ -718,6 +750,7 @@ def get_draft_items(
                     "price_cents": row["v_price_cents"],
                     "kind": row["v_kind"],
                     "position": row["v_position"],
+                    "modifier_group_id": row["v_modifier_group_id"],
                     "created_at": row["v_created_at"],
                     "updated_at": row["v_updated_at"],
                 }
@@ -2318,3 +2351,173 @@ def get_pipeline_rejections(
             "created_at":        row[9],
         })
     return results
+
+
+# -------------------------------------------------------
+# Modifier Group CRUD (Phase 12.1 — Day 110)
+# -------------------------------------------------------
+
+# kind → default group config for migration
+_KIND_TO_GROUP_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "size":   {"name": "Size",    "required": True,  "max_select": 1},
+    "combo":  {"name": "Add-ons", "required": False, "max_select": 0},
+    "flavor": {"name": "Flavor",  "required": False, "max_select": 1},
+    "style":  {"name": "Style",   "required": False, "max_select": 1},
+    "other":  {"name": "Options", "required": False, "max_select": 0},
+}
+
+
+def insert_modifier_group(
+    item_id: int,
+    name: str,
+    *,
+    required: bool = False,
+    min_select: int = 0,
+    max_select: int = 0,
+    position: int = 0,
+) -> int:
+    """Insert a modifier group for a draft item. Returns new group id."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO draft_modifier_groups
+                (item_id, name, required, min_select, max_select, position,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(item_id),
+                str(name).strip(),
+                1 if required else 0,
+                int(min_select),
+                int(max_select),
+                int(position),
+                _now(),
+                _now(),
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def get_modifier_group(group_id: int) -> Optional[Dict[str, Any]]:
+    """Fetch a single modifier group by id. Returns None if not found."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM draft_modifier_groups WHERE id=?",
+            (int(group_id),),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def get_modifier_groups(item_id: int) -> List[Dict[str, Any]]:
+    """Fetch all modifier groups for a draft item, ordered by position then id."""
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM draft_modifier_groups WHERE item_id=? "
+            "ORDER BY COALESCE(position, 1000000000), id",
+            (int(item_id),),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def update_modifier_group(group_id: int, **fields: Any) -> bool:
+    """
+    Update modifier group fields by keyword arguments.
+    Allowed fields: name, required, min_select, max_select, position.
+    Returns True if a row was updated, False if not found or no valid fields.
+    """
+    _ALLOWED = {"name", "required", "min_select", "max_select", "position"}
+    updates = {k: v for k, v in fields.items() if k in _ALLOWED}
+    if not updates:
+        return False
+    updates["updated_at"] = _now()
+    sets = ", ".join(f"{k}=?" for k in updates)
+    vals = list(updates.values()) + [int(group_id)]
+    with db_connect() as conn:
+        cur = conn.execute(
+            f"UPDATE draft_modifier_groups SET {sets} WHERE id=?", vals
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_modifier_group(group_id: int) -> bool:
+    """
+    Delete a modifier group. Variants belonging to this group have their
+    modifier_group_id set to NULL before the group is removed.
+    Returns True if a group was deleted, False if not found.
+    """
+    group_id = int(group_id)
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE draft_item_variants SET modifier_group_id=NULL "
+            "WHERE modifier_group_id=?",
+            (group_id,),
+        )
+        cur = conn.execute(
+            "DELETE FROM draft_modifier_groups WHERE id=?", (group_id,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def migrate_variants_to_modifier_groups(item_id: int) -> int:
+    """
+    Auto-group existing variants for an item into modifier groups by kind.
+
+    Mapping:
+      size   → ModifierGroup("Size",    required=True,  max_select=1)
+      combo  → ModifierGroup("Add-ons", required=False, max_select=0)
+      flavor → ModifierGroup("Flavor",  required=False, max_select=1)
+      style  → ModifierGroup("Style",   required=False, max_select=1)
+      other  → ModifierGroup("Options", required=False, max_select=0)
+
+    Idempotent: if the item already has modifier groups, returns 0 immediately.
+    Returns count of modifier groups created (0 if nothing to do).
+    """
+    item_id = int(item_id)
+
+    with db_connect() as conn:
+        existing_count = conn.execute(
+            "SELECT COUNT(*) FROM draft_modifier_groups WHERE item_id=?",
+            (item_id,),
+        ).fetchone()[0]
+        if existing_count > 0:
+            return 0
+
+        rows = conn.execute(
+            "SELECT id, kind FROM draft_item_variants WHERE item_id=? "
+            "ORDER BY COALESCE(position, 1000000000), id",
+            (item_id,),
+        ).fetchall()
+
+    if not rows:
+        return 0
+
+    # Group variant ids by kind (preserving insertion order)
+    kind_to_ids: Dict[str, List[int]] = {}
+    for row in rows:
+        kind = (row["kind"] or "other").strip() or "other"
+        kind_to_ids.setdefault(kind, []).append(row["id"])
+
+    created = 0
+    for pos, (kind, variant_ids) in enumerate(kind_to_ids.items()):
+        defaults = _KIND_TO_GROUP_DEFAULTS.get(kind, _KIND_TO_GROUP_DEFAULTS["other"])
+        group_id = insert_modifier_group(
+            item_id,
+            defaults["name"],
+            required=defaults["required"],
+            max_select=defaults["max_select"],
+            position=pos,
+        )
+        with db_connect() as conn:
+            conn.executemany(
+                "UPDATE draft_item_variants SET modifier_group_id=? WHERE id=?",
+                [(group_id, vid) for vid in variant_ids],
+            )
+            conn.commit()
+        created += 1
+
+    return created

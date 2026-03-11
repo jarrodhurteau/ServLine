@@ -1186,9 +1186,13 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ## ▶️ CURRENT POSITION
 
-➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
+✅ **Phase 11 — Production AI Pipeline — COMPLETE (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. Day 108: E2E gate integration tests — run_ocr_and_make_draft() tested end-to-end with all Claude calls mocked, verifying pass/fail/thinking/skip/empty-extraction paths. Day 109: gate calibration utility — threshold sweep + signal contribution analysis confirms GATE_THRESHOLD=0.90 correctly separates good menus from poor ones. 2,153 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 COMPLETE (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 110 capstone: Sprint 12.1 schema kickoff — draft_modifier_groups table, modifier_group_id on variants, 5 CRUD functions, migrate_variants_to_modifier_groups() (kind→group auto-migration, idempotent). 2,195 tests pass.
+
+➡ **Phase 12 — POS-Native Data Model & Editor — IN PROGRESS (Days 111-127)**
+
+Sprint 12.1 schema kickoff complete (Day 110): modifier group table + CRUD + migration foundation in place. Days 111-115: full nested get_draft_items() + extraction pipeline + template library.
 
 ---
 
@@ -1752,3 +1756,14 @@ ServLine now has:
   - Calibration finding: threshold=0.90 cleanly separates excellent/good (pass ~0.92-0.96) from marginal/poor (fail ~0.45-0.72)
   - Day 109 test suite: 39 cases, 100% pass rate
   - Cumulative: 2,153 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+- **Sprint 11.3 Capstone / Sprint 12.1 Schema Kickoff (Day 110):** *** COMPLETE ***
+  - `draft_modifier_groups` table — POS-native modifier group container (name, required, min/max select, position)
+  - `modifier_group_id` column added to `draft_item_variants` (nullable, backward-compat; ALTER TABLE for existing DBs)
+  - 5 CRUD functions: `insert_modifier_group()`, `get_modifier_group()`, `get_modifier_groups()`, `update_modifier_group()`, `delete_modifier_group()`
+  - `delete_modifier_group()` NULLs variant `modifier_group_id` before delete (no orphaned references)
+  - `_KIND_TO_GROUP_DEFAULTS`: kind→group config map (size→Size req, combo→Add-ons, flavor→Flavor, style→Style, other→Options)
+  - `migrate_variants_to_modifier_groups(item_id)`: auto-groups existing variants by kind, idempotent
+  - `get_draft_items()` now includes `modifier_group_id` in each variant dict (zero breakage — 23 old test schemas updated)
+  - Day 110 test suite: 42 cases, 100% pass rate
+  - Cumulative: 2,195 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
