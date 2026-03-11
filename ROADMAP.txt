@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 110 (March 11, 2026) — Sprint 11.3 Capstone / Sprint 12.1 Schema Kickoff (42 tests, 2,195 total)
+Last Updated: Day 111 (March 11, 2026) — Sprint 12.1 Nested Groups + Template Library (40 tests, 2,200 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1552,6 +1552,32 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 110 test suite: 42 cases, 100% pass rate
     Cumulative: 2,195 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  Day 111: Sprint 12.1 — Nested Modifier Groups + Template Library *** COMPLETE ***
+  ---------------------------------------------------------------------------------
+  [x] _get_draft_items_nested() — full 3-level POS hierarchy:
+        items[].modifier_groups[].modifiers[] + items[].ungrouped_variants[]
+        Two-query approach: groups+grouped variants, then ungrouped variants
+        All group fields: id, name, required, min_select, max_select, position
+        Backward compat: get_draft_items() default unchanged (returns flat variants)
+  [x] get_draft_items(include_modifier_groups=True) parameter added
+  [x] draft_modifier_group_templates table (per-restaurant reusable presets):
+        id, restaurant_id (nullable=global), name, required, min_select, max_select,
+        position, modifiers (JSON list), created_at, updated_at
+  [x] kitchen_name TEXT column added to draft_items (ALTER guard, nullable)
+  [x] MODIFIER_TEMPLATE_PRESETS — 4 built-in presets:
+        size_sml (S/M/L, required), temperature (Hot/Iced, required),
+        sauce_choice (BBQ/Ranch/Buffalo), protein_add (Chicken/Steak/Tofu)
+  [x] Template CRUD: insert_modifier_template(), get_modifier_template(),
+        list_modifier_templates() (restaurant-scoped + global), delete_modifier_template()
+  [x] seed_modifier_template_presets(restaurant_id) — idempotent seeder
+  [x] apply_modifier_template(item_id, template_id) → {group_id, modifier_ids}
+        Creates modifier group + variants from template in one call
+        Non-idempotent by design (two calls = two groups)
+        Raises ValueError for missing item or template
+
+    Day 111 test suite: 40 cases, 100% pass rate
+    Cumulative: 2,200 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
   CONTEXT: Research into Square, Toast, Clover, Lightspeed, and SpotOn reveals
@@ -1621,10 +1647,10 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
   [x] Modifier group CRUD functions (Day 110):
         - insert_modifier_group(), update_modifier_group(), delete_modifier_group()
         - get_modifier_groups(item_id), get_modifier_group(group_id)
-  [ ] Update get_draft_items() to include modifier groups (nested structure):
-        - LEFT JOIN modifier_groups + variants grouped by group
+  [x] Update get_draft_items() to include modifier groups (nested structure) (Day 111):
         - items[].modifier_groups[].modifiers[] nested structure
-        (Day 110 adds modifier_group_id to flat variant output; full nesting in Day 111)
+        - items[].ungrouped_variants[] for variants not linked to a group
+        - include_modifier_groups=True parameter, backward compat default unchanged
   [x] Migration: auto-group existing variants by (item_id, kind) (Day 110):
         - kind=size → ModifierGroup("Size", required=true, max=1)
         - kind=combo → ModifierGroup("Add-ons", required=false)
@@ -1635,14 +1661,15 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
         - Claude Call 1 prompt → extract modifier groups with names + rules
         - claude_items_to_draft_rows() → include modifier group structure
         - Backward compat: items without explicit groups still work
-  [ ] Reusable modifier group library (per restaurant):
+  [x] Reusable modifier group library (per restaurant) (Day 111):
         - draft_modifier_group_templates table
-        - Common presets: "Size (S/M/L)", "Temperature", "Sauce Choice"
-        - Apply template to item → creates group + modifiers in one click
-  [ ] Dual naming support:
-        - Add kitchen_name TEXT column to draft_items (nullable)
-        - Customer sees "Margherita Pizza", kitchen ticket shows "MARG"
-        - Optional: POS systems that support it get both names in export
+        - 4 built-in presets: size_sml, temperature, sauce_choice, protein_add
+        - apply_modifier_template(item_id, template_id) — one-click group creation
+        - seed_modifier_template_presets() — idempotent seeder
+  [x] Dual naming — kitchen_name column (Day 111):
+        - kitchen_name TEXT column on draft_items (nullable, ALTER guard)
+        - Included in nested get_draft_items() output
+        - Editor wiring deferred to Day 112
 
 Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 ........................................................

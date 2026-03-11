@@ -1192,7 +1192,7 @@ Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprin
 
 ➡ **Phase 12 — POS-Native Data Model & Editor — IN PROGRESS (Days 111-127)**
 
-Sprint 12.1 schema kickoff complete (Day 110): modifier group table + CRUD + migration foundation in place. Days 111-115: full nested get_draft_items() + extraction pipeline + template library.
+Day 111: nested get_draft_items(include_modifier_groups=True) → items[].modifier_groups[].modifiers[] + ungrouped_variants[]. Template library: draft_modifier_group_templates table, 4 built-in presets (size_sml/temperature/sauce_choice/protein_add), apply_modifier_template() one-click group creation. kitchen_name column added to draft_items. 2,200 tests pass. Days 112-115: extraction pipeline + kitchen_name editor wiring + Sprint 12.1 capstone.
 
 ---
 

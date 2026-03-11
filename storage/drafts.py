@@ -298,6 +298,24 @@ def _ensure_schema() -> None:
             """
         )
 
+        # draft_modifier_group_templates (Day 111 — reusable presets per restaurant)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_modifier_group_templates (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              restaurant_id INTEGER,
+              name          TEXT NOT NULL,
+              required      INTEGER DEFAULT 0,
+              min_select    INTEGER DEFAULT 0,
+              max_select    INTEGER DEFAULT 0,
+              position      INTEGER DEFAULT 0,
+              modifiers     TEXT NOT NULL DEFAULT '[]',
+              created_at    TEXT NOT NULL,
+              updated_at    TEXT NOT NULL
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -338,6 +356,10 @@ def _ensure_schema() -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_modifier_groups_item ON draft_modifier_groups(item_id)"
         )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_templates_restaurant "
+            "ON draft_modifier_group_templates(restaurant_id)"
+        )
 
         # in case existing DBs predate Day-14+ columns, patch them
         def _col_exists(table: str, col: str) -> bool:
@@ -365,6 +387,10 @@ def _ensure_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_variants_group "
             "ON draft_item_variants(modifier_group_id)"
         )
+        if not _col_exists("draft_items", "kitchen_name"):
+            cur.execute(
+                "ALTER TABLE draft_items ADD COLUMN kitchen_name TEXT;"
+            )
 
         conn.commit()
 
@@ -676,16 +702,163 @@ def get_draft(draft_id: int) -> Optional[Dict[str, Any]]:
         return _row_to_dict(row) if row else None
 
 
+def _get_draft_items_nested(draft_id: int) -> List[Dict[str, Any]]:
+    """
+    Internal helper: returns items with full modifier-group nesting.
+
+    Each item dict contains:
+      modifier_groups: list of groups, each with a 'modifiers' list
+      ungrouped_variants: variants whose modifier_group_id IS NULL
+    """
+    with db_connect() as conn:
+        # --- pass 1: items + modifier groups + grouped variants ---
+        rows = conn.execute(
+            """
+            SELECT
+                di.id            AS item_id,
+                di.draft_id,
+                di.name,
+                di.description,
+                di.price_cents,
+                di.category,
+                di.position,
+                di.confidence,
+                di.kitchen_name,
+                di.created_at,
+                di.updated_at,
+                mg.id            AS mg_id,
+                mg.name          AS mg_name,
+                mg.required      AS mg_required,
+                mg.min_select    AS mg_min_select,
+                mg.max_select    AS mg_max_select,
+                mg.position      AS mg_position,
+                v.id             AS v_id,
+                v.label          AS v_label,
+                v.price_cents    AS v_price_cents,
+                v.kind           AS v_kind,
+                v.position       AS v_position
+            FROM draft_items di
+            LEFT JOIN draft_modifier_groups mg ON mg.item_id = di.id
+            LEFT JOIN draft_item_variants v
+                ON v.item_id = di.id AND v.modifier_group_id = mg.id
+            WHERE di.draft_id = ?
+            ORDER BY
+                COALESCE(di.position, 1000000000), di.id,
+                COALESCE(mg.position, 1000000000), mg.id,
+                COALESCE(v.position,  1000000000), v.id
+            """,
+            (draft_id,),
+        ).fetchall()
+
+        # --- pass 2: ungrouped variants ---
+        ungrouped_rows = conn.execute(
+            """
+            SELECT v.id, v.item_id, v.label, v.price_cents, v.kind,
+                   v.position, v.modifier_group_id,
+                   v.created_at, v.updated_at
+            FROM draft_item_variants v
+            JOIN draft_items di ON di.id = v.item_id
+            WHERE di.draft_id = ? AND v.modifier_group_id IS NULL
+            ORDER BY COALESCE(v.position, 1000000000), v.id
+            """,
+            (draft_id,),
+        ).fetchall()
+
+    items_map: Dict[int, Dict[str, Any]] = {}
+    ordered_ids: List[int] = []
+
+    for row in rows:
+        iid = row["item_id"]
+        if iid not in items_map:
+            items_map[iid] = {
+                "id": iid,
+                "draft_id": row["draft_id"],
+                "name": row["name"],
+                "description": row["description"],
+                "price_cents": row["price_cents"],
+                "category": row["category"],
+                "position": row["position"],
+                "confidence": row["confidence"],
+                "kitchen_name": row["kitchen_name"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "modifier_groups": [],
+                "ungrouped_variants": [],
+                "_groups_map": {},
+            }
+            ordered_ids.append(iid)
+
+        item = items_map[iid]
+
+        if row["mg_id"] is not None:
+            mg_id = row["mg_id"]
+            if mg_id not in item["_groups_map"]:
+                group: Dict[str, Any] = {
+                    "id": mg_id,
+                    "name": row["mg_name"],
+                    "required": row["mg_required"],
+                    "min_select": row["mg_min_select"],
+                    "max_select": row["mg_max_select"],
+                    "position": row["mg_position"],
+                    "modifiers": [],
+                }
+                item["modifier_groups"].append(group)
+                item["_groups_map"][mg_id] = group
+
+            if row["v_id"] is not None:
+                item["_groups_map"][mg_id]["modifiers"].append(
+                    {
+                        "id": row["v_id"],
+                        "label": row["v_label"],
+                        "price_cents": row["v_price_cents"],
+                        "kind": row["v_kind"],
+                        "position": row["v_position"],
+                    }
+                )
+
+    # attach ungrouped variants
+    for row in ungrouped_rows:
+        iid = row["item_id"]
+        if iid in items_map:
+            items_map[iid]["ungrouped_variants"].append(
+                {
+                    "id": row["id"],
+                    "item_id": iid,
+                    "label": row["label"],
+                    "price_cents": row["price_cents"],
+                    "kind": row["kind"],
+                    "position": row["position"],
+                    "modifier_group_id": None,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+
+    # strip internal map
+    for item in items_map.values():
+        del item["_groups_map"]
+
+    return [items_map[iid] for iid in ordered_ids]
+
+
 def get_draft_items(
-    draft_id: int, *, include_variants: bool = True
+    draft_id: int,
+    *,
+    include_variants: bool = True,
+    include_modifier_groups: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Fetch all items for a draft, ordered by position then id.
 
-    When include_variants=True (default), each item dict gets a 'variants'
-    key containing a list of variant dicts (may be empty).  This uses a
-    LEFT JOIN + in-memory grouping so it's a single DB round-trip.
+    include_variants=True (default): each item gets a flat 'variants' list.
+    include_modifier_groups=True: each item gets 'modifier_groups' (nested
+      structure: modifier_groups[].modifiers[]) + 'ungrouped_variants' for
+      any variants not attached to a group.  Mutually exclusive with the
+      flat 'variants' key.
     """
+    if include_modifier_groups:
+        return _get_draft_items_nested(int(draft_id))
+
     with db_connect() as conn:
         if not include_variants:
             rows = conn.execute(
@@ -2521,3 +2694,230 @@ def migrate_variants_to_modifier_groups(item_id: int) -> int:
         created += 1
 
     return created
+
+
+# ---------------------------------------------------------------------------
+# Day 111 — Modifier Group Template Library
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+MODIFIER_TEMPLATE_PRESETS: Dict[str, Dict[str, Any]] = {
+    "size_sml": {
+        "name": "Size (S/M/L)",
+        "required": True,
+        "min_select": 1,
+        "max_select": 1,
+        "modifiers": [
+            {"label": "Small", "price_cents": 0, "kind": "size"},
+            {"label": "Medium", "price_cents": 100, "kind": "size"},
+            {"label": "Large", "price_cents": 200, "kind": "size"},
+        ],
+    },
+    "temperature": {
+        "name": "Temperature",
+        "required": True,
+        "min_select": 1,
+        "max_select": 1,
+        "modifiers": [
+            {"label": "Hot", "price_cents": 0, "kind": "style"},
+            {"label": "Iced", "price_cents": 0, "kind": "style"},
+        ],
+    },
+    "sauce_choice": {
+        "name": "Sauce Choice",
+        "required": False,
+        "min_select": 0,
+        "max_select": 1,
+        "modifiers": [
+            {"label": "BBQ", "price_cents": 0, "kind": "flavor"},
+            {"label": "Ranch", "price_cents": 0, "kind": "flavor"},
+            {"label": "Buffalo", "price_cents": 0, "kind": "flavor"},
+        ],
+    },
+    "protein_add": {
+        "name": "Add Protein",
+        "required": False,
+        "min_select": 0,
+        "max_select": 0,
+        "modifiers": [
+            {"label": "Chicken", "price_cents": 300, "kind": "combo"},
+            {"label": "Steak", "price_cents": 500, "kind": "combo"},
+            {"label": "Tofu", "price_cents": 200, "kind": "combo"},
+        ],
+    },
+}
+
+
+def insert_modifier_template(
+    restaurant_id: Optional[int],
+    name: str,
+    modifiers: Optional[List[Dict[str, Any]]] = None,
+    *,
+    required: bool = False,
+    min_select: int = 0,
+    max_select: int = 0,
+    position: int = 0,
+) -> int:
+    """Insert a reusable modifier group template. Returns new id."""
+    now = _now()
+    mods_json = _json.dumps(modifiers or [])
+    with db_connect() as conn:
+        gid = conn.execute(
+            """
+            INSERT INTO draft_modifier_group_templates
+                (restaurant_id, name, required, min_select, max_select,
+                 position, modifiers, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                restaurant_id,
+                name.strip(),
+                1 if required else 0,
+                int(min_select),
+                int(max_select),
+                int(position),
+                mods_json,
+                now,
+                now,
+            ),
+        ).lastrowid
+        conn.commit()
+    return gid
+
+
+def get_modifier_template(template_id: int) -> Optional[Dict[str, Any]]:
+    """Return a single template dict (with modifiers decoded), or None."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM draft_modifier_group_templates WHERE id=?",
+            (int(template_id),),
+        ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["modifiers"] = _json.loads(d["modifiers"])
+    return d
+
+
+def list_modifier_templates(
+    restaurant_id: Optional[int],
+) -> List[Dict[str, Any]]:
+    """
+    Return all templates for a restaurant (including global templates where
+    restaurant_id IS NULL), ordered by position then id.
+    """
+    with db_connect() as conn:
+        if restaurant_id is None:
+            rows = conn.execute(
+                "SELECT * FROM draft_modifier_group_templates "
+                "WHERE restaurant_id IS NULL "
+                "ORDER BY COALESCE(position, 1000000000), id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM draft_modifier_group_templates "
+                "WHERE restaurant_id = ? OR restaurant_id IS NULL "
+                "ORDER BY COALESCE(position, 1000000000), id",
+                (int(restaurant_id),),
+            ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["modifiers"] = _json.loads(d["modifiers"])
+        result.append(d)
+    return result
+
+
+def delete_modifier_template(template_id: int) -> bool:
+    """Hard-delete a template. Returns True if a row was deleted."""
+    with db_connect() as conn:
+        deleted = conn.execute(
+            "DELETE FROM draft_modifier_group_templates WHERE id=?",
+            (int(template_id),),
+        ).rowcount
+        conn.commit()
+    return deleted > 0
+
+
+def seed_modifier_template_presets(restaurant_id: Optional[int]) -> int:
+    """
+    Insert all MODIFIER_TEMPLATE_PRESETS for a restaurant if none exist yet.
+    Returns the number of templates inserted (0 if already seeded).
+    """
+    existing = list_modifier_templates(restaurant_id)
+    existing_names = {t["name"] for t in existing}
+    inserted = 0
+    for pos, preset in enumerate(MODIFIER_TEMPLATE_PRESETS.values()):
+        if preset["name"] not in existing_names:
+            insert_modifier_template(
+                restaurant_id,
+                preset["name"],
+                preset["modifiers"],
+                required=bool(preset.get("required", False)),
+                min_select=int(preset.get("min_select", 0)),
+                max_select=int(preset.get("max_select", 0)),
+                position=pos,
+            )
+            inserted += 1
+    return inserted
+
+
+def apply_modifier_template(item_id: int, template_id: int) -> Dict[str, Any]:
+    """
+    Create a modifier group on *item_id* from *template_id*.
+
+    Returns {"group_id": int, "modifier_ids": List[int]}.
+
+    Raises ValueError if either the item or template does not exist.
+    This is intentionally non-idempotent: applying the same template twice
+    creates two independent groups (useful for e.g. two separate sauce rounds).
+    """
+    template = get_modifier_template(int(template_id))
+    if template is None:
+        raise ValueError(f"Modifier template {template_id} not found")
+
+    # Verify item exists by attempting a direct query
+    with db_connect() as conn:
+        item_row = conn.execute(
+            "SELECT id FROM draft_items WHERE id=?", (int(item_id),)
+        ).fetchone()
+    if item_row is None:
+        raise ValueError(f"Draft item {item_id} not found")
+
+    # Create the modifier group from template attrs
+    group_id = insert_modifier_group(
+        int(item_id),
+        template["name"],
+        required=bool(template["required"]),
+        min_select=int(template["min_select"]),
+        max_select=int(template["max_select"]),
+    )
+
+    # Insert each modifier as a variant linked to the new group
+    now = _now()
+    modifier_ids: List[int] = []
+    with db_connect() as conn:
+        for pos, mod in enumerate(template["modifiers"]):
+            vid = conn.execute(
+                """
+                INSERT INTO draft_item_variants
+                    (item_id, label, price_cents, kind, position,
+                     modifier_group_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(item_id),
+                    mod.get("label", ""),
+                    int(mod.get("price_cents", 0)),
+                    mod.get("kind", "other"),
+                    pos,
+                    group_id,
+                    now,
+                    now,
+                ),
+            ).lastrowid
+            modifier_ids.append(vid)
+        conn.commit()
+
+    return {"group_id": group_id, "modifier_ids": modifier_ids}
