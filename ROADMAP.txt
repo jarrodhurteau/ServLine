@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 112 (March 12, 2026) — Sprint 12.1 Extraction Pipeline + Kitchen Name Editor (40 tests, 2,241 total)
+Last Updated: Day 113 (March 13, 2026) — Sprint 12.1 Modifier Group Contract + Save/Load Cycle (49 tests, 2,290 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1603,6 +1603,32 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 
     Day 112 test suite: 40 cases, 100% pass rate
     Cumulative: 2,241 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Day 113: Sprint 12.1 — Modifier Group Contract + Save/Load Cycle *** COMPLETE ***
+  ----------------------------------------------------------------------------------
+  [x] validate_draft_payload() updated in portal/contracts.py:
+        - items[i]._modifier_groups[] validated: name (required str), required/
+          min_select/max_select/position (optional int), _modifiers[] (label required,
+          price_cents optional int)
+        - items[i].kitchen_name validated: optional string or null
+        - Top-level deleted_modifier_group_ids validated: optional list of ints
+  [x] draft_save() endpoint (portal/app.py):
+        - deleted_modifier_group_ids parsed from payload + passed through validator
+        - Loops deleted_modifier_group_ids → calls delete_modifier_group() for each
+        - Returns deleted_mg_count in response JSON (alongside existing deleted_count)
+        - Gracefully skips non-existent group IDs
+  [x] draft_editor() route (portal/app.py):
+        - get_draft_items(draft_id, include_modifier_groups=True) — items now carry
+          modifier_groups[] (nested) + ungrouped_variants[] for template rendering
+  [x] draft_editor.html template:
+        - .modifier-group-pill badge (green) next to variant count pill
+        - Shows "N group(s)" with group names in title tooltip attribute
+        - CSS: rgba(16,185,129) green tones to distinguish from variant pill (indigo)
+  [x] 4 older test schemas backfilled: draft_modifier_groups table + kitchen_name
+        column added to tests/test_day87, test_day88, test_day90, test_day92
+
+    Day 113 test suite: 49 cases, 100% pass rate
+    Cumulative: 2,290 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------

@@ -449,6 +449,19 @@
       white-space: nowrap;
       margin-left: 4px;
     }
+    .modifier-group-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.32);
+      white-space: nowrap;
+      margin-left: 4px;
+    }
 
     /* Collapsed variant rows */
     #items-body tr.variant-row.variant-collapsed {
@@ -820,6 +833,9 @@
                     {% endif %}
                     {% if it.variants %}
                       <span class="variant-count-pill">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
+                    {% endif %}
+                    {% if it.modifier_groups %}
+                      <span class="modifier-group-pill" title="{{ it.modifier_groups|map(attribute='name')|join(', ') }}">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
                     {% endif %}
                   </div>
                   <div class="kitchen-name-row">

@@ -94,6 +94,58 @@ def validate_draft_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
             except Exception:
                 return False, f"items[{i}].confidence must be an integer or null"
 
+        # kitchen_name (optional string or None)
+        if "kitchen_name" in it and it["kitchen_name"] is not None:
+            if not isinstance(it["kitchen_name"], str):
+                return False, f"items[{i}].kitchen_name must be a string or null"
+
+        # _modifier_groups (optional list of modifier group dicts)
+        if "_modifier_groups" in it:
+            groups = it["_modifier_groups"]
+            if not isinstance(groups, list):
+                return False, f"items[{i}]._modifier_groups must be a list"
+            for gi, g in enumerate(groups):
+                if not isinstance(g, dict):
+                    return False, f"items[{i}]._modifier_groups[{gi}] must be an object"
+                # name (required string)
+                if "name" not in g or not isinstance(g.get("name"), str):
+                    return False, f"items[{i}]._modifier_groups[{gi}].name must be a string"
+                if not g["name"].strip():
+                    return False, f"items[{i}]._modifier_groups[{gi}].name must not be empty"
+                # required (optional int-like or None)
+                if "required" in g and g["required"] is not None:
+                    if not _is_intlike(g["required"]):
+                        return False, f"items[{i}]._modifier_groups[{gi}].required must be an integer"
+                # min_select (optional int-like or None)
+                if "min_select" in g and g["min_select"] is not None:
+                    if not _is_intlike(g["min_select"]):
+                        return False, f"items[{i}]._modifier_groups[{gi}].min_select must be an integer"
+                # max_select (optional int-like or None)
+                if "max_select" in g and g["max_select"] is not None:
+                    if not _is_intlike(g["max_select"]):
+                        return False, f"items[{i}]._modifier_groups[{gi}].max_select must be an integer"
+                # position (optional int-like or None)
+                if "position" in g and g["position"] is not None:
+                    if not _is_intlike(g["position"]):
+                        return False, f"items[{i}]._modifier_groups[{gi}].position must be an integer"
+                # _modifiers (optional list)
+                if "_modifiers" in g:
+                    modifiers = g["_modifiers"]
+                    if not isinstance(modifiers, list):
+                        return False, f"items[{i}]._modifier_groups[{gi}]._modifiers must be a list"
+                    for mi, m in enumerate(modifiers):
+                        if not isinstance(m, dict):
+                            return False, f"items[{i}]._modifier_groups[{gi}]._modifiers[{mi}] must be an object"
+                        # label (required string)
+                        if "label" not in m or not isinstance(m.get("label"), str):
+                            return False, f"items[{i}]._modifier_groups[{gi}]._modifiers[{mi}].label must be a string"
+                        if not m["label"].strip():
+                            return False, f"items[{i}]._modifier_groups[{gi}]._modifiers[{mi}].label must not be empty"
+                        # price_cents (optional int-like or None)
+                        if "price_cents" in m and m["price_cents"] is not None:
+                            if not _is_intlike(m["price_cents"]):
+                                return False, f"items[{i}]._modifier_groups[{gi}]._modifiers[{mi}].price_cents must be an integer"
+
         # _variants (optional list of variant dicts)
         if "_variants" in it:
             variants = it["_variants"]
@@ -131,5 +183,14 @@ def validate_draft_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
         for dvi, dvid in enumerate(dvids):
             if not _is_intlike(dvid):
                 return False, f"deleted_variant_ids[{dvi}] must be an integer"
+
+    # --- Top-level deleted_modifier_group_ids (optional) ---
+    if "deleted_modifier_group_ids" in payload:
+        dmgids = payload["deleted_modifier_group_ids"]
+        if not isinstance(dmgids, list):
+            return False, "deleted_modifier_group_ids must be a list"
+        for dmi, dmid in enumerate(dmgids):
+            if not _is_intlike(dmid):
+                return False, f"deleted_modifier_group_ids[{dmi}] must be an integer"
 
     return True, ""

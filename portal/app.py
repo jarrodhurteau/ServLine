@@ -4862,7 +4862,7 @@ def draft_editor(draft_id: int):
     if not draft:
         abort(404, description=f"Draft {draft_id} not found")
 
-    items = drafts_store.get_draft_items(draft_id) or []
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
 
     # ---- NEW: compute per-item quality + low-confidence flag ----
     low_conf_items = []
@@ -5021,6 +5021,7 @@ def draft_save(draft_id: int):
         "title": payload.get("title"),
         "restaurant_id": payload.get("restaurant_id"),
         "status": payload.get("status"),
+        "deleted_modifier_group_ids": payload.get("deleted_modifier_group_ids") or [],
     }
     ok, err = validate_draft_payload(probe)
     if not ok:
@@ -5030,6 +5031,7 @@ def draft_save(draft_id: int):
     items = payload.get("items") or []
     deleted_ids = payload.get("deleted_item_ids") or []
     deleted_variant_ids = payload.get("deleted_variant_ids") or []
+    deleted_modifier_group_ids = payload.get("deleted_modifier_group_ids") or []
 
     try:
         if title is not None:
@@ -5053,12 +5055,22 @@ def draft_save(draft_id: int):
                     drafts_store.delete_variants_by_id([vid_int])
                 except Exception:
                     continue
+        # Delete orphaned modifier group rows (Day 113)
+        deleted_mg_count = 0
+        if deleted_modifier_group_ids:
+            for mgid in deleted_modifier_group_ids:
+                try:
+                    if drafts_store.delete_modifier_group(int(mgid)):
+                        deleted_mg_count += 1
+                except Exception:
+                    continue
         saved = {
             "ok": True,
             "saved_at": _now_iso(),
             "inserted_ids": upsert_result.get("inserted_ids", []),
             "updated_ids": upsert_result.get("updated_ids", []),
             "deleted_count": deleted_count,
+            "deleted_mg_count": deleted_mg_count,
         }
         return jsonify(saved), 200
     except Exception as e:

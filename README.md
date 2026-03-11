@@ -1196,6 +1196,8 @@ Day 111: nested get_draft_items(include_modifier_groups=True) → items[].modifi
 
 Day 112: Extraction pipeline now produces modifier groups. _build_modifier_groups_from_claude() converts Claude "modifier_groups" output to _modifier_groups format. claude_items_to_draft_rows() emits _modifier_groups when present (backward compat: sizes still → _variants). _insert_modifier_groups_with_cursor() inline helper wires groups+modifiers into DB inside existing transactions. _insert_items_bulk() + upsert_draft_items() both persist kitchen_name and _modifier_groups (replace=True on update). draft_editor.html: kitchen-name input field in every item row, collectPayload() includes kitchen_name. 2,241 tests pass.
 
+Day 113: Modifier group contract + save/load cycle closed. validate_draft_payload() validates _modifier_groups[] per item (name, required, min/max_select, _modifiers[]) + kitchen_name + deleted_modifier_group_ids at top level. draft_save() endpoint handles deleted_modifier_group_ids → delete_modifier_group() + returns deleted_mg_count. draft_editor() now loads items with include_modifier_groups=True. Template: green modifier-group-pill badge next to variant pill, shows group count + names in tooltip. 4 older test schemas backfilled (draft_modifier_groups + kitchen_name). 2,290 tests pass.
+
 ---
 
 ## 🌄 System State Summary
