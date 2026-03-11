@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 IN PROGRESS (Days 101-104). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 102.7: file-based debug logging (_write_debug_log → storage/logs/) + THINKING_MODEL="claude-sonnet-4-6" wired for adaptive thinking opt-in. Portal passes use_thinking flag. 3-call Sonnet pipeline remains default. Next: live A/B comparison (3-call vs thinking). 1,806 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 5-stage pipeline: OCR → Call 1 (multimodal extract) → Call 2 (vision verify) → Semantic → Call 3 (reconcile). Day 105: confidence gate module + signal #6 (Claude call confidence) + rejection logging table. Gate wiring into live pipeline is next (Days 106-107). 1,979 tests pass.
 
 ---
 
@@ -1670,3 +1670,48 @@ ServLine now has:
   - Ready for live A/B comparison: flip flag to test single-call thinking vs 3-call pipeline
   - Day 102.7 test suite: 26 cases, 100% pass rate
   - Cumulative: 1,806 passed (excl. Day 70 fixture errors)
+
+- **Prompt Iteration + Live Website Testing (Day 102.8b):** *** COMPLETE ***
+  - Live site testing with real pizza menu (Draft #218): 108 → 133 items (+23%)
+  - Section header propagation: "Wraps — Regular $10 / W/ Fries $14" → size variants on all wraps
+  - Sauce/flavor handling: named sauces extracted as individual Sauces items (not collapsed)
+  - Quantity split: "6 Pcs / 10 Pcs / 20 Pcs" wings → 3 separate items per size
+  - Shared options: "Naked or Breaded", "White or Wheat" → size variants on each item
+  - `PIPELINE_MODE = "thinking"` default (Opus single-call); "3call" toggle for pipeline validation
+  - Day 102.8b test suite: 28 cases, 100% pass rate
+  - Cumulative: 1,834 passed (excl. Day 70 fixture errors)
+
+- **Full Pipeline E2E Validation (Day 103):** *** COMPLETE ***
+  - PIPELINE_MODE toggle: "thinking" (Opus single-call) vs "3call" (full 3-call pipeline)
+  - Per-call contribution analysis: tracks item count before/after each of 3 Claude calls
+  - `EXTENDED_THINKING = PIPELINE_MODE == "thinking"` — mode auto-configures model + thinking
+  - E2E test suite: 44 cases covering both pipeline modes, contribution deltas, graceful degradation
+  - Day 103 test suite: 44 cases, 100% pass rate
+  - Cumulative: 1,878 passed (excl. Day 70 fixture errors)
+
+- **Sprint 11.2 Capstone — Targeted Reconciliation (Day 104):** *** COMPLETE ***
+  - Comprehensive coverage: all 7 change types, all skip paths, all error recovery paths
+  - Pre/post reconciliation metric comparison (items_confirmed, items_corrected, items_not_found)
+  - Changes log: name_fix, price_fix, category_fix, description_fix, size_added, not_found, no_change
+  - Debug payload completeness: full reconciliation metadata in debug JSON
+  - Sprint 11.2 interoperability: reconciliation + semantic pipeline + vision verify all working together
+  - Day 104 test suite: 59 cases, 100% pass rate
+  - Sprint 11.2 COMPLETE: Targeted Reconciliation (Claude Call 3) fully integrated
+  - Cumulative: 1,939 passed (excl. Day 70 fixture errors)
+
+- **Confidence Gate Foundation (Day 105):** *** COMPLETE ***
+  - Sprint 11.3 start (Phase 11: Production AI Pipeline)
+  - Signal #6 in `storage/semantic_confidence.py`: Claude's self-reported call confidence
+    - `stamp_claude_confidence(items, call_confidence)` — broadcasts call-level confidence to all items
+    - 6-signal formula when `claude_confidence` set: grammar 0.27, name 0.18, price 0.18, variant 0.14, flags 0.13, claude 0.10
+    - Fully backward-compatible: items without `claude_confidence` use original 5-signal formula unchanged
+  - New `storage/confidence_gate.py`: binary pass/fail gate at the menu level
+    - `evaluate_confidence_gate(items, call2_confidence, call3_confidence)` → GateResult
+    - 4 signals: semantic 0.50, Call 2 0.25, Call 3 0.15, item count sanity 0.10
+    - Unavailable call signals auto-redistribute weight to semantic
+    - Default GATE_THRESHOLD = 0.90; customer_message never exposes numeric scores
+  - Rejection logging in `storage/drafts.py`: new `pipeline_rejections` table
+    - `log_pipeline_rejection()` — stores gate score, reason, all pipeline signals as JSON
+    - `get_pipeline_rejections(restaurant_id, limit)` — retrieve for analysis/hardening
+  - Day 105 test suite: 40 cases, 100% pass rate
+  - Cumulative: 1,979 passed (excl. Day 70 fixture errors)

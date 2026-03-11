@@ -261,6 +261,24 @@ def _ensure_schema() -> None:
             """
         )
 
+        # pipeline_rejections (Day 105 — confidence gate rejection logging)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_rejections (
+              id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+              restaurant_id       INTEGER,
+              draft_id            INTEGER,
+              image_path          TEXT,
+              ocr_chars           INTEGER NOT NULL DEFAULT 0,
+              item_count          INTEGER NOT NULL DEFAULT 0,
+              gate_score          REAL NOT NULL,
+              gate_reason         TEXT,
+              pipeline_signals    TEXT,
+              created_at          TEXT NOT NULL
+            )
+            """
+        )
+
         # helpful indexes
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status)"
@@ -291,6 +309,12 @@ def _ensure_schema() -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(active)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rejections_restaurant ON pipeline_rejections(restaurant_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rejections_created ON pipeline_rejections(created_at)"
         )
 
         # in case existing DBs predate Day-14+ columns, patch them
@@ -2167,3 +2191,130 @@ def clone_draft(draft_id: int) -> Dict[str, Any]:
             )
 
     return {"id": new_id, "draft_id": new_id}
+
+
+# ---------------------------------------------------------------------------
+# Pipeline rejection logging (Day 105 — Sprint 11.3)
+# ---------------------------------------------------------------------------
+
+def log_pipeline_rejection(
+    restaurant_id: Optional[int],
+    draft_id: Optional[int],
+    gate_score: float,
+    gate_reason: str,
+    *,
+    image_path: str = "",
+    ocr_chars: int = 0,
+    item_count: int = 0,
+    pipeline_signals: Optional[Dict[str, Any]] = None,
+) -> int:
+    """Record a pipeline rejection in the database.
+
+    Called when evaluate_confidence_gate() returns passed=False.
+    Stores all available pipeline signals for post-mortem analysis and
+    future pipeline hardening.
+
+    Args:
+        restaurant_id:    Restaurant that uploaded the menu (may be None).
+        draft_id:         Draft created for the upload (may be None if none).
+        gate_score:       Aggregate gate score (0.0-1.0) from GateResult.
+        gate_reason:      Technical reason string from GateResult.
+        image_path:       Path or identifier of the uploaded menu image.
+        ocr_chars:        Character count from the OCR step.
+        item_count:       Number of items extracted before the gate.
+        pipeline_signals: Full signals dict from GateResult for JSON storage.
+
+    Returns:
+        The newly-inserted rejection row id.
+    """
+    signals_json = json.dumps(pipeline_signals or {})
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO pipeline_rejections
+              (restaurant_id, draft_id, image_path, ocr_chars, item_count,
+               gate_score, gate_reason, pipeline_signals, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                restaurant_id,
+                draft_id,
+                image_path or "",
+                ocr_chars,
+                item_count,
+                round(float(gate_score), 6),
+                gate_reason,
+                signals_json,
+                _now(),
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_pipeline_rejections(
+    restaurant_id: Optional[int] = None,
+    *,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent pipeline rejections for analysis.
+
+    Args:
+        restaurant_id: Filter to a specific restaurant.  None = all.
+        limit:         Maximum rows to return (default 50).
+
+    Returns:
+        List of rejection dicts ordered by most-recent first.
+        Each dict has: id, restaurant_id, draft_id, image_path, ocr_chars,
+        item_count, gate_score, gate_reason, pipeline_signals (dict), created_at.
+    """
+    with db_connect() as conn:
+        cur = conn.cursor()
+        if restaurant_id is not None:
+            cur.execute(
+                """
+                SELECT id, restaurant_id, draft_id, image_path, ocr_chars,
+                       item_count, gate_score, gate_reason, pipeline_signals,
+                       created_at
+                FROM pipeline_rejections
+                WHERE restaurant_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (restaurant_id, limit),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, restaurant_id, draft_id, image_path, ocr_chars,
+                       item_count, gate_score, gate_reason, pipeline_signals,
+                       created_at
+                FROM pipeline_rejections
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        rows = cur.fetchall()
+
+    results = []
+    for row in rows:
+        signals = {}
+        try:
+            signals = json.loads(row[8] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+        results.append({
+            "id":                row[0],
+            "restaurant_id":     row[1],
+            "draft_id":          row[2],
+            "image_path":        row[3],
+            "ocr_chars":         row[4],
+            "item_count":        row[5],
+            "gate_score":        row[6],
+            "gate_reason":       row[7],
+            "pipeline_signals":  signals,
+            "created_at":        row[9],
+        })
+    return results

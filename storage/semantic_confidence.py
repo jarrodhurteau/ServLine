@@ -55,12 +55,23 @@ from typing import Any, Dict, List, Optional
 # Constants
 # ---------------------------------------------------------------------------
 
-# Signal weights (must sum to 1.0)
+# Signal weights — 5-signal formula (items without claude_confidence)
+# Must sum to 1.0
 _W_GRAMMAR = 0.30
 _W_NAME = 0.20
 _W_PRICE = 0.20
 _W_VARIANT = 0.15
 _W_FLAGS = 0.15
+
+# Signal weights — 6-signal formula (items with claude_confidence set)
+# claude_confidence = Claude's self-reported call confidence, distributed to items
+# Must sum to 1.0
+_W6_GRAMMAR = 0.27
+_W6_NAME = 0.18
+_W6_PRICE = 0.18
+_W6_VARIANT = 0.14
+_W6_FLAGS = 0.13
+_W6_CLAUDE = 0.10
 
 # Flag penalty values per severity
 _FLAG_PENALTY_WARN = 0.15
@@ -259,6 +270,47 @@ def _score_flag_penalty(item: Dict[str, Any]) -> float:
     return max(0.0, 1.0 - total_penalty)
 
 
+def _score_claude_confidence(item: Dict[str, Any]) -> float:
+    """Read Claude's self-reported call confidence from the item.
+
+    Signal #6 (Day 105): Claude's confidence score (0.0-1.0) is stamped onto
+    every item by stamp_claude_confidence() after each Claude call completes.
+    Defaults to 0.5 (neutral) when the field is absent, but this function
+    is only called when 'claude_confidence' is explicitly set on the item.
+    """
+    val = item.get("claude_confidence")
+    if val is None:
+        return 0.5
+    try:
+        return max(0.0, min(1.0, float(val)))
+    except (ValueError, TypeError):
+        return 0.5
+
+
+# ---------------------------------------------------------------------------
+# Public helpers — Claude confidence stamping
+# ---------------------------------------------------------------------------
+
+def stamp_claude_confidence(items: list, call_confidence: float) -> None:
+    """Broadcast a Claude call-level confidence score to all items in a list.
+
+    Call 2 (vision verify) and Call 3 (reconcile) each return a single
+    confidence float for the whole call.  This helper distributes it onto
+    every item as ``claude_confidence`` so that score_semantic_confidence()
+    can use it as signal #6.
+
+    Mutates items in place.  Idempotent — calling multiple times with the
+    same value is safe; calling with a later (higher quality) value overwrites.
+
+    Args:
+        items:           List of item dicts (modified in place).
+        call_confidence: Claude's self-reported confidence (0.0-1.0).
+    """
+    clamped = max(0.0, min(1.0, float(call_confidence)))
+    for item in items:
+        item["claude_confidence"] = clamped
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -271,6 +323,11 @@ def score_semantic_confidence(items: list) -> None:
       - semantic_confidence: float 0.0-1.0
       - semantic_confidence_details: dict with signal audit trail
 
+    Day 105 (signal #6): If an item has ``claude_confidence`` set (stamped by
+    stamp_claude_confidence() after a Claude call), a 6-signal formula is used
+    with slightly adjusted weights.  Items without the field use the original
+    5-signal formula unchanged — backward-compatible.
+
     Pipeline placement: Step 9.2, after check_cross_item_consistency (9.1).
     Mutates items in place.
     """
@@ -281,35 +338,57 @@ def score_semantic_confidence(items: list) -> None:
         variant_raw = _score_variant_quality(item)
         flag_raw = _score_flag_penalty(item)
 
-        weighted_grammar = grammar_raw * _W_GRAMMAR
-        weighted_name = name_raw * _W_NAME
-        weighted_price = price_raw * _W_PRICE
-        weighted_variant = variant_raw * _W_VARIANT
-        weighted_flags = flag_raw * _W_FLAGS
+        has_claude = "claude_confidence" in item
 
-        raw_score = (weighted_grammar + weighted_name + weighted_price
-                     + weighted_variant + weighted_flags)
+        if has_claude:
+            # 6-signal formula
+            claude_raw = _score_claude_confidence(item)
+            weighted_grammar = grammar_raw * _W6_GRAMMAR
+            weighted_name = name_raw * _W6_NAME
+            weighted_price = price_raw * _W6_PRICE
+            weighted_variant = variant_raw * _W6_VARIANT
+            weighted_flags = flag_raw * _W6_FLAGS
+            weighted_claude = claude_raw * _W6_CLAUDE
+            raw_score = (weighted_grammar + weighted_name + weighted_price
+                         + weighted_variant + weighted_flags + weighted_claude)
+        else:
+            # Original 5-signal formula (unchanged)
+            claude_raw = None
+            weighted_grammar = grammar_raw * _W_GRAMMAR
+            weighted_name = name_raw * _W_NAME
+            weighted_price = price_raw * _W_PRICE
+            weighted_variant = variant_raw * _W_VARIANT
+            weighted_flags = flag_raw * _W_FLAGS
+            weighted_claude = None
+            raw_score = (weighted_grammar + weighted_name + weighted_price
+                         + weighted_variant + weighted_flags)
+
         final = max(0.0, min(1.0, round(raw_score, 4)))
 
         item["semantic_confidence"] = final
-        item["semantic_confidence_details"] = {
+        details: Dict[str, Any] = {
             "grammar_score": round(grammar_raw, 4),
-            "grammar_weight": _W_GRAMMAR,
+            "grammar_weight": _W6_GRAMMAR if has_claude else _W_GRAMMAR,
             "grammar_weighted": round(weighted_grammar, 4),
             "name_quality_score": round(name_raw, 4),
-            "name_quality_weight": _W_NAME,
+            "name_quality_weight": _W6_NAME if has_claude else _W_NAME,
             "name_quality_weighted": round(weighted_name, 4),
             "price_score": round(price_raw, 4),
-            "price_weight": _W_PRICE,
+            "price_weight": _W6_PRICE if has_claude else _W_PRICE,
             "price_weighted": round(weighted_price, 4),
             "variant_score": round(variant_raw, 4),
-            "variant_weight": _W_VARIANT,
+            "variant_weight": _W6_VARIANT if has_claude else _W_VARIANT,
             "variant_weighted": round(weighted_variant, 4),
             "flag_penalty_score": round(flag_raw, 4),
-            "flag_penalty_weight": _W_FLAGS,
+            "flag_penalty_weight": _W6_FLAGS if has_claude else _W_FLAGS,
             "flag_penalty_weighted": round(weighted_flags, 4),
             "final": final,
         }
+        if has_claude:
+            details["claude_confidence_score"] = round(claude_raw, 4)
+            details["claude_confidence_weight"] = _W6_CLAUDE
+            details["claude_confidence_weighted"] = round(weighted_claude, 4)
+        item["semantic_confidence_details"] = details
 
 
 # ---------------------------------------------------------------------------

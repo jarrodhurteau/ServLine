@@ -1393,23 +1393,35 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
 
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
-  [ ] Wire Claude's self-reported confidence as signal #6 in semantic_confidence.py
-      - Add to existing 5-signal weighted scoring (grammar, name, price, variant, flags)
-      - Determine appropriate weight through testing
-  [ ] Confidence gate: binary pass/fail
-      - Threshold TBD through real-world testing (starting point: 90%)
-      - Pass: deliver data to customer
-      - Fail: "Please retake your photo with better lighting"
-      - NO confidence scores shown to customers. Ever.
-  [ ] Rejection logging system
-      - Log every failed parse: image, OCR output, Claude corrections, confidence,
-        identified issues, all pipeline signals
+
+  Day 105: Confidence Gate Foundation *** COMPLETE ***
+  -----------------------------------------------------
+  [x] Signal #6 in semantic_confidence.py — Claude's self-reported call confidence
+      - stamp_claude_confidence(items, call_confidence) broadcasts call-level
+        confidence onto every item as claude_confidence field
+      - score_semantic_confidence() uses 6-signal formula when claude_confidence
+        is set: grammar 0.27, name 0.18, price 0.18, variant 0.14, flags 0.13, claude 0.10
+      - Items without claude_confidence use original 5-signal formula unchanged
+        (fully backward-compatible — zero existing tests broken)
+  [x] Confidence gate module: storage/confidence_gate.py
+      - evaluate_confidence_gate(items, call2_confidence, call3_confidence) → GateResult
+      - 4 signals: semantic 0.50, Call 2 0.25, Call 3 0.15, item count 0.10
+      - Unavailable call signals auto-redistribute weight to semantic
+      - Default threshold: GATE_THRESHOLD = 0.90
+      - GateResult.customer_message — friendly retry prompt, never exposes scores
+  [x] Rejection logging: pipeline_rejections table in storage/drafts.py
+      - log_pipeline_rejection() — insert on gate fail, stores all pipeline signals as JSON
+      - get_pipeline_rejections(restaurant_id, limit) — retrieve for analysis
       - Purpose: find patterns, harden pipeline, raise the floor
-      - This is the "learning system" — no human reviewers, system improves itself
-  [ ] End-to-end pipeline integration tests
-      - Test full 6-step flow with real menu images
-      - Verify each step's output feeds correctly into the next
-      - Test graceful degradation (API failures, low confidence, edge cases)
+  [x] 40 tests — 8 classes covering signal #6, stamp helper, gate signals,
+      gate pass/fail, optional signal redistribution, DB round-trip, integration
+
+  PENDING (Days 106-110):
+  [ ] Wire gate into live pipeline (ai_ocr_helper.py + ocr_pipeline.py)
+      - Call stamp_claude_confidence() after Call 2 and Call 3 results merge
+      - Evaluate gate at end of pipeline, log rejections automatically
+  [ ] Flask rejection response path (/ai/preview returns customer_message on fail)
+  [ ] End-to-end pipeline integration tests with real menu images
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
