@@ -1,0 +1,1788 @@
+{
+  "timestamp": "20260306_160531",
+  "model": "claude-opus-4-6",
+  "thinking_active": true,
+  "multimodal": true,
+  "ocr_text_length": 7789,
+  "image_blocks_count": 1,
+  "api_kwargs": {
+    "model": "claude-opus-4-6",
+    "max_tokens": 32000,
+    "system": "You are extracting menu items from a restaurant menu image for POS import.\nRead the image carefully \u2014 it is the primary source of truth.\nOCR text is provided as a hint but often contains errors \u2014 always trust the image.\n\nExtract every orderable item from this restaurant menu for POS system import.\n\nEach item = one product a customer can order in a POS system.\nSplit compound items: \"Beef or Chicken Empanadas\" \u2192 two separate items.\nIndividual toppings, sauces, and dressings each get their own item.\nSection-wide choices (e.g., \"Naked or Breaded\", \"White or Wheat\") \u2192 size variants on each item, not descriptions.\nSection-wide notes (e.g., \"All sandwiches come with lettuce, tomato...\") \u2192 include in each item's description.\nUse Title Case for names even if the menu is printed in ALL CAPS.\n\nFor each item return:\n- \"name\": exact full name as printed on the menu\n- \"description\": menu description if shown, null otherwise\n- \"price\": price as float, 0 if not visible\n- \"category\": one of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other\n- \"sizes\": [{\"label\": \"...\", \"price\": N.NN}] for items with multiple price points\n\nOutput ONLY valid JSON: {\"items\": [...]}",
+    "temperature": 1,
+    "thinking": {
+      "type": "enabled",
+      "budget_tokens": 10000
+    }
+  },
+  "response": {
+    "stop_reason": "end_turn",
+    "input_tokens": 7141,
+    "output_tokens": 14865,
+    "block_types": [
+      "thinking",
+      "text"
+    ],
+    "thinking_chars": 5660,
+    "thinking_text": "Let me carefully analyze the menu image and extract all items. I'll go section by section.\n\n**PIZZA**\n\nFirst, the pizza sizes appear to be: 10\" Med, 12\" Set, 14\" Lg, Family Size\n\n**CHEESE** pizza - 8.00, 11.50, 13.95, 22.50\n**EACH TOPPING ADD** - 1.50, 1.50, 2.25, 2.75\n\n**PIZZA & CALZONE TOPPINGS:**\nMEAT TOPPINGS: Pepperoni, Sausage, Hamburger, Bacon, Chicken, Pepperoni\n\n\nVEGGIE TOPPINGS: Mushrooms, Fresh Tomatoes, Pineapple, Eggplant, Broccoli, Banana Peppers, Hot Peppers, Spinach, Black Olives, Onions, Roasted Red Peppers\n\nThey offer several sauce options including Garlic, Ranch, Red or Blue Cheese, White, Pesto, Alfredo, BBQ, and Honey BBQ. Now I'm moving into the gourmet pizza section, which has different sizing and includes specialty pizzas like the 4 Cheese with Ricotta and Mozzarella.\n\nLooking at the rest of their gourmet lineup\u2014they've got the Meat Lovers with pepperoni, sausage, bacon, ham and hamburger; a Combination with pepperoni, sausage, onions, peppers and mushrooms; a Mexican version with hamburger, hot peppers and cheddar; and a Hawaiian with pineapple, bacon and ham. There's also a Gyro Special that appears to continue beyond what I'm seeing. Continuing through the rest of the menu items with similar pricing tiers across small, medium, and large sizes. Looking at the rest of the pizza menu and now moving into the calzones section, which come in different sizes with consistent pricing tiers. The calzones are all stuffed with ricotta and mozzarella, served with sauce on the side, and include options like steak combo, buffalo chicken variations, and customizable builds. I'm looking at the calzone menu more carefully now - the cheese calzone has distinct small and large pricing at $9.50 and $12.95, while all the other varieties are consistently priced at $14.75 for small and $19.95 for large.\n\nNow I'm reviewing the appetizers section, which includes garlic knots, various nacho options, fried sides like fries and onion rings, chicken tenders with different preparation styles, and items like mozzarella sticks, garlic bread, and stuffed mushrooms. I'm continuing through the appetizer menu, noting the pricing structure for items like the fried chicken platters, mozzarella sticks, and various potato skin options with their different toppings and portion sizes.\n\nNow I'm looking more carefully at the menu image to verify the exact prices, and I can see the soups section listed at 6.50, followed by the fresh buffalo wings section with multiple flavor options available and different wing quantities priced at 9.95 for 6 pieces or 15.00 for 10 pieces, with the option to add fries. Looking at the burger variations with their regular and deluxe pricing, then moving into the club sandwich section with its fixed $14.00 price point and various protein options.\n\nNow I'm seeing the melt sandwich category, which includes options like the Reuben with corned beef and sauerkraut, along with cheese and protein-based melts, each available in regular and deluxe sizes with customization options like adding bacon.\n\nMoving into the wraps section, which offers gyros with beef or grilled chicken, tuna wraps, and various chicken options including ranch and buffalo variations with different heat levels and toppings.\n\nNow I need to check the pricing structure for wraps\u2014it looks like they list prices with fries included. Let me carefully go through each menu section again from the original image to make sure I'm capturing the details accurately before organizing everything into the JSON format.\n\nLooking at the pizza sizes, I'm seeing four price columns: 10\" Med, 12\" (which might be \"Set\" or \"Sml\" depending on the pizza type), 14\" Lg, and Family Size. For the gourmet pizzas specifically, it appears the sizes are 12\" Sml, 14\" Lg, and Family Size at 17x25. The calones have their own sizing with just Small and Large options.\n\nNow I'm systematically extracting the pricing: Cheese pizza runs 8.00, 11.50, 13.95, and 22.50 across those sizes, with topping add-ons at 1.50, 1.50, 2.25, and 2.75 respectively. For gourmet pizzas, I'm seeing three sizes with prices like 14.75, 16.95, 25.95 for the 4 Cheese, and 17.95, 25 for the others\u2014though I need to clarify which price corresponds to which size.\n\nFor wings, I'm dealing with flavor options (HOT, MILD, BBQ) and a Naked or Breaded choice that applies across the section, plus quantity-based pricing tiers. I'll treat the quantities as size variants and note the Naked or Breaded option in the item description rather than creating separate variants for each combination.\n\nThe wraps section has a similar situation with White or Wheat as a section-wide choice, so I need to handle that the same way.\n\nNow I'm working through the rest of the menu systematically\u2014burgers have Regular and Deluxe variants, club sandwiches are all $14.00, and melts also have Regular and Deluxe options. I'm noticing the wraps have dual pricing though: a base price and a separate \"W/ FRIES\" price, so I need to account for that distinction as I compile everything. Looking at the right side of the menu more carefully, I can see the burger and sandwich sections with their pricing structures\u2014burgers have regular and deluxe options, sandwiches are listed at flat prices like $14.00, and wraps appear to follow a pattern where there's a base price and an additional charge for adding fries. I'm noticing that some items like soups might have a standard price across all varieties rather than individual pricing.\n\nNow I need to track down the specific price for the spinach pie since it mentions the tzatziki sauce accompaniment, then I'll organize everything into a structured format.",
+    "response_text_preview": "```json\n{\"items\": [\n  {\"name\": \"Cheese Pizza\", \"description\": null, \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 8.00}, {\"label\": \"12\\\"\", \"price\": 11.50}, {\"label\": \"14\\\" Lg\", \"price\": 13.95}, {\"label\": \"Family Size\", \"price\": 22.50}]},\n  {\"name\": \"Each Topping Add\", \"description\": \"Pepperoni, Sausage, Hamburger, Bacon, Chicken, Pepperoni, Mushrooms, Fresh Tomatoes, Pineapple, Eggplant, Broccoli, Banana Peppers, Hot Peppers, Spinach, Black Olives, Onions, Roasted Red",
+    "response_text_length": 25940,
+    "response_text_full": "```json\n{\"items\": [\n  {\"name\": \"Cheese Pizza\", \"description\": null, \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 8.00}, {\"label\": \"12\\\"\", \"price\": 11.50}, {\"label\": \"14\\\" Lg\", \"price\": 13.95}, {\"label\": \"Family Size\", \"price\": 22.50}]},\n  {\"name\": \"Each Topping Add\", \"description\": \"Pepperoni, Sausage, Hamburger, Bacon, Chicken, Pepperoni, Mushrooms, Fresh Tomatoes, Pineapple, Eggplant, Broccoli, Banana Peppers, Hot Peppers, Spinach, Black Olives, Onions, Roasted Red Peppers\", \"price\": 0, \"category\": \"Toppings\", \"sizes\": [{\"label\": \"10\\\" Med\", \"price\": 1.50}, {\"label\": \"12\\\"\", \"price\": 1.50}, {\"label\": \"14\\\" Lg\", \"price\": 2.25}, {\"label\": \"Family Size\", \"price\": 2.75}]},\n  {\"name\": \"4 Cheese Pizza\", \"description\": \"Ricotta, Mozzarella, Provolone, American\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 14.75}, {\"label\": \"14\\\" Lg\", \"price\": 16.95}, {\"label\": \"Family Size\", \"price\": 25.95}]},\n  {\"name\": \"Meat Lovers\", \"description\": \"Pepperoni, Sausage, Bacon, Ham & Hamburger\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Combination\", \"description\": \"Pepperoni, Sausage, Onions, Peppers & Mushrooms\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Mexican\", \"description\": \"Hamburger, Onions, Hot Peppers & Cheddar Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Hawaiian\", \"description\": \"Pineapple, Bacon, Ham & Tomato (Red or White Sauce)\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Gyro Special\", \"description\": \"Gyro Meat, Tomatoes, Onions, Feta Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Philly Steak\", \"description\": \"Steak, Onions, Peppers & Mushrooms\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Pesto Chicken\", \"description\": \"Grilled Chicken, Pesto Sauce, Tomato\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Grilled Chicken Bacon Ranch\", \"description\": null, \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Buffalo Chicken Bacon Ranch\", \"description\": \"Hot, Mild, BBQ, Honey BBQ\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Buffalo Chicken Pizza\", \"description\": \"Hot, Mild, BBQ, Honey BBQ with Blue Cheese or Mozzarella\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Alfredo Chicken Pizza\", \"description\": \"Broccoli & Chicken w/ Alfredo Sauce\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Pollo Chicken\", \"description\": \"Broccoli & Chicken w/ Alfredo Sauce\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Veggie Pizza\", \"description\": \"Onion, Peppers, Mushroom, Broccoli, Tomato, Garlic\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Mediterranean\", \"description\": \"Onion, Pepperoni, Mushroom, Olive, Broccoli, Tomato, Garlic\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Turkish\", \"description\": \"Tomatoes, Spinach, Eggplant, Olives, Peppers, Onions\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Lasagna Pizza\", \"description\": \"Fresh Cheese, Spinach, Ricotta, Onions & Hamburger\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Margarita Pizza\", \"description\": \"Fresh Basil & Fresh Mozzarella Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Meat Lovers Pan Pizza\", \"description\": \"Homemade, Fresh Mozzarella Cheese, Homemade Red Chicken\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Beef Taco Pizza\", \"description\": \"Seasoning Ground Beef, Diced Onions and Peppers, Chopped Tomatoes\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Potato Bacon Pizza\", \"description\": \"Sliced Potatoes, Bacon, Cheddar Cheese & Mozzarella Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Grilled Chicken Pizza\", \"description\": \"Spicy Chicken, Diced Onions and Peppers, Hot Sauce\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Honey Bbq Bacon Cheddar Pizza\", \"description\": \"Mozzarella Cheese, BBQ Sauce and Ranch Dressing\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Buffalo Chicken Blue Pizza\", \"description\": \"Mozzarella Cheese and Blue Cheese Base\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Burger Pizza\", \"description\": \"1000 Island Base, Hamburger, Pickles, Tomato, Mozzarella Cheese\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Bbq Chicken Pineapple Pizza\", \"description\": \"BBQ Grilled Chicken, Pineapple, Red Sauce\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Bbq Steak Pizza\", \"description\": \"Mozzarella, American Cheese, Mozzarella Cheese, Steak\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Cheesy Steak Pizza\", \"description\": \"Olive Oil, Garlic Sauce, Mozzarella Cheese, Steak\", \"price\": 0, \"category\": \"Pizza\", \"sizes\": [{\"label\": \"12\\\" Sm\", \"price\": 17.95}, {\"label\": \"14\\\" Lg\", \"price\": 25.50}, {\"label\": \"Family Size\", \"price\": 34.75}]},\n  {\"name\": \"Cheese Calzone\", \"description\": \"All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 9.50}, {\"label\": \"Large\", \"price\": 12.95}]},\n  {\"name\": \"Steak Combo Calzone\", \"description\": \"Stewed Steak, Onions, Peppers, Mushrooms, Cheese & Sauce. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Buffalo Chicken Calzone\", \"description\": \"All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Buffalo Chicken Bacon Ranch Calzone\", \"description\": \"Hamburger & Sauce. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Chicken Pesto Calzone\", \"description\": \"Grilled Chicken, bacon, ranch. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Veggie Calzone\", \"description\": \"Grilled, Mushroom, Onion, Pepper, Tomato, Mushroom & Pesto. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Gyro Calzone\", \"description\": \"All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Meatball Parm Calzone\", \"description\": \"All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Chicken Parmesan Calzone\", \"description\": \"Pepper, Sausage, Peppers, Onions & Mushrooms. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Alfredo Calzone\", \"description\": \"Chicken, Broccoli, Alfredo Sauce. All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.\", \"price\": 0, \"category\": \"Calzones\", \"sizes\": [{\"label\": \"Small\", \"price\": 14.75}, {\"label\": \"Large\", \"price\": 19.95}]},\n  {\"name\": \"Garlic Knots\", \"description\": \"12 Pieces\", \"price\": 6.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Chicken Nacho\", \"description\": \"Grilled chicken, banana pepper on side. Salsa and sour cream on side\", \"price\": 12.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Beef Nacho\", \"description\": \"Seasoned hamburger, peppers, mozzarella & cheddar. Salsa and sour cream on side\", \"price\": 12.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Chicken Bacon Nacho\", \"description\": \"Chicken, bacon, chips, mozzarella cheese, cheddar cheese and sour cream on the side\", \"price\": 12.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"French Fries\", \"description\": null, \"price\": 7.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Curly Fries\", \"description\": null, \"price\": 8.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Onion Rings\", \"description\": null, \"price\": 7.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"5 Pcs Chicken Tenders\", \"description\": \"bbq or honey mustard on the side\", \"price\": 12.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"5 Pcs Chicken Tenders W/ French Fries\", \"description\": \"bbq or honey mustard on the side\", \"price\": 11.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"5 Pcs Fried Chicken W/ French Fries\", \"description\": null, \"price\": 14.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"New! 4 Pcs Fried Chicken W/ French Fries\", \"description\": null, \"price\": 19.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Mozzarella Sticks\", \"description\": \"6pc w/ marinara sauce on the side\", \"price\": 10.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Garlic Bread\", \"description\": null, \"price\": 6.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Stuffed Grape Leaves\", \"description\": \"w/ marinara sauce\", \"price\": 4.00, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Homemade Stuffed Mushrooms\", \"description\": null, \"price\": 10.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Potato Skins (Bacon & Cheese)\", \"description\": \"4 PCS side of sour cream\", \"price\": 11.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Potato Skins (Broccoli & Cheese)\", \"description\": \"4 PCS\", \"price\": 10.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Jalapeno Poppers (6)\", \"description\": null, \"price\": 10.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Sampler\", \"description\": \"2 Chicken tenders, 2 Mozzarella Sticks & 2 Jalapeno Peppers\", \"price\": 11.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Spinach Pie\", \"description\": \"Side of tzatziki sauce\", \"price\": 11.95, \"category\": \"Appetizers\", \"sizes\": []},\n  {\"name\": \"Soup\", \"description\": null, \"price\": 6.50, \"category\": \"Soups\", \"sizes\": []},\n  {\"name\": \"Fresh Buffalo Wings 6 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 9.95, \"category\": \"Wings\", \"sizes\": [{\"label\": \"6 PCS\", \"price\": 9.95}, {\"label\": \"6 PCS W/ Fries\", \"price\": 13.50}]},\n  {\"name\": \"Fresh Buffalo Wings 10 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 15.00, \"category\": \"Wings\", \"sizes\": [{\"label\": \"10 PCS\", \"price\": 15.00}, {\"label\": \"10 PCS W/ Fries\", \"price\": 17.95}]},\n  {\"name\": \"Fresh Buffalo Wings 20 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 0, \"category\": \"Wings\", \"sizes\": [{\"label\": \"20 PCS W/ Fries\", \"price\": 27.95}]},\n  {\"name\": \"Fresh Buffalo Wings 50 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 0, \"category\": \"Wings\", \"sizes\": [{\"label\": \"50 PCS W/ Fries\", \"price\": 64.95}]},\n  {\"name\": \"Boneless Wings 12 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 14.95, \"category\": \"Wings\", \"sizes\": [{\"label\": \"12 PCS\", \"price\": 14.95}, {\"label\": \"12 PCS W/ Fries\", \"price\": 16.95}]},\n  {\"name\": \"Boneless Wings 20 Pcs\", \"description\": \"Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 0, \"category\": \"Wings\", \"sizes\": [{\"label\": \"20 PCS W/ Fries\", \"price\": 23.95}]},\n  {\"name\": \"Buffalo Tender 6 Pcs\", \"description\": \"HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 11.99, \"category\": \"Wings\", \"sizes\": [{\"label\": \"6 PCS\", \"price\": 11.99}, {\"label\": \"6 PCS W/ Fries\", \"price\": 16.95}]},\n  {\"name\": \"Buffalo Chicken Tender 10 Pcs\", \"description\": \"HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ\", \"price\": 0, \"category\": \"Wings\", \"sizes\": [{\"label\": \"10 PCS W/ Fries\", \"price\": 19.95}]},\n  {\"name\": \"Burger\", \"description\": \"Lettuce, tomato, mayo\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.00}, {\"label\": \"Deluxe\", \"price\": 13.00}]},\n  {\"name\": \"Bacon Burger\", \"description\": \"Lettuce, tomato & American cheese\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.99}, {\"label\": \"Deluxe\", \"price\": 13.99}]},\n  {\"name\": \"Double Burger\", \"description\": \"Lettuce, tomato & American cheese\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.99}, {\"label\": \"Deluxe\", \"price\": 15.99}]},\n  {\"name\": \"Russian Burger\", \"description\": \"Mushroom, Pickles, lettuce, Tomato, Mozzarella Cheese\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 11.99}, {\"label\": \"Deluxe\", \"price\": 15.99}]},\n  {\"name\": \"1000 Island Burger\", \"description\": \"Hamburger with Onions & Cheddar cheese, pickles\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.99}, {\"label\": \"Deluxe\", \"price\": 13.99}]},\n  {\"name\": \"Mushroom Burger\", \"description\": \"with Onions & Cheddar cheese, pickles\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.99}, {\"label\": \"Deluxe\", \"price\": 13.99}]},\n  {\"name\": \"Texas Burger\", \"description\": \"A1 Sauce, bacon, cheddar cheese, pickles\", \"price\": 0, \"category\": \"Burgers\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.99}, {\"label\": \"Deluxe\", \"price\": 13.99}]},\n  {\"name\": \"Blt Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Turkey Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Ham Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Tuna Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Manhattan Club Sandwich\", \"description\": \"Turkey & ham. All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Roast Beef Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Chicken Cutlet Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Grilled Chicken Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Steak & Cheese Club Sandwich\", \"description\": \"All club sandwiches come with lettuce, tomato, bacon, French fries and pickles\", \"price\": 14.00, \"category\": \"Sandwiches\", \"sizes\": []},\n  {\"name\": \"Reuben Melt\", \"description\": \"Corned beef, sauerkraut & side of 1000 island dressing. All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Cheeseburger Melt\", \"description\": \"All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Steak & Cheese Melt\", \"description\": \"All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Grilled Chicken Melt\", \"description\": \"All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Chicken Cutlet Melt\", \"description\": \"All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"White Tuna Melt\", \"description\": \"American cheese, lettuce, tomato, mayo. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Roast Beef Melt\", \"description\": \"All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Rye, White\", \"price\": 0, \"category\": \"Sandwiches\", \"sizes\": [{\"label\": \"Regular\", \"price\": 9.95}, {\"label\": \"Deluxe\", \"price\": 13.95}]},\n  {\"name\": \"Beef Gyro Wrap\", \"description\": \"Lettuce, Tomatoes, Onions & Tzatziki Sauce. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Grilled Chicken Gyro Wrap\", \"description\": \"Lettuce, Tomatoes, Onions & Tzatziki Sauce. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Tuna White Wrap\", \"description\": \"Lettuce, Tomato, Mayo & Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Grilled Chicken Ranch Blt Wrap\", \"description\": \"Grilled Chicken, Ranch Dressing, Bacon, Lettuce & Tomato. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Crispy Chicken Ranch Blt Wrap\", \"description\": \"Crispy Chicken, Ranch Dressing, Bacon, Lettuce & BBQ. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Buffalo Chicken Wrap\", \"description\": \"Hot, Mild, Honey BBQ, Lettuce, Tomatoes & Blue Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Grilled Chicken Wrap\", \"description\": \"Lettuce, Tomato, Mayo, American Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Russian Chicken Wrap\", \"description\": \"Crispy Chicken, Tomato, Mayo, Russian Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Chicken Caesar Wrap\", \"description\": \"Grilled Chicken, Romaine, Parmesan & Caesar Dressing. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Pesto Chicken Wrap\", \"description\": \"Grilled Chicken, Pesto Sauce, Lettuce, Tomato & Provolone Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Honey Mustard Chicken Wrap\", \"description\": \"Crispy or Grilled Chicken, Lettuce, Tomato, Mayo & American Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Chicken Stir Fry Wrap\", \"description\": \"Onions, Tomato, Mayo, Mushrooms, Broccoli & American Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Chicken Cajun Wrap\", \"description\": \"Lettuce, Tomato, Mayo, Cheddar Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Bbq Chicken, Bacon & Ranch Wrap\", \"description\": \"White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Chicken Souvlaki Wrap\", \"description\": \"Grilled Chicken, Onions, Tzatziki Sauce, Feta Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Mexican Wrap\", \"description\": \"Grilled or Spicy Chicken, Cheese, Avocado, Onions & Hot Sauce. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Cambridge Wrap\", \"description\": \"Grilled Chicken, Cheese, Tomatoes & Pickles. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Veggie Wrap\", \"description\": \"Steak, Lettuce, Rice, Tomato, Mayo & American Cheese. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Steak & Cheese Wrap\", \"description\": \"Steak, Lettuce, Tomato, Mayo & American Cheese, Mushrooms. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Steak Bomb Wrap\", \"description\": \"Onion, Pepper, Mushroom, Ham. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Taco Wrap\", \"description\": \"Nacho Chips, Ground Beef, Cheddar, Beans & Salsa. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]},\n  {\"name\": \"Bacon Burger Wrap\", \"description\": \"Lettuce, Tomato, American Cheese & Mayo. White or Wheat\", \"price\": 0, \"category\": \"Wraps\", \"sizes\": [{\"label\": \"Wrap\", \"price\": 10.00}, {\"label\": \"W/ Fries\", \"price\": 14.00}]}\n]}\n```"
+  },
+  "result": {
+    "parsed_item_count": 114,
+    "category_breakdown": {
+      "Pizza": 29,
+      "Toppings": 1,
+      "Calzones": 10,
+      "Appetizers": 20,
+      "Soups": 1,
+      "Wings": 8,
+      "Burgers": 7,
+      "Sandwiches": 16,
+      "Wraps": 22
+    },
+    "items_manifest": [
+      {
+        "name": "Cheese Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 4,
+        "sizes": [
+          {
+            "label": "10\" Med",
+            "price": 8.0
+          },
+          {
+            "label": "12\"",
+            "price": 11.5
+          },
+          {
+            "label": "14\" Lg",
+            "price": 13.95
+          },
+          {
+            "label": "Family Size",
+            "price": 22.5
+          }
+        ]
+      },
+      {
+        "name": "Each Topping Add",
+        "category": "Toppings",
+        "price": 0.0,
+        "n_sizes": 4,
+        "desc": "Pepperoni, Sausage, Hamburger, Bacon, Chicken, Pepperoni, Mushrooms, Fresh Tomat",
+        "sizes": [
+          {
+            "label": "10\" Med",
+            "price": 1.5
+          },
+          {
+            "label": "12\"",
+            "price": 1.5
+          },
+          {
+            "label": "14\" Lg",
+            "price": 2.25
+          },
+          {
+            "label": "Family Size",
+            "price": 2.75
+          }
+        ]
+      },
+      {
+        "name": "4 Cheese Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Ricotta, Mozzarella, Provolone, American",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 14.75
+          },
+          {
+            "label": "14\" Lg",
+            "price": 16.95
+          },
+          {
+            "label": "Family Size",
+            "price": 25.95
+          }
+        ]
+      },
+      {
+        "name": "Meat Lovers",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Pepperoni, Sausage, Bacon, Ham & Hamburger",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Combination",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Pepperoni, Sausage, Onions, Peppers & Mushrooms",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Mexican",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Hamburger, Onions, Hot Peppers & Cheddar Cheese",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Hawaiian",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Pineapple, Bacon, Ham & Tomato (Red or White Sauce)",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Gyro Special",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Gyro Meat, Tomatoes, Onions, Feta Cheese",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Philly Steak",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Steak, Onions, Peppers & Mushrooms",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Pesto Chicken",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Grilled Chicken, Pesto Sauce, Tomato",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Bacon Ranch",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Bacon Ranch",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Hot, Mild, BBQ, Honey BBQ",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Hot, Mild, BBQ, Honey BBQ with Blue Cheese or Mozzarella",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Alfredo Chicken Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Broccoli & Chicken w/ Alfredo Sauce",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Pollo Chicken",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Broccoli & Chicken w/ Alfredo Sauce",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Veggie Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Onion, Peppers, Mushroom, Broccoli, Tomato, Garlic",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Mediterranean",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Onion, Pepperoni, Mushroom, Olive, Broccoli, Tomato, Garlic",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Turkish",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Tomatoes, Spinach, Eggplant, Olives, Peppers, Onions",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Lasagna Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Fresh Cheese, Spinach, Ricotta, Onions & Hamburger",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Margarita Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Fresh Basil & Fresh Mozzarella Cheese",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Meat Lovers Pan Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Homemade, Fresh Mozzarella Cheese, Homemade Red Chicken",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Beef Taco Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Seasoning Ground Beef, Diced Onions and Peppers, Chopped Tomatoes",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Potato Bacon Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Sliced Potatoes, Bacon, Cheddar Cheese & Mozzarella Cheese",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Spicy Chicken, Diced Onions and Peppers, Hot Sauce",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Honey Bbq Bacon Cheddar Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Mozzarella Cheese, BBQ Sauce and Ranch Dressing",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Blue Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Mozzarella Cheese and Blue Cheese Base",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Burger Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "1000 Island Base, Hamburger, Pickles, Tomato, Mozzarella Cheese",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Bbq Chicken Pineapple Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "BBQ Grilled Chicken, Pineapple, Red Sauce",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Bbq Steak Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Mozzarella, American Cheese, Mozzarella Cheese, Steak",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Cheesy Steak Pizza",
+        "category": "Pizza",
+        "price": 0.0,
+        "n_sizes": 3,
+        "desc": "Olive Oil, Garlic Sauce, Mozzarella Cheese, Steak",
+        "sizes": [
+          {
+            "label": "12\" Sm",
+            "price": 17.95
+          },
+          {
+            "label": "14\" Lg",
+            "price": 25.5
+          },
+          {
+            "label": "Family Size",
+            "price": 34.75
+          }
+        ]
+      },
+      {
+        "name": "Cheese Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 9.5
+          },
+          {
+            "label": "Large",
+            "price": 12.95
+          }
+        ]
+      },
+      {
+        "name": "Steak Combo Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Stewed Steak, Onions, Peppers, Mushrooms, Cheese & Sauce. All calzones stuffed w",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Bacon Ranch Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Hamburger & Sauce. All calzones stuffed with ricotta and mozzarella. Served with",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Chicken Pesto Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, bacon, ranch. All calzones stuffed with ricotta and mozzarella.",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Veggie Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled, Mushroom, Onion, Pepper, Tomato, Mushroom & Pesto. All calzones stuffed",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Gyro Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Meatball Parm Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All calzones stuffed with ricotta and mozzarella. Served with sauce on the side.",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Chicken Parmesan Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Pepper, Sausage, Peppers, Onions & Mushrooms. All calzones stuffed with ricotta ",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Alfredo Calzone",
+        "category": "Calzones",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Chicken, Broccoli, Alfredo Sauce. All calzones stuffed with ricotta and mozzarel",
+        "sizes": [
+          {
+            "label": "Small",
+            "price": 14.75
+          },
+          {
+            "label": "Large",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Garlic Knots",
+        "category": "Appetizers",
+        "price": 6.95,
+        "n_sizes": 0,
+        "desc": "12 Pieces"
+      },
+      {
+        "name": "Chicken Nacho",
+        "category": "Appetizers",
+        "price": 12.95,
+        "n_sizes": 0,
+        "desc": "Grilled chicken, banana pepper on side. Salsa and sour cream on side"
+      },
+      {
+        "name": "Beef Nacho",
+        "category": "Appetizers",
+        "price": 12.95,
+        "n_sizes": 0,
+        "desc": "Seasoned hamburger, peppers, mozzarella & cheddar. Salsa and sour cream on side"
+      },
+      {
+        "name": "Chicken Bacon Nacho",
+        "category": "Appetizers",
+        "price": 12.95,
+        "n_sizes": 0,
+        "desc": "Chicken, bacon, chips, mozzarella cheese, cheddar cheese and sour cream on the s"
+      },
+      {
+        "name": "French Fries",
+        "category": "Appetizers",
+        "price": 7.0,
+        "n_sizes": 0
+      },
+      {
+        "name": "Curly Fries",
+        "category": "Appetizers",
+        "price": 8.95,
+        "n_sizes": 0
+      },
+      {
+        "name": "Onion Rings",
+        "category": "Appetizers",
+        "price": 7.0,
+        "n_sizes": 0
+      },
+      {
+        "name": "5 Pcs Chicken Tenders",
+        "category": "Appetizers",
+        "price": 12.0,
+        "n_sizes": 0,
+        "desc": "bbq or honey mustard on the side"
+      },
+      {
+        "name": "5 Pcs Chicken Tenders W/ French Fries",
+        "category": "Appetizers",
+        "price": 11.95,
+        "n_sizes": 0,
+        "desc": "bbq or honey mustard on the side"
+      },
+      {
+        "name": "5 Pcs Fried Chicken W/ French Fries",
+        "category": "Appetizers",
+        "price": 14.95,
+        "n_sizes": 0
+      },
+      {
+        "name": "New! 4 Pcs Fried Chicken W/ French Fries",
+        "category": "Appetizers",
+        "price": 19.95,
+        "n_sizes": 0
+      },
+      {
+        "name": "Mozzarella Sticks",
+        "category": "Appetizers",
+        "price": 10.0,
+        "n_sizes": 0,
+        "desc": "6pc w/ marinara sauce on the side"
+      },
+      {
+        "name": "Garlic Bread",
+        "category": "Appetizers",
+        "price": 6.0,
+        "n_sizes": 0
+      },
+      {
+        "name": "Stuffed Grape Leaves",
+        "category": "Appetizers",
+        "price": 4.0,
+        "n_sizes": 0,
+        "desc": "w/ marinara sauce"
+      },
+      {
+        "name": "Homemade Stuffed Mushrooms",
+        "category": "Appetizers",
+        "price": 10.95,
+        "n_sizes": 0
+      },
+      {
+        "name": "Potato Skins (Bacon & Cheese)",
+        "category": "Appetizers",
+        "price": 11.95,
+        "n_sizes": 0,
+        "desc": "4 PCS side of sour cream"
+      },
+      {
+        "name": "Potato Skins (Broccoli & Cheese)",
+        "category": "Appetizers",
+        "price": 10.95,
+        "n_sizes": 0,
+        "desc": "4 PCS"
+      },
+      {
+        "name": "Jalapeno Poppers (6)",
+        "category": "Appetizers",
+        "price": 10.95,
+        "n_sizes": 0
+      },
+      {
+        "name": "Sampler",
+        "category": "Appetizers",
+        "price": 11.95,
+        "n_sizes": 0,
+        "desc": "2 Chicken tenders, 2 Mozzarella Sticks & 2 Jalapeno Peppers"
+      },
+      {
+        "name": "Spinach Pie",
+        "category": "Appetizers",
+        "price": 11.95,
+        "n_sizes": 0,
+        "desc": "Side of tzatziki sauce"
+      },
+      {
+        "name": "Soup",
+        "category": "Soups",
+        "price": 6.5,
+        "n_sizes": 0
+      },
+      {
+        "name": "Fresh Buffalo Wings 6 Pcs",
+        "category": "Wings",
+        "price": 9.95,
+        "n_sizes": 2,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "6 PCS",
+            "price": 9.95
+          },
+          {
+            "label": "6 PCS W/ Fries",
+            "price": 13.5
+          }
+        ]
+      },
+      {
+        "name": "Fresh Buffalo Wings 10 Pcs",
+        "category": "Wings",
+        "price": 15.0,
+        "n_sizes": 2,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "10 PCS",
+            "price": 15.0
+          },
+          {
+            "label": "10 PCS W/ Fries",
+            "price": 17.95
+          }
+        ]
+      },
+      {
+        "name": "Fresh Buffalo Wings 20 Pcs",
+        "category": "Wings",
+        "price": 0.0,
+        "n_sizes": 1,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "20 PCS W/ Fries",
+            "price": 27.95
+          }
+        ]
+      },
+      {
+        "name": "Fresh Buffalo Wings 50 Pcs",
+        "category": "Wings",
+        "price": 0.0,
+        "n_sizes": 1,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "50 PCS W/ Fries",
+            "price": 64.95
+          }
+        ]
+      },
+      {
+        "name": "Boneless Wings 12 Pcs",
+        "category": "Wings",
+        "price": 14.95,
+        "n_sizes": 2,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "12 PCS",
+            "price": 14.95
+          },
+          {
+            "label": "12 PCS W/ Fries",
+            "price": 16.95
+          }
+        ]
+      },
+      {
+        "name": "Boneless Wings 20 Pcs",
+        "category": "Wings",
+        "price": 0.0,
+        "n_sizes": 1,
+        "desc": "Naked or Breaded. Served with side blue cheese. HOT, MILD, BBQ, HONEY BBQ, GARLI",
+        "sizes": [
+          {
+            "label": "20 PCS W/ Fries",
+            "price": 23.95
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Tender 6 Pcs",
+        "category": "Wings",
+        "price": 11.99,
+        "n_sizes": 2,
+        "desc": "HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ",
+        "sizes": [
+          {
+            "label": "6 PCS",
+            "price": 11.99
+          },
+          {
+            "label": "6 PCS W/ Fries",
+            "price": 16.95
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Tender 10 Pcs",
+        "category": "Wings",
+        "price": 0.0,
+        "n_sizes": 1,
+        "desc": "HOT, MILD, BBQ, HONEY BBQ, GARLIC ROMANO, CAJUN, TERIYAKI, JACK DANIELS BBQ",
+        "sizes": [
+          {
+            "label": "10 PCS W/ Fries",
+            "price": 19.95
+          }
+        ]
+      },
+      {
+        "name": "Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, tomato, mayo",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.0
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.0
+          }
+        ]
+      },
+      {
+        "name": "Bacon Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, tomato & American cheese",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.99
+          }
+        ]
+      },
+      {
+        "name": "Double Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, tomato & American cheese",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 15.99
+          }
+        ]
+      },
+      {
+        "name": "Russian Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Mushroom, Pickles, lettuce, Tomato, Mozzarella Cheese",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 11.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 15.99
+          }
+        ]
+      },
+      {
+        "name": "1000 Island Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Hamburger with Onions & Cheddar cheese, pickles",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.99
+          }
+        ]
+      },
+      {
+        "name": "Mushroom Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "with Onions & Cheddar cheese, pickles",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.99
+          }
+        ]
+      },
+      {
+        "name": "Texas Burger",
+        "category": "Burgers",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "A1 Sauce, bacon, cheddar cheese, pickles",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.99
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.99
+          }
+        ]
+      },
+      {
+        "name": "Blt Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Turkey Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Ham Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Tuna Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Manhattan Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "Turkey & ham. All club sandwiches come with lettuce, tomato, bacon, French fries"
+      },
+      {
+        "name": "Roast Beef Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Chicken Cutlet Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Grilled Chicken Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Steak & Cheese Club Sandwich",
+        "category": "Sandwiches",
+        "price": 14.0,
+        "n_sizes": 0,
+        "desc": "All club sandwiches come with lettuce, tomato, bacon, French fries and pickles"
+      },
+      {
+        "name": "Reuben Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Corned beef, sauerkraut & side of 1000 island dressing. All sandwiches come with",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Cheeseburger Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Ry",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Steak & Cheese Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Ry",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Ry",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Chicken Cutlet Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Ry",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "White Tuna Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "American cheese, lettuce, tomato, mayo. Add Bacon $1 extra. Choice of Rye, White",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Roast Beef Melt",
+        "category": "Sandwiches",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "All sandwiches come with lettuce, mayo, tomato. Add Bacon $1 extra. Choice of Ry",
+        "sizes": [
+          {
+            "label": "Regular",
+            "price": 9.95
+          },
+          {
+            "label": "Deluxe",
+            "price": 13.95
+          }
+        ]
+      },
+      {
+        "name": "Beef Gyro Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomatoes, Onions & Tzatziki Sauce. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Gyro Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomatoes, Onions & Tzatziki Sauce. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Tuna White Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomato, Mayo & Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Ranch Blt Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, Ranch Dressing, Bacon, Lettuce & Tomato. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Crispy Chicken Ranch Blt Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Crispy Chicken, Ranch Dressing, Bacon, Lettuce & BBQ. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Buffalo Chicken Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Hot, Mild, Honey BBQ, Lettuce, Tomatoes & Blue Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Grilled Chicken Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomato, Mayo, American Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Russian Chicken Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Crispy Chicken, Tomato, Mayo, Russian Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Chicken Caesar Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, Romaine, Parmesan & Caesar Dressing. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Pesto Chicken Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, Pesto Sauce, Lettuce, Tomato & Provolone Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Honey Mustard Chicken Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Crispy or Grilled Chicken, Lettuce, Tomato, Mayo & American Cheese. White or Whe",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Chicken Stir Fry Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Onions, Tomato, Mayo, Mushrooms, Broccoli & American Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Chicken Cajun Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomato, Mayo, Cheddar Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Bbq Chicken, Bacon & Ranch Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Chicken Souvlaki Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, Onions, Tzatziki Sauce, Feta Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Mexican Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled or Spicy Chicken, Cheese, Avocado, Onions & Hot Sauce. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Cambridge Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Grilled Chicken, Cheese, Tomatoes & Pickles. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Veggie Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Steak, Lettuce, Rice, Tomato, Mayo & American Cheese. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Steak & Cheese Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Steak, Lettuce, Tomato, Mayo & American Cheese, Mushrooms. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Steak Bomb Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Onion, Pepper, Mushroom, Ham. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Taco Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Nacho Chips, Ground Beef, Cheddar, Beans & Salsa. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      },
+      {
+        "name": "Bacon Burger Wrap",
+        "category": "Wraps",
+        "price": 0.0,
+        "n_sizes": 2,
+        "desc": "Lettuce, Tomato, American Cheese & Mayo. White or Wheat",
+        "sizes": [
+          {
+            "label": "Wrap",
+            "price": 10.0
+          },
+          {
+            "label": "W/ Fries",
+            "price": 14.0
+          }
+        ]
+      }
+    ],
+    "error": null
+  }
+}

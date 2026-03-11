@@ -261,10 +261,13 @@ def _validate_descriptions(items: List[Dict[str, Any]]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Extended thinking configuration
+# Pipeline mode configuration
 # ---------------------------------------------------------------------------
-EXTENDED_THINKING = True  # A/B test: single-call Sonnet 4.6 + adaptive thinking
-THINKING_MODEL = "claude-opus-4-6"  # Model used when EXTENDED_THINKING=True
+# "thinking" = single Opus call with extended thinking (skips Calls 2 & 3)
+# "3call"    = full 3-call pipeline: Call 1 → Call 2 (vision) → Call 3 (reconcile)
+PIPELINE_MODE = "thinking"  # Day 103: explicit toggle for E2E validation
+EXTENDED_THINKING = PIPELINE_MODE == "thinking"
+THINKING_MODEL = "claude-opus-4-6"  # Model used when PIPELINE_MODE == "thinking"
 
 
 # ---------------------------------------------------------------------------

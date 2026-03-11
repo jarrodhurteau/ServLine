@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 102.8b (March 7, 2026) — Prompt Iteration (section headers, sauces, quantity split)
+Last Updated: Day 104 (March 11, 2026) — Sprint 11.2 Capstone (59 tests, 1,867 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1317,6 +1317,80 @@ Sprint 11.2 — Targeted Reconciliation: Claude Call 3 (Days 101-104)
     Day 102.8 test suite: 28 cases, 100% pass rate
     Cumulative: 1,764 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  Day 103: Full Pipeline E2E Validation *** COMPLETE ***
+  -------------------------------------------------------
+  GOAL: Validate that the complete 3-call pipeline (Call 1 extraction →
+  Call 2 vision verification → Call 3 targeted reconciliation) resolves
+  remaining issues without more Call 1 prompt tweaking. Days 102.5-102.8b
+  focused on Call 1 quality in isolation — Day 103 tests whether Calls 2+3
+  actually catch and fix what Call 1 gets wrong.
+
+  [x] PIPELINE_MODE toggle: explicit "thinking" vs "3call" mode in ai_menu_extract.py
+      - EXTENDED_THINKING now derived from PIPELINE_MODE (cleaner control)
+      - Logged in app.py pipeline orchestrator for observability
+  [x] Full 3-call E2E test suite (44 tests, 100% pass):
+      - 10 test classes covering all pipeline stages and known issues
+      - Realistic pizza-menu data matching real menu (17 items, 8 categories)
+  [x] Per-call contribution analysis (validated in tests):
+      - Call 1: 17 items extracted (with 4 known issues)
+      - Call 2 fixes: calzone description shift, removes generic "Each Topping Add",
+        adds missing Chicken Nacho
+      - Call 3 fixes: wing price swap (Regular/W Fries inversion)
+      - Remaining: wraps missing W/Fries $14 (section-header context issue for Call 1)
+  [x] Known issue tracking through pipeline:
+      - Calzone description shifting → Call 2 catches from image ✓
+      - "Each Topping Add" duplicate → Call 2 removes generic ✓
+      - Wing price swaps → Call 3 corrects from image ✓
+      - Wraps W/Fries → not caught (section-header variant, Call 1 prompt issue)
+  [x] Debug payload validated: all 5 stages captured, JSON-serializable
+  [x] Confidence flow validated: Call 1 default → semantic scoring →
+      Call 3 bump (+5 confirmed, 92 corrected) → re-scoring
+  [x] No pipeline integration bugs found — all stages wire correctly
+
+  KNOWN REMAINING ISSUE:
+    - Wraps missing W/Fries $14 variant: This is a Call 1 prompt issue
+      (section header "Wraps — Regular $10 / W/ Fries $14" should propagate
+      as size variants to all wraps). Calls 2+3 can't fix what's not flagged.
+      Target: Call 1 prompt refinement if needed, or accept as minor gap.
+
+    Day 103 test suite: 44 cases, 100% pass rate
+    Cumulative: 1,808 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Day 104: Sprint 11.2 Capstone & Wrap-Up *** COMPLETE ***
+  ---------------------------------------------------------
+  [x] Comprehensive reconciliation test suite (59 cases, 100% pass rate):
+      - Full happy path: semantic → Call 3 → final items (realistic pizza menu)
+      - Call 3 skip scenarios (no flagged items, no API key, bad image path)
+      - Call 3 error recovery (API error, bad JSON, empty response, wrong shape)
+      - Confidence flow: pre/post comparison, 0-100 → 0-1 normalization, tier order
+      - Merge logic: case-insensitive match, mixed statuses, empty inputs, name updates
+      - Changes log: all 7 types (confirmed, not_found, price_corrected,
+        category_corrected, description_corrected, name_corrected, no_match)
+      - Debug payload: all required fields present + JSON serializable
+      - Interop: all 5 modules work together, temperature=0, system prompt content
+  [x] Sprint 11.2 summary (see below)
+
+    Day 104 test suite: 59 cases, 100% pass rate
+    Cumulative: 1,867 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Sprint 11.2 Summary — Targeted Reconciliation (Call 3) *** COMPLETE ***
+  -------------------------------------------------------------------------
+  Delivered production-ready targeted reconciliation + 169 tests across 4 days:
+    Days 101-104: ai_reconcile.py, pipeline integration, E2E validation, capstone
+
+  KEY DELIVERABLES:
+    - ai_reconcile.py: collect_flagged_items → reconcile → merge (~637 LOC)
+    - PIPELINE_MODE toggle: explicit "thinking" vs "3call" control
+    - 3-call pipeline wired: Call 1 (extract) → Call 2 (vision) → Call 3 (reconcile)
+    - Per-call contribution tracking in debug payload + pipeline metrics
+    - Graceful degradation at every stage — never blocks draft creation
+
+  KNOWN REMAINING ISSUE:
+    - Wraps missing W/Fries $14 variant: section header "Wraps — Regular $10 /
+      W/ Fries $14" should propagate as size variants to all wraps. This is a
+      Call 1 prompt issue; Calls 2+3 cannot fix what was never extracted.
+      Target: accept as minor gap or revisit in Sprint 11.3 prompt tuning.
+
 Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
 .................................................................
   [ ] Wire Claude's self-reported confidence as signal #6 in semantic_confidence.py
@@ -1337,7 +1411,163 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
       - Verify each step's output feeds correctly into the next
       - Test graceful degradation (API failures, low confidence, edge cases)
 
-Phase 12 — Production Platform (Days 111-125)
+Phase 12 — POS-Native Data Model & Editor (Days 111-127)
+---------------------------------------------------------
+  CONTEXT: Research into Square, Toast, Clover, Lightspeed, and SpotOn reveals
+  that ALL major POS systems structure their menu data the same way:
+
+    Category → Item → Modifier Group → Modifier
+
+  ServLine's current model (Item → Variant with kind tag) is structurally
+  flat compared to what POS systems expect. Variants are tagged with a kind
+  (size/combo/flavor/style/other) but lack the named container (modifier group)
+  with selection rules (required, min/max) that every POS editor uses.
+
+  This mismatch causes export translation problems and prevents the editor
+  from matching the mental model restaurant owners develop using their POS.
+
+  GOAL: Align ServLine's data model, editor, and exports with the universal
+  POS hierarchy. If the data is already shaped the way POS systems expect,
+  exports become trivial format translations rather than structural transforms.
+
+  KEY RESEARCH FINDINGS (from POS competitive analysis):
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Square: Modifier Sets (list-type or text-type), required/optional, min/max,
+    conversational modifiers, per-item overrides. WoFlow integration for
+    menu-to-POS import (outsourced). Tile grid POS layout, web forms back office.
+
+  Toast: Modifier Groups (shared across items), nested modifiers (recursive),
+    inheritance from menu groups, items double as modifiers. Menu Builder vs
+    Classic editor. Change sets with scheduled publishing.
+
+  Clover: Modifier Groups with minRequired/maxAllowed, showByDefault toggle.
+    Separate Item Groups concept for variant management (Attributes →
+    Attribute Options → Items). Category/tab-based navigation.
+
+  Lightspeed: Production Instructions (free kitchen notes) + Sub-items
+    (priced add-ons). Single vs multiple choice at sub-screen level.
+    Items cannot be deleted, only archived. Quick Create vs Detailed Create.
+
+  SpotOn: Modifiers organized into sections, any combination can have own price.
+    BOH web editor + FOH POS editing. Enterprise multi-location support.
+
+  UNIVERSAL PATTERNS:
+  - 4-level hierarchy: Category → Item → Modifier Group → Modifier
+  - Modifier groups are always NAMED containers with selection rules
+  - Required vs optional + min/max selections is standard everywhere
+  - POS layout = color-coded tile grid; back office = web forms/lists
+  - Dual naming: customer-facing name, POS/staff name, kitchen name
+  - Categories ≠ layout groups (reporting vs display separation)
+  - Modifier pricing is always per-modifier (some support group-level)
+  - Modifier groups are reusable/shareable across multiple items
+
+Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
+...............................................................
+  [ ] New draft_modifier_groups table:
+        id              INTEGER PRIMARY KEY AUTOINCREMENT
+        item_id         INTEGER NOT NULL (FK → draft_items.id ON DELETE CASCADE)
+        name            TEXT NOT NULL          -- "Size", "Add a Side", "Sauce Choice"
+        required        INTEGER DEFAULT 0      -- 0=optional, 1=required
+        min_select      INTEGER DEFAULT 0      -- minimum selections (0=no minimum)
+        max_select      INTEGER DEFAULT 0      -- maximum selections (0=unlimited)
+        position        INTEGER DEFAULT 0      -- ordering within parent item
+        created_at      TEXT NOT NULL
+        updated_at      TEXT NOT NULL
+  [ ] Refactor draft_item_variants to add modifier_group_id:
+        - New column: modifier_group_id INTEGER (FK → draft_modifier_groups.id)
+        - Nullable for backward compat (existing variants without groups)
+        - Index on modifier_group_id for JOIN performance
+  [ ] Modifier group CRUD functions:
+        - insert_modifier_group(), update_modifier_group(), delete_modifier_group()
+        - get_modifier_groups(item_id), get_modifier_group(group_id)
+  [ ] Update get_draft_items() to include modifier groups:
+        - LEFT JOIN modifier_groups + variants grouped by group
+        - items[].modifier_groups[].modifiers[] nested structure
+  [ ] Migration: auto-group existing variants by (item_id, kind):
+        - kind=size → ModifierGroup("Size", required=true, max=1)
+        - kind=combo → ModifierGroup("Add-ons", required=false)
+        - kind=flavor → ModifierGroup("Flavor", required=false, max=1)
+        - kind=style → ModifierGroup("Style", required=false, max=1)
+        - Idempotent: skip items that already have groups
+  [ ] Update extraction pipeline to produce modifier groups:
+        - Claude Call 1 prompt → extract modifier groups with names + rules
+        - claude_items_to_draft_rows() → include modifier group structure
+        - Backward compat: items without explicit groups still work
+  [ ] Reusable modifier group library (per restaurant):
+        - draft_modifier_group_templates table
+        - Common presets: "Size (S/M/L)", "Temperature", "Sauce Choice"
+        - Apply template to item → creates group + modifiers in one click
+  [ ] Dual naming support:
+        - Add kitchen_name TEXT column to draft_items (nullable)
+        - Customer sees "Margherita Pizza", kitchen ticket shows "MARG"
+        - Optional: POS systems that support it get both names in export
+
+Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
+........................................................
+  [ ] Category-based navigation view:
+        - Left sidebar: category list with item counts (collapsible)
+        - Main area: items in selected category
+        - "All Items" view for full list (current default)
+        - Category drag-and-drop reordering
+  [ ] Item card layout (option alongside current table view):
+        - Card shows: name, price, description preview, modifier group count
+        - Click card → expand to show modifier groups + modifiers
+        - Quick-edit inline (name, price) without opening full form
+        - Badge indicators: variant count, validation warnings
+  [ ] Modifier group management UI:
+        - Per-item: "Add Modifier Group" button
+        - Group header: name, required toggle, min/max selectors
+        - Modifiers listed under group with name + price
+        - Add/remove/reorder modifiers within group
+        - Apply from template library (one-click common setups)
+  [ ] Modifier group rules editor:
+        - Required/optional toggle (visual: required = blue border, optional = gray)
+        - Min/max selection dropdowns
+        - Preview: "Customer must choose exactly 1" / "Choose up to 3"
+        - Validation: warn if required but no modifiers defined
+  [ ] Drag-and-drop reordering:
+        - Items within category
+        - Modifier groups within item
+        - Modifiers within group
+        - Position persisted to DB
+  [ ] Dual name display:
+        - Item name field + optional kitchen name field
+        - Kitchen name shown as gray subtitle when populated
+        - Toggle to show/hide kitchen names globally
+  [ ] Upgrade collectPayload() and save logic:
+        - Include modifier_groups[] with modifiers[] per item
+        - deleted_modifier_group_ids for orphan cleanup
+        - Save endpoint handles full group + modifier lifecycle
+
+Sprint 12.3 — Export Format Alignment (Days 123-127)
+.....................................................
+  [ ] Update Square CSV export:
+        - Modifier groups → Square Modifier Sets (1:1 mapping)
+        - required/min/max → Square selection rules
+        - Group name as Modifier Set name
+        - Per-modifier pricing
+  [ ] Update Toast CSV export:
+        - Modifier groups → Toast Option Groups (1:1 mapping)
+        - Nested structure matches Toast hierarchy
+        - Required groups → Toast "required" flag
+  [ ] Update Generic POS JSON export:
+        - menu.categories[].items[].modifier_groups[].modifiers[]
+        - Include selection rules in each modifier group
+        - Backward compat: items without groups export as before
+  [ ] Update all other export formats (CSV, XLSX, JSON):
+        - Modifier groups represented appropriately per format
+        - Wide CSV: group name as column prefix
+        - XLSX: group headers as styled rows
+  [ ] Export validation updates:
+        - New warnings: modifier_group_no_modifiers, required_group_empty
+        - Validate min/max consistency (min <= max, max <= modifier count)
+        - Cross-item modifier group consistency checks
+  [ ] End-to-end export round-trip tests:
+        - All export formats verified with modifier group data
+        - Square/Toast/POS JSON structurally validated against POS schemas
+        - Backward compat: drafts without modifier groups still export cleanly
+
+Phase 13 — Production Platform (Days 128-147)
 ----------------------------------------------
   CONTEXT: Transform ServLine from a development tool into a production SaaS
   with two customer experiences sharing the same engine.
@@ -1354,7 +1584,7 @@ Phase 12 — Production Platform (Days 111-125)
     KEY RULE: NO internal human review. System handles it or asks for better photo.
     Customer always reviews last (in ServLine editor or POS editor).
 
-Sprint 12.1 — User Accounts & Auth (Days 111-115)
+Sprint 13.1 — User Accounts & Auth (Days 128-132)
 ...................................................
   [ ] Public user registration (email + password)
       - Sign up, log in, password reset
@@ -1368,7 +1598,7 @@ Sprint 12.1 — User Accounts & Auth (Days 111-115)
       - No AI calls, no OCR — just a web editor with a database
       - Genuinely useful standalone tool, not a crippled demo
 
-Sprint 12.2 — Stripe Payment Gate (Days 116-119)
+Sprint 13.2 — Stripe Payment Gate (Days 133-136)
 ..................................................
   [ ] Stripe Checkout integration
       - $50 per batch (up to 3 menu parses)
@@ -1382,7 +1612,7 @@ Sprint 12.2 — Stripe Payment Gate (Days 116-119)
       - Seasonal menu change or major overhaul → new $50 batch
       - Existing saved menus remain editable/exportable forever (no paywall on edits)
 
-Sprint 12.3 — POS Partner Integration & B2B Go-To-Market (Days 120-125)
+Sprint 13.3 — POS Partner Integration & B2B Go-To-Market (Days 137-142)
 ......................................................................
 
   GO-TO-MARKET STRATEGY:
@@ -1475,7 +1705,7 @@ Sprint 12.3 — POS Partner Integration & B2B Go-To-Market (Days 120-125)
       - Request queuing for high-volume partners
       - Usage logging for renegotiation data (the receipts)
 
-Sprint 12.4 — QR Code Digital Menus (Days 126-130)
+Sprint 13.4 — QR Code Digital Menus (Days 143-147)
 ...................................................
   CONTEXT: You already have clean, structured menu data. Generating a hosted
   digital menu with a QR code is trivial on top of that — and it's a killer
@@ -1497,7 +1727,7 @@ Sprint 12.4 — QR Code Digital Menus (Days 126-130)
       - Clean, mobile-first design (restaurants print QR for table use)
       - Restaurant name + logo (if uploaded) at top
       - Categories as sections with item cards: name, description, price, variants
-      - Allergen/dietary badges (when Phase 14 is built, auto-wired)
+      - Allergen/dietary badges (when Phase 15 is built, auto-wired)
       - Light/dark theme toggle for readability
       - No ServLine branding on the page (or small "Powered by ServLine" footer)
       - Responsive: looks great on phones, tablets, and desktop
@@ -1548,7 +1778,7 @@ Sprint 12.4 — QR Code Digital Menus (Days 126-130)
       - Multiple sizes: small (table sticker), medium (tent card), large (poster)
       - Instructions page: "How to use your QR code menu"
 
-Phase 13 — POS OAuth & Live Push (Days 131-150)
+Phase 14 — POS OAuth & Live Push (Days 148-167)
 -------------------------------------------------
   TARGET: Square first (simplest API, best docs), then Toast, then Clover.
   Apply for Toast Developer Program early — approval takes time.
@@ -1556,7 +1786,7 @@ Phase 13 — POS OAuth & Live Push (Days 131-150)
   Both experiences use these integrations: POS API customers get JSON they can
   push themselves, website customers get "Push to POS" button.
 
-Sprint 13.1 — OAuth & Integration Architecture (Days 131-135)
+Sprint 14.1 — OAuth & Integration Architecture (Days 148-152)
 ..............................................................
   [ ] OAuth 2.0 Authorization Code flow (generic base)
       - GET /connect/<provider> → redirect to provider's authorize URL
@@ -1572,7 +1802,7 @@ Sprint 13.1 — OAuth & Integration Architecture (Days 131-135)
   [ ] Connect/disconnect UI in restaurant settings
       - "Connect to [Provider]" button, connection status, "Disconnect" with confirm
 
-Sprint 13.2 — Square Integration (Days 136-140)
+Sprint 14.2 — Square Integration (Days 153-157)
 .................................................
   [ ] Square Developer account + sandbox setup
   [ ] Square OAuth flow (authorize, callback, token refresh)
@@ -1584,7 +1814,7 @@ Sprint 13.2 — Square Integration (Days 136-140)
   [ ] Square API client: create categories, items, modifiers in correct order
   [ ] Push status tracking + error handling + idempotent re-push
 
-Sprint 13.3 — Toast Integration (Days 141-145)
+Sprint 14.3 — Toast Integration (Days 158-162)
 ................................................
   [ ] Toast Developer Program access + sandbox (apply early!)
   [ ] Toast OAuth flow
@@ -1594,7 +1824,7 @@ Sprint 13.3 — Toast Integration (Days 141-145)
   [ ] Toast API client + push logic
   [ ] Push status tracking + error handling
 
-Sprint 13.4 — Clover Integration (Days 146-150)
+Sprint 14.4 — Clover Integration (Days 163-167)
 .................................................
   [ ] Clover Developer account + sandbox
   [ ] Clover OAuth flow
@@ -1602,7 +1832,7 @@ Sprint 13.4 — Clover Integration (Days 146-150)
   [ ] Clover API client + push logic
   [ ] Push status tracking + error handling
 
-Phase 14 — Menu Intelligence Features (Days 151-170)
+Phase 15 — Menu Intelligence Features (Days 168-187)
 ------------------------------------------------------
   CONTEXT: These features are the competitive moat. Any engineer can build
   OCR + AI verification. What they can't replicate is a system that truly
@@ -1614,7 +1844,7 @@ Phase 14 — Menu Intelligence Features (Days 151-170)
   ServLine editor, POS API partners get them as additional data fields in
   the JSON response (upsell opportunity).
 
-Sprint 14.1 — Allergen & Dietary Detection (Days 151-155)
+Sprint 15.1 — Allergen & Dietary Detection (Days 168-172)
 ..........................................................
   [ ] Allergen detection from menu item names + descriptions
       - Common allergens: gluten, dairy, nuts, shellfish, soy, eggs
@@ -1630,7 +1860,7 @@ Sprint 14.1 — Allergen & Dietary Detection (Days 151-155)
       - CSV: additional columns
   [ ] Editor UI: allergen badges per item (auto-detected, manually overridable)
 
-Sprint 14.2 — Nutritional Estimation (Days 156-160)
+Sprint 15.2 — Nutritional Estimation (Days 173-177)
 .....................................................
   [ ] Calorie and macro estimation from item names + descriptions
       - Portion-aware: "half portion" vs "family size"
@@ -1642,7 +1872,7 @@ Sprint 14.2 — Nutritional Estimation (Days 156-160)
   [ ] Nutritional data in exports (optional field, POS systems that support it)
   [ ] Editor UI: nutritional panel per item (collapsible, non-intrusive)
 
-Sprint 14.3 — Smart Menu Suggestions (Days 161-165)
+Sprint 15.3 — Smart Menu Suggestions (Days 178-182)
 .....................................................
   [ ] Description generation assistance
       - AI-generated descriptions for items with no description
@@ -1659,7 +1889,7 @@ Sprint 14.3 — Smart Menu Suggestions (Days 161-165)
       - "Items like Buffalo Wings typically have a sauce choice modifier"
       - Based on common patterns in restaurant menus
 
-Sprint 14.4 — Menu Quality Score (Days 166-170)
+Sprint 15.4 — Menu Quality Score (Days 183-187)
 .................................................
   [ ] Overall menu quality assessment (for restaurant owners)
       - Completeness: % of items with descriptions, prices, allergens
@@ -1672,7 +1902,7 @@ Sprint 14.4 — Menu Quality Score (Days 166-170)
   [ ] Quality score in API response (POS companies can surface to restaurants)
   [ ] Quality dashboard in ServLine editor
 
-Phase 15 — Production Hardening & Polish (Days 171-185)
+Phase 16 — Production Hardening & Polish (Days 188-202)
 --------------------------------------------------------
   [ ] Performance optimization and caching layer
   [ ] Monitoring, alerting, and error dashboards
@@ -1710,7 +1940,7 @@ Year 1 Goals:
 Year 2 Goals:
 - Renegotiate POS partner pricing with data ($2-5k/mo based on usage/value)
 - Scale to 10-15 small/mid POS partners across US regions
-- Add premium API tiers: allergens, dietary, nutrition (Phase 14 features)
+- Add premium API tiers: allergens, dietary, nutrition (Phase 15 features)
   * POS partners pay more for enriched JSON fields
   * They build the UI for fields they want — they consume what they pay for
   * Standard ($X/mo) → Premium ($XX/mo) → Intelligence ($XXX/mo)

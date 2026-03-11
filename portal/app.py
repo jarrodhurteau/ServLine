@@ -2111,9 +2111,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     tracker.start_step(STEP_CALL1_EXTRACT)
                 from storage.ai_menu_extract import (
                     extract_menu_items_via_claude, claude_items_to_draft_rows,
-                    EXTENDED_THINKING,
+                    EXTENDED_THINKING, PIPELINE_MODE,
                 )
                 _thinking_active = EXTENDED_THINKING
+                print(f"[Draft] Pipeline mode: {PIPELINE_MODE}")
                 claude_items = extract_menu_items_via_claude(
                     clean_ocr_text, image_path=str(saved_file_path),
                     use_thinking=_thinking_active,
