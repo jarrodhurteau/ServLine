@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. 2,081 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. Day 108: E2E gate integration tests — run_ocr_and_make_draft() tested end-to-end with all Claude calls mocked, verifying pass/fail/thinking/skip/empty-extraction paths. 2,114 tests pass.
 
 ---
 
@@ -1734,4 +1734,11 @@ ServLine now has:
     - No auto-redirect on rejected (only "done" triggers redirect to editor)
   - `imports.html`: "rejected" → red pill + "Rejected" label in Jinja2 and JS PILL_CLASS/LABEL
   - Day 107 test suite: 30 cases, 100% pass rate
-  - Cumulative: 2,081 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+- **E2E Gate Integration Tests (Day 108):** *** COMPLETE ***
+  - `run_ocr_and_make_draft()` called directly with all external deps mocked (OCR text, 3 Claude calls, semantic pipeline, DB)
+  - Verifies: gate pass → `status=done`, no rejection row; gate fail → `status=rejected`, `error=customer_message`, rejection row in `pipeline_rejections`
+  - Covers: Call 2 skipped (redistributed weights), Call 3 skipped (no flagged items), thinking mode bypass (gate never runs), empty extraction (guard fires), threshold boundary + multi-rejection accumulation
+  - Debug payload `confidence_gate` block verified: passed, score, threshold, signals (incl. `ocr_char_count`), reason
+  - Day 108 test suite: 33 cases, 100% pass rate
+  - Cumulative: 2,114 passed (excl. Day 70 fixture errors, Day 99 timing flakes)

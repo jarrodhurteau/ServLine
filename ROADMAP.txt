@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 107 (March 11, 2026) — Sprint 11.3 Rejection UI (30 tests, 2,081 total)
+Last Updated: Day 108 (March 11, 2026) — Sprint 11.3 E2E Gate Integration Tests (33 tests, 2,114 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1468,8 +1468,35 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 107 test suite: 30 cases, 100% pass rate
     Cumulative: 2,081 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  PENDING (Days 108-110):
-  [ ] End-to-end live pipeline test with real menu image + gate threshold check
+  Day 108: End-to-End Gate Pipeline Integration Tests *** COMPLETE ***
+  -------------------------------------------------------------------
+  [x] run_ocr_and_make_draft() called directly with all external deps mocked
+      (OCR text, Call 1 extraction, Call 2 vision, semantic pipeline, Call 3 reconcile)
+  [x] In-memory SQLite for import_jobs + pipeline_rejections (real DB logic, no file I/O)
+  [x] Full 3-call pass path: all high-confidence signals → status=done, no rejection logged
+  [x] Full 3-call fail path: low-confidence signals → status=rejected, error=customer_message,
+      rejection row written to pipeline_rejections with correct gate_score + signals JSON
+  [x] Call 2 skipped (vision error/no_api_key): gate evaluates with redistributed weights,
+      call2_vision.skipped=True in debug payload signals block
+  [x] Call 3 skipped (no flagged items): gate evaluates without call3_confidence,
+      call3_reconcile.skipped=True in debug payload; no rejection on pass
+  [x] Thinking mode bypass: EXTENDED_THINKING=True → gate not evaluated, status always done,
+      no rejection logged, no confidence_gate block in debug payload, Call 2 never invoked
+  [x] Empty extraction: no items → gate guard (if items:) skips evaluation → status=done,
+      no rejection logged, no confidence_gate block in payload
+  [x] Gate threshold boundary: very high semantic clears threshold, very low fails;
+      multiple rejections accumulate in DB ordered DESC by id
+  [x] Debug payload completeness: confidence_gate block structure (passed, score, threshold,
+      signals, reason), FAIL reason on gate fail, ocr_char_count in signals, threshold
+      matches GATE_THRESHOLD constant
+  [x] 33 tests — 8 classes covering pass/fail paths, skipped calls, thinking mode, empty
+      extraction, threshold boundary, multi-rejection accumulation, payload structure
+
+    Day 108 test suite: 33 cases, 100% pass rate
+    Cumulative: 2,114 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  PENDING (Days 109-110):
+  [ ] Sprint 11.3 wrap-up: threshold calibration review + Sprint 12 kickoff preparation
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------
