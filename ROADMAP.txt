@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 108 (March 11, 2026) — Sprint 11.3 E2E Gate Integration Tests (33 tests, 2,114 total)
+Last Updated: Day 109 (March 11, 2026) — Sprint 11.3 Gate Calibration Utility (39 tests, 2,153 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1495,8 +1495,35 @@ Sprint 11.3 — Confidence Gate & Rejection Logging (Days 105-110)
     Day 108 test suite: 33 cases, 100% pass rate
     Cumulative: 2,114 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  PENDING (Days 109-110):
-  [ ] Sprint 11.3 wrap-up: threshold calibration review + Sprint 12 kickoff preparation
+  Day 109: Gate Calibration Utility *** COMPLETE ***
+  --------------------------------------------------
+  [x] storage/gate_calibration.py — threshold sensitivity + signal analysis (~260 LOC)
+      - PipelineResult / make_result() — wraps evaluate_confidence_gate for batch input
+      - sweep_thresholds(results, lo, hi, step) → list[ThresholdPoint]
+        - Scores each result at every threshold; pass rate is monotonically non-increasing
+      - analyze_signal_contribution(results) → dict[str, SignalStats]
+        - Per-signal mean/min/max/count + mean effective weight across all results
+        - Correctly handles skipped optional signals (call2/call3 not always present)
+      - run_calibration_report(results, threshold) → CalibrationReport
+        - Full stats: n_total, n_pass, n_fail, pass_rate, score stats
+        - n_marginal: count within ±0.05 of threshold (sensitivity indicator)
+        - Embeds sweep + signal stats + plain-English recommendation string
+      - _build_recommendation() — flags too-lenient, well-calibrated, or too-strict
+        thresholds based on pass rate, marginal count, and closest near-miss
+
+  VALIDATION: threshold=0.90 is well-calibrated for a mixed batch:
+    - Excellent menus (sem≈0.95, call2≈0.97): PASS ~0.96 score
+    - Good menus (sem≈0.92, call2≈0.92): PASS ~0.92 score
+    - Marginal menus (sem≈0.72, call2≈0.72): FAIL ~0.72 score
+    - Poor menus (sem≈0.45, call2≈0.40): FAIL ~0.45 score
+    Result: clear separation between acceptable and unacceptable quality.
+    The 0.90 threshold correctly rejects marginal+poor and passes good+excellent.
+
+    Day 109 test suite: 39 cases, 100% pass rate
+    Cumulative: 2,153 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  PENDING (Day 110):
+  [ ] Sprint 11.3 capstone: Sprint 12.1 schema kickoff (modifier group foundation)
 
 Phase 12 — POS-Native Data Model & Editor (Days 111-127)
 ---------------------------------------------------------

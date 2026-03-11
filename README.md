@@ -1188,7 +1188,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 ➡ **Phase 11 — Production AI Pipeline — IN PROGRESS (Days 96-110)**
 
-Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. Day 108: E2E gate integration tests — run_ocr_and_make_draft() tested end-to-end with all Claude calls mocked, verifying pass/fail/thinking/skip/empty-extraction paths. 2,114 tests pass.
+Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 IN PROGRESS (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 105: gate module + signal #6 + rejection logging. Day 106: gate wired into pipeline — live-tested, thinking-mode bypass fix. Day 107: frontend rejection UI — banner + pill. Day 108: E2E gate integration tests — run_ocr_and_make_draft() tested end-to-end with all Claude calls mocked, verifying pass/fail/thinking/skip/empty-extraction paths. Day 109: gate calibration utility — threshold sweep + signal contribution analysis confirms GATE_THRESHOLD=0.90 correctly separates good menus from poor ones. 2,153 tests pass.
 
 ---
 
@@ -1742,3 +1742,13 @@ ServLine now has:
   - Debug payload `confidence_gate` block verified: passed, score, threshold, signals (incl. `ocr_char_count`), reason
   - Day 108 test suite: 33 cases, 100% pass rate
   - Cumulative: 2,114 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+- **Gate Calibration Utility (Day 109):** *** COMPLETE ***
+  - `storage/gate_calibration.py` — batch analysis tool for threshold calibration
+  - `make_result()` wraps `evaluate_confidence_gate` for easy batch construction
+  - `sweep_thresholds(results, lo, hi, step)` — pass/fail rate at each threshold; monotonically non-increasing
+  - `analyze_signal_contribution(results)` — per-signal mean/min/max, handles skipped optional signals
+  - `run_calibration_report(results)` — full stats + threshold sweep + `n_marginal` + plain-English recommendation
+  - Calibration finding: threshold=0.90 cleanly separates excellent/good (pass ~0.92-0.96) from marginal/poor (fail ~0.45-0.72)
+  - Day 109 test suite: 39 cases, 100% pass rate
+  - Cumulative: 2,153 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
