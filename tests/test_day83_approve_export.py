@@ -98,6 +98,7 @@ def _make_test_db() -> sqlite3.Connection:
             category TEXT,
             position INTEGER,
             confidence INTEGER,
+            kitchen_name TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
@@ -114,6 +115,20 @@ def _make_test_db() -> sqlite3.Connection:
             modifier_group_id   INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS draft_modifier_groups (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id     INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            required    INTEGER DEFAULT 0,
+            min_select  INTEGER DEFAULT 0,
+            max_select  INTEGER DEFAULT 0,
+            position    INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
             FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
         )
     """)

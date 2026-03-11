@@ -1200,6 +1200,8 @@ Day 113: Modifier group contract + save/load cycle closed. validate_draft_payloa
 
 Day 114: Reorder + template/migration endpoints round out Sprint 12.1 API surface. Storage: reorder_modifier_groups(item_id, ordered_ids) + reorder_modifiers(group_id, ordered_ids) (both backed by _bulk_reorder_by_position() executemany helper) + migrate_draft_modifier_groups(draft_id) → {item_count, migrated_count}. Portal: POST modifier_groups/reorder, POST modifiers/reorder, GET modifier_templates, POST apply_template (404 on missing item/template), POST migrate_modifier_groups. 2,326 tests pass.
 
+Day 115 — Sprint 12.1 Capstone: POS export now emits POS-native nested modifier groups. _build_generic_pos_json() upgraded to version 1.1: items with modifier_groups[] emit nested groups (name, required, min_select, max_select, modifiers[]) + flat modifiers[] for backward compat; kitchen_name included when set; ungrouped variants appended to flat list. approve_export + export_pos.json endpoints updated to use include_modifier_groups=True. _validate_draft_for_export() updated to collect variants from all three sources (variants, ungrouped_variants, modifier_groups[].modifiers[]). Two new REST endpoints: POST /drafts/<id>/items/<iid>/modifier_groups (add single group, 201 + group_id) + PATCH /drafts/<id>/modifier_groups/<gid> (update name/required/min/max/position, 404 on miss). Backfilled Day 80/81/82/83/85 test schemas with draft_modifier_groups table + kitchen_name column. 2,368 tests pass.
+
 ---
 
 ## 🌄 System State Summary

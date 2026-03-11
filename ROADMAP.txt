@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 114 (March 11, 2026) — Sprint 12.1 Reorder + Template/Migration Endpoints (37 tests, 2,326 total)
+Last Updated: Day 115 (March 11, 2026) — Sprint 12.1 Capstone: POS Export Upgrade + Modifier Group CRUD (42 tests, 2,368 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1771,6 +1771,26 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
         - GET  /restaurants/<rid>/modifier_templates
         - POST /drafts/<id>/items/<iid>/apply_template
         - POST /drafts/<id>/migrate_modifier_groups
+  [x] Sprint 12.1 Capstone: POS Export Upgrade + Modifier Group CRUD (Day 115):
+        - _build_generic_pos_json() upgraded to POS-native nested format:
+            items[].modifier_groups[] with required/min_select/max_select metadata
+            items[].modifiers[] flat list maintained for backward compat
+            kitchen_name included in export when set
+            metadata version bumped to "1.1"
+        - approve_export endpoint updated: include_modifier_groups=True, variant_count counts
+            grouped modifiers + ungrouped variants
+        - _validate_draft_for_export() updated: collects variants from all 3 sources
+            (variants, ungrouped_variants, modifier_groups[].modifiers[])
+        - POST /drafts/<id>/items/<iid>/modifier_groups — add single modifier group
+            Body: name (required), required, min_select, max_select, position
+            Returns: {ok, group_id}, 201
+        - PATCH /drafts/<id>/modifier_groups/<gid> — update group fields
+            Allowed fields: name, required, min_select, max_select, position
+            Returns: {ok}, 404 if not found
+        - Backfilled draft_modifier_groups + kitchen_name into Day 80/81/82/83/85 test schemas
+
+    Day 115 test suite: 42 cases, 100% pass rate
+    Cumulative: 2,368 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 ........................................................

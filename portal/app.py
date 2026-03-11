@@ -5196,6 +5196,83 @@ def draft_migrate_modifier_groups(draft_id: int):
     return jsonify({"ok": True, **result}), 200
 
 
+@app.post("/drafts/<int:draft_id>/items/<int:item_id>/modifier_groups")
+@login_required
+def add_modifier_group(draft_id: int, item_id: int):
+    """
+    Add a single modifier group to *item_id*.
+
+    Body (JSON):
+      { "name": <str>, "required": <bool>,
+        "min_select": <int>, "max_select": <int>, "position": <int> }
+
+    Returns: { "ok": true, "group_id": <int> }
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "name is required"}), 400
+
+    required = bool(payload.get("required", False))
+    try:
+        min_select = int(payload.get("min_select") or 0)
+        max_select = int(payload.get("max_select") or 0)
+        position = int(payload.get("position") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "min_select, max_select, position must be integers"}), 400
+
+    group_id = drafts_store.insert_modifier_group(
+        item_id,
+        name,
+        required=required,
+        min_select=min_select,
+        max_select=max_select,
+        position=position,
+    )
+    return jsonify({"ok": True, "group_id": group_id}), 201
+
+
+@app.patch("/drafts/<int:draft_id>/modifier_groups/<int:group_id>")
+@login_required
+def update_modifier_group(draft_id: int, group_id: int):
+    """
+    Update fields on a modifier group.
+
+    Allowed body fields: name, required, min_select, max_select, position.
+    Returns: { "ok": true } on success, 404 if group not found.
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+
+    allowed = {"name", "required", "min_select", "max_select", "position"}
+    updates: dict = {}
+
+    if "name" in payload:
+        name = (payload["name"] or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "name cannot be empty"}), 400
+        updates["name"] = name
+
+    for int_field in ("min_select", "max_select", "position"):
+        if int_field in payload:
+            try:
+                updates[int_field] = int(payload[int_field])
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": f"{int_field} must be an integer"}), 400
+
+    if "required" in payload:
+        updates["required"] = 1 if payload["required"] else 0
+
+    if not updates:
+        return jsonify({"ok": False, "error": "no valid fields provided"}), 400
+
+    updated = drafts_store.update_modifier_group(group_id, **updates)
+    if not updated:
+        return jsonify({"ok": False, "error": "modifier group not found"}), 404
+    return jsonify({"ok": True}), 200
+
+
 @app.post("/drafts/<int:draft_id>/submit")
 @login_required
 def draft_submit(draft_id: int):
@@ -5339,9 +5416,14 @@ def draft_approve_export(draft_id: int):
         if not draft:
             return jsonify({"ok": False, "error": "Draft not found"}), 404
 
-        items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+        items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
         warnings = _validate_draft_for_export(items)
-        variant_count = sum(len(it.get("variants") or []) for it in items)
+        # Count all modifiers: grouped (in modifier_groups[].modifiers[]) + ungrouped
+        variant_count = sum(
+            sum(len(grp.get("modifiers") or []) for grp in (it.get("modifier_groups") or []))
+            + len(it.get("ungrouped_variants") or it.get("variants") or [])
+            for it in items
+        )
 
         pos_json = _build_generic_pos_json(items, draft)
 
@@ -6163,7 +6245,13 @@ def _validate_draft_for_export(items):
         name = it.get("name", "")
         price = it.get("price_cents", 0)
         cat = it.get("category") or ""
-        variants = it.get("variants") or []
+        # Collect all modifiers regardless of source format:
+        #   - flat variants (include_variants=True path)
+        #   - ungrouped_variants + modifier_groups[].modifiers[] (include_modifier_groups=True path)
+        variants = list(it.get("variants") or [])
+        variants += list(it.get("ungrouped_variants") or [])
+        for grp in (it.get("modifier_groups") or []):
+            variants += list(grp.get("modifiers") or [])
 
         if not price and not variants:
             warnings.append({
@@ -6578,12 +6666,32 @@ def _build_generic_pos_json(items, draft=None):
     Structure:
       { menu: { id, title, categories: [
           { name, items: [
-              { name, description, base_price, modifiers: [
+              { name, kitchen_name, description, base_price,
+                modifier_groups: [               # POS-native (when present)
+                  { name, required, min_select, max_select,
+                    modifiers: [{ name, price }] }
+                ],
+                modifiers: [                     # legacy flat fallback
                   { group, name, price }
-              ]}
+                ]
+              }
           ]}
       ]}, metadata: { ... } }
+
+    When an item carries modifier_groups[], they are emitted as POS-native
+    nested groups (with required/min_select/max_select metadata).  The legacy
+    flat `modifiers` list is still included for backward compatibility, built
+    by flattening all modifier groups.  Items that only have ungrouped
+    variants use the old flat-only format (modifier_groups=[]).
     """
+    _KIND_LABELS = {
+        "size": "Size",
+        "combo": "Combo Add-on",
+        "flavor": "Flavor",
+        "style": "Style",
+        "other": "Option",
+    }
+
     draft = draft or {}
     cat_map: dict = {}
     for it in items:
@@ -6594,30 +6702,66 @@ def _build_generic_pos_json(items, draft=None):
     for cat_name in sorted(cat_map.keys()):
         cat_items = []
         for it in cat_map[cat_name]:
+            kitchen = (it.get("kitchen_name") or "").strip() or None
             item_entry = {
                 "name": it.get("name", ""),
                 "description": it.get("description") or "",
                 "base_price": _format_price_dollars(it.get("price_cents", 0)),
             }
-            variants = it.get("variants") or []
-            if variants:
-                modifiers = []
-                for v in variants:
-                    kind_labels = {
-                        "size": "Size",
-                        "combo": "Combo Add-on",
-                        "flavor": "Flavor",
-                        "style": "Style",
-                        "other": "Option",
-                    }
-                    modifiers.append({
-                        "group": kind_labels.get(v.get("kind", "size"), "Option"),
+            if kitchen:
+                item_entry["kitchen_name"] = kitchen
+
+            modifier_groups = it.get("modifier_groups") or []
+            ungrouped = it.get("ungrouped_variants") or it.get("variants") or []
+
+            if modifier_groups:
+                # POS-native nested groups
+                pos_groups = []
+                flat_modifiers = []
+                for grp in modifier_groups:
+                    grp_modifiers = []
+                    for mod in (grp.get("modifiers") or []):
+                        mod_entry = {
+                            "name": mod.get("label", ""),
+                            "price": _format_price_dollars(mod.get("price_cents", 0)),
+                        }
+                        grp_modifiers.append(mod_entry)
+                        flat_modifiers.append({
+                            "group": grp.get("name", ""),
+                            "name": mod.get("label", ""),
+                            "price": _format_price_dollars(mod.get("price_cents", 0)),
+                        })
+                    pos_groups.append({
+                        "name": grp.get("name", ""),
+                        "required": bool(grp.get("required")),
+                        "min_select": grp.get("min_select") or 0,
+                        "max_select": grp.get("max_select") or 0,
+                        "modifiers": grp_modifiers,
+                    })
+                # also flatten any remaining ungrouped variants
+                for v in ungrouped:
+                    flat_modifiers.append({
+                        "group": _KIND_LABELS.get(v.get("kind", "other"), "Option"),
                         "name": v.get("label", ""),
                         "price": _format_price_dollars(v.get("price_cents", 0)),
                     })
-                item_entry["modifiers"] = modifiers
+                item_entry["modifier_groups"] = pos_groups
+                item_entry["modifiers"] = flat_modifiers
             else:
-                item_entry["modifiers"] = []
+                # legacy flat-only format (no named groups)
+                item_entry["modifier_groups"] = []
+                if ungrouped:
+                    item_entry["modifiers"] = [
+                        {
+                            "group": _KIND_LABELS.get(v.get("kind", "other"), "Option"),
+                            "name": v.get("label", ""),
+                            "price": _format_price_dollars(v.get("price_cents", 0)),
+                        }
+                        for v in ungrouped
+                    ]
+                else:
+                    item_entry["modifiers"] = []
+
             cat_items.append(item_entry)
         categories.append({"name": cat_name, "items": cat_items})
 
@@ -6630,7 +6774,7 @@ def _build_generic_pos_json(items, draft=None):
         "metadata": {
             "exported_at": _now_iso(),
             "format": "generic_pos",
-            "version": "1.0",
+            "version": "1.1",
             "item_count": len(items),
             "category_count": len(categories),
         },
@@ -6687,7 +6831,7 @@ def draft_export_pos_json(draft_id: int):
     """Generic POS JSON export: universal item/variant/modifier schema."""
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
     payload = _build_generic_pos_json(items, draft)
 
     resp = make_response(json.dumps(payload, indent=2))

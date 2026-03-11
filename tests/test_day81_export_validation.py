@@ -94,6 +94,7 @@ def _make_test_db() -> sqlite3.Connection:
             category TEXT,
             position INTEGER,
             confidence INTEGER,
+            kitchen_name TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
@@ -110,6 +111,20 @@ def _make_test_db() -> sqlite3.Connection:
             modifier_group_id   INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS draft_modifier_groups (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id     INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            required    INTEGER DEFAULT 0,
+            min_select  INTEGER DEFAULT 0,
+            max_select  INTEGER DEFAULT 0,
+            position    INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
             FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
         )
     """)
@@ -539,7 +554,7 @@ class TestRoundTripPOSJSON:
         result = _verify_pos_json_round_trip(items, draft={"id": 99, "title": "Test"})
         meta = result["metadata"]
         assert meta["format"] == "generic_pos"
-        assert meta["version"] == "1.0"
+        assert meta["version"] == "1.1"
         assert meta["item_count"] == 1
 
     def test_categories_distributed(self):

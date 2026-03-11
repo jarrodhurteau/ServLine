@@ -120,6 +120,7 @@ def _make_test_db() -> sqlite3.Connection:
             category TEXT,
             position INTEGER,
             confidence INTEGER,
+            kitchen_name TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
@@ -150,6 +151,20 @@ def _make_test_db() -> sqlite3.Connection:
             position INTEGER,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS draft_modifier_groups (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id     INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            required    INTEGER DEFAULT 0,
+            min_select  INTEGER DEFAULT 0,
+            max_select  INTEGER DEFAULT 0,
+            position    INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_draft ON draft_items(draft_id)")
@@ -513,7 +528,7 @@ class TestGenericPOSJSON:
         payload = _build_generic_pos_json([], {})
         meta = payload["metadata"]
         assert meta["format"] == "generic_pos"
-        assert meta["version"] == "1.0"
+        assert meta["version"] == "1.1"
         assert meta["item_count"] == 0
         assert meta["category_count"] == 0
         assert "exported_at" in meta
