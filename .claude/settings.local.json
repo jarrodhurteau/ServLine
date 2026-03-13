@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nDay 55: Sprint 8.1 finale — pipeline integration, OCR typo normalization, confidence tiers\n\nPipeline integration: enrich_grammar_on_text_blocks\\(\\) wired into OCR pipeline between\ntwo-column merge and classify_and_collapse. Grammar metadata \\(parsed_name, line_type,\nconfidence_tier, components\\) now flows to text_blocks and preview_blocks.\n\nOCR typo normalization \\(88Q→BBQ, piZzA→PIZZA, bracket noise, WI/→W/\\).\nConfidence tiers: high/medium/low/unknown mapped from numeric scores.\nFallback OCR hardening: 100% classification on all 4 OCR files \\(primary + degraded\\).\n691 tests across 5 suites, all passing. Sprint 8.1 complete.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(sqlite3:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(done)",
+      "Bash(git status:*)",
+      "Bash(ls:*)",
+      "Bash(bc:*)",
+      "Bash(for f in tests/test_day61_cross_item.py tests/test_day62_fuzzy_names.py tests/test_day65_variant_patterns.py)",
+      "Bash(do echo \"=== $f ===\")",
+      "Bash(python3:*)",
+      "Bash(wc -l tests/test_day*.py)",
+      "Bash(git checkout -- portal/app.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python -m pytest tests/test_day100_5_pipeline_cleanup.py::TestPipelineDebugRoute::test_debug_route_no_payload -v)",
+      "Bash(PYTHONIOENCODING=utf-8 python3 -c \":*)",
+      "Bash(pip show anthropic)",
+      "Skill(claude-developer-platform)",
+      "Skill(claude-developer-platform:*)",
+      "Bash(sort -k9)",
+      "Bash(test -f .env)",
+      "WebFetch(domain:doc.toasttab.com)",
+      "WebFetch(domain:squareup.com)",
+      "WebFetch(domain:k-series-support.lightspeedhq.com)",
+      "WebFetch(domain:help.spoton.com)",
+      "WebFetch(domain:spotonteam.atlassian.net)",
+      "WebFetch(domain:docs.clover.com)",
+      "WebFetch(domain:developers.spoton.com)",
+      "WebFetch(domain:support.itsacheckmate.com)",
+      "WebFetch(domain:dev.pro)",
+      "WebFetch(domain:agentestudio.com)",
+      "Bash(for f:*)",
+      "Read(//c/Users/Owner/Desktop/servline/tests/**)",
+      "Bash(do grep:*)"
+    ]
+  }
+}

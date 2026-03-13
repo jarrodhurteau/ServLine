@@ -452,12 +452,13 @@ class TestCardModifierGroups:
         assert "card-groups" in html
 
     def test_each_group_renders_card_group_div(self, client, fresh_db):
-        _, did = _create_draft(fresh_db)
+        # Day 118: editing mode renders .mg-editor panels; read-only mode renders .card-group divs.
+        # Use approved status to verify the read-only card-group path.
+        _, did = _create_draft(fresh_db, status="approved")
         iid = _insert_item(fresh_db, did, "Pizza")
         _insert_group(fresh_db, iid, "Crust")
         _insert_group(fresh_db, iid, "Sauce")
         html = _get_editor(client, did)
-        # The rendered div uses class="card-group" (with closing ">")
         assert html.count('<div class="card-group">') == 2
 
     def test_group_name_in_card_group_name(self, client, fresh_db):

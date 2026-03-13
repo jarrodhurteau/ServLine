@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 117 (March 13, 2026) — Sprint 12.2 Day 2: Item Card Layout + Kitchen Name Editor (38 tests, 2,441 total)
+Last Updated: Day 118 (March 13, 2026) — Sprint 12.2 Day 3: Modifier Group Management UI (37 tests, 2,478 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1825,12 +1825,21 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 
     Day 117 test suite: 38 cases, 100% pass rate
     Cumulative: 2,441 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
-  [ ] Modifier group management UI:
-        - Per-item: "Add Modifier Group" button
-        - Group header: name, required toggle, min/max selectors
-        - Modifiers listed under group with name + price
-        - Add/remove/reorder modifiers within group
-        - Apply from template library (one-click common setups)
+
+  [x] Modifier group management UI (Day 118):
+        - Per-item: "Add Modifier Group" button (.card-add-mg-btn) ✓
+        - Group header: name input (.mg-editor-name), required toggle (.mg-required-toggle) ✓
+        - Min/max selectors (.mg-min-select, .mg-max-select) ✓
+        - Modifiers listed as .mg-modifier-row with .mg-mod-label + .mg-mod-price ✓
+        - Add modifier row (.mg-add-mod-row) per group ✓
+        - Delete group button (.mg-delete-btn) + batched via deleted_modifier_group_ids ✓
+        - Apply from template library (.card-apply-template-btn + #mg-template-modal) ✓
+        - PATCH /drafts/<id>/modifier_groups/<group_id> live update on change ✓
+        - Save wired: deleted_modifier_group_ids passed in fetch payload ✓
+        - Non-editing drafts: read-only .card-group view preserved ✓
+
+    Day 118 test suite: 37 cases, 100% pass rate
+    Cumulative: 2,478 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
   [ ] Modifier group rules editor:
         - Required/optional toggle (visual: required = blue border, optional = gray)
         - Min/max selection dropdowns
@@ -1877,6 +1886,17 @@ Sprint 12.3 — Export Format Alignment (Days 123-127)
         - All export formats verified with modifier group data
         - Square/Toast/POS JSON structurally validated against POS schemas
         - Backward compat: drafts without modifier groups still export cleanly
+
+  FUTURE — Guided Onboarding Wizard (Phase 13 or later):
+    The "TurboTax of POS menu import" — what makes ServLine ServLine, not just
+    another menu import tool. Category-by-category guided review post-import,
+    with suggested modifier group templates per category and "apply to all" bulk
+    stamp. Final wizard screen lands on the full editor for overview, final
+    sign-off, and export. The wizard builds confidence; the editor is the
+    destination. Export correctness (Sprint 12.3) ships first because the final
+    wizard screen — "Your menu is ready to import to Square" — only means
+    something if the export actually works.
+    Full spec: memory/project_wizard_sprint123.md
 
 Phase 13 — Production Platform (Days 128-147)
 ----------------------------------------------

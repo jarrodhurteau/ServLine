@@ -694,6 +694,110 @@
     .card-modifiers li:last-child { border-bottom: none; }
     .card-mod-price { color: #a3b4d3; }
 
+    /* Day 118: Modifier Group Editor Panels */
+    .mg-editor {
+      background: rgba(255,255,255,.04); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+    }
+    .mg-editor-header {
+      display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+    }
+    .mg-editor-name {
+      flex: 1; font-size: .8rem; background: var(--card-bg);
+      border: 1px solid var(--line); border-radius: 5px;
+      color: var(--ink); padding: 3px 6px;
+    }
+    .mg-required-toggle { accent-color: #7dd3fc; cursor: pointer; }
+    .mg-required-label { font-size: .72rem; color: var(--muted); }
+    .mg-select-row {
+      display: flex; align-items: center; gap: 6px;
+      font-size: .72rem; color: var(--muted); margin-bottom: 6px;
+    }
+    .mg-min-select, .mg-max-select {
+      width: 48px; background: var(--card-bg);
+      border: 1px solid var(--line); border-radius: 4px;
+      color: var(--ink); padding: 2px 4px; font-size: .75rem;
+    }
+    .mg-delete-btn {
+      background: transparent; border: 1px solid rgba(220,53,69,.35);
+      color: rgba(220,53,69,.75); border-radius: 5px;
+      padding: 2px 6px; cursor: pointer; font-size: .72rem;
+      white-space: nowrap;
+    }
+    .mg-delete-btn:hover { background: rgba(220,53,69,.15); color: #ff6b7a; }
+    .mg-modifier-row {
+      display: flex; align-items: center; gap: 5px; margin-bottom: 4px;
+    }
+    .mg-mod-label {
+      flex: 1; font-size: .78rem; background: var(--card-bg);
+      border: 1px solid var(--line); border-radius: 4px;
+      color: var(--ink); padding: 2px 5px;
+    }
+    .mg-mod-price {
+      width: 60px; font-size: .78rem; background: var(--card-bg);
+      border: 1px solid var(--line); border-radius: 4px;
+      color: var(--ink); padding: 2px 5px;
+    }
+    .mg-mod-delete {
+      background: transparent; border: none; color: rgba(220,53,69,.7);
+      cursor: pointer; padding: 2px 4px; font-size: .8rem; line-height: 1;
+    }
+    .mg-mod-delete:hover { color: #ff6b7a; }
+    .mg-add-mod-row {
+      display: flex; align-items: center; gap: 5px; margin-top: 4px;
+    }
+    .mg-add-mod-label, .mg-add-mod-price {
+      font-size: .78rem; background: var(--card-bg);
+      border: 1px dashed var(--line); border-radius: 4px;
+      color: var(--ink); padding: 2px 5px;
+    }
+    .mg-add-mod-label { flex: 1; }
+    .mg-add-mod-price { width: 60px; }
+    .mg-add-mod-confirm {
+      background: rgba(125,211,252,.15); border: 1px solid rgba(125,211,252,.35);
+      color: #7dd3fc; border-radius: 4px; padding: 2px 7px;
+      cursor: pointer; font-size: .75rem;
+    }
+    .mg-add-mod-confirm:hover { background: rgba(125,211,252,.25); }
+    /* Add-group and apply-template buttons */
+    .card-add-mg-btn {
+      background: rgba(125,211,252,.10); border: 1px dashed rgba(125,211,252,.4);
+      color: #7dd3fc; border-radius: 6px; padding: 3px 9px;
+      cursor: pointer; font-size: .74rem;
+    }
+    .card-add-mg-btn:hover { background: rgba(125,211,252,.2); }
+    .card-apply-template-btn {
+      background: rgba(167,139,250,.10); border: 1px dashed rgba(167,139,250,.4);
+      color: #c4b5fd; border-radius: 6px; padding: 3px 9px;
+      cursor: pointer; font-size: .74rem;
+    }
+    .card-apply-template-btn:hover { background: rgba(167,139,250,.2); }
+    /* Template picker modal */
+    .mg-template-modal {
+      display: none; position: fixed; inset: 0; z-index: 1100;
+      background: rgba(0,0,0,.6); align-items: center; justify-content: center;
+    }
+    .mg-template-modal.open { display: flex; }
+    .mg-template-modal-inner {
+      background: var(--card-bg); border: 1px solid var(--line);
+      border-radius: 12px; padding: 20px; min-width: 300px; max-width: 480px;
+    }
+    .mg-template-modal-title {
+      font-size: .95rem; font-weight: 600; margin-bottom: 12px;
+    }
+    .mg-template-list { list-style: none; padding: 0; margin: 0 0 12px; }
+    .mg-template-list li {
+      padding: 7px 10px; border-radius: 6px; cursor: pointer;
+      font-size: .84rem; border: 1px solid var(--line); margin-bottom: 6px;
+    }
+    .mg-template-list li:hover { background: rgba(255,255,255,.06); }
+    .mg-template-empty { font-size: .82rem; color: var(--muted); margin-bottom: 12px; }
+    .mg-template-close-btn {
+      background: transparent; border: 1px solid var(--line);
+      color: var(--muted); border-radius: 6px; padding: 4px 12px;
+      cursor: pointer; font-size: .8rem;
+    }
+
     /* Trashcan delete button on card */
     .card-delete-btn {
       background: transparent; border: 1px solid rgba(220,53,69,.35);
@@ -1179,9 +1283,88 @@
               {% endif %}
             </div>
 
+            {# Day 118: Add Modifier Group + Apply Template buttons (editing only) #}
+            {% if draft.status == 'editing' %}
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+              <button class="card-add-mg-btn"
+                      data-item-id="{{ it.id }}"
+                      data-draft-id="{{ draft.id }}"
+                      title="Add modifier group to this item">+ Add Group</button>
+              <button class="card-apply-template-btn"
+                      data-item-id="{{ it.id }}"
+                      data-draft-id="{{ draft.id }}"
+                      title="Apply a modifier group template">⊞ Template</button>
+            </div>
+            {% endif %}
+
             {% if it.modifier_groups %}
             <div class="card-groups" id="card-groups-{{ it.id }}">
               {% for mg in it.modifier_groups %}
+              {% if draft.status == 'editing' %}
+              {# Editing mode: full mg-editor panel #}
+              <div class="mg-editor" data-group-id="{{ mg.id }}">
+                <div class="mg-editor-header">
+                  <input class="mg-editor-name"
+                         data-group-id="{{ mg.id }}"
+                         value="{{ mg.name|e }}"
+                         placeholder="Group name"
+                         aria-label="Group name" />
+                  <label style="display:flex;align-items:center;gap:3px;">
+                    <input type="checkbox"
+                           class="mg-required-toggle"
+                           data-group-id="{{ mg.id }}"
+                           {% if mg.required %}checked{% endif %}
+                           aria-label="Required" />
+                    <span class="mg-required-label">Req</span>
+                  </label>
+                  <button class="mg-delete-btn"
+                          data-group-id="{{ mg.id }}"
+                          title="Delete group">✕</button>
+                </div>
+                <div class="mg-select-row">
+                  Min:
+                  <input type="number" class="mg-min-select"
+                         data-group-id="{{ mg.id }}"
+                         value="{{ mg.min_select if mg.min_select is not none else 0 }}"
+                         min="0" max="20" />
+                  Max:
+                  <input type="number" class="mg-max-select"
+                         data-group-id="{{ mg.id }}"
+                         value="{{ mg.max_select if mg.max_select is not none else 0 }}"
+                         min="0" max="20" />
+                </div>
+                {% if mg.modifiers %}
+                {% for mod in mg.modifiers %}
+                <div class="mg-modifier-row" data-mod-id="{{ mod.id }}">
+                  <input class="mg-mod-label"
+                         value="{{ mod.label|e }}"
+                         data-mod-id="{{ mod.id }}"
+                         placeholder="Modifier name"
+                         aria-label="Modifier name" />
+                  <input class="mg-mod-price"
+                         value="{% if mod.price_cents %}{{ '%.2f'|format(mod.price_cents / 100) }}{% endif %}"
+                         data-mod-id="{{ mod.id }}"
+                         placeholder="0.00"
+                         inputmode="decimal"
+                         aria-label="Modifier price" />
+                  <button class="mg-mod-delete"
+                          data-mod-id="{{ mod.id }}"
+                          title="Remove modifier">✕</button>
+                </div>
+                {% endfor %}
+                {% endif %}
+                <div class="mg-add-mod-row" data-group-id="{{ mg.id }}">
+                  <input class="mg-add-mod-label" placeholder="New modifier…" aria-label="New modifier name" />
+                  <input class="mg-add-mod-price" placeholder="0.00" inputmode="decimal" aria-label="New modifier price" />
+                  <button class="mg-add-mod-confirm"
+                          data-group-id="{{ mg.id }}"
+                          data-item-id="{{ it.id }}"
+                          data-draft-id="{{ draft.id }}"
+                          title="Add modifier">+</button>
+                </div>
+              </div>
+              {% else %}
+              {# Non-editing mode: read-only card-group display #}
               <div class="card-group">
                 <div class="card-group-name">{{ mg.name|e }}</div>
                 <div class="card-group-meta">
@@ -1203,6 +1386,7 @@
                 </ul>
                 {% endif %}
               </div>
+              {% endif %}
               {% endfor %}
             </div>
             {% endif %}
@@ -1221,6 +1405,16 @@
 
       <p class="helper" style="margin-top:10px;">Shortcuts: <strong>Ctrl/Cmd+S</strong> Save · <strong>Delete</strong> Delete selected.</p>
       <div id="toast" class="toast"></div>
+    </div>
+  </div>
+
+  <!-- Day 118: Modifier Group Template Picker Modal -->
+  <div id="mg-template-modal" class="mg-template-modal" role="dialog" aria-modal="true" aria-label="Apply modifier group template">
+    <div class="mg-template-modal-inner">
+      <div class="mg-template-modal-title">Apply Modifier Group Template</div>
+      <ul class="mg-template-list" id="mg-template-list"></ul>
+      <div class="mg-template-empty" id="mg-template-empty" style="display:none">No templates found for this restaurant.</div>
+      <button class="mg-template-close-btn" id="mg-template-close">Cancel</button>
     </div>
   </div>
 
@@ -1788,7 +1982,7 @@
         const res = await fetch(`/drafts/${draftId}/save`, {
           method:"POST",
           headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds, deleted_variant_ids: deletedVariantIds })
+          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds, deleted_variant_ids: deletedVariantIds, deleted_modifier_group_ids: window._deletedMgIds || [] })
         });
         const data = await res.json();
         if (!res.ok || data.ok===false) throw new Error(data.error || "Save failed");
@@ -3127,6 +3321,175 @@
     }
 
     window._createDynamicCard = _createDynamicCard;
+
+    // =========================================================
+    // Day 118 — Modifier Group Management UI
+    // =========================================================
+
+    // Tracks group IDs to delete on next save
+    window._deletedMgIds = window._deletedMgIds || [];
+
+    // -- Patch group name on blur --
+    document.addEventListener("change", async e => {
+      const inp = e.target;
+      if (!isEditable) return;
+
+      if (inp.classList.contains("mg-editor-name")) {
+        const gid = inp.dataset.groupId;
+        const name = (inp.value || "").trim();
+        if (!name || !gid) return;
+        await fetch(`/drafts/${draftId}/modifier_groups/${gid}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({name}),
+        });
+        if (window._markDirty) window._markDirty();
+      }
+
+      if (inp.classList.contains("mg-required-toggle")) {
+        const gid = inp.dataset.groupId;
+        if (!gid) return;
+        await fetch(`/drafts/${draftId}/modifier_groups/${gid}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({required: inp.checked}),
+        });
+        if (window._markDirty) window._markDirty();
+      }
+
+      if (inp.classList.contains("mg-min-select") || inp.classList.contains("mg-max-select")) {
+        const gid = inp.dataset.groupId;
+        if (!gid) return;
+        const field = inp.classList.contains("mg-min-select") ? "min_select" : "max_select";
+        const val = parseInt(inp.value, 10);
+        if (isNaN(val)) return;
+        await fetch(`/drafts/${draftId}/modifier_groups/${gid}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({[field]: val}),
+        });
+        if (window._markDirty) window._markDirty();
+      }
+    });
+
+    // -- Delete group --
+    document.addEventListener("click", async e => {
+      if (!isEditable) return;
+      const btn = e.target.closest(".mg-delete-btn");
+      if (btn) {
+        const gid = parseInt(btn.dataset.groupId, 10);
+        if (!gid) return;
+        window._deletedMgIds.push(gid);
+        const panel = btn.closest(".mg-editor");
+        if (panel) panel.remove();
+        if (window._markDirty) window._markDirty();
+        return;
+      }
+
+      // -- Delete modifier row --
+      const modDel = e.target.closest(".mg-mod-delete");
+      if (modDel) {
+        const mid = modDel.dataset.modId;
+        const row = modDel.closest(".mg-modifier-row");
+        if (mid && /^\d+$/.test(mid)) {
+          window._deletedVariantIds = window._deletedVariantIds || [];
+          window._deletedVariantIds.push(parseInt(mid, 10));
+        }
+        if (row) row.remove();
+        if (window._markDirty) window._markDirty();
+        return;
+      }
+
+      // -- Add modifier confirm --
+      const addConf = e.target.closest(".mg-add-mod-confirm");
+      if (addConf) {
+        const gid = parseInt(addConf.dataset.groupId, 10);
+        const itemId = parseInt(addConf.dataset.itemId, 10);
+        const row = addConf.closest(".mg-add-mod-row");
+        if (!row || !gid) return;
+        const labelInp = row.querySelector(".mg-add-mod-label");
+        const priceInp = row.querySelector(".mg-add-mod-price");
+        const label = (labelInp?.value || "").trim();
+        if (!label) { labelInp?.focus(); return; }
+        const priceDollars = parseFloat(priceInp?.value || "0") || 0;
+        const priceCents = Math.round(priceDollars * 100);
+        const resp = await fetch(`/drafts/${draftId}/save`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            items: [{id: itemId, name: document.querySelector(`#card-${itemId} .card-name-display`)?.textContent || "Item",
+                     price_cents: 0, _variants: [{label, price_cents: priceCents, kind: "other", position: 0,
+                                                   modifier_group_id: gid}]}],
+          }),
+        });
+        if (resp.ok) {
+          // Reload page to show new modifier row
+          window.location.reload();
+        }
+        return;
+      }
+
+      // -- Add modifier group --
+      const addMgBtn = e.target.closest(".card-add-mg-btn");
+      if (addMgBtn) {
+        const itemId = parseInt(addMgBtn.dataset.itemId, 10);
+        if (!itemId) return;
+        const resp = await fetch(`/drafts/${draftId}/items/${itemId}/modifier_groups`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({name: "New Group", required: false, min_select: 0, max_select: 1}),
+        });
+        if (resp.ok) window.location.reload();
+        return;
+      }
+
+      // -- Apply template --
+      const tmplBtn = e.target.closest(".card-apply-template-btn");
+      if (tmplBtn) {
+        const itemId = parseInt(tmplBtn.dataset.itemId, 10);
+        const modal = document.getElementById("mg-template-modal");
+        const list  = document.getElementById("mg-template-list");
+        const empty = document.getElementById("mg-template-empty");
+        if (!modal || !list) return;
+        modal._itemId = itemId;
+        list.innerHTML = "";
+        // Fetch restaurant id from draft meta or from page
+        const rid = {{ draft.restaurant_id|tojson if draft.restaurant_id else 'null' }};
+        if (!rid) { empty.style.display = ""; modal.classList.add("open"); return; }
+        const tResp = await fetch(`/restaurants/${rid}/modifier_templates`);
+        const tData = await tResp.json();
+        const templates = tData.templates || [];
+        if (templates.length === 0) {
+          empty.style.display = "";
+          list.style.display = "none";
+        } else {
+          empty.style.display = "none";
+          list.style.display = "";
+          templates.forEach(t => {
+            const li = document.createElement("li");
+            li.textContent = t.name;
+            li.addEventListener("click", async () => {
+              const aResp = await fetch(`/drafts/${draftId}/items/${itemId}/apply_template`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({template_id: t.id}),
+              });
+              if (aResp.ok) { modal.classList.remove("open"); window.location.reload(); }
+            });
+            list.appendChild(li);
+          });
+        }
+        modal.classList.add("open");
+        return;
+      }
+
+      // -- Close template modal --
+      if (e.target.closest("#mg-template-close") || e.target.id === "mg-template-modal") {
+        const modal = document.getElementById("mg-template-modal");
+        if (modal) modal.classList.remove("open");
+      }
+    });
+
   })();
   </script>
 
