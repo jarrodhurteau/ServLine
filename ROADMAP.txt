@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 118 (March 13, 2026) — Sprint 12.2 Day 3: Modifier Group Management UI (37 tests, 2,478 total)
+Last Updated: Day 119 (March 13, 2026) — Sprint 12.2 Day 4: Modifier Group Rules Preview + Full Save Lifecycle (36 tests, 2,514 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1840,11 +1840,32 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 
     Day 118 test suite: 37 cases, 100% pass rate
     Cumulative: 2,478 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
-  [ ] Modifier group rules editor:
-        - Required/optional toggle (visual: required = blue border, optional = gray)
-        - Min/max selection dropdowns
-        - Preview: "Customer must choose exactly 1" / "Choose up to 3"
-        - Validation: warn if required but no modifiers defined
+
+  [x] Modifier group rules preview + full save lifecycle (Day 119):
+        - .mg-rules-preview element with dynamic text per group ✓
+          "Must choose exactly N" / "Must choose N–M" / "Must choose up to N" /
+          "Required" / "Choose up to N" / "Optional"
+        - .mg-editor.is-required blue left border for required groups ✓
+        - .mg-rules-preview.is-optional muted color for optional groups ✓
+        - updateRulesPreview(groupId) JS — live update on required/min/max change ✓
+        - _mgRulesText(required, min, max) pure helper ✓
+        - Jinja2 server-side initial text (no flash on load) ✓
+        - data-required / data-min / data-max on preview element ✓
+        - Validation warning: required group with 0 modifiers → non-blocking toast ✓
+        - collectPayload() upgraded: modifier_groups_by_item{} per item ✓
+          each group: {id, name, required, min_select, max_select, modifiers[]}
+        - Save payload includes modifier_groups_by_item → synced to server ✓
+        - upsert_group_modifiers(group_id, modifiers) storage function ✓
+          full-replace: DELETE existing + INSERT new (idempotent)
+        - Save endpoint: update_modifier_group() per group (metadata sync) ✓
+        - Save endpoint: upsert_group_modifiers() per group (modifier sync) ✓
+        - Save endpoint: unknown group_id silently skipped ✓
+        - Save response: mg_synced count + warnings[] list ✓
+        - Server-side warning for required group with no modifiers (non-blocking) ✓
+
+    Day 119 test suite: 36 cases, 100% pass rate
+    Cumulative: 2,514 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
   [ ] Drag-and-drop reordering:
         - Items within category
         - Modifier groups within item
@@ -1854,10 +1875,6 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
         - Item name field + optional kitchen name field
         - Kitchen name shown as gray subtitle when populated
         - Toggle to show/hide kitchen names globally
-  [ ] Upgrade collectPayload() and save logic:
-        - Include modifier_groups[] with modifiers[] per item
-        - deleted_modifier_group_ids for orphan cleanup
-        - Save endpoint handles full group + modifier lifecycle
 
 Sprint 12.3 — Export Format Alignment (Days 123-127)
 .....................................................

@@ -718,6 +718,16 @@
       border: 1px solid var(--line); border-radius: 4px;
       color: var(--ink); padding: 2px 4px; font-size: .75rem;
     }
+    /* Day 119: required border + rules preview */
+    .mg-editor.is-required { border-left: 3px solid #7dd3fc; padding-left: 8px; }
+    .mg-rules-preview {
+      font-size: .7rem; color: #7dd3fc; font-style: italic;
+      margin-bottom: 4px; min-height: 1em;
+    }
+    .mg-rules-preview.is-optional { color: var(--muted); }
+    .mg-rules-warn {
+      font-size: .7rem; color: #f87171; margin-bottom: 4px;
+    }
     .mg-delete-btn {
       background: transparent; border: 1px solid rgba(220,53,69,.35);
       color: rgba(220,53,69,.75); border-radius: 5px;
@@ -1302,7 +1312,7 @@
               {% for mg in it.modifier_groups %}
               {% if draft.status == 'editing' %}
               {# Editing mode: full mg-editor panel #}
-              <div class="mg-editor" data-group-id="{{ mg.id }}">
+              <div class="mg-editor{% if mg.required %} is-required{% endif %}" data-group-id="{{ mg.id }}">
                 <div class="mg-editor-header">
                   <input class="mg-editor-name"
                          data-group-id="{{ mg.id }}"
@@ -1332,6 +1342,29 @@
                          data-group-id="{{ mg.id }}"
                          value="{{ mg.max_select if mg.max_select is not none else 0 }}"
                          min="0" max="20" />
+                </div>
+                {# Day 119: rules preview text (updated live by JS) #}
+                <div class="mg-rules-preview{% if not mg.required %} is-optional{% endif %}"
+                     data-group-id="{{ mg.id }}"
+                     data-required="{{ 'true' if mg.required else 'false' }}"
+                     data-min="{{ mg.min_select if mg.min_select is not none else 0 }}"
+                     data-max="{{ mg.max_select if mg.max_select is not none else 0 }}">
+                  {%- set _req = mg.required -%}
+                  {%- set _min = (mg.min_select or 0)|int -%}
+                  {%- set _max = (mg.max_select or 0)|int -%}
+                  {%- if _req and _min > 0 and _min == _max -%}
+                    Must choose exactly {{ _min }}
+                  {%- elif _req and _min > 0 and _max > _min -%}
+                    Must choose {{ _min }}–{{ _max }}
+                  {%- elif _req and _max > 0 -%}
+                    Must choose up to {{ _max }}
+                  {%- elif _req -%}
+                    Required
+                  {%- elif _max > 0 -%}
+                    Choose up to {{ _max }}
+                  {%- else -%}
+                    Optional
+                  {%- endif -%}
                 </div>
                 {% if mg.modifiers %}
                 {% for mod in mg.modifiers %}
@@ -1524,6 +1557,11 @@
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
+    // Expose cross-script utilities for Day 117+ card view script (separate <script> tag)
+    window._editorShowToast = showToast;
+    window._editorShowError = showError;
+    window._editorDraftId = draftId;
+    window._editorIsEditable = isEditable;
     // Auto-generate a kitchen-friendly short name from a full menu name
     function _autoKitchenName(name) {
       if (!name) return "";
@@ -1965,24 +2003,76 @@
         items.push(item);
       });
 
+      // Day 119: collect modifier_groups per item from card editors
+      const modifier_groups_by_item = {};
+      $$(".mg-editor[data-group-id]").forEach(editor => {
+        const gid = editor.dataset.groupId;
+        if (!gid) return;
+        // Find the card this editor belongs to
+        const card = editor.closest(".item-card");
+        if (!card) return;
+        const cardItemId = card.dataset.id || card.dataset.itemId;
+        if (!cardItemId) return;
+        if (!modifier_groups_by_item[cardItemId]) modifier_groups_by_item[cardItemId] = [];
+        const nameEl   = editor.querySelector(".mg-editor-name");
+        const reqEl    = editor.querySelector(".mg-required-toggle");
+        const minEl    = editor.querySelector(".mg-min-select");
+        const maxEl    = editor.querySelector(".mg-max-select");
+        const modifiers = [];
+        editor.querySelectorAll(".mg-modifier-row").forEach(row => {
+          const modId  = row.dataset.modId;
+          const label  = (row.querySelector(".mg-mod-label")?.value || "").trim();
+          const priceStr = (row.querySelector(".mg-mod-price")?.value || "").trim();
+          if (!label) return;
+          modifiers.push({
+            id: (modId && /^\d+$/.test(modId)) ? Number(modId) : null,
+            label,
+            price_cents: dollarsToCents(priceStr) || 0,
+          });
+        });
+        modifier_groups_by_item[cardItemId].push({
+          id: /^\d+$/.test(gid) ? Number(gid) : null,
+          name: (nameEl?.value || "").trim(),
+          required: reqEl ? reqEl.checked : false,
+          min_select: parseInt(minEl?.value || "0", 10) || 0,
+          max_select: parseInt(maxEl?.value || "0", 10) || 0,
+          modifiers,
+        });
+      });
+
+      // Day 119: validation warnings for required groups with no modifiers
+      const mg_warnings = [];
+      Object.values(modifier_groups_by_item).forEach(groups => {
+        groups.forEach(grp => {
+          if (grp.required && grp.modifiers.length === 0) {
+            mg_warnings.push(`Required group "${grp.name || 'Unnamed'}" has no modifiers.`);
+          }
+        });
+      });
+      if (mg_warnings.length) errors.push(...mg_warnings);
+
       const title = $("#draft-title").value.trim();
-      return { title, items, errors };
+      return { title, items, errors, modifier_groups_by_item };
     }
 
     async function saveNow(){
       if (!isEditable) return;
       _flushPendingRowDeletes();            // commit soft-deleted table rows
       window._flushPendingCardDeletes?.();  // commit soft-deleted cards
-      const { title, items, errors } = collectPayload();
-      if (errors.length){
-        showError(errors[0]);
+      const { title, items, errors, modifier_groups_by_item } = collectPayload();
+      // Day 119: mg warnings are non-blocking — show but don't abort save
+      const mgWarnings = errors.filter(e => e.includes("no modifiers"));
+      const blockingErrors = errors.filter(e => !e.includes("no modifiers"));
+      if (blockingErrors.length){
+        showError(blockingErrors[0]);
         return;
       }
+      if (mgWarnings.length) showToast(mgWarnings[0]);
       try{
         const res = await fetch(`/drafts/${draftId}/save`, {
           method:"POST",
           headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds, deleted_variant_ids: deletedVariantIds, deleted_modifier_group_ids: window._deletedMgIds || [] })
+          body: JSON.stringify({ title, items, deleted_item_ids: deletedIds, deleted_variant_ids: deletedVariantIds, deleted_modifier_group_ids: window._deletedMgIds || [], modifier_groups_by_item: modifier_groups_by_item || {} })
         });
         const data = await res.json();
         if (!res.ok || data.ok===false) throw new Error(data.error || "Save failed");
@@ -3042,6 +3132,11 @@
     const cardView    = document.getElementById("card-view");
     const tablBtn     = document.getElementById("view-table-btn");
     const cardBtn     = document.getElementById("view-cards-btn");
+    // Aliases from main editor script (separate <script> block — cross-script bridge)
+    const draftId    = window._editorDraftId;
+    const isEditable = window._editorIsEditable;
+    const showError  = window._editorShowError  || console.error.bind(console);
+    const showToast  = window._editorShowToast  || console.log.bind(console);
 
     // ---- View switching ----
     function setView(mode) {
@@ -3329,6 +3424,34 @@
     // Tracks group IDs to delete on next save
     window._deletedMgIds = window._deletedMgIds || [];
 
+    // ---- Day 119: Rules preview helper ----
+    function _mgRulesText(required, min, max) {
+      const r = !!required, mn = parseInt(min, 10) || 0, mx = parseInt(max, 10) || 0;
+      if (r && mn > 0 && mn === mx) return `Must choose exactly ${mn}`;
+      if (r && mn > 0 && mx > mn)   return `Must choose ${mn}–${mx}`;
+      if (r && mx > 0)              return `Must choose up to ${mx}`;
+      if (r)                        return "Required";
+      if (mx > 0)                   return `Choose up to ${mx}`;
+      return "Optional";
+    }
+
+    function updateRulesPreview(groupId) {
+      const editor = document.querySelector(`.mg-editor[data-group-id="${groupId}"]`);
+      if (!editor) return;
+      const reqEl  = editor.querySelector(".mg-required-toggle");
+      const minEl  = editor.querySelector(".mg-min-select");
+      const maxEl  = editor.querySelector(".mg-max-select");
+      const prev   = editor.querySelector(".mg-rules-preview");
+      if (!prev) return;
+      const req = reqEl ? reqEl.checked : false;
+      const mn  = minEl ? parseInt(minEl.value, 10) || 0 : 0;
+      const mx  = maxEl ? parseInt(maxEl.value, 10) || 0 : 0;
+      prev.textContent = _mgRulesText(req, mn, mx);
+      prev.classList.toggle("is-optional", !req);
+      editor.classList.toggle("is-required", req);
+    }
+    window.updateRulesPreview = updateRulesPreview;
+
     // -- Patch group name on blur --
     document.addEventListener("change", async e => {
       const inp = e.target;
@@ -3349,6 +3472,7 @@
       if (inp.classList.contains("mg-required-toggle")) {
         const gid = inp.dataset.groupId;
         if (!gid) return;
+        updateRulesPreview(gid);  // Day 119
         await fetch(`/drafts/${draftId}/modifier_groups/${gid}`, {
           method: "PATCH",
           headers: {"Content-Type": "application/json"},
@@ -3360,6 +3484,7 @@
       if (inp.classList.contains("mg-min-select") || inp.classList.contains("mg-max-select")) {
         const gid = inp.dataset.groupId;
         if (!gid) return;
+        updateRulesPreview(gid);  // Day 119
         const field = inp.classList.contains("mg-min-select") ? "min_select" : "max_select";
         const val = parseInt(inp.value, 10);
         if (isNaN(val)) return;
@@ -3433,13 +3558,23 @@
       const addMgBtn = e.target.closest(".card-add-mg-btn");
       if (addMgBtn) {
         const itemId = parseInt(addMgBtn.dataset.itemId, 10);
-        if (!itemId) return;
-        const resp = await fetch(`/drafts/${draftId}/items/${itemId}/modifier_groups`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({name: "New Group", required: false, min_select: 0, max_select: 1}),
-        });
-        if (resp.ok) window.location.reload();
+        if (!itemId) { showError("Missing item ID on button"); return; }
+        showToast("Adding group…");
+        try {
+          const resp = await fetch(`/drafts/${draftId}/items/${itemId}/modifier_groups`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name: "New Group", required: false, min_select: 0, max_select: 1}),
+          });
+          if (resp.ok) {
+            window.location.reload();
+          } else {
+            const data = await resp.json().catch(() => ({}));
+            showError(data.error || `Server error ${resp.status}`);
+          }
+        } catch(err) {
+          showError("Network error: " + String(err));
+        }
         return;
       }
 
@@ -3450,7 +3585,7 @@
         const modal = document.getElementById("mg-template-modal");
         const list  = document.getElementById("mg-template-list");
         const empty = document.getElementById("mg-template-empty");
-        if (!modal || !list) return;
+        if (!modal || !list) { showError("Template modal not found"); return; }
         modal._itemId = itemId;
         list.innerHTML = "";
         // Fetch restaurant id from draft meta or from page

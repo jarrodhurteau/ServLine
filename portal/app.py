@@ -5042,6 +5042,23 @@ def draft_save(draft_id: int):
     deleted_ids = payload.get("deleted_item_ids") or []
     deleted_variant_ids = payload.get("deleted_variant_ids") or []
     deleted_modifier_group_ids = payload.get("deleted_modifier_group_ids") or []
+    # Day 119: per-item modifier_groups[] for full save lifecycle
+    modifier_groups_by_item = payload.get("modifier_groups_by_item") or {}
+
+    # Day 119: server-side validation warnings for modifier groups
+    save_warnings = []
+    if isinstance(modifier_groups_by_item, dict):
+        for _item_key, groups in modifier_groups_by_item.items():
+            if not isinstance(groups, list):
+                continue
+            for grp in groups:
+                if not isinstance(grp, dict):
+                    continue
+                if grp.get("required") and not (grp.get("modifiers") or []):
+                    gname = grp.get("name") or "Unnamed group"
+                    save_warnings.append(
+                        f"Required modifier group \"{gname}\" has no modifiers defined."
+                    )
 
     try:
         if title is not None:
@@ -5074,6 +5091,47 @@ def draft_save(draft_id: int):
                         deleted_mg_count += 1
                 except Exception:
                     continue
+        # Day 119: sync modifier group metadata + modifiers from payload
+        mg_synced = 0
+        if isinstance(modifier_groups_by_item, dict):
+            for _item_key, groups in modifier_groups_by_item.items():
+                if not isinstance(groups, list):
+                    continue
+                for grp in groups:
+                    if not isinstance(grp, dict):
+                        continue
+                    try:
+                        gid = int(grp.get("id") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    if not gid:
+                        continue
+                    # Update group metadata
+                    update_kwargs = {}
+                    if "name" in grp:
+                        update_kwargs["name"] = str(grp["name"]).strip()
+                    if "required" in grp:
+                        update_kwargs["required"] = bool(grp["required"])
+                    if "min_select" in grp:
+                        try:
+                            update_kwargs["min_select"] = int(grp["min_select"])
+                        except (ValueError, TypeError):
+                            pass
+                    if "max_select" in grp:
+                        try:
+                            update_kwargs["max_select"] = int(grp["max_select"])
+                        except (ValueError, TypeError):
+                            pass
+                    # Confirm group exists before counting as synced
+                    found = bool(drafts_store.get_modifier_group(gid))
+                    if not found:
+                        continue
+                    if update_kwargs:
+                        drafts_store.update_modifier_group(gid, **update_kwargs)
+                    # Full-replace modifiers for this group
+                    if "modifiers" in grp:
+                        drafts_store.upsert_group_modifiers(gid, grp["modifiers"] or [])
+                    mg_synced += 1
         saved = {
             "ok": True,
             "saved_at": _now_iso(),
@@ -5081,6 +5139,8 @@ def draft_save(draft_id: int):
             "updated_ids": upsert_result.get("updated_ids", []),
             "deleted_count": deleted_count,
             "deleted_mg_count": deleted_mg_count,
+            "mg_synced": mg_synced,
+            "warnings": save_warnings,
         }
         return jsonify(saved), 200
     except Exception as e:

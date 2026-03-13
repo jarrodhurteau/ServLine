@@ -3135,6 +3135,65 @@ def reorder_modifiers(group_id: int, ordered_ids: List[int]) -> int:
     )
 
 
+def upsert_group_modifiers(group_id: int, modifiers: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Full-replace modifiers (draft_item_variants) for a modifier group.
+
+    Deletes all existing variants for *group_id*, then inserts each entry
+    from *modifiers*.  Each modifier dict should have:
+        label       (str, required — blank entries are skipped)
+        price_cents (int, optional, default 0)
+        id          (int, optional — ignored; always re-inserted for simplicity)
+
+    Returns {"inserted": N, "deleted": N}.
+    """
+    if not isinstance(modifiers, list):
+        modifiers = []
+
+    # Fetch item_id so newly inserted rows are consistent
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT item_id FROM draft_modifier_groups WHERE id=?",
+            (int(group_id),),
+        ).fetchone()
+        if row is None:
+            return {"inserted": 0, "deleted": 0}
+        item_id = row[0]
+
+        cur = conn.cursor()
+        del_result = cur.execute(
+            "DELETE FROM draft_item_variants WHERE modifier_group_id=?",
+            (int(group_id),),
+        )
+        deleted = del_result.rowcount
+
+        inserted = 0
+        for idx, m in enumerate(modifiers):
+            if not isinstance(m, dict):
+                continue
+            label = (m.get("label") or "").strip()
+            if not label:
+                continue
+            try:
+                price_cents = int(m.get("price_cents") or 0)
+            except (ValueError, TypeError):
+                price_cents = 0
+            cur.execute(
+                """
+                INSERT INTO draft_item_variants
+                    (item_id, label, price_cents, kind, position,
+                     modifier_group_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (item_id, label, price_cents, "other", idx,
+                 int(group_id), _now(), _now()),
+            )
+            inserted += 1
+
+        conn.commit()
+    return {"inserted": inserted, "deleted": deleted}
+
+
 def migrate_draft_modifier_groups(draft_id: int) -> Dict[str, int]:
     """
     Batch-migrate all items in *draft_id* that have ungrouped variants.
