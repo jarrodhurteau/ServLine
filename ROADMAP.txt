@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 115 (March 11, 2026) — Sprint 12.1 Capstone: POS Export Upgrade + Modifier Group CRUD (42 tests, 2,368 total)
+Last Updated: Day 116 (March 13, 2026) — Sprint 12.2 Day 1: Category Navigation Panel (34 tests, 2,403 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1794,11 +1794,20 @@ Sprint 12.1 — Modifier Group Schema & Migration (Days 111-115)
 
 Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 ........................................................
-  [ ] Category-based navigation view:
-        - Left sidebar: category list with item counts (collapsible)
-        - Main area: items in selected category
-        - "All Items" view for full list (current default)
-        - Category drag-and-drop reordering
+  [x] Category-based navigation view (Day 116):
+        - Left sidebar: category list with item counts (collapsible) ✓
+        - Main area: items in selected category ✓
+        - "All Items" view for full list (current default) ✓
+        - Category drag-and-drop reordering ✓
+        - Modifier group count badges (MG N) per category + per item ✓
+        - save_category_order() + get_category_order() storage ✓
+        - POST /drafts/<id>/reorder_categories endpoint ✓
+        - Bug fix: variant sub-rows restored (ungrouped_variants → variants alias) ✓
+
+    Day 116 test suite: 34 cases, 100% pass rate
+    Cumulative: 2,403 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  [ ] Item card layout (option alongside current table view):
   [ ] Item card layout (option alongside current table view):
         - Card shows: name, price, description preview, modifier group count
         - Click card → expand to show modifier groups + modifiers

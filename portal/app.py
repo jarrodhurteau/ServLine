@@ -4924,6 +4924,13 @@ def draft_editor(draft_id: int):
         except Exception:
             pass
 
+    # Day 116: saved category display order
+    category_order = []
+    try:
+        category_order = drafts_store.get_category_order(draft_id)
+    except Exception:
+        pass
+
     return _safe_render(
         "draft_editor.html",
         draft=draft,
@@ -4938,6 +4945,9 @@ def draft_editor(draft_id: int):
         # NEW pt.8 context
         category_tree=category_tree,
         flat_groups=flat_groups,
+
+        # Day 116: category nav order
+        category_order=category_order,
     )
 
 
@@ -5138,6 +5148,33 @@ def modifiers_reorder(draft_id: int, group_id: int):
         return err
     updated = drafts_store.reorder_modifiers(group_id, ordered_ids)
     return jsonify({"ok": True, "updated": updated}), 200
+
+
+@app.post("/drafts/<int:draft_id>/reorder_categories")
+@login_required
+def reorder_categories(draft_id: int):
+    """
+    Persist the user-defined category display order for a draft.
+
+    Body: {"categories": ["Cat A", "Cat B", ...]}
+    Order is stored as a JSON array; unknown categories are ignored at render time.
+
+    Returns: {"ok": true, "count": <int>}
+    """
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "Draft not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    if "categories" not in payload:
+        return jsonify({"error": "Missing 'categories' key"}), 400
+    cats = payload["categories"]
+    if not isinstance(cats, list):
+        return jsonify({"error": "'categories' must be a list"}), 400
+    if not all(isinstance(c, str) for c in cats):
+        return jsonify({"error": "All categories must be strings"}), 400
+    drafts_store.save_category_order(draft_id, cats)
+    return jsonify({"ok": True, "count": len(cats)}), 200
 
 
 @app.get("/restaurants/<int:restaurant_id>/modifier_templates")

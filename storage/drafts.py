@@ -391,6 +391,11 @@ def _ensure_schema() -> None:
             cur.execute(
                 "ALTER TABLE draft_items ADD COLUMN kitchen_name TEXT;"
             )
+        # Day 116 — category ordering per draft
+        if not _col_exists("drafts", "category_order"):
+            cur.execute(
+                "ALTER TABLE drafts ADD COLUMN category_order TEXT;"
+            )
 
         conn.commit()
 
@@ -842,9 +847,10 @@ def _get_draft_items_nested(draft_id: int) -> List[Dict[str, Any]]:
                 }
             )
 
-    # strip internal map
+    # strip internal map; alias ungrouped_variants → variants for template compat
     for item in items_map.values():
         del item["_groups_map"]
+        item["variants"] = item["ungrouped_variants"]
 
     return [items_map[iid] for iid in ordered_ids]
 
@@ -996,6 +1002,37 @@ def approve_publish(draft_id: int) -> None:
 def approve_draft(draft_id: int) -> None:
     """Mark draft as approved (owner reviewed and approved for POS export)."""
     save_draft_metadata(int(draft_id), status="approved")
+
+
+# ------------------------------------------------------------
+# Category order (Day 116)
+# ------------------------------------------------------------
+def save_category_order(draft_id: int, categories: List[str]) -> None:
+    """Persist the user-defined category display order for a draft."""
+    import json as _json
+    encoded = _json.dumps([str(c) for c in categories])
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE drafts SET category_order=?, updated_at=? WHERE id=?",
+            (encoded, _now(), int(draft_id)),
+        )
+        conn.commit()
+
+
+def get_category_order(draft_id: int) -> List[str]:
+    """Return the stored category order for a draft, or [] if none saved."""
+    import json as _json
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT category_order FROM drafts WHERE id=?", (int(draft_id),)
+        ).fetchone()
+    if not row or not row["category_order"]:
+        return []
+    try:
+        result = _json.loads(row["category_order"])
+        return result if isinstance(result, list) else []
+    except (ValueError, TypeError):
+        return []
 
 
 def record_export(

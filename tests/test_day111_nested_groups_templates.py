@@ -171,7 +171,8 @@ class TestNestedGetDraftItems:
         _, _, did, _ = seeded
         items = get_draft_items(did, include_modifier_groups=True)
         assert "modifier_groups" in items[0]
-        assert "variants" not in items[0]
+        # Day 116: 'variants' is now aliased to ungrouped_variants for template compat
+        assert "variants" in items[0]
 
     def test_nested_returns_ungrouped_variants_key(self, seeded):
         _, _, did, _ = seeded

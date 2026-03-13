@@ -791,7 +791,7 @@
       </section>
       {% endif %}
 
-      <div class="table-wrap">
+      <div class="table-wrap" id="items-table-wrap" data-category-order="{{ category_order|tojson }}">
         <table class="editor" id="items-table">
           <thead>
             <tr>
@@ -809,7 +809,8 @@
             <tr class="conf-row {% if it.confidence is not none %}{{ it.confidence|confidence_class }}{% else %}conf-unknown{% endif %}{% if it.low_confidence %} is-low{% endif %}"
                 data-id="{{ it.id }}"
                 data-cat="{{ (it.category or '')|e }}"
-                data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
+                data-confidence="{{ it.confidence if it.confidence is not none else '' }}"
+                data-modifier-group-count="{{ it.modifier_groups|length if it.modifier_groups is defined else 0 }}">
               <td><input type="checkbox" class="row-select" /></td>
               <td>
                 <div class="name-cell">
@@ -1199,39 +1200,95 @@
       setTimeout(()=>tr.classList.remove("row-focus"), 1200);
     }
 
+    // Day 116: category order state (synced with server after drag)
+    let _catOrder = (()=>{
+      try {
+        const raw = document.getElementById("items-table-wrap")
+          ?.dataset.categoryOrder;
+        return raw ? JSON.parse(raw) : [];
+      } catch(e){ return []; }
+    })();
+
+    function _sortedCats(rawCats){
+      // Respect _catOrder; unknown cats appended alphabetically; Uncategorized last
+      const ordered = _catOrder.filter(c => rawCats.includes(c));
+      const remaining = rawCats.filter(c => !ordered.includes(c) && c !== "(Uncategorized)")
+                               .sort((a,b)=>a.localeCompare(b));
+      const uncatIdx = rawCats.indexOf("(Uncategorized)");
+      const result = [...ordered, ...remaining];
+      if (uncatIdx !== -1) result.push("(Uncategorized)");
+      return result;
+    }
+
+    function _persistCatOrder(cats){
+      _catOrder = cats.filter(c => c !== "(Uncategorized)");
+      fetch(`/drafts/${draftId}/reorder_categories`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({categories: _catOrder}),
+      }).catch(()=>{});
+    }
+
     function rebuildOutline(){
       const data = gatherData();
-      const cats = Object.keys(data).sort((a,b)=>{
-        const au = a === "(Uncategorized)", bu = b === "(Uncategorized)";
-        if (au && !bu) return 1;
-        if (!au && bu) return -1;
-        return a.localeCompare(b);
-      });
+      const allCats = Object.keys(data);
+      const cats = _sortedCats(allCats);
 
       const outline = document.getElementById("outline");
       outline.innerHTML = "";
 
+      // "All Items" row
       const liAll = document.createElement("li");
       liAll.className = "cat";
-      liAll.innerHTML = `<div class="row" data-cat="__ALL__"><strong>All</strong><span class="count">${$$("#items-body tr").length}</span></div>`;
+      liAll.innerHTML = `<div class="row" data-cat="__ALL__"><strong>All Items</strong><span class="count">${$$("#items-body tr").length}</span></div>`;
       outline.appendChild(liAll);
-
       liAll.querySelector(".row").addEventListener("click", ()=>{
         $$("#outline .cat").forEach(e=>e.classList.remove("active"));
         liAll.classList.add("active");
         setFilterByCategory("__ALL__");
       });
 
+      let dragSrc = null;
+
       cats.forEach(cat=>{
         const items = data[cat];
         const itemNames = Object.keys(items).sort((a,b)=>a.localeCompare(b));
+        const totalCount = itemNames.reduce((acc, n)=>acc + items[n].rows.length, 0);
+
+        // Count modifier groups across all rows in this category
+        // Note: items[base].rows contains row ID strings, not <tr> elements
+        let mgCount = 0;
+        itemNames.forEach(base=>{
+          items[base].rows.forEach(rowId=>{
+            const trEl = document.querySelector(`#items-body tr[data-id="${CSS.escape(String(rowId))}"]`);
+            if (trEl) mgCount += parseInt(trEl.dataset.modifierGroupCount||"0",10);
+          });
+        });
+        const mgBadge = mgCount > 0
+          ? `<span class="cat-mg-badge" title="${mgCount} modifier group(s)">MG ${mgCount}</span>`
+          : "";
 
         const li = document.createElement("li");
-        li.className = "cat";
-        const totalCount = itemNames.reduce((acc, n)=>acc + items[n].rows.length, 0);
-        li.innerHTML = `<div class="row"><strong>${cat}</strong><span class="count">${totalCount}</span></div>`;
+        li.className = "cat collapsed";
+        li.setAttribute("draggable", cat !== "(Uncategorized)" ? "true" : "false");
+        li.dataset.catName = cat;
+        li.innerHTML = `
+          <div class="row" data-cat="${cat.replace(/"/g,'&quot;')}">
+            <span class="cat-label-text" title="${cat.replace(/"/g,'&quot;')}">${cat}</span>
+            ${mgBadge}
+            <span class="count">${totalCount}</span>
+            <span class="cat-toggle">▾</span>
+          </div>`;
+
         const ulItems = document.createElement("ul");
         ulItems.className = "items";
+
+        // Collapse toggle — click on the toggle arrow only
+        const toggleBtn = li.querySelector(".cat-toggle");
+        toggleBtn.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          li.classList.toggle("collapsed");
+        });
 
         li.querySelector(".row").addEventListener("click", ()=>{
           $$("#outline .cat").forEach(e=>e.classList.remove("active"));
@@ -1239,11 +1296,61 @@
           setFilterByCategory(cat);
         });
 
+        // Drag-and-drop reordering (Day 116)
+        if (cat !== "(Uncategorized)") {
+          li.addEventListener("dragstart", (e)=>{
+            dragSrc = li;
+            e.dataTransfer.effectAllowed = "move";
+          });
+          li.addEventListener("dragend", ()=>{
+            $$("#outline .cat").forEach(c=>c.classList.remove("drag-over"));
+            dragSrc = null;
+          });
+          li.addEventListener("dragover", (e)=>{
+            if (!dragSrc || dragSrc === li) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            $$("#outline .cat").forEach(c=>c.classList.remove("drag-over"));
+            li.classList.add("drag-over");
+          });
+          li.addEventListener("dragleave", ()=>li.classList.remove("drag-over"));
+          li.addEventListener("drop", (e)=>{
+            e.preventDefault();
+            li.classList.remove("drag-over");
+            if (!dragSrc || dragSrc === li) return;
+            const parent = outline;
+            const allLis = Array.from(parent.querySelectorAll(":scope > li.cat[data-cat-name]"));
+            const srcIdx = allLis.indexOf(dragSrc);
+            const dstIdx = allLis.indexOf(li);
+            if (srcIdx === -1 || dstIdx === -1) return;
+            // DOM move
+            if (srcIdx < dstIdx) {
+              parent.insertBefore(dragSrc, li.nextSibling);
+            } else {
+              parent.insertBefore(dragSrc, li);
+            }
+            // Persist new order
+            const newOrder = Array.from(
+              parent.querySelectorAll(":scope > li.cat[data-cat-name]")
+            ).map(el=>el.dataset.catName).filter(c=>c && c !== "(Uncategorized)");
+            _persistCatOrder(newOrder);
+          });
+        }
+
         itemNames.forEach(base=>{
           const entry = items[base];
           const liItem = document.createElement("li");
           liItem.className = "item";
-          liItem.innerHTML = `<div class="row"><span>${base}</span><span class="count">${entry.rows.length}</span></div>`;
+          // per-item modifier group count badge (rows contains ID strings, not elements)
+          let itemMg = 0;
+          entry.rows.forEach(rowId=>{
+            const trEl = document.querySelector(`#items-body tr[data-id="${CSS.escape(String(rowId))}"]`);
+            if (trEl) itemMg += parseInt(trEl.dataset.modifierGroupCount||"0",10);
+          });
+          const itemMgBadge = itemMg > 0
+            ? `<span class="cat-mg-badge" title="${itemMg} modifier group(s)">${itemMg}</span>`
+            : "";
+          liItem.innerHTML = `<div class="row"><span>${base}</span>${itemMgBadge}<span class="count">${entry.rows.length}</span></div>`;
 
           liItem.querySelector(".row").addEventListener("click", (e)=>{
             e.stopPropagation();
