@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 116 (March 13, 2026) — Sprint 12.2 Day 1: Category Navigation Panel (34 tests, 2,403 total)
+Last Updated: Day 117 (March 13, 2026) — Sprint 12.2 Day 2: Item Card Layout + Kitchen Name Editor (38 tests, 2,441 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1807,12 +1807,24 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
     Day 116 test suite: 34 cases, 100% pass rate
     Cumulative: 2,403 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  [ ] Item card layout (option alongside current table view):
-  [ ] Item card layout (option alongside current table view):
-        - Card shows: name, price, description preview, modifier group count
-        - Click card → expand to show modifier groups + modifiers
-        - Quick-edit inline (name, price) without opening full form
-        - Badge indicators: variant count, validation warnings
+  [x] Item card layout + kitchen name editor (Day 117):
+        - Card shows: name, price, description preview, modifier group count ✓
+        - Click card → expand to show modifier groups + modifiers ✓
+        - Quick-edit inline (name, price) without opening full form ✓
+        - Badge indicators: variant count, validation warnings ✓
+        - View toggle (≡ Table / ⊞ Cards) with localStorage persistence ✓
+        - Category filter + search bar sync to card view ✓
+        - is-low border on low-confidence items ✓
+        - Soft-delete (X overlay + Undo) on cards and table rows, committed on Save ✓
+        - Add Item uses active sidebar category, creates card in card view ✓
+        - Kitchen name field: fixed-width (160px) autosize textarea next to item name ✓
+        - Auto Kitchen Names button: bulk-fill all empty kitchen names from item name ✓
+        - Auto-fill on name blur: fills kitchen name if still empty ✓
+        - Algorithm: strips stop words, 4 significant words, 25-char cap ✓
+        - Name column header: Name / Kitchen Name ✓
+
+    Day 117 test suite: 38 cases, 100% pass rate
+    Cumulative: 2,441 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
   [ ] Modifier group management UI:
         - Per-item: "Add Modifier Group" button
         - Group header: name, required toggle, min/max selectors

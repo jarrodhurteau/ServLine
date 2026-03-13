@@ -297,22 +297,33 @@
       gap: 6px;
       flex-wrap: wrap;
     }
+    /* Item name grows to fill, kitchen name is a fixed-width sibling */
+    .name-main > .name-input {
+      flex: 1 1 auto;
+      min-width: 80px;
+      width: auto;   /* override .cell-textarea's width:100% */
+    }
 
     /* === Phase 5: Readability & wrapping === */
     .name-cell {
       max-width: 100%;
     }
     .kitchen-name-row {
-      margin-top: 3px;
+      flex: 0 0 160px;   /* fixed 160px in the flex row */
     }
     .kitchen-name-row .kitchen-name {
       font-size: 0.78rem;
       color: #666;
-      width: 100%;
+      width: 160px;
       border: 1px solid #ddd;
       border-radius: 3px;
       padding: 2px 4px;
       background: #fafafa;
+      resize: none;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: normal;
+      overflow-wrap: break-word;
     }
     .kitchen-name-row .kitchen-name:focus {
       outline: none;
@@ -338,7 +349,7 @@
     }
     #items-table {
       width: 100%;
-      table-layout: fixed;
+      table-layout: auto;
     }
     #items-table th,
     #items-table td {
@@ -571,6 +582,164 @@
       background: rgba(99, 102, 241, 0.15);
       color: #fff;
     }
+
+    /* ===== Day 117: View Toggle & Card View ===== */
+    .view-toggle {
+      display: inline-flex; gap: 2px;
+      border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+      flex-shrink: 0;
+    }
+    .view-btn {
+      padding: 5px 12px; font-size: .82rem; background: transparent;
+      border: none; color: var(--muted); cursor: pointer; border-radius: 0;
+      transition: background .15s, color .15s;
+    }
+    .view-btn:hover { background: rgba(255,255,255,.06); color: var(--ink); }
+    .view-btn.active { background: var(--brand); color: #fff; }
+
+    #card-view { display: none; padding: 4px 0 12px; }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .item-card {
+      background: rgba(20, 28, 48, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: default;
+      transition: border-color .15s, box-shadow .15s;
+      position: relative;
+    }
+    .item-card:hover { border-color: #3b4f7a; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+    .item-card.is-low { border-left: 3px solid #dc3545; }
+    .item-card.card-hidden { display: none; }
+
+    .card-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 8px; margin-bottom: 4px;
+    }
+    .card-name-display {
+      font-weight: 600; font-size: .95rem; color: var(--ink);
+      flex: 1; min-width: 0; word-break: break-word;
+    }
+    .card-price-display {
+      font-size: .9rem; color: #a3b4d3; white-space: nowrap; flex-shrink: 0;
+    }
+    .card-category-label {
+      font-size: .75rem; color: var(--muted); margin-bottom: 6px;
+    }
+    .card-desc {
+      font-size: .82rem; color: var(--muted); margin-bottom: 8px;
+      line-height: 1.4; word-break: break-word;
+    }
+    .card-badges {
+      display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;
+    }
+    .card-badge {
+      font-size: .72rem; padding: 2px 7px; border-radius: 10px; font-weight: 500;
+    }
+    .card-badge-variant {
+      background: rgba(99,102,241,.15); color: #a5b4fc;
+      border: 1px solid rgba(99,102,241,.3);
+    }
+    .card-badge-mg {
+      background: rgba(14,165,233,.12); color: #7dd3fc;
+      border: 1px solid rgba(14,165,233,.3);
+    }
+    .card-badge-warn {
+      background: rgba(220,53,69,.13); color: #ffb3b8;
+      border: 1px solid rgba(220,53,69,.3);
+    }
+
+    /* Quick-edit inputs inside card */
+    .card-quick-edit {
+      display: none; gap: 6px; margin-bottom: 8px;
+    }
+    .card-quick-edit.show { display: flex; }
+    .card-name-qe { flex: 1; font-size: .85rem; }
+    .card-price-qe { width: 80px; font-size: .85rem; }
+
+    /* Expand button */
+    .card-expand-btn {
+      background: transparent; border: none; color: var(--muted);
+      font-size: .78rem; cursor: pointer; padding: 2px 0;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .card-expand-btn:hover { color: var(--ink); }
+
+    /* Expanded modifier groups panel */
+    .card-groups { display: none; margin-top: 8px; }
+    .card-groups.show {
+      display: block;
+      border-top: 1px solid var(--line); padding-top: 8px;
+    }
+    .card-group { margin-bottom: 8px; }
+    .card-group-name {
+      font-size: .8rem; font-weight: 600; color: #7dd3fc; margin-bottom: 4px;
+    }
+    .card-group-meta {
+      font-size: .72rem; color: var(--muted); margin-bottom: 4px;
+    }
+    .card-modifiers {
+      list-style: none; margin: 0; padding: 0;
+    }
+    .card-modifiers li {
+      font-size: .8rem; color: var(--muted); padding: 2px 0;
+      border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .card-modifiers li:last-child { border-bottom: none; }
+    .card-mod-price { color: #a3b4d3; }
+
+    /* Trashcan delete button on card */
+    .card-delete-btn {
+      background: transparent; border: 1px solid rgba(220,53,69,.35);
+      color: rgba(220,53,69,.75); border-radius: 6px;
+      padding: 3px 6px; cursor: pointer; display: inline-flex;
+      align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .card-delete-btn:hover { background: rgba(220,53,69,.15); color: #ff6b7a; }
+
+    /* Soft-delete state */
+    .card-soft-deleted { position: relative; }
+    .card-soft-deleted::before {
+      content: ''; position: absolute; inset: 0; z-index: 1;
+      background: rgba(11,18,32,.55); border-radius: 10px; pointer-events: none;
+    }
+    .card-delete-overlay {
+      position: absolute; inset: 0; z-index: 2;
+      border-radius: 10px; overflow: hidden; pointer-events: none;
+    }
+    .card-delete-overlay svg { display: block; width: 100%; height: 100%; }
+    .card-undo-row {
+      position: relative; z-index: 3;
+      display: flex; justify-content: center; padding-top: 8px;
+    }
+    .card-undo-btn {
+      background: rgba(220,53,69,.12); border: 1px solid rgba(220,53,69,.4);
+      color: #ffb3b8; border-radius: 6px; padding: 4px 18px;
+      font-size: .8rem; cursor: pointer;
+    }
+    .card-undo-btn:hover { background: rgba(220,53,69,.25); color: #fff; }
+
+    /* Table row soft-delete (Day 117) */
+    #items-body tr.row-soft-deleted td {
+      opacity: 0.4;
+    }
+    #items-body tr.row-soft-deleted .undo-row-btn {
+      opacity: 1 !important;
+    }
+    #items-body tr.row-soft-deleted .name-input,
+    #items-body tr.row-soft-deleted .desc-text,
+    #items-body tr.row-soft-deleted .price,
+    #items-body tr.row-soft-deleted .category {
+      text-decoration: line-through;
+      text-decoration-color: rgba(220,53,69,.7);
+    }
   </style>
 
   <div class="layout">
@@ -749,8 +918,17 @@
           <span id="confidence-threshold-value">0%</span>
         </div>
 
+        <!-- Day 117: View toggle -->
+        <div class="view-toggle" id="view-toggle">
+          <button id="view-table-btn" class="view-btn active" title="Table view" aria-pressed="true">≡ Table</button>
+          <button id="view-cards-btn" class="view-btn" title="Card view" aria-pressed="false">⊞ Cards</button>
+        </div>
+
         <div class="spacer"></div>
         <button id="add-row-btn" class="btn">Add Item</button>
+        {% if draft.status == 'editing' %}
+        <button id="auto-kitchen-btn" class="btn" title="Auto-fill blank kitchen names from item names">Auto Kitchen Names</button>
+        {% endif %}
         <span style="position:relative;display:inline-flex;align-items:center;gap:4px;">
           <input list="category-datalist" id="bulk-cat-input" class="cell-input"
                  placeholder="Category..." style="width:130px;font-size:.82rem;"
@@ -796,7 +974,7 @@
           <thead>
             <tr>
               <th style="width:38px;"><input type="checkbox" id="select-all" /></th>
-              <th style="min-width:220px;">Name</th>
+              <th style="min-width:360px;">Name/<br>Kitchen Name</th>
               <th style="min-width:320px;">Description</th>
               <th style="min-width:120px;">Price</th>
               <th style="min-width:160px;">Category</th>
@@ -819,6 +997,12 @@
                               class="cell-textarea name-text name name-input js-autosize prewrap text-wrap"
                               data-autosize
                               {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.name|e }}</textarea>
+                    <div class="kitchen-name-row">
+                      <textarea rows="1"
+                                class="cell-input kitchen-name"
+                                placeholder="Kitchen name…"
+                                {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.kitchen_name or '')|e }}</textarea>
+                    </div>
                     {% if it.confidence is not none %}
                       {% set conf = it.confidence|int %}
                       {% if conf >= 80 %}
@@ -838,12 +1022,6 @@
                     {% if it.modifier_groups %}
                       <span class="modifier-group-pill" title="{{ it.modifier_groups|map(attribute='name')|join(', ') }}">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
                     {% endif %}
-                  </div>
-                  <div class="kitchen-name-row">
-                    <input class="cell-input kitchen-name"
-                           placeholder="Kitchen name…"
-                           value="{{ (it.kitchen_name or '')|e }}"
-                           {% if draft.status != 'editing' %}disabled{% endif %} />
                   </div>
                   {% if it.quality is not none %}
                     <div class="quality-meta">
@@ -934,6 +1112,106 @@
         </table>
       </div>
 
+      <!-- Day 117: Card View (hidden by default, shown when user toggles) -->
+      <div id="card-view">
+        <div id="card-grid" class="card-grid">
+          {% for it in items %}
+          <div class="item-card{% if it.low_confidence %} is-low{% endif %}"
+               id="card-{{ it.id }}"
+               data-id="{{ it.id }}"
+               data-cat="{{ (it.category or '')|lower|e }}"
+               data-name="{{ (it.name or '')|lower|e }}"
+               data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
+
+            <div class="card-header">
+              <div class="card-name-display">{{ it.name|e }}</div>
+              {% if it.price_cents %}
+              <div class="card-price-display">${{ '%.2f'|format(it.price_cents / 100) }}</div>
+              {% endif %}
+            </div>
+
+            {% if it.category %}
+            <div class="card-category-label">{{ it.category|e }}</div>
+            {% endif %}
+
+            {% if it.description %}
+            <div class="card-desc">{{ it.description|e }}</div>
+            {% endif %}
+
+            <div class="card-badges">
+              {% if it.variants %}
+              <span class="card-badge card-badge-variant">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.modifier_groups %}
+              <span class="card-badge card-badge-mg">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.low_confidence %}
+              <span class="card-badge card-badge-warn">⚠ Low</span>
+              {% endif %}
+            </div>
+
+            {% if draft.status == 'editing' %}
+            <div class="card-quick-edit" id="card-qe-{{ it.id }}">
+              <input class="cell-input card-name-qe" data-card-id="{{ it.id }}"
+                     value="{{ it.name|e }}" placeholder="Name" aria-label="Name" />
+              <input class="cell-input card-price-qe" data-card-id="{{ it.id }}"
+                     value="{% if it.price_cents %}{{ '%.2f'|format(it.price_cents / 100) }}{% endif %}"
+                     placeholder="Price" inputmode="decimal" aria-label="Price" />
+            </div>
+            {% endif %}
+
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              {% if it.modifier_groups %}
+              <button class="card-expand-btn" data-card-id="{{ it.id }}" aria-expanded="false">
+                <span class="card-expand-icon">▸</span> Show groups
+              </button>
+              {% endif %}
+              {% if draft.status == 'editing' %}
+              <button class="card-edit-btn btn" style="font-size:.75rem;padding:2px 8px;"
+                      data-card-id="{{ it.id }}">Edit</button>
+              <button class="card-delete-btn" style="margin-left:auto;" title="Delete item"
+                      data-card-id="{{ it.id }}" aria-label="Delete item">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+                  <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                  <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                </svg>
+              </button>
+              {% endif %}
+            </div>
+
+            {% if it.modifier_groups %}
+            <div class="card-groups" id="card-groups-{{ it.id }}">
+              {% for mg in it.modifier_groups %}
+              <div class="card-group">
+                <div class="card-group-name">{{ mg.name|e }}</div>
+                <div class="card-group-meta">
+                  {% if mg.required %}Required{% else %}Optional{% endif %}
+                  {% if mg.min_select is not none and mg.max_select is not none %}
+                    · {{ mg.min_select }}–{{ mg.max_select }} selections
+                  {% endif %}
+                </div>
+                {% if mg.modifiers %}
+                <ul class="card-modifiers">
+                  {% for mod in mg.modifiers %}
+                  <li>
+                    {{ mod.label|e }}
+                    {% if mod.price_cents %}
+                    <span class="card-mod-price">+${{ '%.2f'|format(mod.price_cents / 100) }}</span>
+                    {% endif %}
+                  </li>
+                  {% endfor %}
+                </ul>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
       <datalist id="category-datalist">
         {% for c in categories %}
           <option value="{{ c|e }}"></option>
@@ -983,6 +1261,7 @@
 
     let dirty = false;
     let deletedIds = [];
+    const _pendingRowDeletes = new Map(); // rowId → tr
 
     // Initialize confidence slider from localStorage
     if (confSlider && confValue) {
@@ -1051,6 +1330,22 @@
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
+    // Auto-generate a kitchen-friendly short name from a full menu name
+    function _autoKitchenName(name) {
+      if (!name) return "";
+      const STOP = new Set(["with","and","the","a","an","of","in","on","or",
+        "served","topped","fresh","house","our","your","&","–","-","+"]);
+      const words = name.trim().split(/\s+/);
+      const sig = words.filter(w => !STOP.has(w.toLowerCase().replace(/[^a-z&]/g,"")));
+      const take = sig.length ? sig : words;  // fallback: keep all if all are stop words
+      // Try 4 words first (25-char cap), then shrink until it fits
+      let result = take.slice(0, 4).join(" ");
+      if (result.length > 25) result = take.slice(0, 3).join(" ");
+      if (result.length > 25) result = take.slice(0, 2).join(" ");
+      if (result.length > 25) result = take[0].slice(0, 25);
+      return result;
+    }
+
     function dollarsToCents(val){
       if (val==null) return 0;
       let s=String(val).trim().replace(/[$,]/g,"");
@@ -1062,6 +1357,8 @@
 
     function autosize(el){ el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; }
     $$(".desc-text, .name-text").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
+
+    $$(".kitchen-name").forEach(ta=>{ autosize(ta); ta.addEventListener('input',()=>autosize(ta)); });
 
     function applyConfidenceTint(){
       $$("#items-body tr").forEach(tr=>{
@@ -1480,6 +1777,8 @@
 
     async function saveNow(){
       if (!isEditable) return;
+      _flushPendingRowDeletes();            // commit soft-deleted table rows
+      window._flushPendingCardDeletes?.();  // commit soft-deleted cards
       const { title, items, errors } = collectPayload();
       if (errors.length){
         showError(errors[0]);
@@ -1516,12 +1815,18 @@
         setDirty(false);
         deletedIds=[];
         deletedVariantIds=[];
+        _pendingRowDeletes.clear();
         showSuccess("Saved");
         rebuildOutline();
       } catch(e){
         showError(String(e));
       }
     }
+
+    // Auto-grow kitchen-name textareas for dynamically added rows
+    itemsBody.addEventListener("input", (e)=>{
+      if (e.target.classList.contains("kitchen-name")) autosize(e.target);
+    });
 
     if (isEditable){
       itemsBody.addEventListener("input", ()=>{
@@ -1576,10 +1881,10 @@
             <div class="name-main">
               <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
                 .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
+              <div class="kitchen-name-row"><textarea rows="1" class="cell-input kitchen-name" placeholder="Kitchen name…">${(prefill.kitchen_name||'').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></div>
               ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
               ${prefill.low_confidence ? `<span class="pill-low-mini">⚠ Low</span>` : ``}
             </div>
-            ${prefill.kitchen_name ? `<div class="kitchen-name-row"><input class="cell-input kitchen-name" placeholder="Kitchen name…" value="${(prefill.kitchen_name||'').replace(/"/g,'&quot;')}" /></div>` : `<div class="kitchen-name-row"><input class="cell-input kitchen-name" placeholder="Kitchen name…" value="" /></div>`}
             <span class="prov-pin"
                   title="Source & confidence"
                   data-prov-name="${(prefill.name||'').replace(/"/g,'&quot;')}"
@@ -1607,10 +1912,27 @@
       return tr;
     }
 
+    function _activeSidebarCategory(){
+      const activeRow = document.querySelector("#outline .cat.active .row");
+      if (!activeRow) return "";
+      const cat = activeRow.dataset.cat || "__ALL__";
+      return cat === "__ALL__" ? "" : cat;
+    }
+
     $("#add-row-btn").addEventListener("click",(e)=>{
       e.preventDefault();
-      const tr=addRow({position:0});
-      $(".name", tr)?.focus();
+      const cat = _activeSidebarCategory();
+      const tr = addRow({position:0, category: cat || ""});
+      // If in card view, create a live card for this row and scroll to it
+      if (document.getElementById("card-view")?.style.display !== "none") {
+        const card = _createDynamicCard(tr);
+        if (card) {
+          card.scrollIntoView({behavior:"smooth", block:"center"});
+          card.querySelector(".card-name-qe")?.focus();
+        }
+      } else {
+        $(".name", tr)?.focus();
+      }
     });
 
     itemsBody.addEventListener("click",(e)=>{
@@ -1654,19 +1976,8 @@
         wireRowProvPins(clone);
       } else if (btn.classList.contains("btn-danger") && !btn.classList.contains("delete-variant-btn")){
         if (tr.classList.contains("variant-row")) return; // Handled by delete-variant-btn
-        const parentId = tr.getAttribute("data-id");
-        // Delete associated variant rows
-        $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`).forEach(vtr => {
-          const vid = vtr.getAttribute("data-variant-id");
-          if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
-          vtr.remove();
-        });
-        queueDelete(tr);
-        tr.remove();
+        softDeleteRow(tr);
         setDirty(true);
-        showToast("Deleted");
-        rebuildOutline();
-        applyConfidenceTint();
       }
     });
 
@@ -1675,18 +1986,37 @@
       if (idAttr && /^\d+$/.test(idAttr)) deletedIds.push(Number(idAttr));
     }
 
-    selectAll?.addEventListener("change", ()=>{
-      const checked=selectAll.checked;
-      $$(".row-select").forEach(cb=>cb.checked=checked);
-    });
+    function softDeleteRow(tr) {
+      if (tr.classList.contains("variant-row")) return;
+      if (tr.classList.contains("row-soft-deleted")) return;
+      const rowId = tr.getAttribute("data-id");
+      _pendingRowDeletes.set(rowId, tr);
+      tr.classList.add("row-soft-deleted");
+      const delBtn = tr.querySelector(".btn-danger.delete-btn");
+      if (delBtn) delBtn.style.display = "none";
+      const undoBtn = document.createElement("button");
+      undoBtn.className = "btn btn-secondary undo-row-btn";
+      undoBtn.textContent = "↩ Undo";
+      undoBtn.style.cssText = "font-size:.75rem;padding:2px 6px;";
+      (delBtn ? delBtn.parentElement : tr.querySelector(".row-actions"))?.appendChild(undoBtn);
+      undoBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _pendingRowDeletes.delete(rowId);
+        tr.classList.remove("row-soft-deleted");
+        if (delBtn) delBtn.style.display = "";
+        undoBtn.remove();
+        // Sync: un-hide card if it was hidden by card soft-delete
+        const card = document.getElementById(`card-${rowId}`);
+        if (card && card.classList.contains("card-soft-deleted")) {
+          card.querySelector(".card-undo-btn")?.click();
+        }
+      });
+    }
 
-    $("#delete-selected-btn").addEventListener("click", (e)=>{
-      e.preventDefault();
-      const selected=$$(".row-select").filter(cb=>cb.checked).map(cb=>cb.closest("tr"));
-      if (!selected.length) return;
-      selected.forEach(tr=>{
-        // Cascade: delete associated variant rows
-        const parentId = tr.getAttribute("data-id");
+    function _flushPendingRowDeletes() {
+      if (!_pendingRowDeletes.size) return;
+      _pendingRowDeletes.forEach((tr, rowId) => {
+        const parentId = rowId;
         $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(parentId))}"]`).forEach(vtr => {
           const vid = vtr.getAttribute("data-variant-id");
           if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
@@ -1695,10 +2025,55 @@
         queueDelete(tr);
         tr.remove();
       });
+      _pendingRowDeletes.clear();
+    }
+
+    // Expose for card-view soft-delete flush (Day 117)
+    window._queueDeleteRow = function(rowId){
+      const tr = document.querySelector(`#items-body tr[data-id="${CSS.escape(String(rowId))}"]`);
+      if (!tr) return;
+      $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(String(rowId))}"]`).forEach(vtr => {
+        const vid = vtr.getAttribute("data-variant-id");
+        if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+        vtr.remove();
+      });
+      queueDelete(tr);
+      tr.remove();
+    };
+    window._rebuildOutline = () => rebuildOutline();
+
+    selectAll?.addEventListener("change", ()=>{
+      const checked=selectAll.checked;
+      $$(".row-select").forEach(cb=>cb.checked=checked);
+    });
+
+    $("#delete-selected-btn").addEventListener("click", (e)=>{
+      e.preventDefault();
+      const selected = $$(".row-select").filter(cb=>cb.checked)
+        .map(cb=>cb.closest("tr"))
+        .filter(tr=>tr && !tr.classList.contains("variant-row") && !tr.classList.contains("row-soft-deleted"));
+      if (!selected.length) return;
+      selected.forEach(tr => softDeleteRow(tr));
+      selectAll.checked = false;
+      $$(".row-select").forEach(cb=>cb.checked=false);
       setDirty(true);
-      showToast(`Deleted ${selected.length} item(s)`);
-      rebuildOutline();
-      applyConfidenceTint();
+      showToast(`${selected.length} item(s) marked for deletion — Save to confirm`);
+    });
+
+    // === Auto-fill kitchen names ===
+    $("#auto-kitchen-btn")?.addEventListener("click", (e)=>{
+      e.preventDefault();
+      if (!isEditable) return;
+      let filled = 0;
+      $$(`#items-body tr[data-id]`).filter(tr => !tr.classList.contains("variant-row")).forEach(tr => {
+        const nameEl = tr.querySelector(".name-input");
+        const kEl    = tr.querySelector(".kitchen-name");
+        if (!nameEl || !kEl || kEl.value.trim()) return;  // skip if already has a value
+        const gen = _autoKitchenName(nameEl.value);
+        if (gen) { kEl.value = gen; autosize(kEl); filled++; }
+      });
+      if (filled) { setDirty(true); showToast(`Filled ${filled} kitchen name${filled > 1 ? "s" : ""}`); }
+      else showToast("All kitchen names already filled");
     });
 
     // === Bulk category change (Day 77) ===
@@ -1753,6 +2128,15 @@
       }
       if (el && el.classList.contains("name")){
         rebuildOutline();
+        // Auto-fill kitchen name if still empty
+        const tr = el.closest("tr");
+        if (tr && isEditable) {
+          const kEl = tr.querySelector(".kitchen-name");
+          if (kEl && !kEl.value.trim()) {
+            const gen = _autoKitchenName(el.value);
+            if (gen) { kEl.value = gen; autosize(kEl); setDirty(true); }
+          }
+        }
       }
     }, true);
 
@@ -2453,6 +2837,296 @@
       });
     })();
 
+  })();
+  </script>
+
+  <!-- Day 117: Card View JS -->
+  <script>
+  (function(){
+    const STORAGE_KEY = `servline_view_draft_{{ draft.id }}`;
+    const tableWrap   = document.getElementById("items-table-wrap");
+    const cardView    = document.getElementById("card-view");
+    const tablBtn     = document.getElementById("view-table-btn");
+    const cardBtn     = document.getElementById("view-cards-btn");
+
+    // ---- View switching ----
+    function setView(mode) {
+      const isCard = (mode === "cards");
+      tableWrap.style.display = isCard ? "none" : "";
+      cardView.style.display  = isCard ? "block" : "none";
+      tablBtn.classList.toggle("active", !isCard);
+      cardBtn.classList.toggle("active",  isCard);
+      tablBtn.setAttribute("aria-pressed", String(!isCard));
+      cardBtn.setAttribute("aria-pressed", String(isCard));
+      try { localStorage.setItem(STORAGE_KEY, mode); } catch(e){}
+      if (isCard) applyCardFilters();
+    }
+
+    tablBtn.addEventListener("click", () => setView("table"));
+    cardBtn.addEventListener("click", () => setView("cards"));
+
+    // Restore preference
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === "cards") setView("cards");
+    } catch(e){}
+
+    // ---- Card expand/collapse ----
+    document.querySelectorAll(".card-expand-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const cid    = btn.dataset.cardId;
+        const panel  = document.getElementById(`card-groups-${cid}`);
+        const icon   = btn.querySelector(".card-expand-icon");
+        if (!panel) return;
+        const open = panel.classList.toggle("show");
+        btn.setAttribute("aria-expanded", String(open));
+        icon.textContent = open ? "▾" : "▸";
+        btn.childNodes[1].textContent = open ? " Hide groups" : " Show groups";
+      });
+    });
+
+    // ---- Card soft-delete (trash icon → X overlay + Undo, committed on Save) ----
+    const _pendingCardDeletes = new Map(); // cid → { card, tr }
+
+    function _wireCardDelete(btn) {
+      btn.addEventListener("click", () => {
+        const cid  = btn.dataset.cardId;
+        const card = btn.closest(".item-card");
+        if (!card || card.classList.contains("card-soft-deleted")) return;
+
+        const tr = document.querySelector(`#items-body tr[data-id="${CSS.escape(String(cid))}"]`);
+        // Hide the table row so it's excluded from payload collection
+        if (tr) tr.style.display = "none";
+        _pendingCardDeletes.set(cid, { card, tr });
+
+        // X overlay (SVG corner-to-corner lines)
+        const overlay = document.createElement("div");
+        overlay.className = "card-delete-overlay";
+        overlay.innerHTML = `<svg viewBox="0 0 1 1" preserveAspectRatio="none" width="100%" height="100%">
+          <line x1="0" y1="0" x2="1" y2="1" stroke="rgba(220,53,69,0.65)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+          <line x1="1" y1="0" x2="0" y2="1" stroke="rgba(220,53,69,0.65)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        </svg>`;
+        card.appendChild(overlay);
+
+        // Undo button
+        const undoRow = document.createElement("div");
+        undoRow.className = "card-undo-row";
+        undoRow.innerHTML = `<button class="card-undo-btn">↩ Undo</button>`;
+        card.appendChild(undoRow);
+
+        card.classList.add("card-soft-deleted");
+
+        undoRow.querySelector(".card-undo-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          _pendingCardDeletes.delete(cid);
+          if (tr) tr.style.display = "";
+          overlay.remove();
+          undoRow.remove();
+          card.classList.remove("card-soft-deleted");
+        });
+      });
+    }
+    document.querySelectorAll(".card-delete-btn").forEach(_wireCardDelete);
+
+    function _flushPendingCardDeletes() {
+      if (!_pendingCardDeletes.size) return;
+      _pendingCardDeletes.forEach(({ card, tr }, cid) => {
+        // Restore display so the table-row delete handler can see it, then trigger deletion
+        if (tr) { tr.style.display = ""; window._queueDeleteRow?.(cid); }
+        card.remove();
+      });
+      _pendingCardDeletes.clear();
+      window._rebuildOutline?.();
+    }
+    window._flushPendingCardDeletes = _flushPendingCardDeletes;
+
+    // ---- Card quick-edit toggle ----
+    document.querySelectorAll(".card-edit-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const cid = btn.dataset.cardId;
+        const qe  = document.getElementById(`card-qe-${cid}`);
+        if (!qe) return;
+        const show = qe.classList.toggle("show");
+        btn.textContent = show ? "Done" : "Edit";
+        if (show) qe.querySelector(".card-name-qe")?.focus();
+      });
+    });
+
+    // When card quick-edit values change, sync to table row
+    document.querySelectorAll(".card-name-qe").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const cid = inp.dataset.cardId;
+        const tr  = document.querySelector(`#items-body tr[data-id="${CSS.escape(cid)}"]`);
+        if (!tr) return;
+        const nameTA = tr.querySelector(".name-input");
+        if (nameTA) { nameTA.value = inp.value; nameTA.dispatchEvent(new Event("input")); }
+        // Also update display label on card
+        const display = document.querySelector(`#card-${cid} .card-name-display`);
+        if (display) display.textContent = inp.value;
+        // Mark dirty
+        if (window._markDirty) window._markDirty();
+      });
+    });
+
+    document.querySelectorAll(".card-price-qe").forEach(inp => {
+      inp.addEventListener("change", () => {
+        const cid = inp.dataset.cardId;
+        const tr  = document.querySelector(`#items-body tr[data-id="${CSS.escape(cid)}"]`);
+        if (!tr) return;
+        const priceInp = tr.querySelector(".cell-price");
+        if (priceInp) { priceInp.value = inp.value; priceInp.dispatchEvent(new Event("change")); }
+        // Update display
+        const display = document.querySelector(`#card-${cid} .card-price-display`);
+        if (display) {
+          const cents = parseFloat(inp.value) || 0;
+          display.textContent = cents > 0 ? `$${cents.toFixed(2)}` : "";
+        }
+        if (window._markDirty) window._markDirty();
+      });
+    });
+
+    // ---- Category filter sync → cards ----
+    // Called by setFilterByCategory after table filter
+    const _origFilter = window._setFilterByCategory;  // fallback hook
+    function applyCardFilters() {
+      // Read active category from outline
+      const activeRow = document.querySelector("#outline .cat.active .row");
+      const activeCat = activeRow ? (activeRow.dataset.cat || "__ALL__") : "__ALL__";
+      // Read search term
+      const searchVal = (document.getElementById("search")?.value || "").toLowerCase().trim();
+
+      document.querySelectorAll("#card-grid .item-card").forEach(card => {
+        const cardCat  = (card.dataset.cat || "").toLowerCase();
+        const cardName = card.dataset.name || "";
+        const cardNameDisplay = card.querySelector(".card-name-display")?.textContent.toLowerCase() || "";
+        const cardDesc = card.querySelector(".card-desc")?.textContent.toLowerCase() || "";
+
+        let visible = true;
+
+        if (activeCat !== "__ALL__") {
+          visible = cardCat === activeCat.toLowerCase();
+        }
+        if (visible && searchVal) {
+          visible = cardName.includes(searchVal) || cardNameDisplay.includes(searchVal) || cardDesc.includes(searchVal);
+        }
+
+        card.classList.toggle("card-hidden", !visible);
+      });
+    }
+
+    // Hook into search input
+    const searchEl = document.getElementById("search");
+    if (searchEl) {
+      searchEl.addEventListener("input", () => {
+        if (cardView.style.display !== "none") applyCardFilters();
+      });
+    }
+
+    // Hook into outline clicks (category selection)
+    const outline = document.getElementById("outline");
+    if (outline) {
+      outline.addEventListener("click", () => {
+        if (cardView.style.display !== "none") {
+          setTimeout(applyCardFilters, 0);
+        }
+      });
+    }
+
+    // Expose for external use
+    window._applyCardFilters = applyCardFilters;
+
+    // ---- Dynamic card creation for new rows added in card view ----
+    function _createDynamicCard(tr) {
+      const grid = document.getElementById("card-grid");
+      if (!grid) return null;
+
+      const rowId  = tr.getAttribute("data-id");
+      const cat    = (tr.getAttribute("data-cat") || "");
+      const card = document.createElement("div");
+      card.className = "item-card";
+      card.id = `card-${rowId}`;
+      card.dataset.id   = rowId;
+      card.dataset.cat  = cat.toLowerCase();
+      card.dataset.name = "";
+
+      card.innerHTML = `
+        <div class="card-header">
+          <div class="card-name-display" style="color:var(--muted);font-style:italic;">New item…</div>
+          <div class="card-price-display"></div>
+        </div>
+        ${cat ? `<div class="card-category-label">${cat.replace(/</g,"&lt;")}</div>` : ""}
+        <div class="card-badges"></div>
+        {% if draft.status == 'editing' %}
+        <div class="card-quick-edit show" id="card-qe-${rowId}">
+          <input class="cell-input card-name-qe" data-card-id="${rowId}"
+                 value="" placeholder="Name" aria-label="Name" />
+          <input class="cell-input card-price-qe" data-card-id="${rowId}"
+                 value="" placeholder="Price" inputmode="decimal" aria-label="Price" />
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="card-edit-btn btn" style="font-size:.75rem;padding:2px 8px;"
+                  data-card-id="${rowId}">Done</button>
+          <button class="card-delete-btn" style="margin-left:auto;" title="Delete item"
+                  data-card-id="${rowId}" aria-label="Delete item">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+              <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+            </svg>
+          </button>
+        </div>
+        {% endif %}`;
+
+      // Sync name input → table row
+      const nameQe = card.querySelector(".card-name-qe");
+      if (nameQe) {
+        nameQe.addEventListener("input", () => {
+          const nameTA = tr.querySelector(".name-input");
+          if (nameTA) { nameTA.value = nameQe.value; nameTA.dispatchEvent(new Event("input")); }
+          const display = card.querySelector(".card-name-display");
+          if (display) { display.textContent = nameQe.value || "New item…"; display.style.fontStyle = nameQe.value ? "" : "italic"; }
+          card.dataset.name = nameQe.value.toLowerCase();
+          if (window._markDirty) window._markDirty();
+        });
+      }
+
+      // Sync price input → table row
+      const priceQe = card.querySelector(".card-price-qe");
+      if (priceQe) {
+        priceQe.addEventListener("change", () => {
+          const priceInp = tr.querySelector(".cell-price");
+          if (priceInp) { priceInp.value = priceQe.value; priceInp.dispatchEvent(new Event("change")); }
+          const display = card.querySelector(".card-price-display");
+          if (display) {
+            const cents = parseFloat(priceQe.value) || 0;
+            display.textContent = cents > 0 ? `$${cents.toFixed(2)}` : "";
+          }
+          if (window._markDirty) window._markDirty();
+        });
+      }
+
+      // Edit/Done toggle
+      const editBtn = card.querySelector(".card-edit-btn");
+      if (editBtn) {
+        editBtn.addEventListener("click", () => {
+          const qe = document.getElementById(`card-qe-${rowId}`);
+          if (!qe) return;
+          const show = qe.classList.toggle("show");
+          editBtn.textContent = show ? "Done" : "Edit";
+          if (show) qe.querySelector(".card-name-qe")?.focus();
+        });
+      }
+
+      // Wire delete button
+      const deleteBtn = card.querySelector(".card-delete-btn");
+      if (deleteBtn) _wireCardDelete(deleteBtn);
+
+      // Prepend to grid so it's at the top (mirrors table prepend)
+      grid.prepend(card);
+      applyCardFilters();
+      return card;
+    }
+
+    window._createDynamicCard = _createDynamicCard;
   })();
   </script>
 
