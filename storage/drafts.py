@@ -3095,7 +3095,7 @@ def _bulk_reorder_by_position(
     if not ordered_ids:
         return 0
     now = _now()
-    rows = [(pos, now, int(gid), int(parent_id)) for pos, gid in enumerate(ordered_ids)]
+    rows = [(pos, now, int(gid), int(parent_id)) for pos, gid in enumerate(ordered_ids, start=1)]
     with db_connect() as conn:
         cur = conn.executemany(
             f"UPDATE {table} SET position=?, updated_at=? WHERE id=? AND {parent_col}=?",
@@ -3132,6 +3132,21 @@ def reorder_modifiers(group_id: int, ordered_ids: List[int]) -> int:
     """
     return _bulk_reorder_by_position(
         "draft_item_variants", "modifier_group_id", int(group_id), ordered_ids
+    )
+
+
+def reorder_items(draft_id: int, ordered_ids: List[int]) -> int:
+    """
+    Bulk-update position for draft items belonging to *draft_id*.
+
+    *ordered_ids* is the desired display order (index = new position).
+    Only IDs that actually belong to *draft_id* are updated; unknown IDs
+    are silently skipped.
+
+    Returns the number of rows updated.
+    """
+    return _bulk_reorder_by_position(
+        "draft_items", "draft_id", int(draft_id), ordered_ids
     )
 
 

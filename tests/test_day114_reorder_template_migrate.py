@@ -297,9 +297,9 @@ class TestReorderModifierGroups:
         updated = reorder_modifier_groups(iid, [g3, g1, g2])
 
         assert updated == 3
-        assert _group_position(conn, g3) == 0
-        assert _group_position(conn, g1) == 1
-        assert _group_position(conn, g2) == 2
+        assert _group_position(conn, g3) == 1
+        assert _group_position(conn, g1) == 2
+        assert _group_position(conn, g2) == 3
 
     def test_empty_list_returns_zero(self, seeded):
         conn, _, did = seeded
@@ -315,7 +315,7 @@ class TestReorderModifierGroups:
         updated = reorder_modifier_groups(iid, [9999, g1])
         # only g1 belongs to iid; 9999 is skipped
         assert updated == 1
-        assert _group_position(conn, g1) == 1  # at index 1
+        assert _group_position(conn, g1) == 2  # at index 1
 
     def test_group_belonging_to_other_item_skipped(self, seeded):
         conn, _, did = seeded
@@ -327,7 +327,7 @@ class TestReorderModifierGroups:
         # reorder for iid1 — g2 (belongs to iid2) should be ignored
         updated = reorder_modifier_groups(iid1, [g2, g1])
         assert updated == 1
-        assert _group_position(conn, g1) == 1   # moved
+        assert _group_position(conn, g1) == 2   # moved
         assert _group_position(conn, g2) == 5   # unchanged
 
     def test_single_group_reorder(self, seeded):
@@ -337,7 +337,7 @@ class TestReorderModifierGroups:
 
         updated = reorder_modifier_groups(iid, [g1])
         assert updated == 1
-        assert _group_position(conn, g1) == 0
+        assert _group_position(conn, g1) == 1
 
     def test_returns_int(self, seeded):
         conn, _, did = seeded
@@ -363,9 +363,9 @@ class TestReorderModifiers:
         updated = reorder_modifiers(gid, [v3, v2, v1])
 
         assert updated == 3
-        assert _variant_position(conn, v3) == 0
-        assert _variant_position(conn, v2) == 1
-        assert _variant_position(conn, v1) == 2
+        assert _variant_position(conn, v3) == 1
+        assert _variant_position(conn, v2) == 2
+        assert _variant_position(conn, v1) == 3
 
     def test_empty_list_returns_zero(self, seeded):
         conn, _, did = seeded
@@ -383,7 +383,7 @@ class TestReorderModifiers:
 
         updated = reorder_modifiers(g1, [v2, v1])
         assert updated == 1
-        assert _variant_position(conn, v1) == 1   # moved
+        assert _variant_position(conn, v1) == 2   # moved
         assert _variant_position(conn, v2) == 5   # unchanged
 
     def test_ungrouped_modifier_not_moved(self, seeded):
@@ -395,7 +395,7 @@ class TestReorderModifiers:
 
         updated = reorder_modifiers(gid, [v_ungrouped, v_grouped])
         assert updated == 1
-        assert _variant_position(conn, v_grouped) == 1
+        assert _variant_position(conn, v_grouped) == 2
         assert _variant_position(conn, v_ungrouped) == 5  # unchanged
 
     def test_single_modifier_reorder(self, seeded):
@@ -405,7 +405,7 @@ class TestReorderModifiers:
         v1 = _insert_variant(conn, iid, "Small", group_id=gid, position=99)
 
         assert reorder_modifiers(gid, [v1]) == 1
-        assert _variant_position(conn, v1) == 0
+        assert _variant_position(conn, v1) == 1
 
 
 # ===========================================================================
@@ -500,9 +500,9 @@ class TestReorderEndpoints:
         assert data["ok"] is True
         assert data["updated"] == 3
 
-        assert _group_position(fresh_db, g3) == 0
-        assert _group_position(fresh_db, g1) == 1
-        assert _group_position(fresh_db, g2) == 2
+        assert _group_position(fresh_db, g3) == 1
+        assert _group_position(fresh_db, g1) == 2
+        assert _group_position(fresh_db, g2) == 3
 
     def test_modifier_groups_reorder_empty_list(self, client, fresh_db):
         rid, did = _create_draft(fresh_db)
@@ -540,8 +540,8 @@ class TestReorderEndpoints:
         assert data["ok"] is True
         assert data["updated"] == 2
 
-        assert _variant_position(fresh_db, v2) == 0
-        assert _variant_position(fresh_db, v1) == 1
+        assert _variant_position(fresh_db, v2) == 1
+        assert _variant_position(fresh_db, v1) == 2
 
     def test_modifiers_reorder_empty_list(self, client, fresh_db):
         rid, did = _create_draft(fresh_db)

@@ -5168,6 +5168,27 @@ def _parse_ordered_ids(payload: dict):
         return None, (jsonify({"ok": False, "error": "ordered_ids must contain integers"}), 400)
 
 
+@app.post("/drafts/<int:draft_id>/items/reorder")
+@login_required
+def items_reorder(draft_id: int):
+    """
+    Bulk-update item positions within a draft.
+
+    Body: {"ordered_ids": [<item_id>, ...]}
+    The array index becomes the new position value.
+    IDs not belonging to draft_id are silently ignored.
+
+    Returns: {"ok": true, "updated": <int>}
+    """
+    _require_drafts_storage()
+    payload = request.get_json(silent=True) or {}
+    ordered_ids, err = _parse_ordered_ids(payload)
+    if err:
+        return err
+    updated = drafts_store.reorder_items(draft_id, ordered_ids)
+    return jsonify({"ok": True, "updated": updated}), 200
+
+
 @app.post("/drafts/<int:draft_id>/items/<int:item_id>/modifier_groups/reorder")
 @login_required
 def modifier_groups_reorder(draft_id: int, item_id: int):

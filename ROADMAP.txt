@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 119 (March 13, 2026) — Sprint 12.2 Day 4: Modifier Group Rules Preview + Full Save Lifecycle (36 tests, 2,514 total)
+Last Updated: Day 120 (March 14, 2026) — Sprint 12.2 Day 5: Drag-and-Drop Reordering (32 tests, 2,546 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1866,11 +1866,20 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
     Day 119 test suite: 36 cases, 100% pass rate
     Cumulative: 2,514 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  [ ] Drag-and-drop reordering:
-        - Items within category
-        - Modifier groups within item
-        - Modifiers within group
-        - Position persisted to DB
+  [x] Drag-and-drop reordering (Day 120):
+        - reorder_items() storage fn + POST /drafts/<id>/items/reorder endpoint ✓
+        - Item cards draggable (⠷ handle, editing mode only) ✓
+        - Drop on any card (direct element binding, no grid-gap misfire) ✓
+        - Table rows sync immediately on drop (nextElementSibling, variant sub-rows) ✓
+        - Position inputs renumbered live (1-based, on drag AND on page load) ✓
+        - Modifier groups within item card: draggable, reorder persisted ✓
+        - Modifiers within group: draggable, reorder persisted ✓
+        - 1-based positions throughout (_bulk_reorder_by_position start=1) ✓
+        - "Show groups / Hide groups" text-duplication bug fixed ✓
+
+    Day 120 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,546 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
   [ ] Dual name display:
         - Item name field + optional kitchen name field
         - Kitchen name shown as gray subtitle when populated

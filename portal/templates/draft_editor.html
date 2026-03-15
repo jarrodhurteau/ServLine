@@ -725,6 +725,16 @@
       margin-bottom: 4px; min-height: 1em;
     }
     .mg-rules-preview.is-optional { color: var(--muted); }
+    /* Day 120: Drag-and-drop reordering */
+    .drag-handle {
+      cursor: grab; color: var(--muted); font-size: .85rem;
+      padding: 0 4px; user-select: none; flex-shrink: 0;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .item-card.drag-over { outline: 2px dashed #7dd3fc; outline-offset: 2px; }
+    .mg-editor.drag-over { outline: 2px dashed #7dd3fc; outline-offset: 1px; }
+    .mg-modifier-row.drag-over { outline: 2px dashed #7dd3fc; outline-offset: 1px; }
+    .mg-editor[draggable="true"], .mg-modifier-row[draggable="true"] { cursor: default; }
     .mg-rules-warn {
       font-size: .7rem; color: #f87171; margin-bottom: 4px;
     }
@@ -1235,9 +1245,11 @@
                data-id="{{ it.id }}"
                data-cat="{{ (it.category or '')|lower|e }}"
                data-name="{{ (it.name or '')|lower|e }}"
-               data-confidence="{{ it.confidence if it.confidence is not none else '' }}">
+               data-confidence="{{ it.confidence if it.confidence is not none else '' }}"
+               {% if draft.status == 'editing' %}draggable="true"{% endif %}>
 
             <div class="card-header">
+              {% if draft.status == 'editing' %}<span class="drag-handle" title="Drag to reorder">⠿</span>{% endif %}
               <div class="card-name-display">{{ it.name|e }}</div>
               {% if it.price_cents %}
               <div class="card-price-display">${{ '%.2f'|format(it.price_cents / 100) }}</div>
@@ -1277,7 +1289,7 @@
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
               {% if it.modifier_groups %}
               <button class="card-expand-btn" data-card-id="{{ it.id }}" aria-expanded="false">
-                <span class="card-expand-icon">▸</span> Show groups
+                <span class="card-expand-icon">▸</span><span class="card-expand-text"> Show groups</span>
               </button>
               {% endif %}
               {% if draft.status == 'editing' %}
@@ -1312,8 +1324,9 @@
               {% for mg in it.modifier_groups %}
               {% if draft.status == 'editing' %}
               {# Editing mode: full mg-editor panel #}
-              <div class="mg-editor{% if mg.required %} is-required{% endif %}" data-group-id="{{ mg.id }}">
+              <div class="mg-editor{% if mg.required %} is-required{% endif %}" data-group-id="{{ mg.id }}" data-item-id="{{ it.id }}" draggable="true">
                 <div class="mg-editor-header">
+                  <span class="drag-handle" title="Drag to reorder">⠿</span>
                   <input class="mg-editor-name"
                          data-group-id="{{ mg.id }}"
                          value="{{ mg.name|e }}"
@@ -1368,7 +1381,8 @@
                 </div>
                 {% if mg.modifiers %}
                 {% for mod in mg.modifiers %}
-                <div class="mg-modifier-row" data-mod-id="{{ mod.id }}">
+                <div class="mg-modifier-row" data-mod-id="{{ mod.id }}" data-group-id="{{ mg.id }}" draggable="true">
+                  <span class="drag-handle" title="Drag to reorder">⠿</span>
                   <input class="mg-mod-label"
                          value="{{ mod.label|e }}"
                          data-mod-id="{{ mod.id }}"
@@ -3170,7 +3184,7 @@
         const open = panel.classList.toggle("show");
         btn.setAttribute("aria-expanded", String(open));
         icon.textContent = open ? "▾" : "▸";
-        btn.childNodes[1].textContent = open ? " Hide groups" : " Show groups";
+        btn.querySelector(".card-expand-text").textContent = open ? " Hide groups" : " Show groups";
       });
     });
 
@@ -3624,6 +3638,171 @@
         if (modal) modal.classList.remove("open");
       }
     });
+
+  })();
+  </script>
+
+
+  <!-- Day 120: Drag-and-Drop Reordering (items, modifier groups, modifiers) -->
+  <script>
+  (function() {
+    const _meta = JSON.parse((document.getElementById('draft-meta') || {}).textContent || '{}');
+    const draftId = Number(_meta.id) || null;
+    const isEditing = String(_meta.status || '') === 'editing';
+    if (!draftId || !isEditing) return;
+
+    // Wire drag events directly on each element (not delegated to container).
+    // Delegation breaks on CSS Grid because drops in gap-between-cards fire
+    // on the container, not any card, causing silent no-ops.
+    function _setupDragDrop(container, selector, getId, onDrop) {
+      if (!container) return function() {};
+      var dragSrc = null;
+
+      function getItems() {
+        return Array.from(container.querySelectorAll(':scope > ' + selector));
+      }
+
+      function wireItem(el) {
+        el.addEventListener('dragstart', function(e) {
+          dragSrc = el;
+          el.style.opacity = '0.5';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        el.addEventListener('dragend', function() {
+          el.style.opacity = '';
+          getItems().forEach(function(i) { i.classList.remove('drag-over'); });
+          dragSrc = null;
+        });
+        el.addEventListener('dragover', function(e) {
+          if (!dragSrc || dragSrc === el) return;
+          e.preventDefault();
+          getItems().forEach(function(i) { i.classList.remove('drag-over'); });
+          el.classList.add('drag-over');
+          e.dataTransfer.dropEffect = 'move';
+        });
+        el.addEventListener('dragleave', function() {
+          el.classList.remove('drag-over');
+        });
+        el.addEventListener('drop', function(e) {
+          e.preventDefault();
+          if (!dragSrc || dragSrc === el) return;
+          el.classList.remove('drag-over');
+          var items = getItems();
+          var srcIdx = items.indexOf(dragSrc);
+          var tgtIdx = items.indexOf(el);
+          if (srcIdx < tgtIdx) {
+            container.insertBefore(dragSrc, el.nextSibling);
+          } else {
+            container.insertBefore(dragSrc, el);
+          }
+          var orderedIds = getItems().map(getId).filter(function(n) { return !isNaN(n); });
+          onDrop(orderedIds);
+        });
+      }
+
+      getItems().forEach(wireItem);
+      return wireItem;
+    }
+
+    // Sync table row order to match card order after drag.
+    // Variant sub-rows must be captured BEFORE moving the main row,
+    // because appendChild removes mainRow from its current position first.
+    function _syncTableToCardOrder(orderedIds) {
+      var tbody = document.getElementById('items-body');
+      if (!tbody) return;
+      orderedIds.forEach(function(id) {
+        var mainRow = tbody.querySelector('tr[data-id="' + id + '"]:not(.variant-row)');
+        if (!mainRow) return;
+        // Collect sibling variant rows while still adjacent.
+        // Use nextElementSibling (not nextSibling) to skip whitespace text nodes.
+        var variantRows = [];
+        var next = mainRow.nextElementSibling;
+        while (next && next.classList.contains('variant-row')) {
+          variantRows.push(next);
+          next = next.nextElementSibling;
+        }
+        tbody.appendChild(mainRow);
+        variantRows.forEach(function(vr) { tbody.appendChild(vr); });
+      });
+      _renumberTablePositions(tbody);
+    }
+
+    // Renumber all Position inputs in the table to match current DOM order (1-based).
+    // Called after every drag AND on page load so the column always shows clean numbers.
+    function _renumberTablePositions(tbody) {
+      if (!tbody) return;
+      var pos = 1;
+      Array.from(tbody.querySelectorAll('tr:not(.variant-row)')).forEach(function(tr) {
+        var inp = tr.querySelector('input.position');
+        if (inp) { inp.value = pos++; }
+      });
+    }
+
+    // 1. Item cards
+    var cardGrid = document.getElementById('card-grid');
+    _setupDragDrop(
+      cardGrid,
+      '.item-card',
+      function(el) { return parseInt(el.dataset.id, 10); },
+      function(ids) {
+        _syncTableToCardOrder(ids);
+        fetch('/drafts/' + draftId + '/items/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ordered_ids: ids })
+        }).catch(function() {});
+      }
+    );
+
+    // 2. Modifier groups within item cards
+    function _wireCardGroupsDragDrop(cardGroupsEl, itemId) {
+      _setupDragDrop(
+        cardGroupsEl,
+        '.mg-editor',
+        function(el) { return parseInt(el.dataset.groupId, 10); },
+        function(ids) {
+          fetch('/drafts/' + draftId + '/items/' + itemId + '/modifier_groups/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ordered_ids: ids })
+          }).catch(function() {});
+        }
+      );
+    }
+
+    document.querySelectorAll('.card-groups').forEach(function(cg) {
+      var card = cg.closest('.item-card');
+      if (!card) return;
+      var itemId = parseInt(card.dataset.id, 10);
+      _wireCardGroupsDragDrop(cg, itemId);
+    });
+    window._wireCardGroupsDragDrop = _wireCardGroupsDragDrop;
+
+    // 3. Modifiers within a group
+    function _wireMgModifiersDragDrop(mgEditorEl, groupId) {
+      _setupDragDrop(
+        mgEditorEl,
+        '.mg-modifier-row',
+        function(el) { return parseInt(el.dataset.modId, 10); },
+        function(ids) {
+          fetch('/drafts/' + draftId + '/modifier_groups/' + groupId + '/modifiers/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ordered_ids: ids })
+          }).catch(function() {});
+        }
+      );
+    }
+
+    document.querySelectorAll('.mg-editor').forEach(function(ed) {
+      var groupId = parseInt(ed.dataset.groupId, 10);
+      if (!isNaN(groupId)) _wireMgModifiersDragDrop(ed, groupId);
+    });
+    window._wireMgModifiersDragDrop = _wireMgModifiersDragDrop;
+
+    // Run once on page load to ensure Position column shows clean 1-based numbers
+    // regardless of what the DB stored (items with position=0 or NULL show correctly).
+    _renumberTablePositions(document.getElementById('items-body'));
 
   })();
   </script>
