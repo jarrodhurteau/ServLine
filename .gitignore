@@ -25,7 +25,9 @@ storage/*.ocr.txt
 storage/*.raw.json
 storage/*.json
 storage/*.txt
+storage/logs/
 *.debug.log
+nul
 
 # --- Uploads (keep .gitkeep only) ---
 uploads/*

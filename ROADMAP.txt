@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 120 (March 14, 2026) — Sprint 12.2 Day 5: Drag-and-Drop Reordering (32 tests, 2,546 total)
+Last Updated: Day 121 (March 17, 2026) — Sprint 12.2 Day 6: Dual Name Display (32 tests, 2,578 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1880,10 +1880,29 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
     Day 120 test suite: 32 cases, 100% pass rate
     Cumulative: 2,546 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-  [ ] Dual name display:
-        - Item name field + optional kitchen name field
-        - Kitchen name shown as gray subtitle when populated
-        - Toggle to show/hide kitchen names globally
+  Day 121: Dual Name Display *** COMPLETE ***
+  -------------------------------------------
+  [x] Card view kitchen name subtitle (.card-kitchen-name):
+        - Rendered as gray muted subtitle below card-header when kitchen_name populated ✓
+        - Not rendered when kitchen_name is null/empty ✓
+        - HTML-escaped for XSS safety ✓
+        - Positioned between card-header and card-category-label ✓
+  [x] Card quick-edit kitchen name input (.card-kitchen-qe):
+        - Input field in card-quick-edit section (editing mode only) ✓
+        - Pre-filled from item's kitchen_name value ✓
+        - Syncs to table row .kitchen-name textarea on input ✓
+        - Updates .card-kitchen-name subtitle dynamically (create/remove) ✓
+        - Wired in dynamic card creation (_createDynamicCard) ✓
+  [x] Global show/hide toggle (#toggle-kitchen-names):
+        - Button in toolbar after view-toggle div ✓
+        - aria-pressed="true" by default (visible) ✓
+        - Toggles .kitchen-names-hidden class on document.body ✓
+        - Hides: .card-kitchen-name, .card-kitchen-qe, .kitchen-name-row ✓
+        - localStorage persistence (key: servline_kitchen_names_visible) ✓
+        - Restores from localStorage on page load ✓
+
+    Day 121 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,578 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 12.3 — Export Format Alignment (Days 123-127)
 .....................................................

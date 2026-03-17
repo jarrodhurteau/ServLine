@@ -662,6 +662,17 @@
     .card-quick-edit.show { display: flex; }
     .card-name-qe { flex: 1; font-size: .85rem; }
     .card-price-qe { width: 80px; font-size: .85rem; }
+    .card-kitchen-qe { flex: 1; font-size: .8rem; }
+
+    /* Day 121: Kitchen name subtitle on cards */
+    .card-kitchen-name {
+      font-size: .78rem; color: var(--muted); margin-top: -2px; margin-bottom: 4px;
+      word-break: break-word; line-height: 1.3;
+    }
+    /* Global toggle: hide kitchen names */
+    .kitchen-names-hidden .card-kitchen-name { display: none; }
+    .kitchen-names-hidden .card-kitchen-qe { display: none; }
+    .kitchen-names-hidden .kitchen-name-row { display: none; }
 
     /* Expand button */
     .card-expand-btn {
@@ -1048,6 +1059,9 @@
           <button id="view-cards-btn" class="view-btn" title="Card view" aria-pressed="false">⊞ Cards</button>
         </div>
 
+        <!-- Day 121: Kitchen names toggle -->
+        <button id="toggle-kitchen-names" class="btn" title="Show/hide kitchen names" aria-pressed="true">Kitchen Names</button>
+
         <div class="spacer"></div>
         <button id="add-row-btn" class="btn">Add Item</button>
         {% if draft.status == 'editing' %}
@@ -1256,6 +1270,11 @@
               {% endif %}
             </div>
 
+            {# Day 121: Kitchen name subtitle #}
+            {% if it.kitchen_name %}
+            <div class="card-kitchen-name">{{ it.kitchen_name|e }}</div>
+            {% endif %}
+
             {% if it.category %}
             <div class="card-category-label">{{ it.category|e }}</div>
             {% endif %}
@@ -1283,6 +1302,8 @@
               <input class="cell-input card-price-qe" data-card-id="{{ it.id }}"
                      value="{% if it.price_cents %}{{ '%.2f'|format(it.price_cents / 100) }}{% endif %}"
                      placeholder="Price" inputmode="decimal" aria-label="Price" />
+              <input class="cell-input card-kitchen-qe" data-card-id="{{ it.id }}"
+                     value="{{ (it.kitchen_name or '')|e }}" placeholder="Kitchen name" aria-label="Kitchen name" />
             </div>
             {% endif %}
 
@@ -3288,6 +3309,58 @@
       });
     });
 
+    // ---- Day 121: Kitchen name quick-edit sync ----
+    document.querySelectorAll(".card-kitchen-qe").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const cid = inp.dataset.cardId;
+        const tr  = document.querySelector(`#items-body tr[data-id="${CSS.escape(cid)}"]`);
+        if (tr) {
+          const kEl = tr.querySelector(".kitchen-name");
+          if (kEl) { kEl.value = inp.value; kEl.dispatchEvent(new Event("input")); }
+        }
+        // Update kitchen name subtitle on card
+        const card = document.getElementById(`card-${cid}`);
+        if (card) {
+          let sub = card.querySelector(".card-kitchen-name");
+          if (inp.value.trim()) {
+            if (!sub) {
+              sub = document.createElement("div");
+              sub.className = "card-kitchen-name";
+              const header = card.querySelector(".card-header");
+              if (header) header.after(sub);
+            }
+            sub.textContent = inp.value.trim();
+          } else if (sub) {
+            sub.remove();
+          }
+        }
+        if (window._markDirty) window._markDirty();
+      });
+    });
+
+    // ---- Day 121: Kitchen names toggle ----
+    const KN_STORAGE_KEY = "servline_kitchen_names_visible";
+    const knToggleBtn = document.getElementById("toggle-kitchen-names");
+    const editorWrap  = document.body;
+
+    function _setKitchenNamesVisible(visible) {
+      editorWrap.classList.toggle("kitchen-names-hidden", !visible);
+      if (knToggleBtn) knToggleBtn.setAttribute("aria-pressed", String(visible));
+      try { localStorage.setItem(KN_STORAGE_KEY, visible ? "1" : "0"); } catch(e){}
+    }
+
+    if (knToggleBtn) {
+      knToggleBtn.addEventListener("click", () => {
+        const isHidden = editorWrap.classList.contains("kitchen-names-hidden");
+        _setKitchenNamesVisible(isHidden); // toggle: hidden→show, show→hide
+      });
+    }
+    // Restore from localStorage (default: visible)
+    try {
+      const saved = localStorage.getItem(KN_STORAGE_KEY);
+      if (saved === "0") _setKitchenNamesVisible(false);
+    } catch(e){}
+
     // ---- Category filter sync → cards ----
     // Called by setFilterByCategory after table filter
     const _origFilter = window._setFilterByCategory;  // fallback hook
@@ -3365,6 +3438,8 @@
                  value="" placeholder="Name" aria-label="Name" />
           <input class="cell-input card-price-qe" data-card-id="${rowId}"
                  value="" placeholder="Price" inputmode="decimal" aria-label="Price" />
+          <input class="cell-input card-kitchen-qe" data-card-id="${rowId}"
+                 value="" placeholder="Kitchen name" aria-label="Kitchen name" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="card-edit-btn btn" style="font-size:.75rem;padding:2px 8px;"
@@ -3403,6 +3478,26 @@
             const cents = parseFloat(priceQe.value) || 0;
             display.textContent = cents > 0 ? `$${cents.toFixed(2)}` : "";
           }
+          if (window._markDirty) window._markDirty();
+        });
+      }
+
+      // Day 121: Sync kitchen name input → table row + subtitle
+      const kitchenQe = card.querySelector(".card-kitchen-qe");
+      if (kitchenQe) {
+        kitchenQe.addEventListener("input", () => {
+          const kEl = tr.querySelector(".kitchen-name");
+          if (kEl) { kEl.value = kitchenQe.value; kEl.dispatchEvent(new Event("input")); }
+          let sub = card.querySelector(".card-kitchen-name");
+          if (kitchenQe.value.trim()) {
+            if (!sub) {
+              sub = document.createElement("div");
+              sub.className = "card-kitchen-name";
+              const header = card.querySelector(".card-header");
+              if (header) header.after(sub);
+            }
+            sub.textContent = kitchenQe.value.trim();
+          } else if (sub) { sub.remove(); }
           if (window._markDirty) window._markDirty();
         });
       }
