@@ -875,6 +875,44 @@
       text-decoration: line-through;
       text-decoration-color: rgba(220,53,69,.7);
     }
+
+    /* ===== Day 122: Editor Stats Bar ===== */
+    #editor-stats-bar {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 8px 14px; margin-bottom: 10px;
+      background: rgba(125,211,252,.06); border: 1px solid rgba(125,211,252,.18);
+      border-radius: 8px; font-size: .82rem; color: var(--muted);
+    }
+    .stats-item { display: inline-flex; align-items: center; gap: 4px; }
+    .stats-value { color: var(--ink); font-weight: 600; }
+
+    /* Day 122: Bulk card selection */
+    .card-bulk-checkbox {
+      width: 16px; height: 16px; accent-color: #7dd3fc; cursor: pointer;
+      flex-shrink: 0; margin: 0;
+    }
+    .item-card.bulk-selected { outline: 2px solid #7dd3fc; outline-offset: -2px; }
+
+    #bulk-card-toolbar {
+      display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 14px; margin-bottom: 8px;
+      background: rgba(125,211,252,.08); border: 1px solid rgba(125,211,252,.25);
+      border-radius: 8px; font-size: .82rem;
+    }
+    #bulk-card-toolbar.visible { display: flex; }
+    .bulk-count-badge {
+      background: #7dd3fc; color: #0b1220; font-weight: 700;
+      border-radius: 10px; padding: 1px 8px; font-size: .78rem;
+    }
+
+    /* Day 122: Empty state */
+    .empty-state-msg {
+      text-align: center; padding: 32px 16px;
+      color: var(--muted); font-size: .9rem;
+    }
+    .empty-state-msg .empty-hint {
+      margin-top: 8px; font-size: .8rem; opacity: .7;
+    }
   </style>
 
   <div class="layout">
@@ -1076,6 +1114,28 @@
         <button id="delete-selected-btn" class="btn btn-danger">Delete Selected</button>
       </div>
 
+      {# === Day 122: Editor Stats Bar === #}
+      {% if editor_stats is defined and editor_stats %}
+      <div id="editor-stats-bar">
+        <span class="stats-item"><span class="stats-value">{{ editor_stats.item_count }}</span> items</span>
+        <span class="stats-item"><span class="stats-value">{{ editor_stats.category_count }}</span> categories</span>
+        <span class="stats-item"><span class="stats-value">{{ editor_stats.mg_coverage_pct }}%</span> modifier coverage</span>
+        {% if editor_stats.price_min > 0 %}
+        <span class="stats-item">${{ '%.2f'|format(editor_stats.price_min / 100) }} – ${{ '%.2f'|format(editor_stats.price_max / 100) }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# === Day 122: Bulk Card Action Toolbar === #}
+      <div id="bulk-card-toolbar">
+        <span class="bulk-count-badge" id="bulk-count-badge">0</span> selected
+        <button id="bulk-card-select-all" class="btn btn-secondary" style="font-size:.78rem;padding:2px 8px;">Select All in Category</button>
+        <input list="category-datalist" id="bulk-card-cat-input" class="cell-input" placeholder="Move to category..." style="width:130px;font-size:.78rem;" />
+        <button id="bulk-card-move-btn" class="btn btn-secondary" style="font-size:.78rem;padding:2px 8px;">Move</button>
+        <button id="bulk-card-delete-btn" class="btn btn-danger" style="font-size:.78rem;padding:2px 8px;">Delete Selected</button>
+        <button id="bulk-card-cancel-btn" class="btn" style="font-size:.78rem;padding:2px 8px;">Cancel</button>
+      </div>
+
       {# === Low Confidence Bucket (Phase 3 pt.7 + Day 77 variant info) === #}
       {% set q_thresh = quality_threshold|default(65) %}
       {% if low_conf_items is defined and low_conf_items %}
@@ -1263,11 +1323,12 @@
                {% if draft.status == 'editing' %}draggable="true"{% endif %}>
 
             <div class="card-header">
-              {% if draft.status == 'editing' %}<span class="drag-handle" title="Drag to reorder">⠿</span>{% endif %}
+              {% if draft.status == 'editing' %}<input type="checkbox" class="card-bulk-checkbox" data-card-id="{{ it.id }}" aria-label="Select item" />{% endif %}
               <div class="card-name-display">{{ it.name|e }}</div>
               {% if it.price_cents %}
               <div class="card-price-display">${{ '%.2f'|format(it.price_cents / 100) }}</div>
               {% endif %}
+              {% if draft.status == 'editing' %}<span class="drag-handle" title="Drag to reorder">⠿</span>{% endif %}
             </div>
 
             {# Day 121: Kitchen name subtitle #}
@@ -1461,6 +1522,12 @@
 
           </div>
           {% endfor %}
+          {% if not items %}
+          <div class="empty-state-msg" id="empty-state-no-items">
+            <div>No items in this draft yet.</div>
+            <div class="empty-hint">Click "Add Item" to create your first menu item.</div>
+          </div>
+          {% endif %}
         </div>
       </div>
 
@@ -3898,6 +3965,155 @@
     // Run once on page load to ensure Position column shows clean 1-based numbers
     // regardless of what the DB stored (items with position=0 or NULL show correctly).
     _renumberTablePositions(document.getElementById('items-body'));
+
+    // =========================================================
+    // Day 122 — Bulk Card Actions & Editor Stats Bar
+    // =========================================================
+
+    const bulkCardToolbar = document.getElementById("bulk-card-toolbar");
+    const bulkCountBadge  = document.getElementById("bulk-count-badge");
+
+    function _updateBulkCount() {
+      const checked = document.querySelectorAll(".card-bulk-checkbox:checked").length;
+      if (bulkCountBadge) bulkCountBadge.textContent = String(checked);
+      // Show/hide toolbar based on selection count
+      if (bulkCardToolbar) bulkCardToolbar.classList.toggle("visible", checked > 0);
+      return checked;
+    }
+
+    function _clearBulkSelection() {
+      document.querySelectorAll(".card-bulk-checkbox").forEach(function(cb) {
+        cb.checked = false;
+      });
+      document.querySelectorAll(".item-card.bulk-selected").forEach(function(c) {
+        c.classList.remove("bulk-selected");
+      });
+      _updateBulkCount();
+    }
+
+    // Checkbox change → highlight card + update count
+    document.addEventListener("change", function(e) {
+      if (!e.target.classList.contains("card-bulk-checkbox")) return;
+      var card = e.target.closest(".item-card");
+      if (card) card.classList.toggle("bulk-selected", e.target.checked);
+      _updateBulkCount();
+    });
+
+    // Select All in Category
+    var bulkSelectAllBtn = document.getElementById("bulk-card-select-all");
+    if (bulkSelectAllBtn) {
+      bulkSelectAllBtn.addEventListener("click", function() {
+        var activeRow = document.querySelector("#outline .cat.active .row");
+        var activeCat = activeRow ? (activeRow.dataset.cat || "").toLowerCase() : "";
+        document.querySelectorAll("#card-grid .item-card:not(.card-hidden)").forEach(function(card) {
+          if (!activeCat || (card.dataset.cat || "").toLowerCase() === activeCat) {
+            var cb = card.querySelector(".card-bulk-checkbox");
+            if (cb) { cb.checked = true; card.classList.add("bulk-selected"); }
+          }
+        });
+        _updateBulkCount();
+      });
+    }
+
+    // Bulk card delete
+    var bulkCardDeleteBtn = document.getElementById("bulk-card-delete-btn");
+    if (bulkCardDeleteBtn) {
+      bulkCardDeleteBtn.addEventListener("click", function() {
+        var checked = document.querySelectorAll(".card-bulk-checkbox:checked");
+        if (!checked.length) { showToast("No items selected"); return; }
+        if (!confirm("Delete " + checked.length + " selected item(s)?")) return;
+        var ids = [];
+        checked.forEach(function(cb) {
+          var cid = cb.dataset.cardId;
+          if (cid) ids.push(parseInt(cid, 10));
+        });
+        fetch("/drafts/" + draftId + "/bulk_delete", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({item_ids: ids})
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.ok) {
+            ids.forEach(function(id) {
+              var card = document.getElementById("card-" + id);
+              if (card) card.remove();
+              var tr = document.querySelector('#items-body tr[data-id="' + id + '"]');
+              if (tr) tr.remove();
+            });
+            _clearBulkSelection();
+            showToast(data.deleted + " item(s) deleted");
+            _refreshStatsBar();
+          } else {
+            showToast(data.error || "Delete failed");
+          }
+        }).catch(function() { showToast("Delete failed"); });
+      });
+    }
+
+    // Bulk card move category
+    var bulkCardMoveBtn = document.getElementById("bulk-card-move-btn");
+    if (bulkCardMoveBtn) {
+      bulkCardMoveBtn.addEventListener("click", function() {
+        var catInput = document.getElementById("bulk-card-cat-input");
+        var newCat = (catInput ? catInput.value : "").trim();
+        if (!newCat) { showToast("Enter a category first"); return; }
+        var checked = document.querySelectorAll(".card-bulk-checkbox:checked");
+        if (!checked.length) { showToast("No items selected"); return; }
+        var ids = [];
+        checked.forEach(function(cb) {
+          var cid = cb.dataset.cardId;
+          if (cid) ids.push(parseInt(cid, 10));
+        });
+        fetch("/drafts/" + draftId + "/bulk_move_category", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({item_ids: ids, category: newCat})
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.ok) {
+            ids.forEach(function(id) {
+              var card = document.getElementById("card-" + id);
+              if (card) {
+                card.dataset.cat = newCat.toLowerCase();
+                var label = card.querySelector(".card-category-label");
+                if (label) label.textContent = newCat;
+              }
+              var tr = document.querySelector('#items-body tr[data-id="' + id + '"]');
+              if (tr) {
+                var catInp = tr.querySelector(".category");
+                if (catInp) catInp.value = newCat;
+              }
+            });
+            _clearBulkSelection();
+            showToast(data.updated + " item(s) moved to "" + newCat + """);
+            _refreshStatsBar();
+          } else {
+            showToast(data.error || "Move failed");
+          }
+        }).catch(function() { showToast("Move failed"); });
+      });
+    }
+
+    // Cancel bulk mode
+    var bulkCancelBtn = document.getElementById("bulk-card-cancel-btn");
+    if (bulkCancelBtn) {
+      bulkCancelBtn.addEventListener("click", function() { _clearBulkSelection(); });
+    }
+
+    // Refresh stats bar via AJAX
+    function _refreshStatsBar() {
+      var bar = document.getElementById("editor-stats-bar");
+      if (!bar) return;
+      fetch("/drafts/" + draftId + "/stats")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (!data.ok) return;
+          var s = data.stats;
+          var vals = bar.querySelectorAll(".stats-value");
+          if (vals[0]) vals[0].textContent = s.item_count;
+          if (vals[1]) vals[1].textContent = s.category_count;
+          if (vals[2]) vals[2].textContent = s.mg_coverage_pct + "%";
+        }).catch(function() {});
+    }
+    window._refreshStatsBar = _refreshStatsBar;
 
   })();
   </script>

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 121 (March 17, 2026) — Sprint 12.2 Day 6: Dual Name Display (32 tests, 2,578 total)
+Last Updated: Day 122 (March 17, 2026) — Sprint 12.2 Day 7: Bulk Card Actions & Stats Bar (32 tests, 2,610 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1903,6 +1903,37 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 
     Day 121 test suite: 32 cases, 100% pass rate
     Cumulative: 2,578 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Day 122: Bulk Card Actions & Editor Stats Bar *** COMPLETE ***
+  -------------------------------------------------------------
+  [x] Editor stats bar (#editor-stats-bar):
+        - Item count, category count, modifier coverage %, price range ✓
+        - Computed by _compute_editor_stats() helper ✓
+        - Rendered server-side in template ✓
+        - Live refresh via GET /drafts/<id>/stats AJAX endpoint ✓
+  [x] Bulk selection mode on card view:
+        - .card-bulk-checkbox always visible on each card (editing mode only) ✓
+        - .bulk-selected outline highlight on checked cards ✓
+        - #bulk-card-toolbar auto-shows when any cards selected ✓
+        - Count badge + action buttons (Move, Delete, Select All, Cancel) ✓
+        - "Select All in Category" button respects active category filter ✓
+  [x] Bulk delete (POST /drafts/<id>/bulk_delete):
+        - Accepts {"item_ids": [...]} JSON body ✓
+        - Deletes items from DB, removes cards + table rows from DOM ✓
+        - Confirmation dialog before delete ✓
+        - Status guard: 403 on non-editing drafts ✓
+  [x] Bulk category move (POST /drafts/<id>/bulk_move_category):
+        - Accepts {"item_ids": [...], "category": "..."} JSON body ✓
+        - Updates category in DB + card data-cat + table row ✓
+        - Status guard: 403 on non-editing drafts ✓
+  [x] Empty state UI:
+        - .empty-state-msg shown when draft has no items ✓
+        - Helpful hint: "Click Add Item to create your first menu item" ✓
+  [x] CSS: stats bar, bulk mode, bulk toolbar, empty state styles ✓
+  [x] JS: _updateBulkCount, _clearBulkSelection, _refreshStatsBar ✓
+
+    Day 122 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,610 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 12.3 — Export Format Alignment (Days 123-127)
 .....................................................

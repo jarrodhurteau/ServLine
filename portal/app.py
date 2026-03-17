@@ -4853,6 +4853,31 @@ def drafts_list():
     drafts = drafts_store.list_drafts(status=status, restaurant_id=restaurant_id, limit=200, offset=0)
     return _safe_render("drafts.html", drafts=drafts, status=status, restaurant_id=restaurant_id)
 
+def _compute_editor_stats(items: list) -> dict:
+    """Day 122: Compute summary stats for the editor stats bar."""
+    total = len(items)
+    cats = set()
+    with_mg = 0
+    prices = []
+    for it in items:
+        cat = (it.get("category") or "").strip()
+        if cat:
+            cats.add(cat)
+        if it.get("modifier_groups"):
+            with_mg += 1
+        pc = it.get("price_cents")
+        if pc and int(pc) > 0:
+            prices.append(int(pc))
+    mg_pct = round(with_mg / total * 100) if total else 0
+    return {
+        "item_count": total,
+        "category_count": len(cats),
+        "mg_coverage_pct": mg_pct,
+        "price_min": min(prices) if prices else 0,
+        "price_max": max(prices) if prices else 0,
+    }
+
+
 @app.get("/drafts/<int:draft_id>/edit")
 @login_required
 def draft_editor(draft_id: int):
@@ -4931,6 +4956,9 @@ def draft_editor(draft_id: int):
     except Exception:
         pass
 
+    # Day 122: editor stats
+    editor_stats = _compute_editor_stats(items)
+
     return _safe_render(
         "draft_editor.html",
         draft=draft,
@@ -4948,6 +4976,9 @@ def draft_editor(draft_id: int):
 
         # Day 116: category nav order
         category_order=category_order,
+
+        # Day 122: stats bar
+        editor_stats=editor_stats,
     )
 
 
@@ -7473,4 +7504,86 @@ if _os.environ.get("FLASK_DEBUG") == "1":
             import traceback, html
             tb = traceback.format_exc()
             return f"<pre>{html.escape(tb)}</pre>", 500
+# === Day 122: Editor Stats + Bulk Card Actions ===
+
+
+@app.get("/drafts/<int:draft_id>/stats")
+@login_required
+def draft_stats(draft_id: int):
+    """Return live editor stats as JSON."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "Draft not found"}), 404
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
+    stats = _compute_editor_stats(items)
+    return jsonify({"ok": True, "stats": stats}), 200
+
+
+@app.post("/drafts/<int:draft_id>/bulk_delete")
+@login_required
+def bulk_delete_items(draft_id: int):
+    """
+    Delete multiple items by ID from a draft (card-view bulk action).
+    Body: {"item_ids": [1, 2, 3]}
+    """
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "Draft not found"}), 404
+    if draft.get("status") != "editing":
+        return jsonify({"ok": False, "error": "Draft is not editable"}), 403
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get("item_ids")
+    if not isinstance(raw_ids, list):
+        return jsonify({"ok": False, "error": "'item_ids' must be a list"}), 400
+    int_ids = []
+    for x in raw_ids:
+        try:
+            int_ids.append(int(x))
+        except (ValueError, TypeError):
+            return jsonify({"ok": False, "error": f"Invalid item id: {x}"}), 400
+    deleted = drafts_store.delete_draft_items(draft_id, int_ids) if int_ids else 0
+    return jsonify({"ok": True, "deleted": deleted}), 200
+
+
+@app.post("/drafts/<int:draft_id>/bulk_move_category")
+@login_required
+def bulk_move_category(draft_id: int):
+    """
+    Move multiple items to a new category.
+    Body: {"item_ids": [1, 2, 3], "category": "Appetizers"}
+    """
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "Draft not found"}), 404
+    if draft.get("status") != "editing":
+        return jsonify({"ok": False, "error": "Draft is not editable"}), 403
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get("item_ids")
+    category = payload.get("category")
+    if not isinstance(raw_ids, list):
+        return jsonify({"ok": False, "error": "'item_ids' must be a list"}), 400
+    if not isinstance(category, str) or not category.strip():
+        return jsonify({"ok": False, "error": "'category' must be a non-empty string"}), 400
+    category = category.strip()
+    int_ids = []
+    for x in raw_ids:
+        try:
+            int_ids.append(int(x))
+        except (ValueError, TypeError):
+            return jsonify({"ok": False, "error": f"Invalid item id: {x}"}), 400
+    if not int_ids:
+        return jsonify({"ok": True, "updated": 0}), 200
+    with db_connect() as conn:
+        qmarks = ",".join(["?"] * len(int_ids))
+        conn.execute(
+            f"UPDATE draft_items SET category=? WHERE draft_id=? AND id IN ({qmarks})",
+            (category, int(draft_id), *int_ids),
+        )
+        conn.commit()
+    return jsonify({"ok": True, "updated": len(int_ids), "category": category}), 200
+
+
 # === /DEBUG APPEND ===
