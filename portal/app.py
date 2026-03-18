@@ -6237,10 +6237,150 @@ def draft_export_json(draft_id: int):
     resp.headers["Content-Disposition"] = f'attachment; filename="draft_{draft_id}.json"'
     return resp
 
+
+# ---------------------------------------------------------------------------
+# XLSX shared helper (Day 125)
+# ---------------------------------------------------------------------------
+
+def _xlsx_write_sheet(ws, items, xl, *, include_category: bool = True):
+    """Write items with modifier group headers + modifier/variant sub-rows to a worksheet.
+
+    Row types and styles:
+      - Header row: bold white text on dark bg (#1a2236)
+      - Item row: bold text
+      - Modifier group row: bold text on light blue bg (#D6EAF8), shows group name + required
+      - Modifier row: gray text on light gray bg (#F2F2F2), indented with "    "
+      - Ungrouped variant row: gray text on light gray bg (#F2F2F2), indented with "  "
+    """
+    from openpyxl.styles import Font, PatternFill  # type: ignore[import]
+
+    # -- Styles --
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1a2236", end_color="1a2236", fill_type="solid")
+    parent_font = Font(bold=True)
+    group_font = Font(bold=True, color="1a5276")
+    group_fill = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
+    modifier_font = Font(color="666666")
+    modifier_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+    # -- Headers --
+    if include_category:
+        headers = ["name", "description", "price_cents", "category", "group_name", "required"]
+    else:
+        headers = ["name", "description", "price_cents", "group_name", "required"]
+
+    ws.append(headers)
+    for ci in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=ci)
+        cell.font = header_font
+        cell.fill = header_fill
+
+    # -- Data rows --
+    for it in items:
+        mod_groups = it.get("modifier_groups") or []
+        ungrouped = it.get("ungrouped_variants") or []
+        # Fallback: if fetched with include_variants=True (no modifier_groups key)
+        if not mod_groups and not ungrouped and "variants" in it:
+            ungrouped = it.get("variants") or []
+
+        # Item row
+        if include_category:
+            row_data = [
+                it.get("name", ""),
+                it.get("description", ""),
+                it.get("price_cents", 0),
+                it.get("category") or "",
+                "",  # group_name
+                "",  # required
+            ]
+        else:
+            row_data = [
+                it.get("name", ""),
+                it.get("description", ""),
+                it.get("price_cents", 0),
+                "",  # group_name
+                "",  # required
+            ]
+        ws.append(row_data)
+        row_num = ws.max_row
+        for ci in range(1, len(headers) + 1):
+            ws.cell(row=row_num, column=ci).font = parent_font
+
+        # Modifier group header + modifier rows
+        for grp in mod_groups:
+            grp_name = grp.get("name") or "(unnamed)"
+            required = "Y" if grp.get("required") else "N"
+            if include_category:
+                grp_row = ["", "", "", "", grp_name, required]
+            else:
+                grp_row = ["", "", "", grp_name, required]
+            ws.append(grp_row)
+            grow_num = ws.max_row
+            for ci in range(1, len(headers) + 1):
+                cell = ws.cell(row=grow_num, column=ci)
+                cell.font = group_font
+                cell.fill = group_fill
+
+            for mod in (grp.get("modifiers") or []):
+                if include_category:
+                    mrow = [
+                        "    " + (mod.get("label") or ""),
+                        mod.get("kind", "size"),
+                        mod.get("price_cents", 0),
+                        "",  # category
+                        grp_name,
+                        "",  # required
+                    ]
+                else:
+                    mrow = [
+                        "    " + (mod.get("label") or ""),
+                        mod.get("kind", "size"),
+                        mod.get("price_cents", 0),
+                        grp_name,
+                        "",  # required
+                    ]
+                ws.append(mrow)
+                mrow_num = ws.max_row
+                for ci in range(1, len(headers) + 1):
+                    cell = ws.cell(row=mrow_num, column=ci)
+                    cell.font = modifier_font
+                    cell.fill = modifier_fill
+
+        # Ungrouped variant sub-rows
+        for v in ungrouped:
+            if include_category:
+                vrow = [
+                    "  " + (v.get("label") or ""),
+                    v.get("kind", "size"),
+                    v.get("price_cents", 0),
+                    "",  # category
+                    "",  # group_name
+                    "",  # required
+                ]
+            else:
+                vrow = [
+                    "  " + (v.get("label") or ""),
+                    v.get("kind", "size"),
+                    v.get("price_cents", 0),
+                    "",  # group_name
+                    "",  # required
+                ]
+            ws.append(vrow)
+            vrow_num = ws.max_row
+            for ci in range(1, len(headers) + 1):
+                cell = ws.cell(row=vrow_num, column=ci)
+                cell.font = modifier_font
+                cell.fill = modifier_fill
+
+    # Auto-width columns
+    for ci in range(1, len(headers) + 1):
+        ws.column_dimensions[xl.utils.get_column_letter(ci)].width = 18
+
+
 @app.get("/drafts/<int:draft_id>/export.xlsx")
 @login_required
 def draft_export_xlsx(draft_id: int):
-    """Excel export with variant sub-rows, formatting, and auto-generated columns."""
+    """Excel export with modifier group headers, modifier sub-rows, and ungrouped variant sub-rows."""
     _require_drafts_storage()
 
     try:
@@ -6253,80 +6393,13 @@ def draft_export_xlsx(draft_id: int):
         return make_response("openpyxl not installed. pip install openpyxl", 500)
 
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
-
-    # Collect all unique variant labels in first-appearance order
-    seen_labels: dict = {}
-    for it in items:
-        for v in (it.get("variants") or []):
-            lbl = (v.get("label") or "").strip()
-            if lbl and lbl not in seen_labels:
-                seen_labels[lbl] = len(seen_labels)
-    label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
 
     wb = xl.Workbook()
     ws = wb.active
     ws.title = (draft.get("title") or f"Draft {draft_id}")[:31]
 
-    # -- Styles --
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1a2236", end_color="1a2236", fill_type="solid")
-    parent_font = Font(bold=True)
-    variant_font = Font(color="666666")
-    variant_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-
-    # -- Headers --
-    base_headers = ["name", "description", "price_cents", "category"]
-    variant_headers = [f"price_{lbl}" for lbl in label_order]
-    all_headers = base_headers + variant_headers
-    ws.append(all_headers)
-    for ci, _ in enumerate(all_headers, start=1):
-        cell = ws.cell(row=1, column=ci)
-        cell.font = header_font
-        cell.fill = header_fill
-
-    # -- Data rows --
-    for it in items:
-        variants = it.get("variants") or []
-        vpmap = {}
-        for v in variants:
-            lbl = (v.get("label") or "").strip()
-            if lbl:
-                vpmap[lbl] = v.get("price_cents", 0)
-
-        row_data = [
-            it.get("name", ""),
-            it.get("description", ""),
-            it.get("price_cents", 0),
-            it.get("category") or "",
-        ]
-        for lbl in label_order:
-            row_data.append(vpmap.get(lbl, ""))
-        ws.append(row_data)
-        row_num = ws.max_row
-        for ci in range(1, len(all_headers) + 1):
-            ws.cell(row=row_num, column=ci).font = parent_font
-
-        # Variant sub-rows (indented)
-        for v in variants:
-            vrow = [
-                "  " + (v.get("label") or ""),  # indented label in name column
-                v.get("kind", "size"),            # kind in description column
-                v.get("price_cents", 0),          # price in price column
-                "",                               # no category
-            ]
-            for _ in label_order:
-                vrow.append("")
-            ws.append(vrow)
-            vrow_num = ws.max_row
-            for ci in range(1, len(all_headers) + 1):
-                cell = ws.cell(row=vrow_num, column=ci)
-                cell.font = variant_font
-                cell.fill = variant_fill
-
-    # Auto-width columns
-    for ci, _ in enumerate(all_headers, start=1):
-        ws.column_dimensions[xl.utils.get_column_letter(ci)].width = 18
+    _xlsx_write_sheet(ws, items, xl, include_category=True)
 
     out = io.BytesIO()
     wb.save(out)
@@ -6341,7 +6414,7 @@ def draft_export_xlsx(draft_id: int):
 @app.get("/drafts/<int:draft_id>/export_by_category.xlsx")
 @login_required
 def draft_export_xlsx_by_category(draft_id: int):
-    """Excel export with one sheet per category.  Each sheet has variant sub-rows."""
+    """Excel export with one sheet per category.  Each sheet has modifier group + variant sub-rows."""
     _require_drafts_storage()
 
     try:
@@ -6354,20 +6427,13 @@ def draft_export_xlsx_by_category(draft_id: int):
         return make_response("openpyxl not installed. pip install openpyxl", 500)
 
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
 
     # Group items by category
     cat_map: dict = {}  # category -> list of items
     for it in items:
         cat = (it.get("category") or "Uncategorized").strip()
         cat_map.setdefault(cat, []).append(it)
-
-    # Styles
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1a2236", end_color="1a2236", fill_type="solid")
-    parent_font = Font(bold=True)
-    variant_font = Font(color="666666")
-    variant_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 
     wb = xl.Workbook()
     wb.remove(wb.active)  # remove default empty sheet
@@ -6376,63 +6442,7 @@ def draft_export_xlsx_by_category(draft_id: int):
         cat_items = cat_map[cat_name]
         sheet_title = cat_name[:31] or "Uncategorized"
         ws = wb.create_sheet(title=sheet_title)
-
-        # Collect variant labels for this category
-        seen_labels: dict = {}
-        for it in cat_items:
-            for v in (it.get("variants") or []):
-                lbl = (v.get("label") or "").strip()
-                if lbl and lbl not in seen_labels:
-                    seen_labels[lbl] = len(seen_labels)
-        label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
-
-        base_headers = ["name", "description", "price_cents"]
-        variant_headers = [f"price_{lbl}" for lbl in label_order]
-        all_headers = base_headers + variant_headers
-
-        ws.append(all_headers)
-        for ci, _ in enumerate(all_headers, start=1):
-            cell = ws.cell(row=1, column=ci)
-            cell.font = header_font
-            cell.fill = header_fill
-
-        for it in cat_items:
-            variants = it.get("variants") or []
-            vpmap = {}
-            for v in variants:
-                lbl = (v.get("label") or "").strip()
-                if lbl:
-                    vpmap[lbl] = v.get("price_cents", 0)
-
-            row_data = [
-                it.get("name", ""),
-                it.get("description", ""),
-                it.get("price_cents", 0),
-            ]
-            for lbl in label_order:
-                row_data.append(vpmap.get(lbl, ""))
-            ws.append(row_data)
-            row_num = ws.max_row
-            for ci in range(1, len(all_headers) + 1):
-                ws.cell(row=row_num, column=ci).font = parent_font
-
-            for v in variants:
-                vrow = [
-                    "  " + (v.get("label") or ""),
-                    v.get("kind", "size"),
-                    v.get("price_cents", 0),
-                ]
-                for _ in label_order:
-                    vrow.append("")
-                ws.append(vrow)
-                vrow_num = ws.max_row
-                for ci in range(1, len(all_headers) + 1):
-                    cell = ws.cell(row=vrow_num, column=ci)
-                    cell.font = variant_font
-                    cell.fill = variant_fill
-
-        for ci, _ in enumerate(all_headers, start=1):
-            ws.column_dimensions[xl.utils.get_column_letter(ci)].width = 18
+        _xlsx_write_sheet(ws, cat_items, xl, include_category=False)
 
     # If no categories at all, create a placeholder sheet
     if not cat_map:
@@ -6593,6 +6603,43 @@ def _validate_draft_for_export(items):
                     "type": "group_max_exceeds_count",
                     "message": f"Modifier group '{grp_name}' on '{name}': max_select ({max_sel}) > modifier count ({mod_count})",
                 })
+
+    # --- Day 125: cross-item modifier group consistency ---
+    # Within each category, collect which group names each item uses.
+    # If most items in a category share a group name but some don't, flag outliers.
+    cat_groups: dict = {}  # category -> {group_name: [item_name, ...]}
+    for it in items:
+        cat = (it.get("category") or "").strip()
+        if not cat:
+            continue
+        for grp in (it.get("modifier_groups") or []):
+            gn = (grp.get("name") or "").strip()
+            if gn:
+                cat_groups.setdefault(cat, {}).setdefault(gn, []).append(it.get("name", ""))
+
+    for cat, group_map in cat_groups.items():
+        for gn, item_names in group_map.items():
+            # Count total items in this category (that have at least one modifier group)
+            cat_items_with_groups = set()
+            for it in items:
+                it_cat = (it.get("category") or "").strip()
+                if it_cat == cat and (it.get("modifier_groups") or []):
+                    cat_items_with_groups.add(it.get("name", ""))
+            total_with_groups = len(cat_items_with_groups)
+            using_this_group = set(item_names)
+            # If >=50% of items in category have this group but some don't, flag missing ones
+            if total_with_groups >= 3 and len(using_this_group) >= total_with_groups * 0.5:
+                missing = cat_items_with_groups - using_this_group
+                for miss_name in missing:
+                    warnings.append({
+                        "item_id": None,
+                        "name": miss_name,
+                        "type": "modifier_group_inconsistent",
+                        "message": (
+                            f"Most items in '{cat}' have modifier group '{gn}', "
+                            f"but '{miss_name}' does not"
+                        ),
+                    })
 
     return warnings
 
