@@ -6485,6 +6485,48 @@ def _validate_draft_for_export(items):
             except ImportError:
                 pass  # size_vocab not available — skip price inversion check
 
+        # --- Day 123: modifier group warnings ---
+        for grp in (it.get("modifier_groups") or []):
+            grp_name = grp.get("name") or "(unnamed)"
+            mods = grp.get("modifiers") or []
+            mod_count = len(mods)
+
+            # Empty modifier group
+            if mod_count == 0:
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "modifier_group_empty",
+                    "message": f"Modifier group '{grp_name}' on '{name}' has no modifiers",
+                })
+
+            # Required group with no modifiers (can't satisfy requirement)
+            if grp.get("required") and mod_count == 0:
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "required_group_empty",
+                    "message": f"Required modifier group '{grp_name}' on '{name}' has no modifiers",
+                })
+
+            # min/max consistency
+            min_sel = grp.get("min_select") or 0
+            max_sel = grp.get("max_select") or 0
+            if min_sel and max_sel and min_sel > max_sel:
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "group_min_exceeds_max",
+                    "message": f"Modifier group '{grp_name}' on '{name}': min_select ({min_sel}) > max_select ({max_sel})",
+                })
+            if max_sel and mod_count and max_sel > mod_count:
+                warnings.append({
+                    "item_id": item_id,
+                    "name": name,
+                    "type": "group_max_exceeds_count",
+                    "message": f"Modifier group '{grp_name}' on '{name}': max_select ({max_sel}) > modifier count ({mod_count})",
+                })
+
     return warnings
 
 
@@ -6712,53 +6754,71 @@ def draft_export_preview(draft_id: int):
 
 
 def _build_square_rows(items):
-    """Build Square CSV rows: items + modifier groups from variants.
+    """Build Square CSV rows: items + modifier sets from modifier groups.
 
     Square import format:
       Token, Item Name, Description, Category, Price,
-      Modifier Set Name, Modifier Name, Modifier Price
+      Modifier Set Name, Modifier Name, Modifier Price,
+      Required, Min Select, Max Select
 
-    Items without variants: single row with base price.
-    Items with variants: parent row (price=base), then modifier rows
-    grouped by kind (e.g., "Size", "Combo Add-on").
+    Items without modifiers: single row with base price.
+    Items with modifier_groups: parent row, then modifier rows under each
+    group (mapped 1:1 to Square Modifier Sets with selection rules).
+    Items with only ungrouped_variants: fall back to kind-based grouping.
     """
+    _KIND_LABELS = {
+        "size": "Size",
+        "combo": "Combo Add-on",
+        "flavor": "Flavor",
+        "style": "Style",
+        "other": "Option",
+    }
+
     rows = []
     for it in items:
         name = it.get("name", "")
         desc = it.get("description") or ""
         cat = it.get("category") or ""
         price = _format_price_dollars(it.get("price_cents", 0))
-        variants = it.get("variants") or []
 
-        if not variants:
-            rows.append([
-                "item", name, desc, cat, price, "", "", "",
-            ])
-        else:
-            # Parent row with base price
-            rows.append([
-                "item", name, desc, cat, price, "", "", "",
-            ])
-            # Group variants by kind for modifier sets
+        modifier_groups = it.get("modifier_groups") or []
+        ungrouped = it.get("ungrouped_variants") or it.get("variants") or []
+
+        # Parent row (always emitted)
+        rows.append([
+            "item", name, desc, cat, price, "", "", "", "", "", "",
+        ])
+
+        if modifier_groups:
+            # POS-native modifier groups → Square Modifier Sets (1:1)
+            for grp in modifier_groups:
+                set_name = grp.get("name", "Option")
+                required = "Y" if grp.get("required") else "N"
+                min_sel = grp.get("min_select") or 0
+                max_sel = grp.get("max_select") or 0
+                for mod in (grp.get("modifiers") or []):
+                    mod_price = _format_price_dollars(mod.get("price_cents", 0))
+                    rows.append([
+                        "modifier", name, "", "", "",
+                        set_name, mod.get("label", ""), mod_price,
+                        required, str(min_sel), str(max_sel),
+                    ])
+
+        if ungrouped:
+            # Ungrouped variants → kind-based modifier sets (backward compat)
             kind_groups: dict = {}
-            for v in variants:
+            for v in ungrouped:
                 k = v.get("kind", "size")
                 kind_groups.setdefault(k, []).append(v)
 
-            kind_labels = {
-                "size": "Size",
-                "combo": "Combo Add-on",
-                "flavor": "Flavor",
-                "style": "Style",
-                "other": "Option",
-            }
             for kind, vlist in kind_groups.items():
-                set_name = kind_labels.get(kind, "Option")
+                set_name = _KIND_LABELS.get(kind, "Option")
                 for v in vlist:
                     mod_price = _format_price_dollars(v.get("price_cents", 0))
                     rows.append([
                         "modifier", name, "", "", "",
                         set_name, v.get("label", ""), mod_price,
+                        "", "", "",
                     ])
     return rows
 
@@ -6768,43 +6828,58 @@ def _build_toast_rows(items):
 
     Toast import format:
       Menu Group, Menu Item, Base Price,
-      Option Group, Option, Option Price
+      Option Group, Option, Option Price, Required
 
     Items map to Menu Items under their category (Menu Group).
-    Variants map to Options under Option Groups (by kind).
+    Modifier groups map 1:1 to Toast Option Groups.
+    Ungrouped variants fall back to kind-based grouping.
     """
+    _KIND_LABELS = {
+        "size": "Size",
+        "combo": "Combo Add-on",
+        "flavor": "Flavor",
+        "style": "Style",
+        "other": "Option",
+    }
+
     rows = []
     for it in items:
         name = it.get("name", "")
         cat = it.get("category") or "Uncategorized"
         price = _format_price_dollars(it.get("price_cents", 0))
-        variants = it.get("variants") or []
 
-        if not variants:
-            rows.append([cat, name, price, "", "", ""])
-        else:
-            # Parent row
-            rows.append([cat, name, price, "", "", ""])
-            # Group by kind
+        modifier_groups = it.get("modifier_groups") or []
+        ungrouped = it.get("ungrouped_variants") or it.get("variants") or []
+
+        # Parent row (always emitted)
+        rows.append([cat, name, price, "", "", "", ""])
+
+        if modifier_groups:
+            # POS-native modifier groups → Toast Option Groups (1:1)
+            for grp in modifier_groups:
+                group_name = grp.get("name", "Option")
+                required = "Y" if grp.get("required") else "N"
+                for mod in (grp.get("modifiers") or []):
+                    opt_price = _format_price_dollars(mod.get("price_cents", 0))
+                    rows.append([
+                        "", "", "", group_name,
+                        mod.get("label", ""), opt_price, required,
+                    ])
+
+        if ungrouped:
+            # Ungrouped variants → kind-based option groups (backward compat)
             kind_groups: dict = {}
-            for v in variants:
+            for v in ungrouped:
                 k = v.get("kind", "size")
                 kind_groups.setdefault(k, []).append(v)
 
-            kind_labels = {
-                "size": "Size",
-                "combo": "Combo Add-on",
-                "flavor": "Flavor",
-                "style": "Style",
-                "other": "Option",
-            }
             for kind, vlist in kind_groups.items():
-                group_name = kind_labels.get(kind, "Option")
+                group_name = _KIND_LABELS.get(kind, "Option")
                 for v in vlist:
                     opt_price = _format_price_dollars(v.get("price_cents", 0))
                     rows.append([
                         "", "", "", group_name,
-                        v.get("label", ""), opt_price,
+                        v.get("label", ""), opt_price, "",
                     ])
     return rows
 
@@ -6935,13 +7010,14 @@ def _build_generic_pos_json(items, draft=None):
 def draft_export_square_csv(draft_id: int):
     """Square POS CSV export: items + modifier groups."""
     _require_drafts_storage()
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
     rows = _build_square_rows(items)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["Token", "Item Name", "Description", "Category",
-                      "Price", "Modifier Set Name", "Modifier Name", "Modifier Price"])
+                      "Price", "Modifier Set Name", "Modifier Name", "Modifier Price",
+                      "Required", "Min Select", "Max Select"])
     for r in rows:
         writer.writerow(r)
 
@@ -6957,13 +7033,13 @@ def draft_export_square_csv(draft_id: int):
 def draft_export_toast_csv(draft_id: int):
     """Toast POS CSV export: menu group / item / option hierarchy."""
     _require_drafts_storage()
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
     rows = _build_toast_rows(items)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["Menu Group", "Menu Item", "Base Price",
-                      "Option Group", "Option", "Option Price"])
+                      "Option Group", "Option", "Option Price", "Required"])
     for r in rows:
         writer.writerow(r)
 

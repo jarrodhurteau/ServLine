@@ -1937,15 +1937,19 @@ Sprint 12.2 — POS-Native Editor Redesign (Days 116-122)
 
 Sprint 12.3 — Export Format Alignment (Days 123-127)
 .....................................................
-  [ ] Update Square CSV export:
-        - Modifier groups → Square Modifier Sets (1:1 mapping)
-        - required/min/max → Square selection rules
-        - Group name as Modifier Set name
-        - Per-modifier pricing
-  [ ] Update Toast CSV export:
-        - Modifier groups → Toast Option Groups (1:1 mapping)
-        - Nested structure matches Toast hierarchy
-        - Required groups → Toast "required" flag
+  [x] Update Square CSV export:  ✓ Day 123
+        - Modifier groups → Square Modifier Sets (1:1 mapping) ✓
+        - required/min/max → Square selection rules ✓
+        - Group name as Modifier Set name ✓
+        - Per-modifier pricing ✓
+        - 3 new columns: Required, Min Select, Max Select ✓
+        - Ungrouped variants → kind-based fallback (backward compat) ✓
+  [x] Update Toast CSV export:  ✓ Day 123
+        - Modifier groups → Toast Option Groups (1:1 mapping) ✓
+        - Nested structure matches Toast hierarchy ✓
+        - Required groups → Toast "required" flag ✓
+        - 1 new column: Required ✓
+        - Ungrouped variants → kind-based fallback (backward compat) ✓
   [ ] Update Generic POS JSON export:
         - menu.categories[].items[].modifier_groups[].modifiers[]
         - Include selection rules in each modifier group
@@ -1954,14 +1958,17 @@ Sprint 12.3 — Export Format Alignment (Days 123-127)
         - Modifier groups represented appropriately per format
         - Wide CSV: group name as column prefix
         - XLSX: group headers as styled rows
-  [ ] Export validation updates:
-        - New warnings: modifier_group_no_modifiers, required_group_empty
-        - Validate min/max consistency (min <= max, max <= modifier count)
+  [~] Export validation updates:  (partially done Day 123)
+        - New warnings: modifier_group_empty, required_group_empty ✓
+        - Validate min/max consistency: group_min_exceeds_max, group_max_exceeds_count ✓
         - Cross-item modifier group consistency checks
   [ ] End-to-end export round-trip tests:
         - All export formats verified with modifier group data
         - Square/Toast/POS JSON structurally validated against POS schemas
         - Backward compat: drafts without modifier groups still export cleanly
+
+    Day 123 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,642 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
   FUTURE — Guided Onboarding Wizard (Phase 13 or later):
     The "TurboTax of POS menu import" — what makes ServLine ServLine, not just
