@@ -6042,12 +6042,19 @@ def draft_export_csv(draft_id: int):
 @app.get("/drafts/<int:draft_id>/export_variants.csv")
 @login_required
 def draft_export_csv_variants(draft_id: int):
-    """CSV export with variant sub-rows under each parent item."""
+    """CSV export with variant sub-rows under each parent item.
+
+    When modifier groups are present, emits modifier_group header rows
+    followed by modifier child rows.  Ungrouped variants continue as
+    plain variant rows for backward compatibility.
+    """
     _require_drafts_storage()
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_variants=True,
+                                          include_modifier_groups=True) or []
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["type", "id", "name", "description", "price_cents", "category", "kind", "label"])
+    writer.writerow(["type", "id", "name", "description", "price_cents",
+                      "category", "kind", "label", "group_name", "required"])
     for it in items:
         writer.writerow([
             "item",
@@ -6056,19 +6063,32 @@ def draft_export_csv_variants(draft_id: int):
             it.get("description", ""),
             it.get("price_cents", 0),
             it.get("category") or "",
-            "",
-            "",
+            "", "", "", "",
         ])
-        for v in (it.get("variants") or []):
+
+        # POS-native modifier groups → group header + modifier rows
+        for grp in (it.get("modifier_groups") or []):
+            grp_name = grp.get("name", "Option")
+            required = "Y" if grp.get("required") else "N"
             writer.writerow([
-                "variant",
-                "",
-                "",
-                "",
+                "modifier_group", "", "", "", "",
+                "", "", "", grp_name, required,
+            ])
+            for mod in (grp.get("modifiers") or []):
+                writer.writerow([
+                    "modifier", "", "", "",
+                    mod.get("price_cents", 0),
+                    "", mod.get("kind", "size"), mod.get("label", ""),
+                    grp_name, "",
+                ])
+
+        # Ungrouped variants (backward compat)
+        for v in (it.get("ungrouped_variants") or it.get("variants") or []):
+            writer.writerow([
+                "variant", "", "", "",
                 v.get("price_cents", 0),
-                "",
-                v.get("kind", "size"),
-                v.get("label", ""),
+                "", v.get("kind", "size"), v.get("label", ""),
+                "", "",
             ])
     csv_data = buf.getvalue().encode("utf-8-sig")
     resp = make_response(csv_data)
@@ -6080,17 +6100,33 @@ def draft_export_csv_variants(draft_id: int):
 @app.get("/drafts/<int:draft_id>/export_wide.csv")
 @login_required
 def draft_export_csv_wide(draft_id: int):
-    """CSV export with variant prices as extra columns (one row per item)."""
-    _require_drafts_storage()
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    """CSV export with variant prices as extra columns (one row per item).
 
-    # Collect all unique variant labels across the draft (in order of first appearance)
+    Modifier group modifiers become columns prefixed with the group name
+    (e.g. ``Size:Small``, ``Size:Large``).  Ungrouped variants use their
+    label directly (backward compat).
+    """
+    _require_drafts_storage()
+    items = drafts_store.get_draft_items(draft_id, include_variants=True,
+                                          include_modifier_groups=True) or []
+
+    # Collect all unique column labels across items (in first-appearance order)
     seen_labels: dict = {}  # label -> insertion order
+
     for it in items:
-        for v in (it.get("variants") or []):
+        # Modifier group modifiers → "GroupName:Label"
+        for grp in (it.get("modifier_groups") or []):
+            grp_name = grp.get("name", "Option")
+            for mod in (grp.get("modifiers") or []):
+                col = f"{grp_name}:{mod.get('label', '')}"
+                if col not in seen_labels:
+                    seen_labels[col] = len(seen_labels)
+        # Ungrouped variants → plain label (backward compat)
+        for v in (it.get("ungrouped_variants") or it.get("variants") or []):
             lbl = (v.get("label") or "").strip()
             if lbl and lbl not in seen_labels:
                 seen_labels[lbl] = len(seen_labels)
+
     label_order = sorted(seen_labels.keys(), key=lambda x: seen_labels[x])
 
     buf = io.StringIO()
@@ -6106,13 +6142,18 @@ def draft_export_csv_wide(draft_id: int):
             it.get("price_cents", 0),
             it.get("category") or "",
         ]
-        # Build a label -> price mapping for this item's variants
-        vpmap = {}
-        for v in (it.get("variants") or []):
+        # Build label -> price mapping
+        vpmap: dict = {}
+        for grp in (it.get("modifier_groups") or []):
+            grp_name = grp.get("name", "Option")
+            for mod in (grp.get("modifiers") or []):
+                col = f"{grp_name}:{mod.get('label', '')}"
+                vpmap[col] = mod.get("price_cents", 0)
+        for v in (it.get("ungrouped_variants") or it.get("variants") or []):
             lbl = (v.get("label") or "").strip()
             if lbl:
                 vpmap[lbl] = v.get("price_cents", 0)
-        # Append variant price columns
+        # Append price columns
         for lbl in label_order:
             row.append(vpmap.get(lbl, ""))
         writer.writerow(row)
@@ -6129,9 +6170,10 @@ def draft_export_csv_wide(draft_id: int):
 def draft_export_json(draft_id: int):
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id) or {}
-    items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    items = drafts_store.get_draft_items(draft_id, include_variants=True,
+                                          include_modifier_groups=True) or []
 
-    # Clean items for export: include nested variants array per item
+    # Clean items for export: include nested variants + modifier_groups
     export_items = []
     for it in items:
         eitem = {
@@ -6142,15 +6184,40 @@ def draft_export_json(draft_id: int):
             "category": it.get("category") or "",
             "position": it.get("position"),
         }
-        variants = it.get("variants") or []
-        if variants:
+
+        # Modifier groups (POS-native)
+        modifier_groups = it.get("modifier_groups") or []
+        if modifier_groups:
+            eitem["modifier_groups"] = [
+                {
+                    "name": grp.get("name", ""),
+                    "required": bool(grp.get("required")),
+                    "min_select": grp.get("min_select") or 0,
+                    "max_select": grp.get("max_select") or 0,
+                    "modifiers": [
+                        {
+                            "label": mod.get("label", ""),
+                            "price_cents": mod.get("price_cents", 0),
+                            "kind": mod.get("kind", "size"),
+                        }
+                        for mod in (grp.get("modifiers") or [])
+                    ],
+                }
+                for grp in modifier_groups
+            ]
+        else:
+            eitem["modifier_groups"] = []
+
+        # Ungrouped variants (backward compat)
+        ungrouped = it.get("ungrouped_variants") or it.get("variants") or []
+        if ungrouped:
             eitem["variants"] = [
                 {
                     "label": v.get("label", ""),
                     "price_cents": v.get("price_cents", 0),
                     "kind": v.get("kind", "size"),
                 }
-                for v in variants
+                for v in ungrouped
             ]
         else:
             eitem["variants"] = []

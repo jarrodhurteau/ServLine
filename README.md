@@ -1218,6 +1218,8 @@ Day 122 — Sprint 12.2 Day 7 (Capstone): Bulk Card Actions & Editor Stats Bar. 
 
 Day 123 — Sprint 12.3 Day 1: Square & Toast Export Alignment. _build_square_rows() upgraded from flat kind-based variant grouping to POS-native modifier groups: modifier_groups → Square Modifier Sets (1:1 mapping), selection rules emitted as Required (Y/N), Min Select, Max Select columns. Ungrouped variants fall back to kind-based grouping (backward compat). _build_toast_rows() upgraded similarly: modifier_groups → Toast Option Groups (1:1), Required column (Y/N). Both route handlers switched from include_variants=True to include_modifier_groups=True. CSV headers updated: Square now 11 columns (Token, Item Name, Description, Category, Price, Modifier Set Name, Modifier Name, Modifier Price, Required, Min Select, Max Select); Toast now 7 columns (Menu Group, Menu Item, Base Price, Option Group, Option, Option Price, Required). _validate_draft_for_export() extended with 4 new modifier group warnings: modifier_group_empty, required_group_empty, group_min_exceeds_max, group_max_exceeds_count. Full backward compat: items with only ungrouped_variants export identically to pre-Day 123 format. 228 regression tests pass. 32 tests, 2,642 cumulative.
 
+Day 124 — Sprint 12.3 Day 2: CSV, JSON & Generic POS JSON Modifier Group Upgrades. CSV variants export upgraded: modifier_group header rows + modifier child rows with group_name and required columns alongside legacy variant rows. CSV wide export upgraded: modifier group modifiers become GroupName:Label prefixed columns (e.g. price_Size:Small) while ungrouped variants keep plain label columns. JSON export upgraded: modifier_groups[] array per item with name, required, min_select, max_select, and nested modifiers[] (label, price_cents, kind); ungrouped variants stay in variants[]. Generic POS JSON (_build_generic_pos_json) verified: already supports POS-native nested modifier_groups with selection rules + flat modifiers fallback. All formats maintain full backward compatibility — items without modifier groups export identically to pre-Day 124. 32 tests, 2,674 cumulative.
+
 ---
 
 ## 🌄 System State Summary
@@ -1289,10 +1291,13 @@ ServLine now has:
 - ✅ Export UI dropdown — 10 format choices organized into Standard + POS sections
 - ✅ XLSX export with variant sub-rows — bold parents, gray indented variants, auto-generated label columns
 - ✅ XLSX sheet-per-category export — one sheet per category with category-specific variant columns
-- ✅ Square CSV export — items + modifier groups from variants (Size, Combo Add-on, Flavor, Style, Option)
-- ✅ Toast CSV export — menu group / item / option hierarchy
-- ✅ Generic POS JSON — universal `menu.categories[].items[].modifiers[]` schema
-- ✅ Pre-export validation — missing prices, categories, names, zero-price variants
+- ✅ Square CSV export — items + POS-native modifier groups with selection rules (Required, Min/Max Select)
+- ✅ Toast CSV export — menu group / item / option hierarchy with Required flag
+- ✅ Generic POS JSON — universal `menu.categories[].items[].modifier_groups[].modifiers[]` schema
+- ✅ CSV variants — modifier_group + modifier rows with group_name/required columns
+- ✅ CSV wide — modifier group columns as GroupName:Label prefixes
+- ✅ JSON export — modifier_groups[] array per item with selection rules
+- ✅ Pre-export validation — missing prices, categories, names, zero-price variants, modifier group checks
 - ✅ Export preview modal — formatted output preview before download with format selector
 
 ---

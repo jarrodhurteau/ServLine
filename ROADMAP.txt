@@ -1950,13 +1950,14 @@ Sprint 12.3 — Export Format Alignment (Days 123-127)
         - Required groups → Toast "required" flag ✓
         - 1 new column: Required ✓
         - Ungrouped variants → kind-based fallback (backward compat) ✓
-  [ ] Update Generic POS JSON export:
-        - menu.categories[].items[].modifier_groups[].modifiers[]
-        - Include selection rules in each modifier group
-        - Backward compat: items without groups export as before
-  [ ] Update all other export formats (CSV, XLSX, JSON):
-        - Modifier groups represented appropriately per format
-        - Wide CSV: group name as column prefix
+  [x] Update Generic POS JSON export:  ✓ Day 124 (verified existing impl)
+        - menu.categories[].items[].modifier_groups[].modifiers[] ✓
+        - Include selection rules in each modifier group ✓
+        - Backward compat: items without groups export as before ✓
+  [~] Update all other export formats (CSV, XLSX, JSON):  (partially done Day 124)
+        - CSV variants: modifier_group + modifier rows with group_name column ✓
+        - CSV wide: group name as column prefix (GroupName:Label) ✓
+        - JSON: modifier_groups[] array per item ✓
         - XLSX: group headers as styled rows
   [~] Export validation updates:  (partially done Day 123)
         - New warnings: modifier_group_empty, required_group_empty ✓
@@ -1969,6 +1970,9 @@ Sprint 12.3 — Export Format Alignment (Days 123-127)
 
     Day 123 test suite: 32 cases, 100% pass rate
     Cumulative: 2,642 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+    Day 124 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,674 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
   FUTURE — Guided Onboarding Wizard (Phase 13 or later):
     The "TurboTax of POS menu import" — what makes ServLine ServLine, not just
@@ -2410,6 +2414,8 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 124: CSV, JSON & Generic POS JSON Modifier Group Upgrades — CSV variants (modifier_group + modifier rows), CSV wide (GroupName:Label columns), JSON (modifier_groups[] per item), Generic POS JSON verification, backward compat for all formats, Sprint 12.3 continued (32 tests)
+Day 123: Square & Toast Export Alignment — modifier groups → Square Modifier Sets + Toast Option Groups, selection rules, validation warnings, Sprint 12.3 start (32 tests)
 Day 91: Version Change Summaries & Annotations — generate_change_summary(), auto-summary on publish, update_menu_version(), edit route+modal, session user in created_by, change_summary+published_by in templates, Sprint 10.2 continued (43 tests)
 Day 90: Price Change Highlighting & Restore from Version — price_direction in diffs, ▲/▼ arrows in compare template, restore_version_to_draft(), restore route+buttons, Sprint 10.2 continued (49 tests)
 Day 89: Version Comparison & Diff Engine — compare_menu_versions(), item matching, field+variant diffs, compare route+template, menu detail compare form, Sprint 10.2 start (52 tests)
