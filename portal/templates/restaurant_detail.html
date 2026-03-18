@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ restaurant.name }} — ServLine{% endblock %}
+
+{% block head %}
+<style>
+  .stat-card {
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 20px; text-align:center; min-width:120px;
+  }
+  .stat-card .num { font-size:1.8rem; font-weight:700; color:#7aa2ff; }
+  .stat-card .label { font-size:.8rem; color:var(--muted); margin-top:2px; }
+  .detail-section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <p class="crumbs"><a href="/dashboard">Dashboard</a> / <a href="/restaurants">My Restaurants</a> / {{ restaurant.name }}</p>
+  <h1 class="text-2xl font-bold mb-4">{{ restaurant.name }}</h1>
+
+  <!-- Stats Overview -->
+  <div class="flex flex-wrap gap-3 mb-4">
+    <div class="stat-card">
+      <div class="num">{{ stats.menu_count }}</div>
+      <div class="label">Menu{{ 's' if stats.menu_count != 1 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ stats.draft_count }}</div>
+      <div class="label">Draft{{ 's' if stats.draft_count != 1 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ stats.item_count }}</div>
+      <div class="label">Item{{ 's' if stats.item_count != 1 }}</div>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="flex flex-wrap gap-2 mb-4">
+    <a href="/restaurants/{{ restaurant.id }}/menus" class="btn btn-primary">View Menus</a>
+    <a href="/import" class="btn">Upload Menu</a>
+  </div>
+
+  <!-- Edit Restaurant Details -->
+  <div class="detail-section">
+    <h2 class="text-lg font-semibold mb-3">Restaurant Details</h2>
+    <form action="/restaurants/{{ restaurant.id }}/update" method="post" style="display:grid; gap:12px; max-width:520px;">
+      <div>
+        <label for="edit-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
+        <input id="edit-name" name="name" type="text" required value="{{ restaurant.name }}" style="width:100%;">
+      </div>
+      <div>
+        <label for="edit-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
+        <input id="edit-phone" name="phone" type="text" value="{{ restaurant.phone or '' }}" placeholder="(555) 123-4567" style="width:100%;">
+      </div>
+      <div>
+        <label for="edit-address" style="color:var(--muted); font-size:.9rem;">Address</label>
+        <input id="edit-address" name="address" type="text" value="{{ restaurant.address or '' }}" placeholder="123 Main St, Anytown USA" style="width:100%;">
+      </div>
+      <div>
+        <label for="edit-cuisine" style="color:var(--muted); font-size:.9rem;">Cuisine Type</label>
+        <select id="edit-cuisine" name="cuisine_type" style="width:100%;">
+          <option value="">-- Select --</option>
+          {% for ct in cuisine_types %}
+            <option value="{{ ct }}" {% if restaurant.cuisine_type == ct %}selected{% endif %}>{{ ct|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="edit-website" style="color:var(--muted); font-size:.9rem;">Website</label>
+        <input id="edit-website" name="website" type="text" value="{{ restaurant.website or '' }}" placeholder="https://example.com" style="width:100%;">
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Recent Drafts -->
+  <div class="detail-section">
+    <h2 class="text-lg font-semibold mb-3">Recent Drafts</h2>
+    {% if recent_drafts|length == 0 %}
+      <p class="muted">No drafts yet. <a href="/import" class="underline">Upload a menu</a> to get started.</p>
+    {% else %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in recent_drafts %}
+          <tr>
+            <td>{{ d.title or 'Untitled' }}</td>
+            <td>
+              <span class="text-xs px-2 py-0.5 rounded-full border border-line
+                {% if d.status == 'approved' %}text-green-400 border-green-500/30
+                {% elif d.status == 'editing' %}text-brand-500 border-brand-500/30
+                {% else %}text-muted{% endif %}">{{ d.status or 'unknown' }}</span>
+            </td>
+            <td class="text-sm text-muted">{{ d.created_at[:10] if d.created_at else '' }}</td>
+            <td><a href="/drafts/{{ d.id }}/edit" class="btn btn-sm">Edit</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
+  <!-- Menus -->
+  <div class="detail-section">
+    <h2 class="text-lg font-semibold mb-3">Menus</h2>
+    {% if menus|length == 0 %}
+      <p class="muted">No menus yet. Create one from the <a href="/restaurants/{{ restaurant.id }}/menus" class="underline">Menus page</a>.</p>
+    {% else %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Versions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in menus %}
+          <tr>
+            <td>{{ m.name }}</td>
+            <td>{{ m.menu_type or '' }}</td>
+            <td>{{ m.version_count if m.version_count is defined else '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
+  <!-- Danger Zone -->
+  <div class="detail-section" style="border-color:rgba(248,113,113,.3);">
+    <h2 class="text-lg font-semibold mb-3" style="color:#f87171;">Danger Zone</h2>
+    <p class="text-sm muted mb-3">Permanently remove this restaurant and unlink it from your account. Drafts and menus will be preserved but unassigned.</p>
+    <button class="btn btn-danger btn-sm"
+      onclick="if(confirm('Are you sure you want to delete this restaurant? This cannot be undone.')) document.getElementById('delete-rest-form').submit();">
+      Delete Restaurant
+    </button>
+    <form id="delete-rest-form" action="/restaurants/{{ restaurant.id }}/delete" method="post" style="display:none;"></form>
+  </div>
+{% endblock %}

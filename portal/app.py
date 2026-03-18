@@ -174,6 +174,7 @@ users_store = None  # type: ignore[assignment]
 try:
     from storage import users as users_store
     users_store._ensure_users_schema()
+    users_store._ensure_restaurant_columns()  # Day 128: cuisine_type, website, updated_at
 except Exception:
     users_store = None  # guarded below
 
@@ -2646,11 +2647,50 @@ def create_menu_route(rest_id):
     menu_type = (request.form.get("menu_type") or "").strip() or None
     description = (request.form.get("description") or "").strip() or None
     try:
-        menus_store.create_menu(rest_id, name, menu_type=menu_type, description=description)
+        menu = menus_store.create_menu(rest_id, name, menu_type=menu_type, description=description)
         flash(f"Menu \"{name}\" created.", "success")
+        # Day 128: redirect customers to next-step page instead of back to list
+        if _is_customer():
+            return redirect(url_for("menu_next_steps", rest_id=rest_id, menu_id=menu["id"]))
     except Exception as e:
         flash(f"Failed to create menu: {e}", "error")
     return redirect(url_for("menus_page", rest_id=rest_id))
+
+
+@app.get("/restaurants/<int:rest_id>/menus/<int:menu_id>/next")
+@login_required
+@require_restaurant_access
+def menu_next_steps(rest_id, menu_id):
+    """Day 128: Post-create next-steps page — upload or start editing."""
+    rest = None
+    with db_connect() as conn:
+        rest = conn.execute("SELECT * FROM restaurants WHERE id=? AND active=1", (rest_id,)).fetchone()
+    if not rest:
+        abort(404)
+    menu = menus_store.get_menu(menu_id) if menus_store else None
+    if not menu:
+        abort(404)
+    return _safe_render("menu_next_steps.html", restaurant=rest, menu=menu)
+
+
+@app.post("/restaurants/<int:rest_id>/menus/<int:menu_id>/new-draft")
+@login_required
+@require_restaurant_access
+def create_blank_draft(rest_id, menu_id):
+    """Day 128: Create a blank draft linked to a restaurant + menu, redirect to editor."""
+    _require_drafts_storage()
+    menu = menus_store.get_menu(menu_id) if menus_store else None
+    menu_name = menu["name"] if menu else "Menu"
+    title = f"{menu_name} — Draft"
+    draft_id = drafts_store._insert_draft(
+        title=title,
+        restaurant_id=rest_id,
+        menu_id=menu_id,
+        status="editing",
+    )
+    flash(f'Draft created for "{menu_name}".', "success")
+    return redirect(f"/drafts/{draft_id}/edit")
+
 
 @app.post("/menus/<int:menu_id>/update")
 @login_required
@@ -3261,14 +3301,24 @@ def dashboard():
             for r in rows:
                 rd = dict(r)
                 rd["role"] = role_map.get(r["id"], "owner")
-                # Count drafts + menus for each restaurant
-                with db_connect() as conn:
-                    rd["draft_count"] = conn.execute(
-                        "SELECT COUNT(*) FROM drafts WHERE restaurant_id=?", (r["id"],)
-                    ).fetchone()[0]
-                    rd["menu_count"] = conn.execute(
-                        "SELECT COUNT(*) FROM menus WHERE restaurant_id=? AND active=1", (r["id"],)
-                    ).fetchone()[0]
+                # Stats for each restaurant (Day 128: use get_restaurant_stats)
+                if users_store:
+                    try:
+                        stats = users_store.get_restaurant_stats(r["id"])
+                        rd.update(stats)
+                    except Exception:
+                        rd.setdefault("draft_count", 0)
+                        rd.setdefault("menu_count", 0)
+                        rd.setdefault("item_count", 0)
+                else:
+                    with db_connect() as conn:
+                        rd["draft_count"] = conn.execute(
+                            "SELECT COUNT(*) FROM drafts WHERE restaurant_id=?", (r["id"],)
+                        ).fetchone()[0]
+                        rd["menu_count"] = conn.execute(
+                            "SELECT COUNT(*) FROM menus WHERE restaurant_id=? AND active=1", (r["id"],)
+                        ).fetchone()[0]
+                    rd["item_count"] = 0
                 my_restaurants.append(rd)
 
     return _safe_render("dashboard.html", my_restaurants=my_restaurants, user=u)
@@ -3371,6 +3421,141 @@ def account_delete():
     session.clear()
     flash("Your account has been deleted.", "info")
     return redirect(url_for("core.index"))
+
+
+# ------------------------
+# Day 128: Restaurant Detail, Edit & Multi-Restaurant Switching
+# ------------------------
+@app.get("/restaurants/<int:rest_id>/detail")
+@login_required
+@require_restaurant_access
+def restaurant_detail(rest_id):
+    """Customer-facing restaurant detail page with edit form + stats."""
+    rest = None
+    if users_store:
+        rest = users_store.get_restaurant(rest_id)
+    if not rest:
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM restaurants WHERE id = ? AND active = 1", (rest_id,)
+            ).fetchone()
+            rest = dict(row) if row else None
+    if not rest:
+        abort(404)
+
+    stats = {"draft_count": 0, "menu_count": 0, "item_count": 0}
+    if users_store:
+        try:
+            stats = users_store.get_restaurant_stats(rest_id)
+        except Exception:
+            pass
+
+    # Fetch recent drafts for this restaurant
+    recent_drafts = []
+    try:
+        with db_connect() as conn:
+            recent_drafts = [dict(r) for r in conn.execute(
+                "SELECT id, title, status, created_at FROM drafts WHERE restaurant_id = ? ORDER BY id DESC LIMIT 5",
+                (rest_id,),
+            ).fetchall()]
+    except Exception:
+        pass
+
+    # Fetch menus
+    menu_list = []
+    if menus_store:
+        try:
+            menu_list = menus_store.list_menus(rest_id)
+        except Exception:
+            pass
+
+    cuisine_types = sorted(users_store.VALID_CUISINE_TYPES) if users_store else []
+
+    return _safe_render("restaurant_detail.html",
+                        restaurant=rest, stats=stats,
+                        recent_drafts=recent_drafts,
+                        menus=menu_list,
+                        cuisine_types=cuisine_types)
+
+
+@app.post("/restaurants/<int:rest_id>/update")
+@login_required
+@require_restaurant_access
+def update_restaurant(rest_id):
+    """Update restaurant details (name, phone, address, cuisine_type, website)."""
+    if not users_store:
+        flash("Restaurant updates not available.", "error")
+        return redirect(url_for("restaurant_detail", rest_id=rest_id))
+
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip() or None
+    address = (request.form.get("address") or "").strip() or None
+    cuisine_type = (request.form.get("cuisine_type") or "").strip() or None
+    website = (request.form.get("website") or "").strip() or None
+
+    try:
+        users_store.update_restaurant(rest_id,
+                                      name=name, phone=phone, address=address,
+                                      cuisine_type=cuisine_type, website=website)
+        flash("Restaurant updated.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as e:
+        flash(f"Update failed: {e}", "error")
+
+    return redirect(url_for("restaurant_detail", rest_id=rest_id))
+
+
+@app.post("/restaurants/<int:rest_id>/delete")
+@login_required
+@require_restaurant_access
+def delete_restaurant(rest_id):
+    """Soft-delete a restaurant."""
+    if not users_store:
+        flash("Restaurant deletion not available.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        users_store.delete_restaurant(rest_id)
+        # Clear session restaurant_id if it was the deleted one
+        u = session.get("user") or {}
+        if u.get("restaurant_id") == rest_id:
+            session["user"] = {**u, "restaurant_id": None}
+        flash("Restaurant deleted.", "success")
+    except Exception as e:
+        flash(f"Delete failed: {e}", "error")
+
+    return redirect(url_for("dashboard"))
+
+
+@app.post("/switch-restaurant")
+@login_required
+def switch_restaurant():
+    """Switch the active restaurant in the session."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    new_rest_id = request.form.get("restaurant_id")
+
+    if not new_rest_id or not user_id or not users_store:
+        flash("Could not switch restaurant.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        new_rest_id = int(new_rest_id)
+    except (ValueError, TypeError):
+        flash("Invalid restaurant.", "error")
+        return redirect(url_for("dashboard"))
+
+    # Verify ownership
+    if not users_store.user_owns_restaurant(user_id, new_rest_id):
+        flash("You do not have access to that restaurant.", "error")
+        return redirect(url_for("dashboard"))
+
+    session["user"] = {**u, "restaurant_id": new_rest_id}
+    rest = users_store.get_restaurant(new_rest_id)
+    name = rest["name"] if rest else f"#{new_rest_id}"
+    flash(f'Switched to "{name}".', "success")
+    return redirect(request.form.get("_redirect") or url_for("dashboard"))
 
 
 # ------------------------

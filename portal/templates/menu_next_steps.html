@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ menu.name }} — Next Steps — ServLine{% endblock %}
+
+{% block head %}
+<style>
+  .next-card {
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:24px; text-align:center; flex:1; min-width:240px;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .next-card:hover { border-color:#7aa2ff; box-shadow:0 0 0 2px rgba(122,162,255,.2); }
+  .next-card h3 { font-size:1.15rem; font-weight:700; margin-bottom:8px; }
+  .next-card p { color:var(--muted); font-size:.9rem; margin-bottom:16px; line-height:1.4; }
+  .next-icon { font-size:2.5rem; margin-bottom:12px; display:block; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <p class="crumbs">
+    <a href="/dashboard">Dashboard</a> /
+    <a href="/restaurants/{{ restaurant.id }}/detail">{{ restaurant.name }}</a> /
+    <a href="/restaurants/{{ restaurant.id }}/menus">Menus</a> /
+    {{ menu.name }}
+  </p>
+
+  <h1 class="text-2xl font-bold mb-2">{{ menu.name }} created!</h1>
+  <p class="muted mb-4">How would you like to add items to this menu?</p>
+
+  <div class="flex flex-wrap gap-4 mb-6">
+    <!-- Option 1: Upload a menu file -->
+    <div class="next-card">
+      <span class="next-icon">&#128196;</span>
+      <h3>Upload a Menu</h3>
+      <p>Upload a photo, PDF, or spreadsheet of your existing menu. We'll extract the items automatically.</p>
+      <a href="/import" class="btn btn-primary">Upload File</a>
+    </div>
+
+    <!-- Option 2: Start from scratch -->
+    <div class="next-card">
+      <span class="next-icon">&#9998;</span>
+      <h3>Build from Scratch</h3>
+      <p>Start with a blank editor and add your menu items manually. Great if you're building a new menu.</p>
+      <form action="/restaurants/{{ restaurant.id }}/menus/{{ menu.id }}/new-draft" method="post" style="display:inline;">
+        <button type="submit" class="btn">Open Editor</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="flex gap-2">
+    <a href="/restaurants/{{ restaurant.id }}/menus" class="btn btn-ghost btn-sm">Back to Menus</a>
+    <a href="/dashboard" class="btn btn-ghost btn-sm">Dashboard</a>
+  </div>
+{% endblock %}

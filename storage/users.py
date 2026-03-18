@@ -303,3 +303,110 @@ def update_user_role(user_id: int, restaurant_id: int, role: str) -> bool:
         ).rowcount
         conn.commit()
     return n > 0
+
+
+# -------------------------------------------------------------------
+# Restaurant management (Day 128)
+# -------------------------------------------------------------------
+VALID_CUISINE_TYPES = frozenset({
+    "american", "italian", "mexican", "chinese", "japanese", "thai",
+    "indian", "mediterranean", "french", "korean", "vietnamese",
+    "greek", "caribbean", "bbq", "seafood", "pizza", "burger",
+    "deli", "bakery", "cafe", "bar", "other",
+})
+
+
+def get_restaurant(restaurant_id: int) -> Optional[Dict[str, Any]]:
+    """Return a single active restaurant by id, or None."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM restaurants WHERE id = ? AND active = 1",
+            (restaurant_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_restaurant(restaurant_id: int, **fields) -> bool:
+    """
+    Update restaurant fields.  Accepted: name, phone, address,
+    cuisine_type, website.  Returns True if a row was updated.
+    Raises ValueError if name is blank.
+    """
+    allowed = {"name", "phone", "address", "cuisine_type", "website"}
+    to_set = {k: v for k, v in fields.items() if k in allowed}
+    if not to_set:
+        return False
+    # Name must not be empty if provided
+    if "name" in to_set:
+        n = (to_set["name"] or "").strip()
+        if not n:
+            raise ValueError("Restaurant name cannot be empty")
+        to_set["name"] = n
+    # Sanitize optional text fields
+    for fld in ("phone", "address", "website"):
+        if fld in to_set:
+            to_set[fld] = (to_set[fld] or "").strip() or None
+    # Validate cuisine_type
+    if "cuisine_type" in to_set:
+        ct = (to_set["cuisine_type"] or "").strip().lower() or None
+        if ct and ct not in VALID_CUISINE_TYPES:
+            ct = "other"
+        to_set["cuisine_type"] = ct
+    to_set["updated_at"] = _now()
+    set_clause = ", ".join(f"{k} = ?" for k in to_set)
+    vals = list(to_set.values()) + [restaurant_id]
+    with db_connect() as conn:
+        n = conn.execute(
+            f"UPDATE restaurants SET {set_clause} WHERE id = ? AND active = 1",
+            vals,
+        ).rowcount
+        conn.commit()
+    return n > 0
+
+
+def delete_restaurant(restaurant_id: int) -> bool:
+    """Soft-delete a restaurant (sets active=0)."""
+    with db_connect() as conn:
+        n = conn.execute(
+            "UPDATE restaurants SET active = 0, updated_at = ? WHERE id = ? AND active = 1",
+            (_now(), restaurant_id),
+        ).rowcount
+        conn.commit()
+    return n > 0
+
+
+def get_restaurant_stats(restaurant_id: int) -> Dict[str, int]:
+    """Return draft_count, menu_count, and item_count for a restaurant."""
+    with db_connect() as conn:
+        draft_count = conn.execute(
+            "SELECT COUNT(*) FROM drafts WHERE restaurant_id = ?",
+            (restaurant_id,),
+        ).fetchone()[0]
+        menu_count = conn.execute(
+            "SELECT COUNT(*) FROM menus WHERE restaurant_id = ? AND active = 1",
+            (restaurant_id,),
+        ).fetchone()[0]
+        item_count = conn.execute(
+            """SELECT COUNT(*) FROM draft_items di
+               JOIN drafts d ON d.id = di.draft_id
+               WHERE d.restaurant_id = ?""",
+            (restaurant_id,),
+        ).fetchone()[0]
+    return {
+        "draft_count": draft_count,
+        "menu_count": menu_count,
+        "item_count": item_count,
+    }
+
+
+def _ensure_restaurant_columns() -> None:
+    """Add cuisine_type, website, updated_at columns if missing (idempotent)."""
+    with db_connect() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(restaurants)").fetchall()}
+        if "cuisine_type" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN cuisine_type TEXT")
+        if "website" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN website TEXT")
+        if "updated_at" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN updated_at TEXT")
+        conn.commit()

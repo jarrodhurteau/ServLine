@@ -12,7 +12,7 @@ from .drafts import db_connect, _now
 # Constants
 # ------------------------------------------------------------
 VALID_MENU_TYPES = frozenset({
-    "breakfast", "lunch", "dinner", "brunch", "happy_hour",
+    "main", "breakfast", "lunch", "dinner", "brunch", "happy_hour",
     "kids", "dessert", "drinks", "catering", "seasonal", "other",
 })
 

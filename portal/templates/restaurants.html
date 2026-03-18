@@ -27,15 +27,22 @@
             <th>Phone</th>
             <th>Address</th>
             <th>ID</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {% for r in restaurants %}
           <tr>
-            <td><a href="/restaurants/{{ r.id }}/menus" class="underline hover:text-brand-500">{{ r.name }}</a></td>
-            <td>{{ r.phone }}</td>
-            <td>{{ r.address }}</td>
+            <td><a href="{% if is_customer %}/restaurants/{{ r.id }}/detail{% else %}/restaurants/{{ r.id }}/menus{% endif %}" class="underline hover:text-brand-500">{{ r.name }}</a></td>
+            <td>{{ r.phone or '' }}</td>
+            <td>{{ r.address or '' }}</td>
             <td>#{{ r.id }}</td>
+            <td>
+              {% if is_customer %}
+                <a href="/restaurants/{{ r.id }}/detail" class="btn btn-sm">Details</a>
+              {% endif %}
+              <a href="/restaurants/{{ r.id }}/menus" class="btn btn-sm">Menus</a>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

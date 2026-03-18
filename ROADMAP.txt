@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 127 (March 18, 2026) — Sprint 13.1 Day 2: Session Scoping & Customer Dashboard (32 tests, 2,770 total)
+Last Updated: Day 128 (March 18, 2026) — Sprint 13.1 Day 3: Restaurant Management & Multi-Restaurant Support (33 tests, 2,803 total)
 
 ================================================================================
 PROJECT MISSION
@@ -2082,6 +2082,35 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
     Day 127 test suite: 32 cases, 100% pass rate
     Cumulative: 2,770 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  [x] Restaurant management & multi-restaurant support:  ✓ Day 128
+      - /restaurants/<id>/detail — customer-facing detail page with stats, edit form,
+        recent drafts, menus, and danger zone (delete)
+      - POST /restaurants/<id>/update — edit name, phone, address, cuisine_type, website
+      - POST /restaurants/<id>/delete — soft-delete with session cleanup
+      - POST /switch-restaurant — multi-restaurant session switcher
+      - storage/users.py — get_restaurant(), update_restaurant(), delete_restaurant(),
+        get_restaurant_stats(), VALID_CUISINE_TYPES (22 types)
+      - _ensure_restaurant_columns() migration — cuisine_type, website, updated_at
+      - Dashboard enhanced: item_count, cuisine badge, active badge, switcher dropdown
+      - restaurants.html: detail links for customers, menus link for admins
+      - restaurant_detail.html template — full CRUD UI with stats cards
+
+    Day 128 test suite: 33 cases, 100% pass rate
+    Cumulative: 2,803 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+    Day 128 bonus: "Main" added to VALID_MENU_TYPES, menu create → next-steps page
+    (upload file or build from scratch), POST /restaurants/<id>/menus/<id>/new-draft
+    creates blank draft linked to menu → redirects to editor.
+
+  [ ] Customer-facing editor cleanup:  → Day 129
+      - Hide dev/debug controls from customers ({% if show_admin %})
+      - Pipeline Debug, OCR Debug, Backfill Variants → "Dev Tools" sidebar section
+      - Confidence slider, low confidence panel, position column → admin only
+      - Clean & Refine, Finalize with AI Cleanup → admin only
+      - Draft/Restaurant/Source/Job ID chips → admin only
+      - Customers see: title, status, Export, Save, Approve, Add Item, Search
+      - Must land before wizard (Sprint 13.2)
+
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................
   CONTEXT: The wizard IS the $50 experience. When someone pays for AI parse,
@@ -2493,6 +2522,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 128: Restaurant Management & Multi-Restaurant Support — /restaurants/<id>/detail page (stats, edit, delete), POST /restaurants/<id>/update (name, phone, address, cuisine_type, website), POST /restaurants/<id>/delete (soft-delete), POST /switch-restaurant (session switcher), storage/users.py (get_restaurant, update_restaurant, delete_restaurant, get_restaurant_stats, VALID_CUISINE_TYPES), _ensure_restaurant_columns migration, dashboard enhanced (item_count, cuisine badge, active badge, switcher), restaurant_detail.html template (33 tests)
 Day 127: Session Scoping & Customer Dashboard — /dashboard route, POST /restaurants auto-links user, require_restaurant_access decorator, scoped /restaurants list, login/register redirect to /dashboard, role-aware nav, /account page with expandable sections (Profile, Restaurants & Menus, POS Links, Export History, Purchases, Delete Account), /account/update + /account/change-password + /account/delete, schema auto-init, restaurants.html extends base.html, Export History added to Sprint 13.3 roadmap (32 tests)
 Day 126: User Accounts & Auth Foundation — storage/users.py (users + user_restaurants tables), werkzeug password hashing, verify_password(), user↔restaurant CRUD, /register endpoint, /login upgraded (legacy admin + DB users), auto-login after registration, register.html template, Sprint 13.1 start (32 tests)
 Day 125: XLSX & XLSX-by-Category Modifier Group Exports + Cross-Item Consistency — modifier group headers as styled rows, round-trip verification, modifier_group_inconsistent warning, Sprint 12.3 complete (32 tests)
