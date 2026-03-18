@@ -149,9 +149,14 @@
   <body class="bg-bg text-ink">
     <!-- Top Nav -->
     <div class="nav">
-      <div class="brand"><a href="/">ServLine Portal</a></div>
+      <div class="brand"><a href="{% if is_customer %}/dashboard{% else %}/{% endif %}">ServLine Portal</a></div>
 
-      <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
+      {% if is_customer %}
+        <div><a href="/dashboard" class="hover:underline">Dashboard</a></div>
+        <div><a href="/restaurants" class="hover:underline">My Restaurants</a></div>
+      {% else %}
+        <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
+      {% endif %}
 
       {% if show_admin %}
         <div><a href="/import" class="hover:underline">Import</a></div>
@@ -163,11 +168,14 @@
       <!-- Right-aligned auth controls -->
       <div class="ml-auto">
         {% if session.get('user') %}
+          {% if is_customer %}
+            <a href="/account" class="btn btn-ghost btn-sm mr-2">Account</a>
+          {% endif %}
           <form method="post" action="/logout" style="display:inline">
             <button class="btn btn-sm">Logout</button>
           </form>
         {% else %}
-          <a href="/login" class="btn">Login</a>
+          <a href="/login" class="btn btn-sm">Login / Create Account</a>
         {% endif %}
       </div>
     </div>

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 126 (March 18, 2026) — Sprint 13.1 Day 1: User Accounts & Auth Foundation (32 tests, 2,737 total)
+Last Updated: Day 127 (March 18, 2026) — Sprint 13.1 Day 2: Session Scoping & Customer Dashboard (32 tests, 2,770 total)
 
 ================================================================================
 PROJECT MISSION
@@ -2057,6 +2057,31 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
     Day 126 test suite: 32 cases, 100% pass rate
     Cumulative: 2,737 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  [x] Session scoping & customer dashboard:  ✓ Day 127
+      - /dashboard route — customer landing page with "My Restaurants"
+      - POST /restaurants auto-links customer via link_user_restaurant()
+      - require_restaurant_access decorator — ownership gate on restaurant routes
+      - /restaurants scoped — customers see only their restaurants, admins see all
+      - Login/register redirect customers to /dashboard (admins keep /)
+      - Role-aware nav: Dashboard + My Restaurants + Account (customer) vs admin links
+      - Context processor: is_customer + show_admin, defensive for legacy sessions
+      - restaurants.html refactored to extend base.html (was standalone)
+  [x] Account settings page:  ✓ Day 127
+      - /account with expandable dropdown sections (Profile, Restaurants & Menus,
+        POS Links, Export History, Purchases, Delete Account)
+      - /account/update — display name change + session sync
+      - /account/change-password — current password verification + validation
+      - /account/delete — soft-delete (deactivate_user) + session clear
+      - Restaurants & Menus section shows linked restaurants with their menus
+      - POS Links, Export History, Purchases — placeholder sections for future sprints
+  [x] Schema auto-init:  ✓ Day 127
+      - _ensure_users_schema() called on app startup (was missing)
+      - login.html title changed from "Admin Login" to "Sign In"
+      - Nav: single "Login / Create Account" button for unauthenticated users
+
+    Day 127 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,770 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................
   CONTEXT: The wizard IS the $50 experience. When someone pays for AI parse,
@@ -2101,6 +2126,12 @@ Sprint 13.3 — Stripe Payment Gate (Days 140-144)
       - EXCEPT: first export after $50 AI parse is free (included)
       - CSV/JSON (non-POS) exports remain free forever
       - Export history tracks which exports were paid vs included
+  [ ] Export History page (/exports or /dashboard/exports)
+      - Customer-facing page showing all past exports
+      - Columns: date, restaurant, format (CSV/JSON/Square/Toast/etc.), item count
+      - Viewable + copyable snapshot of the exported menu (frozen at export time)
+      - Links to re-download the exported file
+      - Tracks paid ($10 POS) vs included (first after $50 AI parse) vs free (CSV/JSON)
   [ ] Re-parse flow
       - Seasonal menu change or major overhaul → new $50 payment
       - Existing saved menus remain editable/exportable forever
@@ -2462,6 +2493,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 127: Session Scoping & Customer Dashboard — /dashboard route, POST /restaurants auto-links user, require_restaurant_access decorator, scoped /restaurants list, login/register redirect to /dashboard, role-aware nav, /account page with expandable sections (Profile, Restaurants & Menus, POS Links, Export History, Purchases, Delete Account), /account/update + /account/change-password + /account/delete, schema auto-init, restaurants.html extends base.html, Export History added to Sprint 13.3 roadmap (32 tests)
 Day 126: User Accounts & Auth Foundation — storage/users.py (users + user_restaurants tables), werkzeug password hashing, verify_password(), user↔restaurant CRUD, /register endpoint, /login upgraded (legacy admin + DB users), auto-login after registration, register.html template, Sprint 13.1 start (32 tests)
 Day 125: XLSX & XLSX-by-Category Modifier Group Exports + Cross-Item Consistency — modifier group headers as styled rows, round-trip verification, modifier_group_inconsistent warning, Sprint 12.3 complete (32 tests)
 Day 124: CSV, JSON & Generic POS JSON Modifier Group Upgrades — CSV variants (modifier_group + modifier rows), CSV wide (GroupName:Label columns), JSON (modifier_groups[] per item), Generic POS JSON verification, backward compat for all formats, Sprint 12.3 continued (32 tests)

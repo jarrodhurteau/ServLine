@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — ServLine{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-1">Dashboard</h1>
+  <p class="muted mb-4">Welcome, {{ user.username or user.email or 'User' }}.</p>
+
+  <!-- My Restaurants -->
+  <section class="card mb-4">
+    <div class="flex items-center mb-3">
+      <h2 class="text-lg font-semibold">My Restaurants</h2>
+      <div class="ml-auto">
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-restaurant-form').style.display='block'">Add Restaurant</button>
+      </div>
+    </div>
+
+    {% if my_restaurants|length == 0 %}
+      <p class="muted">You haven't added any restaurants yet. Click <strong>Add Restaurant</strong> to get started.</p>
+    {% else %}
+      <div class="space-y-3">
+        {% for r in my_restaurants %}
+        <div class="border border-line rounded-xl p-4 bg-bg/50">
+          <div class="flex items-center gap-3 mb-2">
+            <a href="/restaurants/{{ r.id }}/menus" class="text-lg font-semibold underline decoration-brand-600 hover:decoration-brand-500">{{ r.name }}</a>
+            <span class="text-xs px-2 py-0.5 rounded-full border border-line text-muted">{{ r.role }}</span>
+          </div>
+          <div class="flex gap-6 text-sm text-muted">
+            {% if r.phone %}<span>{{ r.phone }}</span>{% endif %}
+            {% if r.address %}<span>{{ r.address }}</span>{% endif %}
+            <span>{{ r.menu_count }} menu{{ 's' if r.menu_count != 1 }}</span>
+            <span>{{ r.draft_count }} draft{{ 's' if r.draft_count != 1 }}</span>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <a href="/restaurants/{{ r.id }}/menus" class="btn btn-sm">Menus</a>
+            <a href="/import" class="btn btn-sm">Upload Menu</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <!-- Add Restaurant Form (hidden) -->
+  <section id="add-restaurant-form" class="card mb-4" style="display:none;">
+    <h2 class="text-lg font-semibold mb-3">Add New Restaurant</h2>
+    <form action="/restaurants" method="post" style="display:grid; gap:12px; max-width:480px;">
+      <input type="hidden" name="_redirect" value="/dashboard">
+      <div>
+        <label for="dash-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
+        <input id="dash-name" name="name" type="text" required placeholder="e.g. Mario's Italian Kitchen" style="width:100%;">
+      </div>
+      <div>
+        <label for="dash-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
+        <input id="dash-phone" name="phone" type="text" placeholder="e.g. (555) 123-4567" style="width:100%;">
+      </div>
+      <div>
+        <label for="dash-address" style="color:var(--muted); font-size:.9rem;">Address</label>
+        <input id="dash-address" name="address" type="text" placeholder="e.g. 123 Main St, Anytown USA" style="width:100%;">
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">Create Restaurant</button>
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('add-restaurant-form').style.display='none'">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Quick Links -->
+  <section class="card">
+    <h2 class="text-lg font-semibold mb-3">Quick Actions</h2>
+    <div class="flex flex-wrap gap-2">
+      <a class="btn btn-primary" href="/import">Upload a Menu</a>
+      <a class="btn" href="/account">Account Settings</a>
+    </div>
+  </section>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Account Settings — ServLine{% endblock %}
+
+{% block head %}
+<style>
+  .acc-section { border:1px solid var(--line); border-radius:14px; margin-bottom:12px; overflow:hidden; }
+  .acc-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 18px; cursor:pointer; user-select:none;
+    background:var(--panel); transition:background .15s;
+  }
+  .acc-header:hover { background:#162040; }
+  .acc-header h2 { margin:0; font-size:1.05rem; font-weight:600; }
+  .acc-chevron { transition:transform .2s; font-size:.8rem; color:var(--muted); }
+  .acc-section.open .acc-chevron { transform:rotate(180deg); }
+  .acc-body { display:none; padding:16px 18px; border-top:1px solid var(--line); background:var(--bg); }
+  .acc-section.open .acc-body { display:block; }
+  .acc-coming { color:var(--muted); font-style:italic; font-size:.9rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <p class="crumbs"><a href="/dashboard">Dashboard</a> / Account</p>
+  <h1 class="text-2xl font-bold mb-4">Account Settings</h1>
+
+  <!-- 1. Profile -->
+  <div class="acc-section open" id="sec-profile">
+    <div class="acc-header" onclick="toggleSection('sec-profile')">
+      <h2>Profile</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      <form action="/account/update" method="post" style="display:grid; gap:12px; max-width:480px;">
+        <div>
+          <label style="color:var(--muted); font-size:.9rem;">Email</label>
+          <input type="text" disabled value="{{ user_data.email if user_data else user.email }}" style="width:100%; opacity:.6;">
+        </div>
+        <div>
+          <label for="acc-display" style="color:var(--muted); font-size:.9rem;">Display Name</label>
+          <input id="acc-display" name="display_name" type="text" value="{{ user_data.display_name if user_data and user_data.display_name else '' }}" placeholder="Your name" style="width:100%;">
+        </div>
+        <div>
+          <label for="acc-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
+          <input id="acc-phone" name="phone" type="text" value="{{ user_data.phone if user_data and user_data.phone else '' }}" placeholder="(555) 123-4567" style="width:100%;">
+        </div>
+        <div>
+          <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+        </div>
+      </form>
+
+      <hr style="border-color:var(--line); margin:16px 0;">
+      <h3 style="font-size:.95rem; font-weight:600; margin-bottom:8px;">Change Password</h3>
+      <form action="/account/change-password" method="post" style="display:grid; gap:12px; max-width:480px;">
+        <div>
+          <label for="acc-curpw" style="color:var(--muted); font-size:.9rem;">Current Password</label>
+          <input id="acc-curpw" name="current_password" type="password" required style="width:100%;">
+        </div>
+        <div>
+          <label for="acc-newpw" style="color:var(--muted); font-size:.9rem;">New Password (min 8 characters)</label>
+          <input id="acc-newpw" name="new_password" type="password" required minlength="8" style="width:100%;">
+        </div>
+        <div>
+          <label for="acc-cfmpw" style="color:var(--muted); font-size:.9rem;">Confirm New Password</label>
+          <input id="acc-cfmpw" name="confirm_password" type="password" required minlength="8" style="width:100%;">
+        </div>
+        <div>
+          <button type="submit" class="btn btn-primary btn-sm">Change Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Restaurants & Menus -->
+  <div class="acc-section" id="sec-restaurants">
+    <div class="acc-header" onclick="toggleSection('sec-restaurants')">
+      <h2>Restaurants &amp; Menus</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      {% if my_restaurants|length == 0 %}
+        <p class="acc-coming">No restaurants linked to your account. <a href="/dashboard" class="underline">Add one from the Dashboard</a>.</p>
+      {% else %}
+        {% for r in my_restaurants %}
+        <div style="margin-bottom:14px;">
+          <div style="font-weight:600;">
+            <a href="/restaurants/{{ r.id }}/menus" class="underline hover:text-brand-500">{{ r.name }}</a>
+          </div>
+          {% if r.menus %}
+            <ul style="margin:4px 0 0 18px; list-style:disc; color:var(--muted); font-size:.9rem;">
+              {% for m in r.menus %}
+                <li>{{ m.name }}{% if m.menu_type %} <span class="text-xs">[{{ m.menu_type }}]</span>{% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p style="margin:4px 0 0 18px; color:var(--muted); font-size:.9rem;">No menus yet</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- 3. POS Links -->
+  <div class="acc-section" id="sec-pos">
+    <div class="acc-header" onclick="toggleSection('sec-pos')">
+      <h2>POS Links</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      <p class="acc-coming">POS integrations coming soon (Square, Toast, Clover).</p>
+    </div>
+  </div>
+
+  <!-- 4. Export History -->
+  <div class="acc-section" id="sec-exports">
+    <div class="acc-header" onclick="toggleSection('sec-exports')">
+      <h2>Export History</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      <p class="acc-coming">Export history will appear here once you export a menu.</p>
+    </div>
+  </div>
+
+  <!-- 5. Purchases -->
+  <div class="acc-section" id="sec-purchases">
+    <div class="acc-header" onclick="toggleSection('sec-purchases')">
+      <h2>Purchases</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      <p class="acc-coming">Purchase history will appear here after your first transaction.</p>
+    </div>
+  </div>
+
+  <!-- 6. Delete Account -->
+  <div class="acc-section" id="sec-delete">
+    <div class="acc-header" onclick="toggleSection('sec-delete')">
+      <h2 style="color:#f87171;">Delete Account</h2>
+      <span class="acc-chevron">&#9660;</span>
+    </div>
+    <div class="acc-body">
+      <p style="color:var(--muted); font-size:.9rem; margin-bottom:12px;">
+        Permanently delete your account and all associated data. This action cannot be undone.
+      </p>
+      <button class="btn btn-danger btn-sm" onclick="if(confirm('Are you sure? This will permanently delete your account and all data.')) document.getElementById('delete-form').submit();">
+        Delete My Account
+      </button>
+      <form id="delete-form" action="/account/delete" method="post" style="display:none;"></form>
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleSection(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+</script>
+{% endblock %}

@@ -53,6 +53,7 @@ except Exception:
 # safer filename + big-file error handling
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.security import check_password_hash
 
 # OCR health imports
 import pytesseract
@@ -172,6 +173,7 @@ except Exception:
 users_store = None  # type: ignore[assignment]
 try:
     from storage import users as users_store
+    users_store._ensure_users_schema()
 except Exception:
     users_store = None  # guarded below
 
@@ -473,10 +475,14 @@ def score_item_quality(item: Dict[str, Any]) -> Tuple[int, bool]:
 
 @app.context_processor
 def inject_globals():
-    """Provide `now` and `show_admin` to all templates."""
+    """Provide `now`, `show_admin`, and `is_customer` to all templates."""
+    raw = session.get("user")
+    u = raw if isinstance(raw, dict) else {}
+    role = u.get("role")
     return {
         "now": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-        "show_admin": bool(session.get("user")),
+        "show_admin": role == "admin" or (bool(u) and role is None),
+        "is_customer": role == "customer",
     }
 
 # ------------------------
@@ -554,8 +560,39 @@ def login_required(view_func):
     return wrapper
 
 # ------------------------
-# Role/restaurant helpers (ADMIN vs CUSTOMER scoping)
+# Role/restaurant helpers (ADMIN vs CUSTOMER scoping) — Day 126-127
 # ------------------------
+def _is_admin() -> bool:
+    """True if the logged-in user has the admin role."""
+    return (session.get("user") or {}).get("role") == "admin"
+
+
+def _is_customer() -> bool:
+    """True if the logged-in user has the customer role."""
+    return (session.get("user") or {}).get("role") == "customer"
+
+
+def require_restaurant_access(view_func):
+    """Decorator: ensures a customer user owns the restaurant in the route.
+
+    Expects `rest_id` in the route kwargs.  Admins pass through.
+    Customers must have a user_restaurants link (checked via users_store).
+    """
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        u = session.get("user") or {}
+        role = u.get("role")
+        # Admins and legacy sessions (no role field) pass through
+        if role == "admin" or role is None:
+            return view_func(*args, **kwargs)
+        # Customer: verify ownership via user_restaurants link
+        rest_id = kwargs.get("rest_id")
+        user_id = u.get("user_id")
+        if rest_id and user_id and users_store:
+            if users_store.user_owns_restaurant(user_id, rest_id):
+                return view_func(*args, **kwargs)
+        abort(403, description="You do not have access to this restaurant.")
+    return wrapper
 def _resolve_restaurant_id_for_action(job_row: sqlite3.Row) -> Optional[int]:
     """
     Determine the restaurant context for an action:
@@ -2518,34 +2555,67 @@ def import_status(job_id):
 # HTML Pages (Portal UI)
 # ------------------------
 @app.get("/restaurants")
+@login_required
 def restaurants_page():
-    with db_connect() as conn:
-        rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
+    u = session.get("user") or {}
+    # Customers see only their linked restaurants; admins see all
+    if _is_customer() and u.get("user_id") and users_store:
+        links = users_store.get_user_restaurants(u["user_id"])
+        rest_ids = [lnk["restaurant_id"] for lnk in links]
+        if rest_ids:
+            placeholders = ",".join("?" * len(rest_ids))
+            with db_connect() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM restaurants WHERE id IN ({placeholders}) AND active=1 ORDER BY id",
+                    rest_ids,
+                ).fetchall()
+        else:
+            rows = []
+    else:
+        with db_connect() as conn:
+            rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
     return _safe_render("restaurants.html", restaurants=rows)
 
 @app.post("/restaurants")
 @login_required
 def create_restaurant():
-    """Create a new restaurant."""
+    """Create a new restaurant. Auto-links to the logged-in customer user."""
     name = (request.form.get("name") or "").strip()
+    redirect_to = request.form.get("_redirect") or None
     if not name:
         flash("Restaurant name is required.", "error")
-        return redirect(url_for("restaurants_page"))
+        return redirect(redirect_to or url_for("restaurants_page"))
     phone = (request.form.get("phone") or "").strip() or None
     address = (request.form.get("address") or "").strip() or None
     try:
         with db_connect() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO restaurants (name, phone, address, active, created_at) VALUES (?, ?, ?, 1, datetime('now'))",
                 (name, phone, address),
             )
+            rest_id = cur.lastrowid
             conn.commit()
+
+        # Auto-link customer user to the new restaurant (Day 127)
+        u = session.get("user") or {}
+        user_id = u.get("user_id")
+        if user_id and users_store:
+            try:
+                users_store.link_user_restaurant(user_id, rest_id, role="owner")
+            except Exception:
+                pass  # link failed (e.g. already linked) — restaurant still created
+            # Update session with first restaurant if none set
+            if not u.get("restaurant_id"):
+                session["user"] = {**u, "restaurant_id": rest_id}
+
         flash(f'Restaurant "{name}" created.', "success")
     except Exception as e:
         flash(f"Failed to create restaurant: {e}", "error")
-    return redirect(url_for("restaurants_page"))
+    return redirect(redirect_to or url_for("restaurants_page"))
 
 @app.get("/restaurants/<int:rest_id>/menus")
+@login_required
+@require_restaurant_access
 def menus_page(rest_id):
     with db_connect() as conn:
         rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rest_id,)).fetchone()
@@ -2564,6 +2634,7 @@ def menus_page(rest_id):
 
 @app.post("/restaurants/<int:rest_id>/menus")
 @login_required
+@require_restaurant_access
 def create_menu_route(rest_id):
     """Create a new menu for a restaurant."""
     if not menus_store:
@@ -3096,13 +3167,13 @@ def login():
 def login_post():
     email_or_username = (request.form.get("username") or request.form.get("email") or "").strip()
     password = (request.form.get("password") or "").strip()
-    nxt = request.form.get("next") or url_for("core.index")
+    nxt = request.form.get("next") or ""
 
     # Legacy dev admin login (backward compat)
     if email_or_username == DEV_USERNAME and password == DEV_PASSWORD:
         session["user"] = {"username": email_or_username, "role": "admin"}
         flash("Welcome back!", "success")
-        return redirect(nxt)
+        return redirect(nxt or url_for("core.index"))
 
     # Database user login (Phase 13)
     if users_store:
@@ -3117,7 +3188,7 @@ def login_post():
                 "restaurant_id": restaurants[0]["restaurant_id"] if restaurants else None,
             }
             flash("Welcome back!", "success")
-            return redirect(nxt)
+            return redirect(nxt or url_for("dashboard"))
 
     flash("Invalid credentials", "error")
     return redirect(url_for("login", next=request.form.get("next") or ""))
@@ -3156,13 +3227,151 @@ def register_post():
         "restaurant_id": None,
     }
     flash("Account created! Welcome to ServLine.", "success")
-    return redirect(url_for("core.index"))
+    return redirect(url_for("dashboard"))
 
 @app.post("/logout")
 def logout():
     session.clear()
     flash("You have been logged out.", "info")
     return redirect(url_for("core.index"))
+
+# ------------------------
+# Day 127: Customer Dashboard
+# ------------------------
+@app.get("/dashboard")
+@login_required
+def dashboard():
+    """Customer dashboard — shows 'My Restaurants' and quick actions."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+
+    # Fetch restaurants the customer owns/manages
+    my_restaurants = []
+    if user_id and users_store:
+        links = users_store.get_user_restaurants(user_id)
+        if links:
+            rest_ids = [lnk["restaurant_id"] for lnk in links]
+            role_map = {lnk["restaurant_id"]: lnk["role"] for lnk in links}
+            placeholders = ",".join("?" * len(rest_ids))
+            with db_connect() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM restaurants WHERE id IN ({placeholders}) AND active=1 ORDER BY id",
+                    rest_ids,
+                ).fetchall()
+            for r in rows:
+                rd = dict(r)
+                rd["role"] = role_map.get(r["id"], "owner")
+                # Count drafts + menus for each restaurant
+                with db_connect() as conn:
+                    rd["draft_count"] = conn.execute(
+                        "SELECT COUNT(*) FROM drafts WHERE restaurant_id=?", (r["id"],)
+                    ).fetchone()[0]
+                    rd["menu_count"] = conn.execute(
+                        "SELECT COUNT(*) FROM menus WHERE restaurant_id=? AND active=1", (r["id"],)
+                    ).fetchone()[0]
+                my_restaurants.append(rd)
+
+    return _safe_render("dashboard.html", my_restaurants=my_restaurants, user=u)
+
+
+@app.get("/account")
+@login_required
+def account_page():
+    """Account settings page — profile, restaurants, future sections."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    user_data = None
+    my_restaurants = []
+
+    if user_id and users_store:
+        user_data = users_store.get_user_by_id(user_id)
+        links = users_store.get_user_restaurants(user_id)
+        if links:
+            rest_ids = [lnk["restaurant_id"] for lnk in links]
+            role_map = {lnk["restaurant_id"]: lnk["role"] for lnk in links}
+            placeholders = ",".join("?" * len(rest_ids))
+            with db_connect() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM restaurants WHERE id IN ({placeholders}) AND active=1 ORDER BY id",
+                    rest_ids,
+                ).fetchall()
+            for r in rows:
+                rd = dict(r)
+                rd["role"] = role_map.get(r["id"], "owner")
+                rd["menus"] = []
+                if menus_store:
+                    rd["menus"] = menus_store.list_menus(r["id"])
+                my_restaurants.append(rd)
+
+    return _safe_render("account.html", user=u, user_data=user_data,
+                        my_restaurants=my_restaurants)
+
+
+@app.post("/account/update")
+@login_required
+def account_update():
+    """Update account settings (display name)."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    if not user_id or not users_store:
+        flash("Account update not available.", "error")
+        return redirect(url_for("account_page"))
+
+    display_name = (request.form.get("display_name") or "").strip() or None
+    users_store.update_user(user_id, display_name=display_name)
+
+    # Update session username
+    session["user"] = {**u, "username": display_name or u.get("email", "")}
+
+    flash("Account updated.", "success")
+    return redirect(url_for("account_page"))
+
+
+@app.post("/account/change-password")
+@login_required
+def account_change_password():
+    """Change the logged-in user's password."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    if not user_id or not users_store:
+        flash("Password change not available.", "error")
+        return redirect(url_for("account_page"))
+
+    current_pw = (request.form.get("current_password") or "").strip()
+    new_pw = (request.form.get("new_password") or "").strip()
+    confirm_pw = (request.form.get("confirm_password") or "").strip()
+
+    # Verify current password
+    user_data = users_store.get_user_by_id(user_id)
+    if not user_data or not check_password_hash(user_data["password_hash"], current_pw):
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for("account_page"))
+
+    if new_pw != confirm_pw:
+        flash("New passwords do not match.", "error")
+        return redirect(url_for("account_page"))
+
+    try:
+        users_store.change_password(user_id, new_pw)
+        flash("Password changed successfully.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+
+    return redirect(url_for("account_page"))
+
+
+@app.post("/account/delete")
+@login_required
+def account_delete():
+    """Soft-delete the logged-in user's account."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    if user_id and users_store:
+        users_store.deactivate_user(user_id)
+    session.clear()
+    flash("Your account has been deleted.", "info")
+    return redirect(url_for("core.index"))
+
 
 # ------------------------
 # Dev helper page: simple upload form
