@@ -168,6 +168,13 @@ try:
 except Exception:
     menus_store = None  # guarded below
 
+# storage layer for user accounts (Phase 13 Day 126+)
+users_store = None  # type: ignore[assignment]
+try:
+    from storage import users as users_store
+except Exception:
+    users_store = None  # guarded below
+
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
     from storage.ocr_facade import build_structured_menu
@@ -3079,7 +3086,7 @@ def api_menu_health(rest_id):
 
 
 # ------------------------
-# Day 6: Auth (Login / Logout)
+# Day 6: Auth (Login / Logout) — upgraded Day 126 (user accounts)
 # ------------------------
 @app.get("/login")
 def login():
@@ -3087,21 +3094,75 @@ def login():
 
 @app.post("/login")
 def login_post():
-    username = (request.form.get("username") or "").strip()
+    email_or_username = (request.form.get("username") or request.form.get("email") or "").strip()
     password = (request.form.get("password") or "").strip()
-    nxt = request.form.get("next") or url_for("index")
-    if username == DEV_USERNAME and password == DEV_PASSWORD:
-        session["user"] = {"username": username, "role": "admin"}
+    nxt = request.form.get("next") or url_for("core.index")
+
+    # Legacy dev admin login (backward compat)
+    if email_or_username == DEV_USERNAME and password == DEV_PASSWORD:
+        session["user"] = {"username": email_or_username, "role": "admin"}
         flash("Welcome back!", "success")
         return redirect(nxt)
+
+    # Database user login (Phase 13)
+    if users_store:
+        user = users_store.verify_password(email_or_username, password)
+        if user:
+            restaurants = users_store.get_user_restaurants(user["id"])
+            session["user"] = {
+                "user_id": user["id"],
+                "username": user["display_name"] or user["email"],
+                "email": user["email"],
+                "role": "customer",
+                "restaurant_id": restaurants[0]["restaurant_id"] if restaurants else None,
+            }
+            flash("Welcome back!", "success")
+            return redirect(nxt)
+
     flash("Invalid credentials", "error")
     return redirect(url_for("login", next=request.form.get("next") or ""))
+
+@app.get("/register")
+def register():
+    return _safe_render("register.html", error=None)
+
+@app.post("/register")
+def register_post():
+    email = (request.form.get("email") or "").strip()
+    password = (request.form.get("password") or "").strip()
+    confirm = (request.form.get("confirm_password") or "").strip()
+    display_name = (request.form.get("display_name") or "").strip() or None
+
+    if password != confirm:
+        flash("Passwords do not match", "error")
+        return redirect(url_for("register"))
+
+    if not users_store:
+        flash("Registration is not available", "error")
+        return redirect(url_for("register"))
+
+    try:
+        user = users_store.create_user(email, password, display_name=display_name)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("register"))
+
+    # Auto-login after registration
+    session["user"] = {
+        "user_id": user["id"],
+        "username": user["display_name"] or user["email"],
+        "email": user["email"],
+        "role": "customer",
+        "restaurant_id": None,
+    }
+    flash("Account created! Welcome to ServLine.", "success")
+    return redirect(url_for("core.index"))
 
 @app.post("/logout")
 def logout():
     session.clear()
     flash("You have been logged out.", "info")
-    return redirect(url_for("index"))
+    return redirect(url_for("core.index"))
 
 # ------------------------
 # Dev helper page: simple upload form

@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 122 (March 17, 2026) — Sprint 12.2 Day 7: Bulk Card Actions & Stats Bar (32 tests, 2,610 total)
+Last Updated: Day 126 (March 18, 2026) — Sprint 13.1 Day 1: User Accounts & Auth Foundation (32 tests, 2,737 total)
 
 ================================================================================
 PROJECT MISSION
@@ -1989,7 +1989,7 @@ Sprint 12.3 — Export Format Alignment (Days 123-127)
     something if the export actually works.
     Full spec: memory/project_wizard_sprint123.md
 
-Phase 13 — Production Platform (Days 128-152)
+Phase 13 — Production Platform (Days 126-152)
 ----------------------------------------------
   CONTEXT: Transform ServLine from a development tool into a production SaaS
   with two customer experiences sharing the same engine.
@@ -2026,19 +2026,36 @@ Phase 13 — Production Platform (Days 128-152)
     - After 6 months: renegotiate with real data (menus processed, conversion
       rate before vs after, time saved)
 
-Sprint 13.1 — User Accounts & Auth (Days 128-132)
+Sprint 13.1 — User Accounts & Auth (Days 126-132)
 ...................................................
-  [ ] Public user registration (email + password)
-      - Sign up, log in, password reset
-      - Replace current session-based auth with proper account system
+  [x] User accounts foundation (storage/users.py):  ✓ Day 126
+      - users table (email, password_hash, display_name, email_verified, active)
+      - user_restaurants table (many-to-many with role: owner/manager/staff)
+      - Full CRUD: create_user, get_user_by_email/id, update_user, deactivate_user
+      - Password hashing (werkzeug generate/check_password_hash)
+      - verify_password() with timing-safe non-existence handling
+      - change_password() with validation
+      - list_users() with active_only filter
+  [x] User↔restaurant association:  ✓ Day 126
+      - link/unlink_user_restaurant(), get_user/restaurant_users()
+      - user_owns_restaurant() check, update_user_role()
+      - UNIQUE constraint on (user_id, restaurant_id)
+  [x] Portal auth endpoints upgraded:  ✓ Day 126
+      - /register (GET + POST) — email, password, confirm, display_name
+      - /login updated — supports both legacy admin + DB user login
+      - Auto-login after registration (session with user_id, role=customer)
+      - register.html template + login.html cross-linked
+      - Fixed url_for("index") → url_for("core.index") for blueprint compat
+  [ ] Email validation & verification
+      - Email format validated on registration
       - Email verification (optional at launch, required later)
-  [ ] User-restaurant association
-      - Users own restaurants, restaurants own menus/drafts
-      - Multi-user per restaurant (future: roles)
   [ ] Free tier access
       - All users get: manual editor, save menus, edit anytime
       - CSV/JSON exports free, POS exports gated ($10)
       - No AI calls, no OCR — just a web editor with a database
+
+    Day 126 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,737 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................
@@ -2445,6 +2462,8 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 126: User Accounts & Auth Foundation — storage/users.py (users + user_restaurants tables), werkzeug password hashing, verify_password(), user↔restaurant CRUD, /register endpoint, /login upgraded (legacy admin + DB users), auto-login after registration, register.html template, Sprint 13.1 start (32 tests)
+Day 125: XLSX & XLSX-by-Category Modifier Group Exports + Cross-Item Consistency — modifier group headers as styled rows, round-trip verification, modifier_group_inconsistent warning, Sprint 12.3 complete (32 tests)
 Day 124: CSV, JSON & Generic POS JSON Modifier Group Upgrades — CSV variants (modifier_group + modifier rows), CSV wide (GroupName:Label columns), JSON (modifier_groups[] per item), Generic POS JSON verification, backward compat for all formats, Sprint 12.3 continued (32 tests)
 Day 123: Square & Toast Export Alignment — modifier groups → Square Modifier Sets + Toast Option Groups, selection rules, validation warnings, Sprint 12.3 start (32 tests)
 Day 91: Version Change Summaries & Annotations — generate_change_summary(), auto-summary on publish, update_menu_version(), edit route+modal, session user in created_by, change_summary+published_by in templates, Sprint 10.2 continued (43 tests)

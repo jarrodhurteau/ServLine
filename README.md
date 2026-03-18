@@ -1190,7 +1190,7 @@ Key design: word sizes split into abbreviated (S/M/L) and named (Personal/Regula
 
 Sprint 11.1 COMPLETE (Days 96-100.5). Sprint 11.2 COMPLETE (Days 101-104). Sprint 11.3 COMPLETE (Days 105-110). Full 6-stage pipeline: OCR → Call 1 → Call 2 (vision verify) → Semantic → Call 3 (reconcile) → Confidence Gate. Day 110 capstone: Sprint 12.1 schema kickoff — draft_modifier_groups table, modifier_group_id on variants, 5 CRUD functions, migrate_variants_to_modifier_groups() (kind→group auto-migration, idempotent). 2,195 tests pass.
 
-➡ **Phase 12 — POS-Native Data Model & Editor — IN PROGRESS (Days 111-127)**
+**Phase 12 — POS-Native Data Model & Editor — COMPLETE (Days 111-125)**
 
 Day 111: nested get_draft_items(include_modifier_groups=True) → items[].modifier_groups[].modifiers[] + ungrouped_variants[]. Template library: draft_modifier_group_templates table, 4 built-in presets (size_sml/temperature/sauce_choice/protein_add), apply_modifier_template() one-click group creation. kitchen_name column added to draft_items. 2,200 tests pass.
 
@@ -1221,6 +1221,12 @@ Day 123 — Sprint 12.3 Day 1: Square & Toast Export Alignment. _build_square_ro
 Day 124 — Sprint 12.3 Day 2: CSV, JSON & Generic POS JSON Modifier Group Upgrades. CSV variants export upgraded: modifier_group header rows + modifier child rows with group_name and required columns alongside legacy variant rows. CSV wide export upgraded: modifier group modifiers become GroupName:Label prefixed columns (e.g. price_Size:Small) while ungrouped variants keep plain label columns. JSON export upgraded: modifier_groups[] array per item with name, required, min_select, max_select, and nested modifiers[] (label, price_cents, kind); ungrouped variants stay in variants[]. Generic POS JSON (_build_generic_pos_json) verified: already supports POS-native nested modifier_groups with selection rules + flat modifiers fallback. All formats maintain full backward compatibility — items without modifier groups export identically to pre-Day 124. 32 tests, 2,674 cumulative.
 
 Day 125 — Sprint 12.3 Day 3: XLSX Modifier Groups, Cross-Item Consistency & Round-Trip Tests. XLSX export fully upgraded: _xlsx_write_sheet() shared helper renders modifier group header rows (bold blue text on light blue #D6EAF8 fill) with group_name + required (Y/N) columns, modifier sub-rows (4-space indent, gray text on #F2F2F2 fill), and ungrouped variant sub-rows (2-space indent). Both draft_export_xlsx() and draft_export_xlsx_by_category() now fetch with include_modifier_groups=True. Headers upgraded to include group_name and required columns (by-category sheets omit category column). Cross-item modifier group consistency check added to _validate_draft_for_export(): within each category, if >=50% of items with groups share a group name and >=3 items have groups, outlier items missing that group get modifier_group_inconsistent warning. End-to-end round-trip tests verify all export formats (XLSX, XLSX by-category, CSV variants, JSON, Square CSV, Toast CSV) with modifier group data + backward compatibility for items without groups. Sprint 12.3 COMPLETE. 32 tests, 2,705 cumulative.
+
+---
+
+➡ **Phase 13 — Production Platform — IN PROGRESS (Days 126+)**
+
+Day 126 — Sprint 13.1 Day 1: User Accounts & Auth Foundation. New storage/users.py module: users table (email UNIQUE COLLATE NOCASE, password_hash, display_name, email_verified, active) + user_restaurants table (many-to-many with role: owner/manager/staff, UNIQUE user+restaurant). Full CRUD: create_user() with werkzeug password hashing, get_user_by_email/id(), verify_password() with timing-safe non-existence handling, change_password(), update_user(), deactivate_user(), list_users(). User↔restaurant association: link/unlink_user_restaurant(), get_user/restaurant_users(), user_owns_restaurant(), update_user_role(). Portal upgraded: /register GET+POST (email, password, confirm, display_name), /login POST supports both legacy admin + DB user login, auto-login after registration with session user_id + role=customer. register.html template cross-linked with login.html. Fixed url_for("index") → url_for("core.index") for blueprint compatibility. 32 tests, 2,737 cumulative.
 
 ---
 
@@ -1301,6 +1307,12 @@ ServLine now has:
 - ✅ JSON export — modifier_groups[] array per item with selection rules
 - ✅ Pre-export validation — missing prices, categories, names, zero-price variants, modifier group checks
 - ✅ Export preview modal — formatted output preview before download with format selector
+
+**Production Platform (Phase 13 — in progress):**
+- ✅ User accounts — email/password registration with werkzeug password hashing
+- ✅ User↔restaurant association — many-to-many with role (owner/manager/staff)
+- ✅ Public registration & login — /register, /login supports both legacy admin + DB users
+- ✅ Auto-login after registration — session with user_id, role=customer
 
 ---
 
