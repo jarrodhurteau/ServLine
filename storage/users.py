@@ -28,6 +28,7 @@ from storage.drafts import db_connect, _now
 # Constants
 # -------------------------------------------------------------------
 VALID_ROLES = frozenset({"owner", "manager", "staff"})
+VALID_TIERS = frozenset({"free", "lightning"})
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LENGTH = 8
 
@@ -451,6 +452,15 @@ def _ensure_restaurant_columns() -> None:
         conn.commit()
 
 
+def _ensure_tier_column() -> None:
+    """Add account_tier column to users table if missing (idempotent, Day 131)."""
+    with db_connect() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "account_tier" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN account_tier TEXT")
+        conn.commit()
+
+
 # -------------------------------------------------------------------
 # Email Verification (Day 130)
 # -------------------------------------------------------------------
@@ -589,3 +599,61 @@ def consume_reset_token(token: str, new_password: str) -> bool:
         )
         conn.commit()
     return True
+
+
+# -------------------------------------------------------------------
+# Account Tier (Day 131)
+# -------------------------------------------------------------------
+def set_user_tier(user_id: int, tier: str) -> bool:
+    """Set the account tier for a user.  Returns True on success.
+
+    Valid tiers: 'free', 'lightning'.
+    Raises ValueError on invalid tier.
+    """
+    tier = (tier or "").strip().lower()
+    if tier not in VALID_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Must be one of: {', '.join(sorted(VALID_TIERS))}")
+    now = _now()
+    with db_connect() as conn:
+        n = conn.execute(
+            "UPDATE users SET account_tier = ?, updated_at = ? WHERE id = ?",
+            (tier, now, user_id),
+        ).rowcount
+        conn.commit()
+    return n > 0
+
+
+def get_user_tier(user_id: int) -> Optional[str]:
+    """Return the account tier for a user, or None if not set."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT account_tier FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    if not row:
+        return None
+    return row["account_tier"] if row["account_tier"] else None
+
+
+def check_feature_access(user_id: int, feature: str) -> bool:
+    """Check if a user has access to a feature based on their tier.
+
+    Features:
+      'editor'          — free + lightning
+      'save_menus'      — free + lightning
+      'csv_json_import' — free + lightning
+      'csv_json_export' — free + lightning
+      'pos_export'      — free ($10) + lightning (first free)
+      'ai_parse'        — lightning only
+      'ocr_upload'      — lightning only
+      'wizard'          — lightning only
+    """
+    FREE_FEATURES = {"editor", "save_menus", "csv_json_import", "csv_json_export", "pos_export"}
+    LIGHTNING_FEATURES = FREE_FEATURES | {"ai_parse", "ocr_upload", "wizard"}
+    tier = get_user_tier(user_id)
+    if tier == "lightning":
+        return feature in LIGHTNING_FEATURES
+    # free tier (default for anyone with tier set)
+    if tier == "free":
+        return feature in FREE_FEATURES
+    # No tier chosen yet — no gated features
+    return False

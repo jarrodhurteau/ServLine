@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name    TEXT,
     email_verified  INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
+    account_tier    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -188,13 +189,15 @@ def app_client(mock_db, monkeypatch):
 
 
 def _register_and_login(client, email="cust@example.com", password="securepass1"):
-    """Helper: register a customer and return client."""
+    """Helper: register a customer, choose free tier, and return client."""
     client.post("/register", data={
         "email": email,
         "password": password,
         "confirm_password": password,
         "display_name": "Test Customer",
     })
+    # Day 131: must choose a tier before accessing dashboard
+    client.post("/choose-plan", data={"tier": "free"})
     return client
 
 

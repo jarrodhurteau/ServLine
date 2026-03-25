@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 130 (March 25, 2026) — Sprint 13.1 Day 5: Email Verification & Password Reset (32 tests, 2,949 total)
+Last Updated: Day 131 (March 25, 2026) — Sprint 13.1 Day 6: Free Tier Access Controls (32 tests, 2,836 total)
 
 ================================================================================
 PROJECT MISSION
@@ -2060,9 +2060,9 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
       - Login page: label changed to "Login Email", added "Forgot password?" link
       - forgot_password.html + reset_password.html templates
       - Real SMTP delivery deferred to Phase 15 (Production Hardening)
-  [ ] Free tier access
+  [x] Free tier access:  ✓ Day 131
       - All users get: manual editor, save menus, edit anytime
-      - CSV/JSON exports free, POS exports gated ($10)
+      - CSV/JSON exports free, POS exports gated ($10 free / $7.99 lightning)
       - No AI calls, no OCR — just a web editor with a database
 
     Day 126 test suite: 32 cases, 100% pass rate
@@ -2139,6 +2139,27 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
 
     Day 130 test suite: 32 cases, 100% pass rate
     Cumulative: 2,949 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  [x] Free tier access controls:  ✓ Day 131
+      - Choose-your-path page after registration (Continue Free vs Lightning Package)
+      - account_tier column on users table (free/lightning), set/get_user_tier() CRUD
+      - check_feature_access() per-tier feature permission map
+      - /choose-plan (GET + POST) — plan selection page with side-by-side comparison
+      - Registration redirects to /choose-plan instead of /dashboard
+      - Login redirects to /choose-plan when no tier chosen
+      - _require_tier_chosen decorator gates dashboard, POS exports
+      - _require_lightning decorator for future AI/wizard gates
+      - OCR image upload (POST /import) blocked for free-tier users
+      - Free: editor, save menus, CSV/JSON/Excel import+export, POS exports $10 each
+      - Lightning ($49.99 one-time): everything free + photo/PDF upload, AI parse,
+        wizard, first POS export free, $7.99 POS exports for life
+      - Legacy and admin sessions bypass all tier checks
+      - choose_plan.html: two-card layout, green checks vs red X comparison
+      - inject_globals() provides account_tier to all templates
+      - Session stores account_tier for fast-path checks
+
+    Day 131 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,836 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................

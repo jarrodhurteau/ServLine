@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Choose Your Plan — ServLine{% endblock %}
+
+{% block content %}
+  <div style="max-width:820px; margin:0 auto;">
+    <h1 class="text-2xl font-bold mb-2 text-center">How would you like to get started?</h1>
+    <p class="muted text-center mb-6">Choose the option that works best for you. You can always upgrade later.</p>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+
+      <!-- Free card -->
+      <div class="card" style="display:flex; flex-direction:column; padding:24px;">
+        <h2 class="text-lg font-bold">Continue Free</h2>
+        <p style="font-size:1.6rem; font-weight:700; margin:8px 0 4px;">Free</p>
+        <p class="text-sm muted" style="margin:0 0 20px;">Build your menu manually at your own pace.</p>
+
+        <form method="post" action="/choose-plan" style="margin-bottom:20px;">
+          <input type="hidden" name="tier" value="free">
+          <button type="submit" class="btn w-full" style="text-align:center; font-size:1.05rem; padding:0.6rem 1rem;">Continue Free</button>
+        </form>
+
+        <div style="display:flex; flex-direction:column; gap:12px; font-size:0.9rem;">
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Full access to the menu editor</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Save menus &amp; edit anytime</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Smart import via Excel, CSV, or JSON</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Export to CSV &amp; JSON for free</div>
+          <div><span style="color:#7aa2ff; font-weight:bold; margin-right:8px;">$</span>POS profile exports — <strong>$10 each</strong></div>
+          <div style="height:8px;"></div>
+          <div><span style="color:#f87171; font-weight:bold; margin-right:8px;">&#10007;</span><span style="color:var(--muted);">Photo/PDF menu upload</span></div>
+          <div><span style="color:#f87171; font-weight:bold; margin-right:8px;">&#10007;</span><span style="color:var(--muted);">AI-powered menu parsing</span></div>
+          <div><span style="color:#f87171; font-weight:bold; margin-right:8px;">&#10007;</span><span style="color:var(--muted);">Step-by-step setup wizard</span></div>
+          <div><span style="color:#f87171; font-weight:bold; margin-right:8px;">&#10007;</span><span style="color:var(--muted);">Free first POS export</span></div>
+          <div><span style="color:#f87171; font-weight:bold; margin-right:8px;">&#10007;</span><span style="color:var(--muted);">Discounted POS exports for life</span></div>
+        </div>
+      </div>
+
+      <!-- Lightning card -->
+      <div class="card" style="display:flex; flex-direction:column; padding:24px; border-color:#5a86f7;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2 class="text-lg font-bold">Lightning Package</h2>
+          <span style="font-size:0.7rem; background:#5a86f7; color:#000; padding:2px 8px; border-radius:20px; font-weight:700; letter-spacing:.3px;">RECOMMENDED</span>
+        </div>
+        <p style="font-size:1.6rem; font-weight:700; margin:8px 0 4px;">$49.99 <span style="font-size:0.85rem; font-weight:600; color:#34d399;">One-time, no subscription necessary!</span></p>
+        <p style="font-size:0.9rem; font-weight:700; color:#facc15; margin:0 0 20px;">Unlimited access for LIFE.</p>
+
+        <form method="post" action="/choose-plan" style="margin-bottom:20px;">
+          <input type="hidden" name="tier" value="lightning">
+          <button type="submit" class="btn btn-primary w-full" style="text-align:center; font-size:1.05rem; padding:0.6rem 1rem;">Get Lightning Package</button>
+        </form>
+
+        <div style="display:flex; flex-direction:column; gap:12px; font-size:0.9rem;">
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Full access to the menu editor</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Save menus &amp; edit anytime</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Smart import via Excel, CSV, or JSON</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Export to CSV &amp; JSON for free</div>
+          <div><span style="color:#7aa2ff; font-weight:bold; margin-right:8px;">$</span>POS profile exports — <strong>$7.99 for LIFE</strong> after your first free export <span style="color:var(--muted); font-size:0.8rem;"><s>$10</s></span></div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Upload your menu as <strong>PDF, JPG, or PNG</strong></div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>AI-powered menu parsing &amp; extraction</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Step-by-step editor setup wizard</div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span><strong>First POS export free</strong></div>
+          <div><span style="color:#34d399; font-weight:bold; margin-right:8px;">&#10003;</span>Discounted POS exports for life</div>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="text-center text-sm muted mt-6">
+      Questions? See how ServLine works on our <a href="/" class="text-brand-500 hover:underline">home page</a>.
+    </p>
+  </div>
+{% endblock %}

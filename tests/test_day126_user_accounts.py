@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name    TEXT,
     email_verified  INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
+    account_tier    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );

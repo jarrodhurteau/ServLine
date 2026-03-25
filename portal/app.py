@@ -175,6 +175,7 @@ try:
     from storage import users as users_store
     users_store._ensure_users_schema()
     users_store._ensure_restaurant_columns()  # Day 128: cuisine_type, website, updated_at
+    users_store._ensure_tier_column()  # Day 131: account_tier
 except Exception:
     users_store = None  # guarded below
 
@@ -476,7 +477,7 @@ def score_item_quality(item: Dict[str, Any]) -> Tuple[int, bool]:
 
 @app.context_processor
 def inject_globals():
-    """Provide `now`, `show_admin`, and `is_customer` to all templates."""
+    """Provide `now`, `show_admin`, `is_customer`, and `account_tier` to all templates."""
     raw = session.get("user")
     u = raw if isinstance(raw, dict) else {}
     role = u.get("role")
@@ -484,6 +485,7 @@ def inject_globals():
         "now": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "show_admin": role == "admin" or (bool(u) and role is None),
         "is_customer": role == "customer",
+        "account_tier": u.get("account_tier"),
     }
 
 # ------------------------
@@ -3251,14 +3253,19 @@ def login_post():
         user = users_store.verify_password(email_or_username, password)
         if user:
             restaurants = users_store.get_user_restaurants(user["id"])
+            tier = users_store.get_user_tier(user["id"])
             session["user"] = {
                 "user_id": user["id"],
                 "username": user["display_name"] or user["email"],
                 "email": user["email"],
                 "role": "customer",
                 "restaurant_id": restaurants[0]["restaurant_id"] if restaurants else None,
+                "account_tier": tier,
             }
             flash("Welcome back!", "success")
+            # If user hasn't chosen a tier yet, redirect to plan selection
+            if not tier:
+                return redirect(url_for("choose_plan"))
             return redirect(nxt or url_for("dashboard"))
 
     flash("Invalid credentials", "error")
@@ -3303,13 +3310,115 @@ def register_post():
     }
     flash("Account created! Welcome to ServLine.", "success")
     flash(f"Verification link: /verify-email/{verification_token}", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("choose_plan"))
 
 @app.post("/logout")
 def logout():
     session.clear()
     flash("You have been logged out.", "info")
     return redirect(url_for("core.index"))
+
+
+# ------------------------
+# Day 131: Choose Your Plan
+# ------------------------
+@app.get("/choose-plan")
+@login_required
+def choose_plan():
+    """Show the plan selection page (free vs lightning).
+
+    If the user already chose a tier, redirect to dashboard.
+    """
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    if user_id and users_store:
+        existing_tier = users_store.get_user_tier(user_id)
+        if existing_tier:
+            return redirect(url_for("dashboard"))
+    return _safe_render("choose_plan.html")
+
+
+@app.post("/choose-plan")
+@login_required
+def choose_plan_post():
+    """Set the user's account tier and redirect to dashboard."""
+    tier = (request.form.get("tier") or "").strip().lower()
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+
+    if not user_id or not users_store:
+        flash("Unable to set plan.", "error")
+        return redirect(url_for("choose_plan"))
+
+    if tier not in ("free", "lightning"):
+        flash("Please select a plan.", "error")
+        return redirect(url_for("choose_plan"))
+
+    try:
+        users_store.set_user_tier(user_id, tier)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("choose_plan"))
+
+    # Update session with tier
+    session["user"] = {**u, "account_tier": tier}
+
+    if tier == "lightning":
+        flash("Lightning Package selected! Upload your menu to get started.", "success")
+    else:
+        flash("Free plan activated! You can start building your menu.", "success")
+    return redirect(url_for("dashboard"))
+
+
+def _require_tier_chosen(f):
+    """Decorator: redirect to /choose-plan if user hasn't picked a tier yet."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        raw = session.get("user")
+        u = raw if isinstance(raw, dict) else {}
+        user_id = u.get("user_id")
+        # Admins, legacy sessions (no user_id), and non-dict sessions bypass
+        if u.get("role") == "admin" or (raw and not user_id):
+            return f(*args, **kwargs)
+        # Check if tier is in session first (fast path)
+        if u.get("account_tier"):
+            return f(*args, **kwargs)
+        # Check DB
+        if user_id and users_store:
+            tier = users_store.get_user_tier(user_id)
+            if tier:
+                session["user"] = {**u, "account_tier": tier}
+                return f(*args, **kwargs)
+        return redirect(url_for("choose_plan"))
+
+    return decorated
+
+
+def _require_lightning(f):
+    """Decorator: block access unless user has lightning tier.
+    Returns 403 with upgrade prompt for free-tier users."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        raw = session.get("user")
+        u = raw if isinstance(raw, dict) else {}
+        user_id = u.get("user_id")
+        # Admins, legacy sessions (no user_id), and non-dict sessions bypass
+        if u.get("role") == "admin" or (raw and not user_id):
+            return f(*args, **kwargs)
+        tier = u.get("account_tier")
+        if not tier:
+            if user_id and users_store:
+                tier = users_store.get_user_tier(user_id)
+        if tier == "lightning":
+            return f(*args, **kwargs)
+        flash("This feature requires the Lightning Package.", "error")
+        return redirect(url_for("dashboard"))
+
+    return decorated
 
 
 # ------------------------
@@ -3415,6 +3524,7 @@ def reset_password_post(token):
 # ------------------------
 @app.get("/dashboard")
 @login_required
+@_require_tier_chosen
 def dashboard():
     """Customer dashboard — shows 'My Restaurants' and quick actions."""
     u = session.get("user") or {}
@@ -3804,6 +3914,7 @@ def test_json_form():
 # ------------------------
 @app.route("/import", methods=["GET", "POST"], strict_slashes=False)
 @login_required
+@_require_tier_chosen
 def import_upload():
     """
     Handles uploaded menu files (images or PDFs) and launches the OCR import job.
@@ -3813,9 +3924,19 @@ def import_upload():
     """
     # Handle landing-page GET so /import from navbar doesn't 405
     if request.method == "GET":
-        return _safe_render("import.html")
+        _raw_g = session.get("user")
+        u_g = _raw_g if isinstance(_raw_g, dict) else {}
+        tier = u_g.get("account_tier")
+        return _safe_render("import.html", account_tier=tier)
 
-    # POST: actual upload handler
+    # POST: actual upload handler — OCR image upload requires lightning tier
+    _raw = session.get("user")
+    u = _raw if isinstance(_raw, dict) else {}
+    tier = u.get("account_tier")
+    if u.get("role") != "admin" and u.get("user_id") and tier != "lightning":
+        flash("Photo/PDF upload requires the Lightning Package. Use CSV, Excel, or JSON import instead.", "error")
+        return redirect(url_for("import_upload"))
+
     try:
         file = request.files.get("file")
         if not file or file.filename == "":
@@ -6139,6 +6260,7 @@ def draft_publish_now(draft_id: int):
 
 @app.post("/drafts/<int:draft_id>/approve_export")
 @login_required
+@_require_tier_chosen
 def draft_approve_export(draft_id: int):
     """Approve draft and export as Generic POS JSON.
 
@@ -7711,6 +7833,7 @@ def _build_generic_pos_json(items, draft=None):
 
 @app.get("/drafts/<int:draft_id>/export_square.csv")
 @login_required
+@_require_tier_chosen
 def draft_export_square_csv(draft_id: int):
     """Square POS CSV export: items + modifier groups."""
     _require_drafts_storage()
@@ -7734,6 +7857,7 @@ def draft_export_square_csv(draft_id: int):
 
 @app.get("/drafts/<int:draft_id>/export_toast.csv")
 @login_required
+@_require_tier_chosen
 def draft_export_toast_csv(draft_id: int):
     """Toast POS CSV export: menu group / item / option hierarchy."""
     _require_drafts_storage()
@@ -7756,6 +7880,7 @@ def draft_export_toast_csv(draft_id: int):
 
 @app.get("/drafts/<int:draft_id>/export_pos.json")
 @login_required
+@_require_tier_chosen
 def draft_export_pos_json(draft_id: int):
     """Generic POS JSON export: universal item/variant/modifier schema."""
     _require_drafts_storage()

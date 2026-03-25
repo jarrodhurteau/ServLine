@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name    TEXT,
     email_verified  INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
+    account_tier    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -166,13 +167,15 @@ def app_client(mock_db, monkeypatch):
 
 
 def _register_and_login(client, email="cust@example.com", password="securepass1"):
-    """Helper: register a customer and return (client, session_data)."""
+    """Helper: register a customer, choose free tier, and return client."""
     client.post("/register", data={
         "email": email,
         "password": password,
         "confirm_password": password,
         "display_name": "Test Customer",
     })
+    # Day 131: must choose a tier before accessing dashboard
+    client.post("/choose-plan", data={"tier": "free"})
     return client
 
 
@@ -321,23 +324,25 @@ class TestScopedRestaurantList:
 # 5. Login/register redirects (4 tests)
 # ===========================================================================
 class TestAuthRedirects:
-    def test_register_redirects_to_dashboard(self, app_client):
+    def test_register_redirects_to_choose_plan(self, app_client):
+        """Day 131: registration now goes to /choose-plan first."""
         resp = app_client.post("/register", data={
             "email": "redir@example.com",
             "password": "securepass1",
             "confirm_password": "securepass1",
         })
         assert resp.status_code == 302
-        assert "/dashboard" in resp.headers.get("Location", "")
+        assert "/choose-plan" in resp.headers.get("Location", "")
 
-    def test_customer_login_redirects_to_dashboard(self, app_client, users_mod):
+    def test_customer_login_no_tier_redirects_to_choose_plan(self, app_client, users_mod):
+        """Day 131: login without tier goes to /choose-plan."""
         users_mod.create_user("login@example.com", "securepass1")
         resp = app_client.post("/login", data={
             "username": "login@example.com",
             "password": "securepass1",
         })
         assert resp.status_code == 302
-        assert "/dashboard" in resp.headers.get("Location", "")
+        assert "/choose-plan" in resp.headers.get("Location", "")
 
     def test_admin_login_redirects_to_index(self, app_client):
         resp = app_client.post("/login", data={
@@ -349,8 +354,10 @@ class TestAuthRedirects:
         # Admin goes to core.index (/)
         assert "/dashboard" not in loc
 
-    def test_login_with_next_param_respected(self, app_client, users_mod):
-        users_mod.create_user("next@example.com", "securepass1")
+    def test_login_with_tier_and_next_param_respected(self, app_client, users_mod):
+        """Day 131: next param works when user already has a tier."""
+        user = users_mod.create_user("next@example.com", "securepass1")
+        users_mod.set_user_tier(user["id"], "free")
         resp = app_client.post("/login", data={
             "username": "next@example.com",
             "password": "securepass1",
