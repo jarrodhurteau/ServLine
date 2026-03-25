@@ -168,7 +168,7 @@
 
       /* --- Badge color transition for unlock (red → green) --- */
       .tier-badge.transitioning {
-        transition: background 0.5s ease, color 0.5s ease, border-color 0.5s ease;
+        transition: background 2s ease, color 2s ease, border-color 2s ease;
         background: rgba(80, 220, 120, 0.15) !important;
         color: #50dc78 !important;
         border-color: rgba(80, 220, 120, 0.3) !important;
@@ -631,7 +631,7 @@
                 setTimeout(() => {
                   badge.classList.remove('locked', 'transitioning');
                   badge.classList.add('unlocked');
-                }, 550);
+                }, 2100);
               }
 
               panel.classList.add('glow');
