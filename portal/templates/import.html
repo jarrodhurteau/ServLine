@@ -576,8 +576,8 @@
       const PLAYED_KEY = 'servline_unlock_tier';
       // Force animation if redirected from plan upgrade (?unlocked=1)
       const freshUnlock = new URLSearchParams(window.location.search).has('unlocked');
-      if (freshUnlock) sessionStorage.removeItem(PLAYED_KEY);
-      const alreadyPlayed = sessionStorage.getItem(PLAYED_KEY) === 'lightning';
+      if (freshUnlock) localStorage.removeItem(PLAYED_KEY);
+      const alreadyPlayed = localStorage.getItem(PLAYED_KEY) === 'lightning';
 
       if (alreadyPlayed) {
         // Already seen — show final unlocked state immediately, no animation
@@ -591,7 +591,7 @@
         });
       } else {
         // First visit this session — animate the full unlock
-        sessionStorage.setItem(PLAYED_KEY, 'lightning');
+        localStorage.setItem(PLAYED_KEY, 'lightning');
 
         // Start with red/locked appearance
         unlockPanels.forEach(panel => {
