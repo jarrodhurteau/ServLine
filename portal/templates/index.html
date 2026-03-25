@@ -1,16 +1,220 @@
-{% extends "base.html" %} 
-{% block title %}ServLine Portal{% endblock %}
-{% block content %}
-  <div class="card">
-    <h1 class="text-2xl font-bold mb-1">ServLine Portal</h1>
-    <p class="muted mb-2">System is online.</p>
-    <p class="muted">
-      Start at <a href="/restaurants" class="underline decoration-brand-600 hover:decoration-brand-500">Restaurants</a>,
-      or check <a href="/health" class="underline">/health</a> and
-      <a href="/db/health" class="underline">/db/health</a>.
-    </p>
-  </div>
+{% extends "base.html" %}
+{% block title %}ServLine — Get Your Menu Online{% endblock %}
 
+{% block body_class %}{% if not show_admin %}theme-landing{% endif %}{% endblock %}
+
+{% block head %}
+{% if not show_admin %}
+<style>
+  /* MenuFlow landing — terracotta/teal linen theme */
+  body.theme-landing {
+    background: #EFE2D3 !important;
+    color: #2C2C2C !important;
+  }
+  body.theme-landing .nav {
+    background: #FAF4EC !important;
+    border-bottom: 1px solid #E8DACA !important;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  }
+  body.theme-landing .nav .brand a {
+    color: #2C2C2C !important;
+  }
+  body.theme-landing .nav a {
+    color: #5A5A52 !important;
+  }
+  body.theme-landing .nav .btn-ghost {
+    background: transparent !important;
+    border-color: #DDD8CE !important;
+    color: #2C2C2C !important;
+  }
+  body.theme-landing .nav .btn-ghost:hover {
+    border-color: #B85C38 !important;
+    color: #B85C38 !important;
+    background: transparent !important;
+  }
+  body.theme-landing .nav .btn-primary {
+    background: #B85C38 !important;
+    border-color: #B85C38 !important;
+    color: #fff !important;
+  }
+  body.theme-landing .nav .btn-primary:hover {
+    background: #A04E2E !important;
+    border-color: #A04E2E !important;
+  }
+  body.theme-landing .wrap .rounded-xl {
+    background: #F8F0E4 !important;
+    border-color: #E8DACA !important;
+    color: #2C2C2C !important;
+  }
+  body.theme-landing footer,
+  body.theme-landing footer div {
+    border-color: #DDD8CE !important;
+    color: #8A8578 !important;
+  }
+
+  .hero {
+    text-align: center;
+    padding: 70px 20px 50px;
+  }
+  .hero h1 {
+    font-size: 2.6rem;
+    font-weight: 800;
+    margin: 0 0 14px;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    color: #2C2C2C;
+  }
+  .hero h1 .orange { color: #B85C38; }
+  .hero h1 .green { color: #2E5B5E; }
+  .hero .subtitle {
+    font-size: 1.1rem;
+    color: #8A8578;
+    max-width: 520px;
+    margin: 0 auto 36px;
+    line-height: 1.7;
+  }
+  .hero-buttons {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .hero-buttons .btn-land {
+    padding: 0.75rem 2.2rem;
+    font-size: 1.05rem;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+    display: inline-block;
+  }
+  .btn-land-primary {
+    background: #B85C38;
+    color: #fff;
+    border: 2px solid #B85C38;
+  }
+  .btn-land-primary:hover {
+    background: #A04E2E;
+    border-color: #A04E2E;
+    color: #fff;
+  }
+  .btn-land-outline {
+    background: transparent;
+    color: #2C2C2C;
+    border: 2px solid #DDD8CE;
+  }
+  .btn-land-outline:hover {
+    border-color: #2E5B5E;
+    color: #2E5B5E;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    max-width: 840px;
+    margin: 0 auto 55px;
+  }
+  @media (max-width: 700px) {
+    .features { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.8rem; }
+  }
+  .feature-card {
+    background: #F8F0E4;
+    border: 1px solid #E8DACA;
+    border-radius: 14px;
+    padding: 30px 22px;
+    text-align: center;
+    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  }
+  .feature-card:hover {
+    border-color: #B85C38;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  }
+  .feature-icon {
+    font-size: 2.2rem;
+    margin-bottom: 14px;
+  }
+  .feature-card h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+    color: #2C2C2C;
+  }
+  .feature-card p {
+    font-size: 0.88rem;
+    color: #8A8578;
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .how-it-works {
+    max-width: 600px;
+    margin: 0 auto 55px;
+    text-align: center;
+  }
+  .how-it-works h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 28px;
+    color: #2C2C2C;
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    text-align: left;
+  }
+  .step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #2E5B5E;
+    color: #fff;
+    font-weight: 800;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step-text h4 {
+    font-weight: 700;
+    margin: 0 0 3px;
+    font-size: 0.95rem;
+    color: #2C2C2C;
+  }
+  .step-text p {
+    margin: 0;
+    color: #8A8578;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+
+  .cta-bottom {
+    text-align: center;
+    padding: 10px 0 60px;
+  }
+  .cta-bottom p {
+    color: #8A8578;
+    font-size: 0.88rem;
+    margin-top: 14px;
+  }
+</style>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+  {% if show_admin %}
+  <!-- Admin view -->
   <section class="card mt-4">
     <h2 class="text-lg font-semibold mb-3">Admin &amp; Maintenance</h2>
     <div class="flex flex-wrap gap-2">
@@ -22,4 +226,78 @@
       <a class="btn btn-primary" href="/db/health">/db/health</a>
     </div>
   </section>
+
+  {% else %}
+  <!-- Customer / visitor landing page -->
+  <div>
+
+    <!-- Hero -->
+    <div class="hero">
+      <h1>Get Your Menu <span class="orange">Online</span> in <span class="green">Minutes</span></h1>
+      <p class="subtitle">
+        Upload a photo of your menu or build one from scratch.
+        We'll turn it into a polished, ready-to-use digital menu for your restaurant.
+      </p>
+      <div class="hero-buttons">
+        <a href="/register" class="btn-land btn-land-primary">Get Started Free</a>
+        <a href="/login" class="btn-land btn-land-outline">Sign In</a>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon">📸</div>
+        <h3>Snap a Photo</h3>
+        <p>Take a picture of your paper menu and we'll read it automatically. No typing required.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">✏️</div>
+        <h3>Edit &amp; Organize</h3>
+        <p>Review your menu in a simple editor. Fix names, prices, and categories with a few clicks.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🚀</div>
+        <h3>Push to Your POS</h3>
+        <p>Export directly to Square, Toast, Clover, or download a file your POS system can import.</p>
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="how-it-works">
+      <h2>How It Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            <h4>Create your free account</h4>
+            <p>No credit card needed. You're up and running in seconds.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            <h4>Upload your menu</h4>
+            <p>Snap a photo, upload a PDF, or paste in a spreadsheet — whatever you have.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            <h4>Review and publish</h4>
+            <p>Check everything looks right in the editor, then export to your POS or share it online.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom CTA -->
+    <div class="cta-bottom">
+      <a href="/register" class="btn-land btn-land-primary" style="padding:0.75rem 2.5rem; font-size:1.05rem;">Create Your Free Account</a>
+      <p>Free to start. No subscription. Upgrade only when you need it.</p>
+    </div>
+
+  </div>
+  {% endif %}
+
 {% endblock %}

@@ -36,7 +36,7 @@
       a { color:#b7cdfb; text-decoration:none; }
       a:hover { text-decoration:underline; }
 
-      .nav { display:flex; gap:16px; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; z-index:50; }
+      .nav { display:flex; gap:16px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; z-index:50; }
       .brand { font-weight:700; letter-spacing:.3px; }
       .wrap { max-width:960px; margin:24px auto; padding:0 16px; }
       .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
@@ -146,15 +146,15 @@
 
     {% block head %}{% endblock %}
   </head>
-  <body class="bg-bg text-ink">
+  <body class="bg-bg text-ink {% block body_class %}{% endblock %}">
     <!-- Top Nav -->
     <div class="nav">
-      <div class="brand"><a href="{% if is_customer %}/dashboard{% else %}/{% endif %}">ServLine Portal</a></div>
+      <div class="brand"><a href="{% if is_customer %}/dashboard{% else %}/{% endif %}"><img src="{{ url_for('static', filename='logo.png') }}" alt="MenuFlow" style="height:78px; margin:-4px 0 -18px;"></a></div>
 
       {% if is_customer %}
         <div><a href="/dashboard" class="hover:underline">Dashboard</a></div>
         <div><a href="/restaurants" class="hover:underline">My Restaurants</a></div>
-      {% else %}
+      {% elif show_admin %}
         <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
       {% endif %}
 
@@ -175,7 +175,8 @@
             <button class="btn btn-sm">Logout</button>
           </form>
         {% else %}
-          <a href="/login" class="btn btn-sm">Login / Create Account</a>
+          <a href="/login" class="btn btn-ghost btn-sm mr-2">Sign In</a>
+          <a href="/register" class="btn btn-primary btn-sm">Get Started</a>
         {% endif %}
       </div>
     </div>
