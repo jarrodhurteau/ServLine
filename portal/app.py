@@ -3289,6 +3289,9 @@ def register_post():
         flash(str(exc), "error")
         return redirect(url_for("register"))
 
+    # Generate email verification token (Day 130)
+    verification_token = users_store.generate_verification_token(user["id"])
+
     # Auto-login after registration
     session["user"] = {
         "user_id": user["id"],
@@ -3296,8 +3299,10 @@ def register_post():
         "email": user["email"],
         "role": "customer",
         "restaurant_id": None,
+        "email_verified": False,
     }
     flash("Account created! Welcome to ServLine.", "success")
+    flash(f"Verification link: /verify-email/{verification_token}", "success")
     return redirect(url_for("dashboard"))
 
 @app.post("/logout")
@@ -3305,6 +3310,105 @@ def logout():
     session.clear()
     flash("You have been logged out.", "info")
     return redirect(url_for("core.index"))
+
+
+# ------------------------
+# Day 130: Email Verification & Password Reset
+# ------------------------
+@app.get("/verify-email/<token>")
+def verify_email(token):
+    """Verify a user's email via token link."""
+    if not users_store:
+        flash("Email verification is not available.", "error")
+        return redirect(url_for("core.index"))
+    user = users_store.verify_email_token(token)
+    if user:
+        # Update session if the verified user is logged in
+        u = session.get("user") or {}
+        if u.get("user_id") == user["id"]:
+            session["user"] = {**u, "email_verified": True}
+        flash("Email verified successfully!", "success")
+        return redirect(url_for("account_page") if session.get("user") else url_for("login"))
+    flash("Invalid or expired verification link.", "error")
+    return redirect(url_for("core.index"))
+
+
+@app.post("/resend-verification")
+@login_required
+def resend_verification():
+    """Generate a new email verification token for the logged-in user."""
+    u = session.get("user") or {}
+    user_id = u.get("user_id")
+    if not user_id or not users_store:
+        flash("Verification not available.", "error")
+        return redirect(url_for("account_page"))
+    user_data = users_store.get_user_by_id(user_id)
+    if user_data and user_data["email_verified"]:
+        flash("Your email is already verified.", "info")
+        return redirect(url_for("account_page"))
+    token = users_store.generate_verification_token(user_id)
+    # In production, send this via email. For now, flash the link.
+    flash(f"Verification link: /verify-email/{token}", "success")
+    return redirect(url_for("account_page"))
+
+
+@app.get("/forgot-password")
+def forgot_password():
+    return _safe_render("forgot_password.html")
+
+
+@app.post("/forgot-password")
+def forgot_password_post():
+    email = (request.form.get("email") or "").strip()
+    if not email:
+        flash("Please enter your email address.", "error")
+        return redirect(url_for("forgot_password"))
+    if not users_store:
+        flash("Password reset is not available.", "error")
+        return redirect(url_for("forgot_password"))
+    token = users_store.generate_reset_token(email)
+    if token:
+        # In production, send this via email. For now, flash the link.
+        flash(f"Password reset link: /reset-password/{token}", "success")
+    else:
+        # Don't reveal whether the email exists — always show same message
+        flash("If an account with that email exists, a reset link has been generated.", "info")
+    return redirect(url_for("forgot_password"))
+
+
+@app.get("/reset-password/<token>")
+def reset_password(token):
+    if not users_store:
+        flash("Password reset is not available.", "error")
+        return redirect(url_for("core.index"))
+    user_id = users_store.validate_reset_token(token)
+    if not user_id:
+        flash("Invalid or expired reset link.", "error")
+        return redirect(url_for("forgot_password"))
+    return _safe_render("reset_password.html", token=token)
+
+
+@app.post("/reset-password/<token>")
+def reset_password_post(token):
+    if not users_store:
+        flash("Password reset is not available.", "error")
+        return redirect(url_for("core.index"))
+    new_pw = (request.form.get("new_password") or "").strip()
+    confirm_pw = (request.form.get("confirm_password") or "").strip()
+    if new_pw != confirm_pw:
+        flash("Passwords do not match.", "error")
+        return redirect(url_for("reset_password", token=token))
+    try:
+        ok = users_store.consume_reset_token(token, new_pw)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("reset_password", token=token))
+    if ok:
+        flash("Password reset successfully. Please sign in.", "success")
+        return redirect(url_for("login"))
+    flash("Invalid or expired reset link.", "error")
+    return redirect(url_for("forgot_password"))
+
 
 # ------------------------
 # Day 127: Customer Dashboard

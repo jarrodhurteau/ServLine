@@ -33,7 +33,19 @@
       <form action="/account/update" method="post" style="display:grid; gap:12px; max-width:480px;">
         <div>
           <label style="color:var(--muted); font-size:.9rem;">Email</label>
-          <input type="text" disabled value="{{ user_data.email if user_data else user.email }}" style="width:100%; opacity:.6;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="text" disabled value="{{ user_data.email if user_data else user.email }}" style="flex:1; opacity:.6;">
+            {% if user_data and user_data.email_verified %}
+              <span style="background:#065f46; color:#6ee7b7; font-size:.75rem; padding:2px 8px; border-radius:9999px; white-space:nowrap;">Verified</span>
+            {% else %}
+              <span style="background:#7c2d12; color:#fdba74; font-size:.75rem; padding:2px 8px; border-radius:9999px; white-space:nowrap;">Unverified</span>
+            {% endif %}
+          </div>
+          {% if user_data and not user_data.email_verified %}
+            <form action="/resend-verification" method="post" style="margin-top:4px;">
+              <button type="submit" class="btn btn-sm" style="font-size:.8rem;">Resend Verification Email</button>
+            </form>
+          {% endif %}
         </div>
         <div>
           <label for="acc-display" style="color:var(--muted); font-size:.9rem;">Display Name</label>

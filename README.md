@@ -1234,6 +1234,8 @@ Day 128 — Sprint 13.1 Day 3: Restaurant Management & Multi-Restaurant Support.
 
 Day 129 — Sprint 13.1 Day 4: Customer-Facing Editor Cleanup. Draft editor split into clean customer view vs full admin view using existing show_admin context processor. Hidden from customers: header info chips (Draft ID, Restaurant ID, Source, Import Job), Pipeline Debug button, Clean & Refine button, Finalize with AI button, confidence threshold slider, Auto Kitchen Names button, Position column (header + cells), confidence badges, provenance tooltip pins, quality scores, Low Confidence panel. Sidebar dev tools (Backfill Variants, OCR Debug JSON/CSV, Pipeline Debug, Back to Import) consolidated into collapsible "Dev Tools" section for admins. OCR Debug CSV removed from export dropdown for customers. JS addRow/addVariantRow conditionally render position cells and provenance pins via showAdmin variable. Zero backend changes — single template with {% if show_admin %} conditionals. Customers retain: search, table/cards toggle, kitchen names toggle, add item, bulk category, delete selected, full export dropdown, save, approve & export to POS. 32 tests, 2,835 cumulative.
 
+Day 130 — Sprint 13.1 Day 5: Email Verification & Password Reset. Token-based email verification: email_verification_tokens table (SHA-256 hashed tokens), generate_verification_token(), verify_email_token() marks email_verified=1. Token-based password reset: password_reset_tokens table with 1-hour expiry and used flag, generate_reset_token() (returns None for unknown/inactive users — no email leak), validate_reset_token(), consume_reset_token() changes password and marks token used. Portal routes: GET /verify-email/<token>, POST /resend-verification, GET+POST /forgot-password, GET+POST /reset-password/<token>. Registration auto-generates verification token. Account page shows Verified/Unverified badge with Resend button. Login page "Forgot password?" link. forgot_password.html and reset_password.html templates. Login label changed from "Username" to "Login Email". Security: tokens stored as SHA-256 hashes, reset tokens expire after 1 hour, forgot-password never reveals email existence, one active token per user. 32 tests, 2,949 cumulative.
+
 ---
 
 ## 🌄 System State Summary
@@ -1323,6 +1325,8 @@ ServLine now has:
 - ✅ Restaurant management — detail page, edit, delete, cuisine types, website
 - ✅ Account settings — profile, password change, delete account
 - ✅ Session scoping — require_restaurant_access, restaurant switching
+- ✅ Email verification — token-based verification with SHA-256 hashed tokens
+- ✅ Password reset — token-based reset with 1-hour expiry, no email existence leak
 
 ---
 

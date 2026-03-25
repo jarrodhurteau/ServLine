@@ -1,18 +1,22 @@
 """
-storage/users.py — User Accounts & Authentication (Phase 13, Day 126)
+storage/users.py — User Accounts & Authentication (Phase 13, Days 126-130)
 
 Tables:
-  users              — email/password accounts
-  user_restaurants   — many-to-many association (with role)
+  users                      — email/password accounts
+  user_restaurants            — many-to-many association (with role)
+  email_verification_tokens   — token-based email verification (Day 130)
+  password_reset_tokens       — token-based password reset (Day 130)
 
 All CRUD goes through this module.  portal/app.py imports it as users_store.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+import secrets
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -61,7 +65,42 @@ def _ensure_users_schema() -> None:
             )
         """)
 
+        # Day 130: Token tables for email verification & password reset
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                token_hash  TEXT NOT NULL UNIQUE,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                token_hash  TEXT NOT NULL UNIQUE,
+                expires_at  TEXT NOT NULL,
+                used        INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
+
+
+# -------------------------------------------------------------------
+# Token helpers (Day 130)
+# -------------------------------------------------------------------
+TOKEN_BYTES = 32
+RESET_TOKEN_HOURS = 1
+
+
+def _hash_token(token: str) -> str:
+    """SHA-256 hash a raw token for safe storage."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 # -------------------------------------------------------------------
@@ -410,3 +449,143 @@ def _ensure_restaurant_columns() -> None:
         if "updated_at" not in cols:
             conn.execute("ALTER TABLE restaurants ADD COLUMN updated_at TEXT")
         conn.commit()
+
+
+# -------------------------------------------------------------------
+# Email Verification (Day 130)
+# -------------------------------------------------------------------
+def generate_verification_token(user_id: int) -> str:
+    """Create a verification token for the user.  Returns the raw token.
+
+    Any previous tokens for this user are deleted first (one active at a time).
+    """
+    raw = secrets.token_urlsafe(TOKEN_BYTES)
+    hashed = _hash_token(raw)
+    now = _now()
+    with db_connect() as conn:
+        conn.execute("DELETE FROM email_verification_tokens WHERE user_id = ?",
+                      (user_id,))
+        conn.execute(
+            """INSERT INTO email_verification_tokens (user_id, token_hash, created_at)
+               VALUES (?, ?, ?)""",
+            (user_id, hashed, now),
+        )
+        conn.commit()
+    return raw
+
+
+def verify_email_token(token: str) -> Optional[Dict[str, Any]]:
+    """Verify an email token.  Returns the user dict on success, None on failure.
+
+    On success the token row is deleted and the user's email_verified is set to 1.
+    """
+    hashed = _hash_token(token)
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM email_verification_tokens WHERE token_hash = ?",
+            (hashed,),
+        ).fetchone()
+        if not row:
+            return None
+        uid = row[0]
+        conn.execute("DELETE FROM email_verification_tokens WHERE token_hash = ?",
+                      (hashed,))
+        conn.execute(
+            "UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?",
+            (_now(), uid),
+        )
+        conn.commit()
+    return get_user_by_id(uid)
+
+
+def get_verification_token_for_user(user_id: int) -> Optional[str]:
+    """Return the token_hash for the user, if one exists (for testing/resend)."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT token_hash FROM email_verification_tokens WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return row[0] if row else None
+
+
+# -------------------------------------------------------------------
+# Password Reset (Day 130)
+# -------------------------------------------------------------------
+def generate_reset_token(email: str) -> Optional[str]:
+    """Create a password-reset token.  Returns the raw token, or None if the
+    email doesn't match any active user (caller should not reveal this).
+    """
+    user = get_user_by_email(email)
+    if not user or not user["active"]:
+        return None
+    raw = secrets.token_urlsafe(TOKEN_BYTES)
+    hashed = _hash_token(raw)
+    now = _now()
+    expires = (datetime.fromisoformat(now) + timedelta(hours=RESET_TOKEN_HOURS)).isoformat(sep=" ", timespec="seconds")
+    with db_connect() as conn:
+        # Invalidate any existing tokens for this user
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?",
+                      (user["id"],))
+        conn.execute(
+            """INSERT INTO password_reset_tokens
+               (user_id, token_hash, expires_at, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (user["id"], hashed, expires, now),
+        )
+        conn.commit()
+    return raw
+
+
+def validate_reset_token(token: str) -> Optional[int]:
+    """Check a reset token.  Returns user_id if valid and not expired, else None."""
+    hashed = _hash_token(token)
+    now = _now()
+    with db_connect() as conn:
+        row = conn.execute(
+            """SELECT user_id, expires_at, used
+               FROM password_reset_tokens
+               WHERE token_hash = ?""",
+            (hashed,),
+        ).fetchone()
+    if not row:
+        return None
+    if row["used"]:
+        return None
+    if row["expires_at"] < now:
+        return None
+    return row["user_id"]
+
+
+def consume_reset_token(token: str, new_password: str) -> bool:
+    """Use a reset token to change the user's password.
+
+    Validates the token, changes the password, marks the token as used.
+    Returns True on success, False on invalid/expired token.
+    Raises ValueError if the new password fails validation.
+    """
+    err = validate_password(new_password)
+    if err:
+        raise ValueError(err)
+    hashed = _hash_token(token)
+    now = _now()
+    with db_connect() as conn:
+        row = conn.execute(
+            """SELECT user_id, expires_at, used
+               FROM password_reset_tokens
+               WHERE token_hash = ?""",
+            (hashed,),
+        ).fetchone()
+        if not row or row["used"] or row["expires_at"] < now:
+            return False
+        uid = row["user_id"]
+        pw_hash = generate_password_hash(new_password)
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (pw_hash, now, uid),
+        )
+        conn.execute(
+            "UPDATE password_reset_tokens SET used = 1 WHERE token_hash = ?",
+            (hashed,),
+        )
+        conn.commit()
+    return True

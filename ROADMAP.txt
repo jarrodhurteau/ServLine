@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 129 (March 18, 2026) — Sprint 13.1 Day 4: Customer-Facing Editor Cleanup (32 tests, 2,835 total)
+Last Updated: Day 130 (March 25, 2026) — Sprint 13.1 Day 5: Email Verification & Password Reset (32 tests, 2,949 total)
 
 ================================================================================
 PROJECT MISSION
@@ -2046,9 +2046,20 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
       - Auto-login after registration (session with user_id, role=customer)
       - register.html template + login.html cross-linked
       - Fixed url_for("index") → url_for("core.index") for blueprint compat
-  [ ] Email validation & verification
-      - Email format validated on registration
-      - Email verification (optional at launch, required later)
+  [x] Email verification & password reset:  ✓ Day 130
+      - email_verification_tokens table (SHA-256 hashed, one active per user)
+      - generate_verification_token(), verify_email_token() → marks email_verified=1
+      - Registration auto-generates verification token (flashed on-screen for now)
+      - /verify-email/<token> route — verifies email, updates session
+      - /resend-verification route — generates new token, invalidates old
+      - Account page: Verified/Unverified badge + Resend Verification Email button
+      - password_reset_tokens table (SHA-256 hashed, 1-hour expiry, used flag)
+      - generate_reset_token(), validate_reset_token(), consume_reset_token()
+      - /forgot-password (GET+POST) — email input, never reveals email existence
+      - /reset-password/<token> (GET+POST) — new password form with eyeball toggles
+      - Login page: label changed to "Login Email", added "Forgot password?" link
+      - forgot_password.html + reset_password.html templates
+      - Real SMTP delivery deferred to Phase 15 (Production Hardening)
   [ ] Free tier access
       - All users get: manual editor, save menus, edit anytime
       - CSV/JSON exports free, POS exports gated ($10)
@@ -2116,6 +2127,18 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
 
     Day 129 test suite: 32 cases, 100% pass rate
     Cumulative: 2,835 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  [x] Email verification & password reset:  ✓ Day 130
+      - email_verification_tokens table (SHA-256 hashed, one active per user)
+      - password_reset_tokens table (SHA-256 hashed, 1-hour expiry, used flag)
+      - /verify-email/<token>, /resend-verification, /forgot-password, /reset-password/<token>
+      - Registration auto-generates verification token
+      - Account page Verified/Unverified badge + Resend button
+      - Login: "Login Email" label + "Forgot password?" link
+      - Real SMTP delivery deferred to Phase 15
+
+    Day 130 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,949 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................
@@ -2528,6 +2551,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 130: Email Verification & Password Reset — email_verification_tokens + password_reset_tokens tables (SHA-256 hashed), generate/verify email tokens (one active per user, auto-generated on registration), generate/validate/consume reset tokens (1-hour expiry, used flag), /verify-email/<token>, /resend-verification, /forgot-password (GET+POST, no email existence leak), /reset-password/<token> (GET+POST), account page Verified/Unverified badge + Resend button, login label "Login Email" + "Forgot password?" link, forgot_password.html + reset_password.html templates (32 tests)
 Day 129: Customer-Facing Editor Cleanup — draft_editor.html split into customer-clean vs admin view using {% if show_admin %} conditionals. Hidden from customers: header info chips, Pipeline Debug, Clean & Refine, Finalize with AI, confidence slider, Auto Kitchen Names, Position column, confidence badges, provenance pins, quality scores, Low Confidence panel. Sidebar dev tools consolidated into collapsible "Dev Tools" section (Backfill, OCR Debug, Pipeline Debug, Back to Import). OCR Debug CSV removed from export dropdown. JS addRow/addVariantRow conditional rendering. Zero backend changes. Customers retain: search, table/cards toggle, kitchen names, add item, bulk category, delete selected, full export dropdown, save, approve & export (32 tests)
 Day 128: Restaurant Management & Multi-Restaurant Support — /restaurants/<id>/detail page (stats, edit, delete), POST /restaurants/<id>/update (name, phone, address, cuisine_type, website), POST /restaurants/<id>/delete (soft-delete), POST /switch-restaurant (session switcher), storage/users.py (get_restaurant, update_restaurant, delete_restaurant, get_restaurant_stats, VALID_CUISINE_TYPES), _ensure_restaurant_columns migration, dashboard enhanced (item_count, cuisine badge, active badge, switcher), restaurant_detail.html template (33 tests)
 Day 127: Session Scoping & Customer Dashboard — /dashboard route, POST /restaurants auto-links user, require_restaurant_access decorator, scoped /restaurants list, login/register redirect to /dashboard, role-aware nav, /account page with expandable sections (Profile, Restaurants & Menus, POS Links, Export History, Purchases, Delete Account), /account/update + /account/change-password + /account/delete, schema auto-init, restaurants.html extends base.html, Export History added to Sprint 13.3 roadmap (32 tests)
