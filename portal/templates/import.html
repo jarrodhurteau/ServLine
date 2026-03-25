@@ -452,119 +452,52 @@
   <!-- Unlock fireworks + free-tier rattle + sound effects -->
   <script>
   (function () {
-    // ======== Sound Effects (Web Audio API — no external files) ========
-    let _audioCtx = null;
-    function getAudio() {
-      if (!_audioCtx) {
-        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
-      }
-      return _audioCtx;
-    }
+    // ======== Sound Effects + Video ========
+    const unlockAudio = new Audio('/static/audio/unlock_new.mp3');
+    const fireworkAudio = new Audio('/static/audio/fireworks_new.mp3');
+    unlockAudio.volume = 0.8;
+    fireworkAudio.volume = 0.7;
+    // Preload
+    unlockAudio.preload = 'auto';
+    fireworkAudio.preload = 'auto';
 
     function playUnlockSound() {
-      const ctx = getAudio(); if (!ctx) return;
-      const now = ctx.currentTime;
-
-      // Layer 1: Sharp metallic "click" — the latch releasing
-      const click = ctx.createOscillator();
-      const clickGain = ctx.createGain();
-      click.type = 'square';
-      click.frequency.setValueAtTime(1800, now);
-      click.frequency.exponentialRampToValueAtTime(400, now + 0.015);
-      clickGain.gain.setValueAtTime(0.2, now);
-      clickGain.gain.linearRampToValueAtTime(0, now + 0.025);
-      click.connect(clickGain).connect(ctx.destination);
-      click.start(now); click.stop(now + 0.03);
-
-      // Layer 2: Short noise burst for the mechanical "tch" texture
-      const noiseLen = ctx.sampleRate * 0.03;
-      const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-      const nd = noiseBuf.getChannelData(0);
-      for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
-      const noise = ctx.createBufferSource();
-      noise.buffer = noiseBuf;
-      const nGain = ctx.createGain();
-      nGain.gain.setValueAtTime(0.18, now);
-      nGain.gain.linearRampToValueAtTime(0, now + 0.03);
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 2500;
-      noise.connect(hp).connect(nGain).connect(ctx.destination);
-      noise.start(now); noise.stop(now + 0.03);
-
-      // Layer 3: Lower thud — the shackle springing open (delayed 30ms)
-      const thud = ctx.createOscillator();
-      const thudGain = ctx.createGain();
-      thud.type = 'sine';
-      thud.frequency.setValueAtTime(350, now + 0.03);
-      thud.frequency.exponentialRampToValueAtTime(120, now + 0.09);
-      thudGain.gain.setValueAtTime(0.12, now + 0.03);
-      thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-      thud.connect(thudGain).connect(ctx.destination);
-      thud.start(now + 0.03); thud.stop(now + 0.1);
-
-      // Layer 4: Tiny metallic ring — padlock body resonance
-      const ring = ctx.createOscillator();
-      const ringGain = ctx.createGain();
-      ring.type = 'sine';
-      ring.frequency.setValueAtTime(2200, now + 0.02);
-      ring.frequency.exponentialRampToValueAtTime(1800, now + 0.15);
-      ringGain.gain.setValueAtTime(0.04, now + 0.02);
-      ringGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-      ring.connect(ringGain).connect(ctx.destination);
-      ring.start(now + 0.02); ring.stop(now + 0.18);
+      unlockAudio.currentTime = 0;
+      unlockAudio.play().catch(() => {});
     }
 
     function playFireworkSound() {
-      const ctx = getAudio(); if (!ctx) return;
-      const now = ctx.currentTime;
-      // White noise burst (firework pop)
-      const bufferSize = ctx.sampleRate * 0.15;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
-      }
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const noiseGain = ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.1, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-      // Bandpass for crackle
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.value = 3000;
-      filter.Q.value = 0.8;
-      noise.connect(filter).connect(noiseGain).connect(ctx.destination);
-      noise.start(now); noise.stop(now + 0.15);
-      // Tonal pop
-      const pop = ctx.createOscillator();
-      const popGain = ctx.createGain();
-      pop.type = 'sine';
-      pop.frequency.setValueAtTime(1200, now);
-      pop.frequency.exponentialRampToValueAtTime(300, now + 0.12);
-      popGain.gain.setValueAtTime(0.08, now);
-      popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-      pop.connect(popGain).connect(ctx.destination);
-      pop.start(now); pop.stop(now + 0.15);
+      const clone = fireworkAudio.cloneNode();
+      clone.volume = 0.6;
+      clone.play().catch(() => {});
     }
 
-    function playRattleSound() {
-      const ctx = getAudio(); if (!ctx) return;
-      const now = ctx.currentTime;
-      // Quick metallic rattle
-      for (let i = 0; i < 4; i++) {
-        const t = now + i * 0.06;
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(500 + i * 100, t);
-        osc.frequency.exponentialRampToValueAtTime(200, t + 0.04);
-        g.gain.setValueAtTime(0.06, t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-        osc.connect(g).connect(ctx.destination);
-        osc.start(t); osc.stop(t + 0.05);
-      }
+    // Play fireworks video as centered overlay with feathered edges
+    function playFireworkVideo() {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `
+        position:fixed; top:50%; left:50%;
+        transform:translate(-50%,-50%);
+        width:70vw; height:70vh;
+        pointer-events:none;
+        z-index:9999;
+        mix-blend-mode:screen;
+        -webkit-mask-image:radial-gradient(ellipse at center, black 25%, transparent 58%);
+        mask-image:radial-gradient(ellipse at center, black 25%, transparent 58%);
+      `;
+      const vid = document.createElement('video');
+      vid.src = '/static/audio/fireworks.webm';
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.style.cssText = `
+        width:100%; height:100%;
+        object-fit:cover;
+        opacity:0.9;
+      `;
+      wrap.appendChild(vid);
+      document.body.appendChild(wrap);
+      vid.play().catch(() => {});
+      vid.onended = () => wrap.remove();
     }
 
     // ======== Firework Helpers ========
@@ -671,66 +604,56 @@
 
         // Main unlock sequence
         setTimeout(() => {
+        // Play unlock sound once for both panels
+        playUnlockSound();
+
         unlockPanels.forEach((panel, idx) => {
-          const delay = idx * 500;  // stagger between panels
+          const delay = idx * 300;  // stagger badge animations
 
           setTimeout(() => {
             const lock = panel.querySelector('.lock-icon');
             const badge = panel.querySelector('.tier-badge');
             const canvas = panel.querySelector('.firework-canvas');
 
-            // Phase 1: Shake the lock + play unlock sound
+            // Phase 1: Shake the lock
             if (lock) {
               lock.classList.add('unlocking');
-              playUnlockSound();
             }
 
-            // Phase 2: After shake — swap icon + text, transition badge red→green, fire fireworks
+            // Phase 2: After shake — swap icon + text, transition badge red→green
             setTimeout(() => {
-              // Swap lock icon and label
               if (lock) lock.textContent = '🔓';
               const label = panel.querySelector('.lock-label');
               if (label) label.textContent = 'Unlocked';
 
-              // Transition badge from red to green
               if (badge) {
                 badge.classList.add('transitioning');
-                // After CSS transition, swap to proper unlocked class
                 setTimeout(() => {
                   badge.classList.remove('locked', 'transitioning');
                   badge.classList.add('unlocked');
                 }, 550);
               }
 
-              // Glow the card
               panel.classList.add('glow');
 
-              // Fire the fireworks + sound
+              // Particles per panel
               if (canvas) {
-                playFireworkSound();
                 spawnBurst(canvas, 18, 80);
                 spawnStars(canvas, 10);
                 spawnRing(canvas, 0);
-
-                // Second wave
-                setTimeout(() => {
-                  playFireworkSound();
-                  spawnBurst(canvas, 12, 110);
-                  spawnStars(canvas, 6);
-                  spawnRing(canvas, 100);
-                }, 400);
-
-                // Third wave
-                setTimeout(() => {
-                  playFireworkSound();
-                  spawnBurst(canvas, 8, 60);
-                  spawnStars(canvas, 4);
-                }, 900);
+                setTimeout(() => { spawnBurst(canvas, 12, 110); spawnStars(canvas, 6); }, 400);
+                setTimeout(() => { spawnBurst(canvas, 8, 60); spawnStars(canvas, 4); }, 900);
               }
-            }, 650);  // after lock shake finishes
+
+              // Fullscreen firework video + sound — only on first panel
+              if (idx === 0) {
+                playFireworkSound();
+                playFireworkVideo();
+              }
+            }, 650);
           }, delay);
         });
-      }, 1000);
+      }, 500);
       } // end if !alreadyPlayed
     }
   })();
