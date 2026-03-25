@@ -2515,6 +2515,11 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 @app.post("/api/menus/import")
 @login_required
 def import_menu():
+    # Tier gate: free-tier users cannot upload images/PDFs via API
+    _raw = session.get("user")
+    _u = _raw if isinstance(_raw, dict) else {}
+    if _u.get("role") != "admin" and _u.get("user_id") and _u.get("account_tier") != "lightning":
+        return jsonify({"error": "Photo/PDF upload requires the Premium Package."}), 403
     try:
         if "file" not in request.files:
             return jsonify({"error": "No file field 'file' provided"}), 400
@@ -3327,15 +3332,14 @@ def logout():
 def choose_plan():
     """Show the plan selection page (free vs lightning).
 
-    If the user already chose a tier, redirect to dashboard.
+    Always accessible so users can upgrade their plan.
     """
     u = session.get("user") or {}
     user_id = u.get("user_id")
+    current_tier = None
     if user_id and users_store:
-        existing_tier = users_store.get_user_tier(user_id)
-        if existing_tier:
-            return redirect(url_for("dashboard"))
-    return _safe_render("choose_plan.html")
+        current_tier = users_store.get_user_tier(user_id)
+    return _safe_render("choose_plan.html", current_tier=current_tier)
 
 
 @app.post("/choose-plan")
@@ -3364,10 +3368,11 @@ def choose_plan_post():
     session["user"] = {**u, "account_tier": tier}
 
     if tier == "lightning":
-        flash("Lightning Package selected! Upload your menu to get started.", "success")
+        flash("Premium Package activated! All features unlocked — upload your menu to get started.", "success")
+        return redirect(url_for("import_upload", unlocked="1"))
     else:
-        flash("Free plan activated! You can start building your menu.", "success")
-    return redirect(url_for("dashboard"))
+        flash("Free plan activated! You can start building your menu with CSV, Excel, or JSON imports.", "success")
+        return redirect(url_for("import_upload"))
 
 
 def _require_tier_chosen(f):
@@ -3415,7 +3420,7 @@ def _require_lightning(f):
                 tier = users_store.get_user_tier(user_id)
         if tier == "lightning":
             return f(*args, **kwargs)
-        flash("This feature requires the Lightning Package.", "error")
+        flash("This feature requires the Premium Package.", "error")
         return redirect(url_for("dashboard"))
 
     return decorated
@@ -3658,11 +3663,11 @@ def account_change_password():
 @app.post("/account/delete")
 @login_required
 def account_delete():
-    """Soft-delete the logged-in user's account."""
+    """Delete the logged-in user's account and all associated data."""
     u = session.get("user") or {}
     user_id = u.get("user_id")
     if user_id and users_store:
-        users_store.deactivate_user(user_id)
+        users_store.delete_user(user_id)
     session.clear()
     flash("Your account has been deleted.", "info")
     return redirect(url_for("core.index"))
@@ -3934,7 +3939,7 @@ def import_upload():
     u = _raw if isinstance(_raw, dict) else {}
     tier = u.get("account_tier")
     if u.get("role") != "admin" and u.get("user_id") and tier != "lightning":
-        flash("Photo/PDF upload requires the Lightning Package. Use CSV, Excel, or JSON import instead.", "error")
+        flash("Photo/PDF upload requires the Premium Package.", "error")
         return redirect(url_for("import_upload"))
 
     try:

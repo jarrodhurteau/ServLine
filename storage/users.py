@@ -244,6 +244,17 @@ def deactivate_user(user_id: int) -> bool:
     return update_user(user_id, active=0)
 
 
+def delete_user(user_id: int) -> bool:
+    """Hard-delete a user and all associated data so the email can be reused."""
+    with db_connect() as conn:
+        conn.execute("DELETE FROM email_verification_tokens WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM user_restaurants WHERE user_id = ?", (user_id,))
+        n = conn.execute("DELETE FROM users WHERE id = ?", (user_id,)).rowcount
+        conn.commit()
+    return n > 0
+
+
 def list_users(active_only: bool = True) -> List[Dict[str, Any]]:
     """Return all users (optionally only active)."""
     q = "SELECT id, email, display_name, email_verified, active, created_at FROM users"

@@ -5,37 +5,237 @@
   <section class="card max-w-3xl mx-auto">
     <h1 class="text-xl font-semibold mb-2">Import a Menu</h1>
     <p class="muted mb-4">
-      Upload a photo, PDF, or structured CSV/XLSX/JSON. We’ll create a draft you can review and publish into your menus.
+      Upload a photo, PDF, or structured CSV/XLSX/JSON. We'll create a draft you can review and publish into your menus.
     </p>
 
-    <!-- Toolbar -->
+    {% if show_admin %}
+    <!-- Toolbar (admin only) -->
     <div class="mb-6 flex flex-wrap gap-2">
       <a class="btn btn-primary" href="{{ url_for('ocr_health_route') }}">OCR Health</a>
     </div>
+    {% endif %}
+
+    <!-- Lock/unlock styles + fireworks animation -->
+    <style>
+      .tier-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: .8rem;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: 12px;
+        margin-left: 8px;
+        vertical-align: middle;
+        transition: all 0.4s ease;
+      }
+      .tier-badge.locked {
+        background: rgba(255, 80, 80, 0.15);
+        color: #ff6b6b;
+        border: 1px solid rgba(255, 80, 80, 0.3);
+      }
+      .tier-badge.unlocked {
+        background: rgba(80, 220, 120, 0.15);
+        color: #50dc78;
+        border: 1px solid rgba(80, 220, 120, 0.3);
+      }
+      .card-locked {
+        position: relative;
+        pointer-events: none;
+      }
+      .card-locked::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        border: 2px dashed rgba(255, 80, 80, 0.35);
+        pointer-events: none;
+      }
+      .card-unlocked {
+        position: relative;
+        overflow: visible;
+      }
+
+      /* --- Lock icon: starts locked, animates to unlocked --- */
+      .lock-icon {
+        display: inline-block;
+        transition: transform 0.3s ease;
+      }
+      .lock-icon.unlocking {
+        animation: lock-shake 0.6s ease-in-out forwards;
+      }
+      @keyframes lock-shake {
+        0%   { transform: rotate(0deg); }
+        15%  { transform: rotate(-12deg); }
+        30%  { transform: rotate(10deg); }
+        45%  { transform: rotate(-8deg); }
+        60%  { transform: rotate(6deg); }
+        75%  { transform: rotate(-3deg); }
+        100% { transform: rotate(0deg) scale(1.15); }
+      }
+
+      /* --- Card glow pulse on unlock --- */
+      @keyframes card-glow {
+        0%   { box-shadow: 0 0 0 0 rgba(80, 220, 120, 0); }
+        30%  { box-shadow: 0 0 20px 6px rgba(80, 220, 120, 0.35); }
+        70%  { box-shadow: 0 0 35px 10px rgba(122, 162, 255, 0.25); }
+        100% { box-shadow: 0 0 0 0 rgba(80, 220, 120, 0); }
+      }
+      .card-unlocked.glow {
+        animation: card-glow 1.5s ease-out forwards;
+      }
+
+      /* --- Firework particles (spawned by JS, overflow outside card) --- */
+      .firework-canvas {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+        z-index: 100;
+      }
+      .fw-particle {
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        animation: fw-shoot var(--fw-dur, 1.2s) cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+        opacity: 0;
+      }
+      @keyframes fw-shoot {
+        0%   { opacity: 1; transform: translate(0, 0) scale(1); }
+        20%  { opacity: 1; }
+        100% { opacity: 0; transform: translate(var(--fw-x), var(--fw-y)) scale(0.1); }
+      }
+
+      /* --- Sparkle stars (larger, float up and out) --- */
+      .fw-star {
+        position: absolute;
+        pointer-events: none;
+        font-size: 18px;
+        opacity: 0;
+        animation: fw-star-rise var(--star-dur, 1.5s) ease-out forwards;
+      }
+      @keyframes fw-star-rise {
+        0%   { opacity: 0; transform: translate(0, 0) scale(0) rotate(0deg); }
+        15%  { opacity: 1; transform: translate(var(--star-x1), var(--star-y1)) scale(1.2) rotate(90deg); }
+        60%  { opacity: 1; transform: translate(var(--star-x2), var(--star-y2)) scale(1) rotate(200deg); }
+        100% { opacity: 0; transform: translate(var(--star-x3), var(--star-y3)) scale(0.4) rotate(360deg); }
+      }
+
+      /* --- Ring burst --- */
+      .fw-ring {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border-radius: 50%;
+        border: 2px solid rgba(122, 162, 255, 0.8);
+        pointer-events: none;
+        opacity: 0;
+        animation: fw-ring-expand 1s ease-out forwards;
+      }
+      @keyframes fw-ring-expand {
+        0%   { opacity: 0.9; transform: scale(0); }
+        50%  { opacity: 0.6; border-color: rgba(80, 220, 120, 0.6); }
+        100% { opacity: 0; transform: scale(12); }
+      }
+
+      .upgrade-hint {
+        display: block;
+        margin-top: 8px;
+        font-size: .8rem;
+        color: #ff6b6b;
+        font-style: italic;
+      }
+
+      /* --- Free-tier: repeating lock rattle every 3s --- */
+      @keyframes lock-rattle {
+        0%,100% { transform: rotate(0deg) scale(1); }
+        8%   { transform: rotate(-15deg) scale(1.1); }
+        18%  { transform: rotate(13deg) scale(1.12); }
+        28%  { transform: rotate(-11deg) scale(1.08); }
+        38%  { transform: rotate(9deg) scale(1.05); }
+        50%  { transform: rotate(-6deg) scale(1.03); }
+        62%  { transform: rotate(4deg) scale(1.01); }
+        75%  { transform: rotate(-2deg) scale(1); }
+      }
+      .lock-icon.rattling {
+        animation: lock-rattle 0.9s ease-in-out;
+      }
+
+      /* --- Badge color transition for unlock (red → green) --- */
+      .tier-badge.transitioning {
+        transition: background 0.5s ease, color 0.5s ease, border-color 0.5s ease;
+        background: rgba(80, 220, 120, 0.15) !important;
+        color: #50dc78 !important;
+        border-color: rgba(80, 220, 120, 0.3) !important;
+      }
+
+      /* Hide sparkle elements until JS triggers them */
+      .sparkle-container { display: none; }
+    </style>
 
     <!-- Upload panels -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
       <!-- Upload Image -->
-      <div class="card">
-        <h2 class="text-lg font-semibold mb-2">Upload Image</h2>
+      {% if account_tier == 'lightning' %}
+      <div class="card card-unlocked" data-unlock-panel>
+        <div class="firework-canvas"></div>
+        <h2 class="text-lg font-semibold mb-2">Upload Image
+          <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
+        </h2>
         <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
           <button type="submit" class="btn btn-primary w-full" id="imgBtn">Upload Image</button>
         </form>
         <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
       </div>
+      {% else %}
+      <div class="card card-locked" data-locked-panel>
+        <h2 class="text-lg font-semibold mb-2">Upload Image
+          <span class="tier-badge locked"><span class="lock-icon">🔒</span> Locked</span>
+        </h2>
+        <form class="space-y-2">
+          <input type="file" disabled class="form-control w-full" style="cursor:not-allowed" />
+          <button type="button" disabled class="btn btn-primary w-full" style="cursor:not-allowed; opacity:0.5">Upload Image</button>
+        </form>
+        <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
+        <a href="{{ url_for('choose_plan') }}" class="upgrade-hint" style="text-decoration:underline; pointer-events:auto;">Upgrade to Premium to unlock photo uploads</a>
+      </div>
+      {% endif %}
 
       <!-- Upload PDF -->
-      <div class="card">
-        <h2 class="text-lg font-semibold mb-2">Upload PDF</h2>
+      {% if account_tier == 'lightning' %}
+      <div class="card card-unlocked" data-unlock-panel>
+        <div class="firework-canvas"></div>
+        <h2 class="text-lg font-semibold mb-2">Upload PDF
+          <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
+        </h2>
         <form id="pdfForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
           <button type="submit" class="btn btn-primary w-full" id="pdfBtn">Upload PDF</button>
         </form>
-        <p class="muted mt-2 text-sm">For digital menus. We’ll extract text and structure a draft.</p>
+        <p class="muted mt-2 text-sm">For digital menus. We'll extract text and structure a draft.</p>
       </div>
+      {% else %}
+      <div class="card card-locked" data-locked-panel>
+        <h2 class="text-lg font-semibold mb-2">Upload PDF
+          <span class="tier-badge locked"><span class="lock-icon">🔒</span> Locked</span>
+        </h2>
+        <form class="space-y-2">
+          <input type="file" disabled class="form-control w-full" style="cursor:not-allowed" />
+          <button type="button" disabled class="btn btn-primary w-full" style="cursor:not-allowed; opacity:0.5">Upload PDF</button>
+        </form>
+        <p class="muted mt-2 text-sm">For digital menus. We'll extract text and structure a draft.</p>
+        <a href="{{ url_for('choose_plan') }}" class="upgrade-hint" style="text-decoration:underline; pointer-events:auto;">Upgrade to Premium to unlock PDF uploads</a>
+      </div>
+      {% endif %}
 
-      <!-- Structured CSV Import -->
+      <!-- Structured CSV Import (always available) -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Structured CSV (POS export)</h2>
         <form id="csvForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
@@ -43,11 +243,11 @@
           <button type="submit" class="btn btn-secondary w-full" id="csvBtn">Import CSV to Draft</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For POS-style CSV exports (name, price, category, etc.). We’ll create a structured draft in the Draft Editor.
+          For POS-style CSV exports (name, price, category, etc.). We'll create a structured draft in the Draft Editor.
         </p>
       </div>
 
-      <!-- Structured XLSX Import -->
+      <!-- Structured XLSX Import (always available) -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Structured Excel (XLSX)</h2>
         <form id="xlsxForm" action="{{ url_for('import_xlsx') }}" method="post" enctype="multipart/form-data" class="space-y-2">
@@ -55,11 +255,11 @@
           <button type="submit" class="btn btn-secondary w-full" id="xlsxBtn">Import XLSX to Draft</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For Excel-style exports (one row per item). We’ll create a structured draft in the Draft Editor.
+          For Excel-style exports (one row per item). We'll create a structured draft in the Draft Editor.
         </p>
       </div>
 
-      <!-- Structured JSON Import -->
+      <!-- Structured JSON Import (always available) -->
       <div class="card">
         <h2 class="text-lg font-semibold mb-2">Structured JSON</h2>
         <form id="jsonForm" action="{{ url_for('import_json') }}" method="post" enctype="multipart/form-data" class="space-y-2">
@@ -73,7 +273,7 @@
           <button type="submit" class="btn btn-secondary w-full" id="jsonBtn">Import JSON to Draft</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For API-style JSON exports (items array or list of objects). We’ll create a structured draft in the Draft Editor.
+          For API-style JSON exports (items array or list of objects). We'll create a structured draft in the Draft Editor.
         </p>
       </div>
     </div>
@@ -111,7 +311,6 @@
       document.getElementById('imgBtn')?.toggleAttribute('disabled', disabled);
       document.getElementById('pdfBtn')?.toggleAttribute('disabled', disabled);
       document.getElementById('csvBtn')?.toggleAttribute('disabled', disabled);
-      // XLSX and JSON use normal form POSTs to /import/xlsx and /import/json for now (no shared progress bar hook).
     }
 
     function doUpload(formEl) {
@@ -247,6 +446,293 @@
     });
 
     // Note: xlsxForm posts directly to /import/xlsx and jsonForm posts to /import/json.
+  })();
+  </script>
+
+  <!-- Unlock fireworks + free-tier rattle + sound effects -->
+  <script>
+  (function () {
+    // ======== Sound Effects (Web Audio API — no external files) ========
+    let _audioCtx = null;
+    function getAudio() {
+      if (!_audioCtx) {
+        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+      }
+      return _audioCtx;
+    }
+
+    function playUnlockSound() {
+      const ctx = getAudio(); if (!ctx) return;
+      const now = ctx.currentTime;
+
+      // Layer 1: Sharp metallic "click" — the latch releasing
+      const click = ctx.createOscillator();
+      const clickGain = ctx.createGain();
+      click.type = 'square';
+      click.frequency.setValueAtTime(1800, now);
+      click.frequency.exponentialRampToValueAtTime(400, now + 0.015);
+      clickGain.gain.setValueAtTime(0.2, now);
+      clickGain.gain.linearRampToValueAtTime(0, now + 0.025);
+      click.connect(clickGain).connect(ctx.destination);
+      click.start(now); click.stop(now + 0.03);
+
+      // Layer 2: Short noise burst for the mechanical "tch" texture
+      const noiseLen = ctx.sampleRate * 0.03;
+      const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+      const nd = noiseBuf.getChannelData(0);
+      for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen);
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const nGain = ctx.createGain();
+      nGain.gain.setValueAtTime(0.18, now);
+      nGain.gain.linearRampToValueAtTime(0, now + 0.03);
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 2500;
+      noise.connect(hp).connect(nGain).connect(ctx.destination);
+      noise.start(now); noise.stop(now + 0.03);
+
+      // Layer 3: Lower thud — the shackle springing open (delayed 30ms)
+      const thud = ctx.createOscillator();
+      const thudGain = ctx.createGain();
+      thud.type = 'sine';
+      thud.frequency.setValueAtTime(350, now + 0.03);
+      thud.frequency.exponentialRampToValueAtTime(120, now + 0.09);
+      thudGain.gain.setValueAtTime(0.12, now + 0.03);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      thud.connect(thudGain).connect(ctx.destination);
+      thud.start(now + 0.03); thud.stop(now + 0.1);
+
+      // Layer 4: Tiny metallic ring — padlock body resonance
+      const ring = ctx.createOscillator();
+      const ringGain = ctx.createGain();
+      ring.type = 'sine';
+      ring.frequency.setValueAtTime(2200, now + 0.02);
+      ring.frequency.exponentialRampToValueAtTime(1800, now + 0.15);
+      ringGain.gain.setValueAtTime(0.04, now + 0.02);
+      ringGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      ring.connect(ringGain).connect(ctx.destination);
+      ring.start(now + 0.02); ring.stop(now + 0.18);
+    }
+
+    function playFireworkSound() {
+      const ctx = getAudio(); if (!ctx) return;
+      const now = ctx.currentTime;
+      // White noise burst (firework pop)
+      const bufferSize = ctx.sampleRate * 0.15;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.1, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      // Bandpass for crackle
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 3000;
+      filter.Q.value = 0.8;
+      noise.connect(filter).connect(noiseGain).connect(ctx.destination);
+      noise.start(now); noise.stop(now + 0.15);
+      // Tonal pop
+      const pop = ctx.createOscillator();
+      const popGain = ctx.createGain();
+      pop.type = 'sine';
+      pop.frequency.setValueAtTime(1200, now);
+      pop.frequency.exponentialRampToValueAtTime(300, now + 0.12);
+      popGain.gain.setValueAtTime(0.08, now);
+      popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      pop.connect(popGain).connect(ctx.destination);
+      pop.start(now); pop.stop(now + 0.15);
+    }
+
+    function playRattleSound() {
+      const ctx = getAudio(); if (!ctx) return;
+      const now = ctx.currentTime;
+      // Quick metallic rattle
+      for (let i = 0; i < 4; i++) {
+        const t = now + i * 0.06;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(500 + i * 100, t);
+        osc.frequency.exponentialRampToValueAtTime(200, t + 0.04);
+        g.gain.setValueAtTime(0.06, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(t); osc.stop(t + 0.05);
+      }
+    }
+
+    // ======== Firework Helpers ========
+    const COLORS = ['#50dc78','#7aa2ff','#ffcc44','#ff6bab','#44eeff','#ff8844','#cc77ff'];
+    const STARS  = ['✦','✧','⚡','★','✶','✹','💥','🎉'];
+
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    function spawnBurst(canvas, count, radius) {
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + rand(-0.2, 0.2);
+        const dist  = rand(radius * 0.5, radius * 1.3);
+        const x = Math.cos(angle) * dist;
+        const y = Math.sin(angle) * dist;
+        const size = rand(4, 9);
+        const dur  = rand(0.8, 1.6);
+        const dot = document.createElement('div');
+        dot.className = 'fw-particle';
+        dot.style.cssText = `width:${size}px;height:${size}px;background:${pick(COLORS)};--fw-x:${x}px;--fw-y:${y}px;--fw-dur:${dur}s;`;
+        canvas.appendChild(dot);
+        setTimeout(() => dot.remove(), dur * 1000 + 100);
+      }
+    }
+
+    function spawnStars(canvas, count) {
+      for (let i = 0; i < count; i++) {
+        const angle = rand(0, Math.PI * 2);
+        const r1 = rand(20, 50), r2 = rand(50, 90), r3 = rand(80, 140);
+        const x1 = Math.cos(angle) * r1, y1 = Math.sin(angle) * r1 - 10;
+        const x2 = Math.cos(angle + 0.3) * r2, y2 = Math.sin(angle + 0.3) * r2 - 20;
+        const x3 = Math.cos(angle + 0.5) * r3, y3 = Math.sin(angle + 0.5) * r3 - 30;
+        const dur = rand(1.2, 2.0);
+        const delay = rand(0, 0.4);
+        const star = document.createElement('span');
+        star.className = 'fw-star';
+        star.textContent = pick(STARS);
+        star.style.cssText = `--star-x1:${x1}px;--star-y1:${y1}px;--star-x2:${x2}px;--star-y2:${y2}px;--star-x3:${x3}px;--star-y3:${y3}px;--star-dur:${dur}s;animation-delay:${delay}s;color:${pick(COLORS)};`;
+        canvas.appendChild(star);
+        setTimeout(() => star.remove(), (dur + delay) * 1000 + 100);
+      }
+    }
+
+    function spawnRing(canvas, delay) {
+      setTimeout(() => {
+        const ring = document.createElement('div');
+        ring.className = 'fw-ring';
+        canvas.appendChild(ring);
+        setTimeout(() => ring.remove(), 1200);
+      }, delay);
+    }
+
+    // ======== FREE TIER: Repeating lock rattle every 3s ========
+    const lockedPanels = document.querySelectorAll('[data-locked-panel]');
+    if (lockedPanels.length) {
+      function rattleLocks() {
+        lockedPanels.forEach(panel => {
+          const lock = panel.querySelector('.lock-icon');
+          if (!lock) return;
+          lock.classList.add('rattling');
+          lock.addEventListener('animationend', () => {
+            lock.classList.remove('rattling');
+          }, { once: true });
+        });
+      }
+      // First rattle after 2s, then every 3s
+      setTimeout(() => {
+        rattleLocks();
+        setInterval(rattleLocks, 3000);
+      }, 1000);
+    }
+
+    // ======== LIGHTNING TIER: Full unlock sequence (plays once per session) ========
+    const unlockPanels = document.querySelectorAll('[data-unlock-panel]');
+    if (unlockPanels.length) {
+      const PLAYED_KEY = 'servline_unlock_tier';
+      // Force animation if redirected from plan upgrade (?unlocked=1)
+      const freshUnlock = new URLSearchParams(window.location.search).has('unlocked');
+      if (freshUnlock) sessionStorage.removeItem(PLAYED_KEY);
+      const alreadyPlayed = sessionStorage.getItem(PLAYED_KEY) === 'lightning';
+
+      if (alreadyPlayed) {
+        // Already seen — show final unlocked state immediately, no animation
+        unlockPanels.forEach(panel => {
+          const lock = panel.querySelector('.lock-icon');
+          const label = panel.querySelector('.lock-label');
+          const badge = panel.querySelector('.tier-badge');
+          if (lock) lock.textContent = '🔓';
+          if (label) label.textContent = 'Unlocked';
+          if (badge) { badge.classList.remove('locked'); badge.classList.add('unlocked'); }
+        });
+      } else {
+        // First visit this session — animate the full unlock
+        sessionStorage.setItem(PLAYED_KEY, 'lightning');
+
+        // Start with red/locked appearance
+        unlockPanels.forEach(panel => {
+          const badge = panel.querySelector('.tier-badge');
+          if (badge) {
+            badge.classList.remove('unlocked');
+            badge.classList.add('locked');
+          }
+        });
+
+        // Main unlock sequence
+        setTimeout(() => {
+        unlockPanels.forEach((panel, idx) => {
+          const delay = idx * 500;  // stagger between panels
+
+          setTimeout(() => {
+            const lock = panel.querySelector('.lock-icon');
+            const badge = panel.querySelector('.tier-badge');
+            const canvas = panel.querySelector('.firework-canvas');
+
+            // Phase 1: Shake the lock + play unlock sound
+            if (lock) {
+              lock.classList.add('unlocking');
+              playUnlockSound();
+            }
+
+            // Phase 2: After shake — swap icon + text, transition badge red→green, fire fireworks
+            setTimeout(() => {
+              // Swap lock icon and label
+              if (lock) lock.textContent = '🔓';
+              const label = panel.querySelector('.lock-label');
+              if (label) label.textContent = 'Unlocked';
+
+              // Transition badge from red to green
+              if (badge) {
+                badge.classList.add('transitioning');
+                // After CSS transition, swap to proper unlocked class
+                setTimeout(() => {
+                  badge.classList.remove('locked', 'transitioning');
+                  badge.classList.add('unlocked');
+                }, 550);
+              }
+
+              // Glow the card
+              panel.classList.add('glow');
+
+              // Fire the fireworks + sound
+              if (canvas) {
+                playFireworkSound();
+                spawnBurst(canvas, 18, 80);
+                spawnStars(canvas, 10);
+                spawnRing(canvas, 0);
+
+                // Second wave
+                setTimeout(() => {
+                  playFireworkSound();
+                  spawnBurst(canvas, 12, 110);
+                  spawnStars(canvas, 6);
+                  spawnRing(canvas, 100);
+                }, 400);
+
+                // Third wave
+                setTimeout(() => {
+                  playFireworkSound();
+                  spawnBurst(canvas, 8, 60);
+                  spawnStars(canvas, 4);
+                }, 900);
+              }
+            }, 650);  // after lock shake finishes
+          }, delay);
+        });
+      }, 1000);
+      } // end if !alreadyPlayed
+    }
   })();
   </script>
 {% endblock %}

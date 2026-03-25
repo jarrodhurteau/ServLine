@@ -354,7 +354,7 @@ class TestChoosePlanGet:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert "Continue Free" in html
-        assert "Lightning Package" in html
+        assert "Premium Package" in html
 
     def test_page_shows_free_description(self, app_client):
         _register_customer(app_client)
@@ -363,11 +363,10 @@ class TestChoosePlanGet:
         assert "menu editor" in html.lower() or "editor" in html.lower()
         assert "Excel" in html or "CSV" in html
 
-    def test_already_has_tier_redirects_to_dashboard(self, app_client):
+    def test_already_has_tier_can_still_view_plans(self, app_client):
         _register_and_choose_tier(app_client, tier="free")
         resp = app_client.get("/choose-plan")
-        assert resp.status_code in (302, 303)
-        assert "/dashboard" in resp.headers.get("Location", "")
+        assert resp.status_code == 200
 
 
 # ===========================================================================
@@ -380,7 +379,7 @@ class TestChoosePlanPost:
         _register_customer(app_client)
         resp = app_client.post("/choose-plan", data={"tier": "free"})
         assert resp.status_code in (302, 303)
-        assert "/dashboard" in resp.headers.get("Location", "")
+        assert "/import" in resp.headers.get("Location", "")
 
     def test_choose_lightning_sets_tier(self, app_client, mock_db):
         _register_customer(app_client)
@@ -430,7 +429,7 @@ class TestRegistrationRedirect:
         }, follow_redirects=True)
         html = resp.data.decode()
         assert "Continue Free" in html
-        assert "Lightning Package" in html
+        assert "Premium Package" in html
 
     def test_register_session_has_no_tier(self, app_client):
         _register_customer(app_client)
@@ -545,7 +544,7 @@ class TestRouteGating:
         resp = app_client.post("/import", data=data, content_type="multipart/form-data",
                                follow_redirects=True)
         html = resp.data.decode()
-        assert "Lightning Package" in html
+        assert "Premium Package" in html
 
     def test_import_post_allowed_for_lightning_tier(self, app_client, tmp_path, monkeypatch):
         _register_and_choose_tier(app_client, tier="lightning")
@@ -559,7 +558,7 @@ class TestRouteGating:
         # Should not be blocked — either redirect to import view or process
         assert resp.status_code in (302, 303, 200)
         html_or_loc = resp.data.decode() + resp.headers.get("Location", "")
-        assert "Lightning Package" not in html_or_loc
+        assert "Premium Package" not in html_or_loc
 
     def test_choose_plan_page_shows_pricing(self, app_client):
         _register_customer(app_client)
