@@ -50,7 +50,7 @@ function Stop-ByProcTree {
   }
 }
 
-# 1) Read PID file and stop both by tree
+# 1) Read PID file and stop Flask by tree
 if (Test-Path $PidsFile) {
   $map = @{}
   foreach ($line in (Get-Content $PidsFile | Where-Object { $_ -match '=' })) {
@@ -61,25 +61,23 @@ if (Test-Path $PidsFile) {
   }
 
   if ($map['FLASK']) { Stop-ByProcTree -RootId $map['FLASK'] -label 'Flask (window)' }
-  if ($map['NGROK']) { Stop-ByProcTree -RootId $map['NGROK'] -label 'ngrok' }
 
   Remove-Item $PidsFile -Force -ErrorAction SilentlyContinue
 } else {
   Write-Host "No pid file found (infra/.pids). Trying fallbacks..." -ForegroundColor Yellow
 }
 
-# 2) Belt + suspenders: kill any python running "flask run"
+# 2) Belt + suspenders: kill any python running flask or portal/app.py
 try {
   $flaskProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" |
-                Where-Object { $_.CommandLine -match 'flask\s+run' }
+                Where-Object { $_.CommandLine -match 'flask\s+run|portal[\\/]app\.py' }
   foreach ($p in $flaskProcs) {
-    Write-Host " - Killing python running 'flask run' (PID $($p.ProcessId))..." -ForegroundColor DarkCyan
+    Write-Host " - Killing python (PID $($p.ProcessId))..." -ForegroundColor DarkCyan
     Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
   }
 } catch {}
 
 # 3) Kill anything still listening on :5000
-$killedByPort = @()
 if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
   try {
     $conns = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue
@@ -87,12 +85,10 @@ if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
       if ($c) {
         Write-Host " - Forcing process on port 5000 (PID $c) to stop..." -ForegroundColor DarkCyan
         Stop-Process -Id $c -Force -ErrorAction SilentlyContinue
-        $killedByPort += $c
       }
     }
   } catch {}
 } else {
-  # Fallback: netstat parse (older PS)
   try {
     $lines = netstat -ano | Select-String -Pattern 'LISTENING' | Select-String -Pattern '[:\.]5000\s' -SimpleMatch
     $foundPids = @()
@@ -102,12 +98,12 @@ if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
     foreach ($p in ($foundPids | Select-Object -Unique)) {
       Write-Host " - Forcing process on port 5000 (PID $p) to stop..." -ForegroundColor DarkCyan
       Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-      $killedByPort += $p
     }
   } catch {}
 }
 
-# 4) Extra sweep: orphan ngrok (rare)
-try { Get-Process ngrok -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch {}
-
 Write-Host "[ServLine] Infra stopped." -ForegroundColor Green
+
+# Close this PowerShell window
+Start-Sleep -Milliseconds 500
+[System.Environment]::Exit(0)

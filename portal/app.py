@@ -2692,6 +2692,37 @@ def create_blank_draft(rest_id, menu_id):
     return redirect(f"/drafts/{draft_id}/edit")
 
 
+@app.get("/menus/<int:menu_id>/edit")
+@login_required
+def menu_edit_redirect(menu_id):
+    """Find or create an editing draft for this menu, then redirect to editor."""
+    _require_drafts_storage()
+    if not menus_store:
+        abort(500, description="Menus storage not available.")
+    menu = menus_store.get_menu(menu_id)
+    if not menu:
+        abort(404, description="Menu not found")
+    rest_id = menu["restaurant_id"]
+    # Look for an existing draft linked to this menu in editing status
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM drafts WHERE menu_id = ? AND status = 'editing' ORDER BY id DESC LIMIT 1",
+            (menu_id,),
+        ).fetchone()
+    if row:
+        return redirect(f"/drafts/{row['id']}/edit")
+    # No existing draft — create one
+    title = f"{menu['name']} — Draft"
+    draft_id = drafts_store._insert_draft(
+        title=title,
+        restaurant_id=rest_id,
+        menu_id=menu_id,
+        status="editing",
+    )
+    flash(f'Draft created for "{menu["name"]}".', "success")
+    return redirect(f"/drafts/{draft_id}/edit")
+
+
 @app.post("/menus/<int:menu_id>/update")
 @login_required
 def update_menu_route(menu_id):

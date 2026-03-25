@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 128 (March 18, 2026) — Sprint 13.1 Day 3: Restaurant Management & Multi-Restaurant Support (33 tests, 2,803 total)
+Last Updated: Day 129 (March 18, 2026) — Sprint 13.1 Day 4: Customer-Facing Editor Cleanup (32 tests, 2,835 total)
 
 ================================================================================
 PROJECT MISSION
@@ -2102,14 +2102,20 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
     (upload file or build from scratch), POST /restaurants/<id>/menus/<id>/new-draft
     creates blank draft linked to menu → redirects to editor.
 
-  [ ] Customer-facing editor cleanup:  → Day 129
+  [x] Customer-facing editor cleanup:  ✓ Day 129
       - Hide dev/debug controls from customers ({% if show_admin %})
       - Pipeline Debug, OCR Debug, Backfill Variants → "Dev Tools" sidebar section
       - Confidence slider, low confidence panel, position column → admin only
       - Clean & Refine, Finalize with AI Cleanup → admin only
       - Draft/Restaurant/Source/Job ID chips → admin only
+      - Confidence badges, provenance pins, quality scores → admin only
+      - JS addRow/addVariantRow conditional rendering via showAdmin
       - Customers see: title, status, Export, Save, Approve, Add Item, Search
+      - Zero backend changes — single template with {% if show_admin %}
       - Must land before wizard (Sprint 13.2)
+
+    Day 129 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,835 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
 ......................................................
@@ -2522,6 +2528,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 129: Customer-Facing Editor Cleanup — draft_editor.html split into customer-clean vs admin view using {% if show_admin %} conditionals. Hidden from customers: header info chips, Pipeline Debug, Clean & Refine, Finalize with AI, confidence slider, Auto Kitchen Names, Position column, confidence badges, provenance pins, quality scores, Low Confidence panel. Sidebar dev tools consolidated into collapsible "Dev Tools" section (Backfill, OCR Debug, Pipeline Debug, Back to Import). OCR Debug CSV removed from export dropdown. JS addRow/addVariantRow conditional rendering. Zero backend changes. Customers retain: search, table/cards toggle, kitchen names, add item, bulk category, delete selected, full export dropdown, save, approve & export (32 tests)
 Day 128: Restaurant Management & Multi-Restaurant Support — /restaurants/<id>/detail page (stats, edit, delete), POST /restaurants/<id>/update (name, phone, address, cuisine_type, website), POST /restaurants/<id>/delete (soft-delete), POST /switch-restaurant (session switcher), storage/users.py (get_restaurant, update_restaurant, delete_restaurant, get_restaurant_stats, VALID_CUISINE_TYPES), _ensure_restaurant_columns migration, dashboard enhanced (item_count, cuisine badge, active badge, switcher), restaurant_detail.html template (33 tests)
 Day 127: Session Scoping & Customer Dashboard — /dashboard route, POST /restaurants auto-links user, require_restaurant_access decorator, scoped /restaurants list, login/register redirect to /dashboard, role-aware nav, /account page with expandable sections (Profile, Restaurants & Menus, POS Links, Export History, Purchases, Delete Account), /account/update + /account/change-password + /account/delete, schema auto-init, restaurants.html extends base.html, Export History added to Sprint 13.3 roadmap (32 tests)
 Day 126: User Accounts & Auth Foundation — storage/users.py (users + user_restaurants tables), werkzeug password hashing, verify_password(), user↔restaurant CRUD, /register endpoint, /login upgraded (legacy admin + DB users), auto-login after registration, register.html template, Sprint 13.1 start (32 tests)

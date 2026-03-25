@@ -29,7 +29,7 @@ Target buyer:
 ```
 servline/
 portal/        # Flask portal (uploads, drafts, editor, imports)
-infra/         # Local infra helpers (ngrok, run/stop scripts)
+infra/         # Local infra helpers (run/stop scripts)
 storage/       # 🧠 One Brain (OCR + semantics + validation)
 fixtures/      # Sample menus and test assets
 uploads/       # User-uploaded menu files
@@ -1231,6 +1231,8 @@ Day 126 — Sprint 13.1 Day 1: User Accounts & Auth Foundation. New storage/user
 Day 127 — Sprint 13.1 Day 2: Session Scoping & Customer Dashboard. /dashboard route with "My Restaurants" (draft/menu counts). POST /restaurants auto-links customer user via link_user_restaurant(). require_restaurant_access decorator gates restaurant routes by ownership. /restaurants scoped: customers see only their linked restaurants, admins see all. Login/register redirect customers to /dashboard. Role-aware nav: Dashboard + My Restaurants + Account button (customer) vs Import/Imports/Uploads (admin). /account page with 6 expandable dropdown sections: Profile (email, display name, phone, change password), Restaurants & Menus (linked restaurants with menus), POS Links, Export History, Purchases, Delete Account. /account/update, /account/change-password, /account/delete endpoints. Schema auto-init on startup. restaurants.html refactored to extend base.html. 32 tests, 2,770 cumulative.
 
 Day 128 — Sprint 13.1 Day 3: Restaurant Management & Multi-Restaurant Support. Customer-facing /restaurants/<id>/detail page with stats cards (menus, drafts, items), edit form (name, phone, address, cuisine_type, website), recent drafts table, menus table, and danger zone delete. POST /restaurants/<id>/update with validation (empty name rejected, invalid cuisine defaults to "other"). POST /restaurants/<id>/delete soft-deletes and clears session restaurant_id. POST /switch-restaurant for multi-restaurant session switching with ownership verification. storage/users.py expanded: get_restaurant(), update_restaurant(), delete_restaurant(), get_restaurant_stats(), VALID_CUISINE_TYPES (22 types), _ensure_restaurant_columns() migration (adds cuisine_type, website, updated_at). Dashboard enhanced with item_count, cuisine badge, active restaurant badge, and restaurant switcher dropdown (shown when 2+ restaurants). restaurants.html updated with detail links for customers. 33 tests, 2,803 cumulative.
+
+Day 129 — Sprint 13.1 Day 4: Customer-Facing Editor Cleanup. Draft editor split into clean customer view vs full admin view using existing show_admin context processor. Hidden from customers: header info chips (Draft ID, Restaurant ID, Source, Import Job), Pipeline Debug button, Clean & Refine button, Finalize with AI button, confidence threshold slider, Auto Kitchen Names button, Position column (header + cells), confidence badges, provenance tooltip pins, quality scores, Low Confidence panel. Sidebar dev tools (Backfill Variants, OCR Debug JSON/CSV, Pipeline Debug, Back to Import) consolidated into collapsible "Dev Tools" section for admins. OCR Debug CSV removed from export dropdown for customers. JS addRow/addVariantRow conditionally render position cells and provenance pins via showAdmin variable. Zero backend changes — single template with {% if show_admin %} conditionals. Customers retain: search, table/cards toggle, kitchen names toggle, add item, bulk category, delete selected, full export dropdown, save, approve & export to POS. 32 tests, 2,835 cumulative.
 
 ---
 

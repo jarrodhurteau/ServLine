@@ -254,7 +254,7 @@ def app_ctx(monkeypatch):
 
     with _app_mod.app.test_client() as client:
         with client.session_transaction() as sess:
-            sess["user"] = "tester"
+            sess["user"] = {"username": "tester", "role": "admin"}
         yield _app_mod.app, client, conn
 
 

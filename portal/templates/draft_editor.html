@@ -46,6 +46,14 @@
     /* Helper note under publish */
     .helper-note { color: var(--muted); font-size: .85rem; margin-top: 6px; }
 
+    /* Category edit pencil */
+    .cat-edit-btn {
+      opacity: 0; cursor: pointer; font-size: .7rem; margin-left: 4px;
+      transition: opacity .15s;
+    }
+    .cat .row:hover .cat-edit-btn { opacity: .6; }
+    .cat-edit-btn:hover { opacity: 1 !important; }
+
     /* Sidebar containment */
     .sidebar {
       position: sticky; top: 80px; max-height: calc(100vh - 100px);
@@ -918,8 +926,26 @@
   <div class="layout">
     <!-- SIDEBAR -->
     <aside class="sidebar">
-      <h3>Menu Outline</h3>
+      {% if not show_admin %}
+      <!-- Customer: search bar in sidebar above categories -->
+      <div class="sidebar-search-wrap" style="margin-bottom:10px;">
+        <div class="search-wrap" style="width:100%;">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <input id="search" class="cell-input search" placeholder="Search items…" />
+        </div>
+      </div>
+      {% endif %}
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <h3 style="margin:0;">Categories</h3>
+        <button type="button" id="add-category-btn" class="btn btn-secondary" style="font-size:.75rem; padding:2px 10px;" {% if draft.status != 'editing' %}disabled{% endif %}>+ Category</button>
+      </div>
       <ul id="outline" class="tree"></ul>
+      <div id="cat-delete-bar" style="display:none; margin-top:6px;">
+        <button type="button" id="cat-delete-selected-btn" class="btn btn-danger" style="font-size:.75rem; padding:2px 10px; width:100%;">Delete selected categories</button>
+      </div>
 
       <hr style="border-color:#1f2a44; margin:12px 0;">
       <h3>Actions</h3>
@@ -961,23 +987,22 @@
         {% endif %}
       </form>
 
-      <!-- Backfill Variants -->
-      <div style="margin-top:10px;">
-        <button id="backfill-variants-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Backfill Variants</button>
-        <div class="helper-note">Merge "Name (Size)" items into structured variants.</div>
-      </div>
-
-      <!-- OCR Debug -->
+      {% if show_admin %}
+      <!-- Dev Tools (admin only) -->
       <hr style="border-color:#1f2a44; margin:12px 0;">
-      <h3>OCR Debug</h3>
-      <div style="display:grid; gap:6px;">
-        <a class="btn" href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}">View OCR Debug (JSON)</a>
-        <a class="btn" href="{{ url_for('draft_ocr_debug_csv',  draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
-      </div>
-
-      {% if draft.source_job_id %}
-        <hr style="border-color:#1f2a44; margin:12px 0%;">
-        <a class="btn" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Back to Import Detail</a>
+      <details class="dev-tools-section">
+        <summary style="cursor:pointer; color:var(--muted); font-size:.9rem; font-weight:600;">Dev Tools ▸</summary>
+        <div style="display:grid; gap:8px; margin-top:8px;">
+          <button id="backfill-variants-btn" class="btn btn-secondary" {% if draft.status != 'editing' %}disabled{% endif %}>Backfill Variants</button>
+          <div class="helper-note">Merge "Name (Size)" items into structured variants.</div>
+          <a class="btn" href="{{ url_for('draft_ocr_debug_json', draft_id=draft.id) }}">View OCR Debug (JSON)</a>
+          <a class="btn" href="{{ url_for('draft_ocr_debug_csv',  draft_id=draft.id) }}">Download OCR Debug (CSV)</a>
+          <a class="btn" target="_blank" rel="noopener" href="{{ url_for('draft_pipeline_debug', draft_id=draft.id) }}">Pipeline Debug</a>
+          {% if draft.source_job_id %}
+          <a class="btn" href="{{ url_for('imports_detail', job_id=draft.source_job_id) }}">Back to Import Detail</a>
+          {% endif %}
+        </div>
+      </details>
       {% endif %}
     </aside>
 
@@ -985,6 +1010,7 @@
     <div class="draft-editor">
       <div class="page-header">
         <div class="infobar">
+          {% if show_admin %}
           <span class="chip"><span class="label">Draft #</span><span class="value">{{ draft.id }}</span></span>
           {% if draft.restaurant_id is not none %}
             <span class="chip"><span class="label">Restaurant</span><span class="value">#{{ draft.restaurant_id }}</span></span>
@@ -995,6 +1021,7 @@
           {% endif %}
           {% if draft.source_job_id %}
             <span class="chip"><span class="label">Import Job</span><span class="value">#{{ draft.source_job_id }}</span></span>
+          {% endif %}
           {% endif %}
           <span class="chip"><span class="label">Last saved</span><span id="last-saved" class="value">{{ draft.updated_at }}</span></span>
 
@@ -1013,8 +1040,10 @@
           <span id="dirty-indicator" class="badge dirty">Unsaved changes</span>
 
           <div style="margin-left:auto; display:flex; gap:8px; align-items:center; white-space:nowrap;">
+            {% if show_admin %}
             <a class="btn" target="_blank" rel="noopener" href="{{ url_for('draft_pipeline_debug', draft_id=draft.id) }}">Pipeline Debug</a>
-            <a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>
+            {% endif %}
+            {% if show_admin %}<a class="btn" href="{{ url_for('drafts_list') }}">Back to Drafts</a>{% endif %}
 
             <details class="export">
               <summary class="btn">Export ▾</summary>
@@ -1034,10 +1063,13 @@
                 <div class="export-divider"></div>
                 <button type="button" id="export-preview-btn">Preview Export...</button>
                 <button type="button" id="export-visible-btn">Export Visible as CSV</button>
+                {% if show_admin %}
                 <a href="{{ url_for('draft_ocr_debug_csv', draft_id=draft.id) }}">OCR Debug (CSV)</a>
+                {% endif %}
               </div>
             </details>
 
+            {% if show_admin %}
             <!-- Clean & Refine = Fix Descriptions + Clean with AI -->
             <form id="refine-form" action="#" method="post" style="display:inline;">
               <button class="btn btn-secondary" title="Join split lines, merge descriptions, and polish OCR noise.">✨ Clean & Refine</button>
@@ -1054,6 +1086,7 @@
               </button>
               <span id="finalize-status" class="pill pill-gray" style="display:none;">Idle</span>
             </form>
+            {% endif %}
 
 
             <button id="save-btn" class="btn btn-primary" {% if draft.status != 'editing' %}disabled{% endif %}>Save</button>
@@ -1074,6 +1107,7 @@
 
       <!-- Sticky toolbar -->
       <div class="toolbar-sticky">
+        {% if show_admin %}
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
@@ -1081,7 +1115,12 @@
           </svg>
           <input id="search" class="cell-input search" placeholder="Search items… (name, description, category)" />
         </div>
+        {% endif %}
+        {% if not show_admin %}
+        <button id="add-row-btn" class="btn btn-success" style="font-size:.95rem; padding:6px 18px; font-weight:600;">+ Add Item</button>
+        {% endif %}
 
+        {% if show_admin %}
         <!-- Confidence threshold slider -->
         <div class="confidence-filter">
           <span>Min confidence:</span>
@@ -1090,6 +1129,7 @@
                  min="0" max="100" step="5" />
           <span id="confidence-threshold-value">0%</span>
         </div>
+        {% endif %}
 
         <!-- Day 117: View toggle -->
         <div class="view-toggle" id="view-toggle">
@@ -1101,8 +1141,8 @@
         <button id="toggle-kitchen-names" class="btn" title="Show/hide kitchen names" aria-pressed="true">Kitchen Names</button>
 
         <div class="spacer"></div>
-        <button id="add-row-btn" class="btn">Add Item</button>
-        {% if draft.status == 'editing' %}
+        {% if show_admin %}<button id="add-row-btn" class="btn">Add Item</button>{% endif %}
+        {% if show_admin and draft.status == 'editing' %}
         <button id="auto-kitchen-btn" class="btn" title="Auto-fill blank kitchen names from item names">Auto Kitchen Names</button>
         {% endif %}
         <span style="position:relative;display:inline-flex;align-items:center;gap:4px;">
@@ -1119,7 +1159,7 @@
       <div id="editor-stats-bar">
         <span class="stats-item"><span class="stats-value">{{ editor_stats.item_count }}</span> items</span>
         <span class="stats-item"><span class="stats-value">{{ editor_stats.category_count }}</span> categories</span>
-        <span class="stats-item"><span class="stats-value">{{ editor_stats.mg_coverage_pct }}%</span> modifier coverage</span>
+        {% if show_admin %}<span class="stats-item"><span class="stats-value">{{ editor_stats.mg_coverage_pct }}%</span> modifier coverage</span>{% endif %}
         {% if editor_stats.price_min > 0 %}
         <span class="stats-item">${{ '%.2f'|format(editor_stats.price_min / 100) }} – ${{ '%.2f'|format(editor_stats.price_max / 100) }}</span>
         {% endif %}
@@ -1137,6 +1177,7 @@
       </div>
 
       {# === Low Confidence Bucket (Phase 3 pt.7 + Day 77 variant info) === #}
+      {% if show_admin %}
       {% set q_thresh = quality_threshold|default(65) %}
       {% if low_conf_items is defined and low_conf_items %}
       <section class="low-conf-panel" id="low-conf-panel">
@@ -1166,6 +1207,7 @@
         </ul>
       </section>
       {% endif %}
+      {% endif %}{# /show_admin low-conf #}
 
       <div class="table-wrap" id="items-table-wrap" data-category-order="{{ category_order|tojson }}">
         <table class="editor" id="items-table">
@@ -1176,7 +1218,7 @@
               <th style="min-width:320px;">Description</th>
               <th style="min-width:120px;">Price</th>
               <th style="min-width:160px;">Category</th>
-              <th style="min-width:90px;">Position</th>
+              {% if show_admin %}<th style="min-width:90px;">Position</th>{% endif %}
               <th style="min-width:170px;">Actions</th>
             </tr>
           </thead>
@@ -1201,6 +1243,7 @@
                                 placeholder="Kitchen name…"
                                 {% if draft.status != 'editing' %}disabled{% endif %}>{{ (it.kitchen_name or '')|e }}</textarea>
                     </div>
+                    {% if show_admin %}
                     {% if it.confidence is not none %}
                       {% set conf = it.confidence|int %}
                       {% if conf >= 80 %}
@@ -1214,6 +1257,7 @@
                     {% if it.low_confidence %}
                       <span class="pill-low-mini">⚠ Low</span>
                     {% endif %}
+                    {% endif %}
                     {% if it.variants %}
                       <span class="variant-count-pill">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
                     {% endif %}
@@ -1221,6 +1265,7 @@
                       <span class="modifier-group-pill" title="{{ it.modifier_groups|map(attribute='name')|join(', ') }}">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
                     {% endif %}
                   </div>
+                  {% if show_admin %}
                   {% if it.quality is not none %}
                     <div class="quality-meta">
                       Quality: {{ it.quality }}/100
@@ -1232,6 +1277,7 @@
                         data-prov-cat="{{ (it.category or '(Uncategorized)')|e }}"
                         data-prov-conf="{{ it.confidence if it.confidence is not none else '' }}"
                         data-prov-pos="{{ it.position if it.position is not none else '' }}">i</span>
+                  {% endif %}
                 </div>
               </td>
               <td>
@@ -1247,10 +1293,12 @@
               <td><input list="category-datalist" class="cell-input category"
                          value="{{ (it.category or '')|e }}"
                          {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              {% if show_admin %}
               <td><input class="cell-input cell-number position"
                          value="{{ it.position if it.position is not none else '' }}"
                          inputmode="numeric"
                          {% if draft.status != 'editing' %}disabled{% endif %} /></td>
+              {% endif %}
               <td class="row-actions">
                 {% if it.variants %}
                   <button class="btn toggle-variants-btn" data-parent-id="{{ it.id }}" {% if draft.status != 'editing' %}disabled{% endif %}>{{ it.variants|length }} var ▾</button>
@@ -1294,7 +1342,7 @@
                   <option value="other"{% if v.kind == 'other' %} selected{% endif %}>other</option>
                 </select>
               </td>
-              <td>{{ v.position|default(0) }}</td>
+              {% if show_admin %}<td>{{ v.position|default(0) }}</td>{% endif %}
               <td>
                 <div class="variant-actions">
                   <button class="variant-reorder-btn variant-move-up" title="Move up" {% if draft.status != 'editing' %}disabled{% endif %}>&uarr;</button>
@@ -1558,7 +1606,9 @@
     {{ {"id": draft.id, "status": draft.status, "source_job_id": draft.source_job_id}|tojson }}
   </script>
 
+  {% if show_admin %}
   <div id="prov-tip" class="prov-tip" role="tooltip" aria-hidden="true"></div>
+  {% endif %}
 
   <script>
   (function(){
@@ -1566,6 +1616,7 @@
     const draftId = Number(meta.id);
     const isEditable = String(meta.status||'') === 'editing';
     const sourceJobId = meta.source_job_id ? Number(meta.source_job_id) : null;
+    const showAdmin = {{ show_admin|tojson }};
 
     const $  = (s, el=document)=>el.querySelector(s);
     const $$ = (s, el=document)=>Array.from(el.querySelectorAll(s));
@@ -1655,7 +1706,17 @@
       });
     }
 
-    function setDirty(v){ dirty=!!v; dirtyIndicator.style.display = dirty? "inline-block":"none"; }
+    let _autosaveTimer = null;
+    function _scheduleAutosave(){
+      if (!isEditable) return;
+      clearTimeout(_autosaveTimer);
+      _autosaveTimer = setTimeout(()=>{ if (dirty) saveNow(); }, 3000);
+    }
+    function setDirty(v){
+      dirty=!!v;
+      dirtyIndicator.style.display = dirty? "inline-block":"none";
+      if (dirty) _scheduleAutosave();
+    }
     function showToast(msg){ toast.textContent=msg; toast.style.display="block"; setTimeout(()=>toast.style.display="none", 1800); }
     function showError(msg){ errorBanner.textContent=msg; errorBanner.style.display="block"; successBanner.style.display="none"; }
     function showSuccess(msg){ successBanner.textContent=msg; successBanner.style.display="block"; errorBanner.style.display="none"; setTimeout(()=>successBanner.style.display="none", 2200); }
@@ -1866,13 +1927,23 @@
       const cats = _sortedCats(allCats);
 
       const outline = document.getElementById("outline");
-      outline.innerHTML = "";
+      // Remove only non-pending children — leave pending new-cat inputs in the DOM
+      // so their blur events are never spuriously triggered by DOM manipulation
+      const firstPending = outline.querySelector("li.new-cat-pending");
+      Array.from(outline.children).forEach(child => {
+        if (!child.classList.contains("new-cat-pending")) outline.removeChild(child);
+      });
+      // Helper: insert before pending inputs (or append if none)
+      function _outlineAppend(el){
+        if (firstPending) outline.insertBefore(el, firstPending);
+        else outline.appendChild(el);
+      }
 
       // "All Items" row
       const liAll = document.createElement("li");
       liAll.className = "cat";
       liAll.innerHTML = `<div class="row" data-cat="__ALL__"><strong>All Items</strong><span class="count">${$$("#items-body tr").length}</span></div>`;
-      outline.appendChild(liAll);
+      _outlineAppend(liAll);
       liAll.querySelector(".row").addEventListener("click", ()=>{
         $$("#outline .cat").forEach(e=>e.classList.remove("active"));
         liAll.classList.add("active");
@@ -1903,9 +1974,17 @@
         li.className = "cat collapsed";
         li.setAttribute("draggable", cat !== "(Uncategorized)" ? "true" : "false");
         li.dataset.catName = cat;
+        const editBtn = cat !== "(Uncategorized)"
+          ? `<span class="cat-edit-btn" title="Rename category">✏</span>`
+          : "";
+        const catCb = cat !== "(Uncategorized)"
+          ? `<input type="checkbox" class="cat-cb" data-cat="${cat.replace(/"/g,'&quot;')}" style="margin-right:4px; cursor:pointer; flex-shrink:0;" />`
+          : `<span style="width:18px; flex-shrink:0;"></span>`;
         li.innerHTML = `
-          <div class="row" data-cat="${cat.replace(/"/g,'&quot;')}">
+          <div class="row" data-cat="${cat.replace(/"/g,'&quot;')}" style="align-items:center;">
+            ${catCb}
             <span class="cat-label-text" title="${cat.replace(/"/g,'&quot;')}">${cat}</span>
+            ${editBtn}
             ${mgBadge}
             <span class="count">${totalCount}</span>
             <span class="cat-toggle">▾</span>
@@ -1920,6 +1999,15 @@
           e.stopPropagation();
           li.classList.toggle("collapsed");
         });
+
+        // Pencil edit — inline rename
+        const catEditBtn = li.querySelector(".cat-edit-btn");
+        if (catEditBtn) {
+          catEditBtn.addEventListener("click", (e)=>{
+            e.stopPropagation();
+            _renameCategoryInline(li, cat);
+          });
+        }
 
         li.querySelector(".row").addEventListener("click", ()=>{
           $$("#outline .cat").forEach(e=>e.classList.remove("active"));
@@ -2011,8 +2099,165 @@
         });
 
         li.appendChild(ulItems);
-        outline.appendChild(li);
+        _outlineAppend(li);
       });
+    }
+
+    /* -------- Sidebar search filter (categories narrow as you type) --- */
+    function _filterSidebarBySearch(){
+      const q = ($("#search")?.value || "").trim().toLowerCase();
+      const outline = document.getElementById("outline");
+      if (!outline) return;
+
+      // Find which categories have visible (matching) rows
+      const visibleCats = new Set();
+      if (q) {
+        $$("#items-body tr:not(.variant-row)").forEach(tr=>{
+          if (tr.style.display !== "none") {
+            const cat = (tr.getAttribute("data-cat") || "(Uncategorized)").toLowerCase();
+            visibleCats.add(cat);
+          }
+        });
+      }
+
+      $$("#outline > li.cat").forEach(li=>{
+        const catRow = li.querySelector(".row");
+        if (!catRow) return;
+        const cat = catRow.dataset.cat;
+        if (cat === "__ALL__") {
+          // Always show "All Items"
+          li.style.display = "";
+          return;
+        }
+        if (!q) {
+          // No search — show all categories
+          li.style.display = "";
+        } else {
+          // Show only categories that contain matching items
+          li.style.display = visibleCats.has((cat||"").toLowerCase()) ? "" : "none";
+        }
+      });
+    }
+
+    /* -------- Category checkboxes + delete selected ------------------- */
+    const catDeleteBar = document.getElementById("cat-delete-bar");
+    const catDeleteBtn = document.getElementById("cat-delete-selected-btn");
+    document.getElementById("outline")?.addEventListener("change", function(e){
+      if (!e.target.classList.contains("cat-cb")) return;
+      // Stop checkbox click from triggering category selection
+      e.stopPropagation();
+      const checked = $$("#outline .cat-cb:checked");
+      if (catDeleteBar) catDeleteBar.style.display = checked.length ? "" : "none";
+    });
+    document.getElementById("outline")?.addEventListener("click", function(e){
+      if (e.target.classList.contains("cat-cb")) e.stopPropagation();
+    });
+    catDeleteBtn?.addEventListener("click", function(){
+      const checked = $$("#outline .cat-cb:checked");
+      if (!checked.length) return;
+      const toDelete = Array.from(checked).map(cb => cb.dataset.cat);
+      if (!confirm(`Delete ${toDelete.length} categor${toDelete.length>1?"ies":"y"} and all their items?`)) return;
+      toDelete.forEach(cat => {
+        $$("#items-body tr:not(.variant-row)").forEach(tr => {
+          if ((tr.getAttribute("data-cat") || "(Uncategorized)") !== cat) return;
+          const id = tr.getAttribute("data-id");
+          if (id && /^\d+$/.test(id)) deletedIds.push(Number(id));
+          // Also collect variant IDs
+          const vToggle = tr.querySelector("[data-parent-id]");
+          const pid = tr.getAttribute("data-id");
+          if (pid) {
+            $$(`#items-body tr.variant-row[data-parent-id="${CSS.escape(pid)}"]`).forEach(vtr => {
+              const vid = vtr.getAttribute("data-id");
+              if (vid && /^\d+$/.test(vid)) deletedVariantIds.push(Number(vid));
+              vtr.remove();
+            });
+          }
+          tr.remove();
+        });
+      });
+      if (catDeleteBar) catDeleteBar.style.display = "none";
+      setDirty(true);
+      rebuildOutline();
+    });
+
+    /* -------- Add Category (inline editing) --------------------------- */
+    // Prevent blur on the currently-focused input when clicking this button
+    document.getElementById("add-category-btn")?.addEventListener("mousedown", function(e){
+      e.preventDefault();
+    });
+    document.getElementById("add-category-btn")?.addEventListener("click", function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      const ol = document.getElementById("outline");
+      if (!ol) return;
+
+      const li = document.createElement("li");
+      li.className = "cat new-cat-pending";
+      li.innerHTML = '<div class="row" style="padding:4px 6px; gap:4px;">' +
+        '<input class="cell-input new-cat-input" placeholder="Category name\u2026"' +
+        ' style="flex:1; font-size:.85rem; padding:3px 6px; color:#111; background:#fff;" />' +
+        '</div>';
+      ol.appendChild(li);
+
+      const inp = li.querySelector(".new-cat-input");
+      let _committed = false;
+      function commit(){
+        if (_committed) return;
+        _committed = true;
+        const name = inp.value.trim();
+        li.remove();
+        if (name) addRow({category: name, position: 0});
+      }
+      inp.addEventListener("keydown", function(ev){
+        if (ev.key === "Enter"){ ev.preventDefault(); commit(); }
+        if (ev.key === "Escape"){ _committed = true; li.remove(); }
+      });
+      inp.addEventListener("blur", function(){
+        // Small delay so mousedown on + Category button can preventDefault first
+        setTimeout(commit, 150);
+      });
+      inp.focus();
+    });
+
+    /* -------- Inline category rename (pencil icon) -------------------- */
+    function _renameCategoryInline(li, oldCat){
+      const row = li.querySelector(".row");
+      if (!row || row.querySelector(".cat-rename-input")) return;
+      const labelEl = row.querySelector(".cat-label-text");
+      if (!labelEl) return;
+      const origDisplay = labelEl.style.display;
+      labelEl.style.display = "none";
+
+      const inp = document.createElement("input");
+      inp.className = "cell-input cat-rename-input";
+      inp.value = oldCat;
+      inp.style.cssText = "flex:1; font-size:.85rem; padding:2px 6px; max-width:140px;";
+      row.insertBefore(inp, row.firstChild);
+      inp.focus();
+      inp.select();
+
+      function finish(){
+        const newCat = inp.value.trim();
+        inp.remove();
+        labelEl.style.display = origDisplay;
+        if (newCat && newCat !== oldCat) {
+          // Rename category on all items in the table
+          $$("#items-body tr:not(.variant-row)").forEach(tr=>{
+            const catInput = $(".category", tr);
+            if (catInput && catInput.value.trim() === oldCat) {
+              catInput.value = newCat;
+              tr.setAttribute("data-cat", newCat);
+            }
+          });
+          setDirty(true);
+          rebuildOutline();
+        }
+      }
+      inp.addEventListener("keydown", function(ev){
+        if (ev.key === "Enter"){ ev.preventDefault(); finish(); }
+        if (ev.key === "Escape"){ inp.remove(); labelEl.style.display = origDisplay; }
+      });
+      inp.addEventListener("blur", finish);
     }
 
     /* -------- Save / Edit / Ops -------------------------------------- */
@@ -2237,7 +2482,10 @@
       });
     }
 
-    $("#search").addEventListener("input", collectRowsFiltered);
+    $("#search").addEventListener("input", function(){
+      collectRowsFiltered();
+      _filterSidebarBySearch();
+    });
 
     if (confSlider && confValue) {
       confSlider.addEventListener("input", () => {
@@ -2268,22 +2516,22 @@
               <textarea rows="1" class="cell-textarea name-text name name-input js-autosize prewrap text-wrap" data-autosize>${(prefill.name||"")
                 .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
               <div class="kitchen-name-row"><textarea rows="1" class="cell-input kitchen-name" placeholder="Kitchen name…">${(prefill.kitchen_name||'').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></div>
-              ${prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
-              ${prefill.low_confidence ? `<span class="pill-low-mini">⚠ Low</span>` : ``}
+              ${showAdmin && prefill.confidence!=null ? `<span class="conf-badge ${prefill.confidence>=80?'conf-high':(prefill.confidence>=60?'conf-med':'conf-low')}">${prefill.confidence}%</span>` : ``}
+              ${showAdmin && prefill.low_confidence ? `<span class="pill-low-mini">⚠ Low</span>` : ``}
             </div>
-            <span class="prov-pin"
+            ${showAdmin ? `<span class="prov-pin"
                   title="Source & confidence"
                   data-prov-name="${(prefill.name||'').replace(/"/g,'&quot;')}"
                   data-prov-cat="${(prefill.category||'(Uncategorized)').replace(/"/g,'&quot;')}"
                   data-prov-conf="${prefill.confidence!=null? String(prefill.confidence): ''}"
-                  data-prov-pos="${prefill.position!=null? String(prefill.position): ''}">i</span>
+                  data-prov-pos="${prefill.position!=null? String(prefill.position): ''}">i</span>` : ``}
           </div>
         </td>
         <td><textarea rows="1" class="cell-textarea desc-text description js-autosize prewrap text-wrap" data-autosize>${(prefill.description||"")
             .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea></td>
         <td><input class="cell-input cell-price price" value="${prefill.price_cents!=null? (prefill.price_cents/100).toFixed(2): ''}" inputmode="decimal" /></td>
         <td><input list="category-datalist" class="cell-input category" value="${(prefill.category||"").replace(/"/g,'&quot;')}" /></td>
-        <td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>
+        ${showAdmin ? `<td><input class="cell-input cell-number position" value="${prefill.position!=null? prefill.position:''}" inputmode="numeric" /></td>` : ``}
         <td class="row-actions">
           <button class="btn duplicate-btn">Duplicate</button>
           <button class="btn btn-danger">Delete</button>
@@ -2856,7 +3104,7 @@
             ${VARIANT_KINDS.map(k => `<option value="${k}"${k===kind?' selected':''}>${k}</option>`).join('')}
           </select>
         </td>
-        <td>${prefill.position != null ? prefill.position : existing.length}</td>
+        ${showAdmin ? `<td>${prefill.position != null ? prefill.position : existing.length}</td>` : ``}
         <td>
           <div class="variant-actions">
             <button class="variant-reorder-btn variant-move-up" title="Move up">&uarr;</button>
