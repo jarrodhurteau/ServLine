@@ -551,25 +551,6 @@
     }
 
     // ======== FREE TIER: Repeating lock rattle every 3s ========
-    const lockedPanels = document.querySelectorAll('[data-locked-panel]');
-    if (lockedPanels.length) {
-      function rattleLocks() {
-        lockedPanels.forEach(panel => {
-          const lock = panel.querySelector('.lock-icon');
-          if (!lock) return;
-          lock.classList.add('rattling');
-          lock.addEventListener('animationend', () => {
-            lock.classList.remove('rattling');
-          }, { once: true });
-        });
-      }
-      // First rattle after 2s, then every 3s
-      setTimeout(() => {
-        rattleLocks();
-        setInterval(rattleLocks, 3000);
-      }, 1000);
-    }
-
     // ======== LIGHTNING TIER: Full unlock sequence (plays once per session) ========
     const unlockPanels = document.querySelectorAll('[data-unlock-panel]');
     if (unlockPanels.length) {
