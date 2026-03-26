@@ -11,9 +11,9 @@ main.wrap:has(> .draft-editor-page) {
   padding: 0 10px !important; /* small breathing room */
 }
 
-/* Root palette for the editor */
-.draft-editor-page :root {
-  --bg:#0b1220; --panel:#0e1729; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44;
+/* Root palette for the editor (admin only — customer theme overrides via body.theme-customer) */
+.draft-editor-page {
+  --panel:#0e1729;
   --brand:#2563eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
   --chip:#0b1527; --chipBorder:#233253;
 }

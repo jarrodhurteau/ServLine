@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="{% if not show_admin %}theme-customer{% endif %}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,11 +12,11 @@
         theme: {
           extend: {
             colors: {
-              bg: '#0b1220',
-              panel: '#111a2f',
-              ink: '#e8eefc',
-              muted: '#9fb0d1',
-              line: '#1f2a44',
+              bg: 'var(--bg)',
+              panel: 'var(--panel)',
+              ink: 'var(--ink)',
+              muted: 'var(--muted)',
+              line: 'var(--line)',
               brand: { 50: '#eaf2ff', 500: '#7aa2ff', 600: '#5a86f7' }
             },
             boxShadow: { card: '0 8px 24px rgba(0,0,0,.25)' },
@@ -31,24 +31,27 @@
 
     <style>
       :root { --bg:#0b1220; --panel:#111a2f; --ink:#e8eefc; --muted:#9fb0d1; --line:#1f2a44; }
+      /* Customer theme: override CSS vars so Tailwind bg-bg/text-ink use new palette */
+      .theme-customer { --bg:#EFE2D3 !important; --panel:#FAF4EC !important; --ink:#2C2C2C !important; --muted:#8A8578 !important; --line:#E8DACA !important; }
+      body.theme-customer { background-color: #EFE2D3 !important; color: #2C2C2C !important; }
       * { box-sizing: border-box; }
-      html,body { height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+      html,body { min-height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+      body.theme-customer { background:#EFE2D3 !important; }
       a { color:#b7cdfb; text-decoration:none; }
       a:hover { text-decoration:underline; }
-
-      /* Customer-facing linen theme — applies to all non-admin pages */
-      body.theme-customer {
-        --bg: #EFE2D3; --panel: #FAF4EC; --ink: #2C2C2C; --muted: #8A8578; --line: #E8DACA;
-        background: #EFE2D3 !important; color: #2C2C2C !important;
-      }
       body.theme-customer a { color: #2E5B5E; }
       body.theme-customer .nav { background: #FAF4EC !important; border-bottom: 1px solid #E8DACA !important; box-shadow: 0 1px 8px rgba(0,0,0,0.04); }
-      body.theme-customer .nav .brand a { color: #2C2C2C !important; }
       body.theme-customer .nav a { color: #5A5A52 !important; }
-      body.theme-customer .card { background: #FAF4EC; border-color: #E8DACA; color: #2C2C2C; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+      body.theme-customer .card { background: #FAF4EC !important; border-color: #E8DACA !important; color: #2C2C2C; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+      body.theme-customer .rounded-xl { background: #FAF4EC !important; border-color: #E8DACA !important; color: #2C2C2C !important; }
       body.theme-customer footer, body.theme-customer footer div { border-color: #DDD8CE !important; color: #8A8578 !important; }
+      body.theme-customer .btn-primary { background: #B85C38 !important; border-color: #B85C38 !important; }
+      body.theme-customer .btn-primary:hover { background: #A04E2E !important; border-color: #A04E2E !important; }
+      body.theme-customer .nav .btn-ghost { background: transparent !important; border-color: #DDD8CE !important; color: #2C2C2C !important; }
+      body.theme-customer .nav .btn-ghost:hover { border-color: #B85C38 !important; color: #B85C38 !important; }
+      body.theme-customer .nav .btn-primary { background: #B85C38 !important; color: #fff !important; }
 
-      .nav { display:flex; gap:16px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--line); background:#0d162b; position:sticky; top:0; z-index:50; }
+      .nav { display:flex; gap:16px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:50; }
       .brand { font-weight:700; letter-spacing:.3px; }
       .wrap { max-width:960px; margin:24px auto; padding:0 16px; }
       .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
@@ -139,7 +142,7 @@
         padding:4px 10px; border-radius:999px;
         border:1px solid hsl(var(--h) 60% 50% / .35);
         background: hsl(var(--h) 60% 55% / .18);
-        color:#e8eefc; font-weight:600; font-size:12.5px;
+        color:var(--ink); font-weight:600; font-size:12.5px;
         white-space:nowrap;
       }
       .chip .dot {
@@ -158,7 +161,7 @@
 
     {% block head %}{% endblock %}
   </head>
-  <body class="bg-bg text-ink {% if not show_admin %}theme-customer{% endif %} {% block body_class %}{% endblock %}">
+  <body class="{% if show_admin %}bg-bg text-ink{% else %}theme-customer{% endif %} {% block body_class %}{% endblock %}">
     <!-- Top Nav -->
     <div class="nav">
       <div class="brand"><a href="{% if is_customer %}/dashboard{% else %}/{% endif %}"><img src="{{ url_for('static', filename='logo.png') }}" alt="MenuFlow" style="height:78px; margin:-4px 0 -18px;"></a></div>
