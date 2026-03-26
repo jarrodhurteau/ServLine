@@ -6,11 +6,16 @@
 
 {% block head %}
 {% if not show_admin %}
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap" rel="stylesheet">
 <style>
   /* MenuFlow landing — terracotta/teal linen theme */
   body.theme-landing {
     background: #EFE2D3 !important;
     color: #2C2C2C !important;
+  }
+  body.theme-landing main.wrap {
+    max-width: none !important;
+    padding: 0 !important;
   }
   body.theme-landing .nav {
     background: #FAF4EC !important;
@@ -110,62 +115,102 @@
     color: #2E5B5E;
   }
 
-  /* ---- Flow diagram ---- */
-  .flow-section {
-    max-width: 960px;
-    margin: 0 auto 55px;
-    padding: 0 20px;
-  }
-  .flow-section h2 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 24px;
-    color: #2C2C2C;
-    text-align: center;
-  }
-  .flow-svg-wrap {
-    width: 100vw;
-    margin-left: calc(-50vw + 50%);
-    background: #EFE2D3;
-    padding: 20px 0;
-  }
-  .flow-svg-wrap img {
-    display: block;
+  /* ---- Split layout: diagram left, features right ---- */
+  .split-section {
     width: 100%;
-    max-width: 700px;
-    height: auto;
-    margin: 0 auto;
+    margin: 0 0 40px;
+    padding: 0 30px;
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    gap: 60px;
+    align-items: start;
   }
-  .flow-tagline {
+  .split-left { padding-top: 80px; }
+  .split-left img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .split-left .flow-tagline {
     text-align: center;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 600;
     color: #2E5B5E;
     letter-spacing: 0.5px;
     text-transform: uppercase;
-    margin-top: 16px;
+    margin-top: 12px;
   }
-
-  @media (max-width: 700px) {
-    .hero h1 { font-size: 1.8rem; }
-    .flow-svg-wrap { display: none; }
-    .flow-mobile { display: block !important; text-align: center; }
-    .flow-mobile .fm-step { margin: 0 auto 12px; max-width: 320px;
-      background: #FAF4EC; border: 2px solid #E8DACA; border-radius: 50px; padding: 16px 20px; }
-    .flow-mobile .fm-step h3 { font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
-    .flow-mobile .fm-step p { font-size: 0.8rem; color: #8A8578; margin: 0; }
-    .flow-mobile .fm-arrow { color: #B85C38; font-size: 1.5rem; margin: 4px 0; }
+  /* Right column: feature blocks */
+  .split-right {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
   }
-  .flow-mobile { display: none; }
+  .feature-block {}
+  .feature-block h2 {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #2C2C2C;
+    margin: 0 0 10px;
+    line-height: 1.25;
+  }
+  .feature-block h2 .accent { color: #B85C38; }
+  .feature-block h2 .teal { color: #2E5B5E; }
+  .feature-block p {
+    font-size: 0.9rem;
+    color: #5A5550;
+    line-height: 1.65;
+    margin: 0 0 10px;
+  }
+  .feature-block .pos-logos {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .feature-block .pos-badge {
+    background: #FAF4EC;
+    border: 1.5px solid #E8DACA;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #2C2C2C;
+  }
+  .feature-block .highlight-box {
+    background: #FAF4EC;
+    border: 1.5px solid #E8DACA;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-top: 10px;
+  }
+  .feature-block .highlight-box p {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+  .feature-divider {
+    border: none;
+    border-top: 1.5px solid #E8DACA;
+    margin: 0;
+  }
 
   .cta-bottom {
     text-align: center;
-    padding: 10px 0 60px;
+    padding: 30px 0 60px;
   }
   .cta-bottom p {
     color: #8A8578;
     font-size: 0.88rem;
     margin-top: 14px;
+  }
+
+  @media (max-width: 800px) {
+    .hero h1 { font-size: 1.8rem; }
+    .split-section {
+      grid-template-columns: 1fr;
+      gap: 30px;
+    }
+    .split-left { position: static; }
   }
 </style>
 {% endif %}
@@ -204,25 +249,79 @@
       </div>
     </div>
 
-    <!-- Flow diagram -->
-    <div class="flow-section">
-      <h2>How It Works</h2>
-      <div class="flow-svg-wrap">
-        <img src="/static/flowchart.svg" alt="MenuFlow process diagram" style="width:100%; height:auto;">
-      </div>
-      <div class="flow-tagline">One menu. Every platform.</div>
+    <!-- Split: Flow diagram (left) + Features (right) -->
+    <div class="split-section" style="max-width:none !important;">
 
-      <!-- Mobile fallback -->
-      <div class="flow-mobile">
-        <div class="fm-step"><h3>📸 Import Your Menu</h3><p>Photo, PDF, spreadsheet, another POS, or type it in</p></div>
-        <div class="fm-arrow">↓</div>
-        <div class="fm-step"><h3>🤖 AI Reads &amp; Organizes It</h3><p>Items, prices, categories — all automatic</p></div>
-        <div class="fm-arrow">↓</div>
-        <div class="fm-step"><h3>✏️ You Review &amp; Edit</h3><p>Simple editor, fix anything with a click</p></div>
-        <div class="fm-arrow">↓</div>
-        <div class="fm-step"><h3>📤 Export Everywhere</h3><p>Square, Toast, Clover, QR Menu, Website</p></div>
+      <!-- LEFT: Flow diagram -->
+      <div class="split-left">
+        <h2 style="text-align:center; font-size:5rem; margin-bottom:30px; color:#2C2C2C; font-weight:700; line-height:1.1;">The <span style="font-family:'Dancing Script',cursive; color:#2E5B5E; font-size:6.5rem;">Flow</span></h2>
+        <img src="/static/flowchart.svg" alt="MenuFlow process — import, AI, edit, export">
+        <div class="flow-tagline">One menu. Every platform.</div>
+      </div>
+
+      <!-- RIGHT: Feature blocks -->
+      <div class="split-right">
+
+        <div class="feature-block">
+          <h2><span class="accent">AI-Powered</span> Menu Reading</h2>
+          <p>Snap a photo of your paper menu or upload a PDF. Our AI reads every item, price, description, and category — no typing required. It even catches sizes, combos, and modifiers that other tools miss.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2>Push to <span class="teal">Any POS</span> in One Click</h2>
+          <p>Connect your account and push your finished menu directly to your POS system. No more retyping everything into a tablet. Update once, and it syncs.</p>
+          <div class="pos-logos">
+            <span class="pos-badge">Square</span>
+            <span class="pos-badge">Toast</span>
+            <span class="pos-badge">Clover</span>
+            <span class="pos-badge">+ More Coming</span>
+          </div>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2><span class="accent">QR Code</span> Digital Menus</h2>
+          <p>Generate a scannable QR code for your tables — free to create. Customers scan and see your full menu on their phone. New background designs released regularly so your menu always looks fresh.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2>Your Menu, <span class="teal">Stored Securely</span></h2>
+          <p>Every menu you build is saved to your account. Come back anytime to edit, update seasonal items, or create a new version. Your menus are always safe and ready when you need them.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2><span class="accent">Know Your Market</span> — Price Intelligence</h2>
+          <p>See how your menu prices stack up against nearby restaurants. During setup, MenuFlow scans competitors in your area and shows you exactly where you stand — category by category.</p>
+          <div class="highlight-box">
+            <p><strong>Example:</strong> "Your burgers average $13.50 — similar restaurants nearby average $11.75. You're 15% above market, which fits a premium positioning."</p>
+          </div>
+          <p style="margin-top:8px;">No guessing. No spreadsheets. Just real data from restaurants near you, delivered right when you need it — while you're reviewing your menu.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2><span class="teal">Smart</span> Menu Suggestions</h2>
+          <p>Our AI doesn't just read your menu — it helps you improve it. Get suggestions for missing descriptions, price inconsistencies, and category organization that makes your menu easier for customers to navigate.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <div class="feature-block">
+          <h2>Export <span class="teal">Anywhere</span></h2>
+          <p>Your menu isn't locked in. Download as Excel, CSV, or JSON. Embed it on your website. Print it. Send it to your delivery partners. MenuFlow is your menu's home base — everything flows out from here.</p>
+        </div>
+
       </div>
     </div>
+
     <!-- Bottom CTA -->
     <div class="cta-bottom">
       <a href="/register" class="btn-land btn-land-primary" style="padding:0.75rem 2.5rem; font-size:1.05rem;">Create Your Free Account</a>
