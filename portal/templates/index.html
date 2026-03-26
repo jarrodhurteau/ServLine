@@ -126,6 +126,12 @@
     align-items: start;
   }
   .split-left { padding-top: 80px; }
+  .flow-box {
+    border: 2px solid #B85C38;
+    border-radius: 14px;
+    padding: 30px 24px;
+    background: #F5EBD9;
+  }
   .split-left img {
     width: 100%;
     height: auto;
@@ -313,9 +319,11 @@
 
       <!-- LEFT: Flow diagram -->
       <div class="split-left">
-        <h2 style="text-align:center; font-size:5rem; margin-bottom:30px; color:#2C2C2C; font-weight:700; line-height:1.1;">The <span style="font-family:'Dancing Script',cursive; color:#2E5B5E; font-size:6.5rem;">Flow</span></h2>
-        <img src="/static/flowchart.svg" alt="MenuFlow process — import, AI, edit, export">
-        <div class="flow-tagline">One menu. Every platform.</div>
+        <div class="flow-box">
+          <h2 style="text-align:center; font-size:5rem; margin-bottom:30px; color:#2C2C2C; font-weight:700; line-height:1.1;">The <span style="font-family:'Dancing Script',cursive; color:#2E5B5E; font-size:6.5rem;">Flow</span></h2>
+          <img src="/static/flowchart.svg" alt="MenuFlow process — import, AI, edit, export">
+          <div class="flow-tagline">One menu. Every platform.</div>
+        </div>
       </div>
 
       <!-- RIGHT: Feature blocks (follows the flow) -->
