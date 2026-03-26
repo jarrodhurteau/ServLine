@@ -2,6 +2,7 @@
 {% block title %}ServLine — Get Your Menu Online{% endblock %}
 
 {% block body_class %}{% if not show_admin %}theme-landing{% endif %}{% endblock %}
+{# theme-customer in base.html handles bg/nav colors for all customer pages #}
 
 {% block head %}
 {% if not show_admin %}
@@ -109,94 +110,51 @@
     color: #2E5B5E;
   }
 
-  .features {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-    max-width: 840px;
+  /* ---- Flow diagram ---- */
+  .flow-section {
+    max-width: 960px;
     margin: 0 auto 55px;
+    padding: 0 20px;
   }
-  @media (max-width: 700px) {
-    .features { grid-template-columns: 1fr; }
-    .hero h1 { font-size: 1.8rem; }
-  }
-  .feature-card {
-    background: #FAF4EC;
-    border: 1px solid #E8DACA;
-    border-radius: 14px;
-    padding: 30px 22px;
-    text-align: center;
-    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
-  }
-  .feature-card:hover {
-    border-color: #B85C38;
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-  }
-  .feature-icon {
-    font-size: 2.2rem;
-    margin-bottom: 14px;
-  }
-  .feature-card h3 {
-    font-size: 1.05rem;
-    font-weight: 700;
-    margin: 0 0 8px;
-    color: #2C2C2C;
-  }
-  .feature-card p {
-    font-size: 0.88rem;
-    color: #8A8578;
-    margin: 0;
-    line-height: 1.6;
-  }
-
-  .how-it-works {
-    max-width: 600px;
-    margin: 0 auto 55px;
-    text-align: center;
-  }
-  .how-it-works h2 {
+  .flow-section h2 {
     font-size: 1.5rem;
     font-weight: 700;
-    margin-bottom: 28px;
+    margin-bottom: 24px;
     color: #2C2C2C;
+    text-align: center;
   }
-  .steps {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    text-align: left;
+  .flow-svg-wrap {
+    width: 100%;
+    background: #EFE2D3;
   }
-  .step {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
+  .flow-svg-wrap img {
+    display: block;
+    width: 100%;
+    max-width: 700px;
+    height: auto;
+    margin: 0 auto;
   }
-  .step-num {
-    flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: #2E5B5E;
-    color: #fff;
-    font-weight: 800;
-    font-size: 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .flow-tagline {
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #2E5B5E;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-top: 16px;
   }
-  .step-text h4 {
-    font-weight: 700;
-    margin: 0 0 3px;
-    font-size: 0.95rem;
-    color: #2C2C2C;
+
+  @media (max-width: 700px) {
+    .hero h1 { font-size: 1.8rem; }
+    .flow-svg-wrap { display: none; }
+    .flow-mobile { display: block !important; text-align: center; }
+    .flow-mobile .fm-step { margin: 0 auto 12px; max-width: 320px;
+      background: #FAF4EC; border: 2px solid #E8DACA; border-radius: 50px; padding: 16px 20px; }
+    .flow-mobile .fm-step h3 { font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
+    .flow-mobile .fm-step p { font-size: 0.8rem; color: #8A8578; margin: 0; }
+    .flow-mobile .fm-arrow { color: #B85C38; font-size: 1.5rem; margin: 4px 0; }
   }
-  .step-text p {
-    margin: 0;
-    color: #8A8578;
-    font-size: 0.88rem;
-    line-height: 1.5;
-  }
+  .flow-mobile { display: none; }
 
   .cta-bottom {
     text-align: center;
@@ -244,53 +202,25 @@
       </div>
     </div>
 
-    <!-- Features -->
-    <div class="features">
-      <div class="feature-card">
-        <div class="feature-icon">📸</div>
-        <h3>Snap a Photo</h3>
-        <p>Take a picture of your paper menu and we'll read it automatically. No typing required.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">✏️</div>
-        <h3>Edit &amp; Organize</h3>
-        <p>Review your menu in a simple editor. Fix names, prices, and categories with a few clicks.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🚀</div>
-        <h3>Push to Your POS</h3>
-        <p>Export directly to Square, Toast, Clover, or download a file your POS system can import.</p>
-      </div>
-    </div>
-
-    <!-- How it works -->
-    <div class="how-it-works">
+    <!-- Flow diagram -->
+    <div class="flow-section">
       <h2>How It Works</h2>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">
-            <h4>Create your free account</h4>
-            <p>No credit card needed. You're up and running in seconds.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">
-            <h4>Upload your menu</h4>
-            <p>Snap a photo, upload a PDF, or paste in a spreadsheet — whatever you have.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">
-            <h4>Review and publish</h4>
-            <p>Check everything looks right in the editor, then export to your POS or share it online.</p>
-          </div>
-        </div>
+      <div class="flow-svg-wrap">
+        <img src="/static/flowchart.svg" alt="MenuFlow process diagram" style="width:100%; height:auto;">
+      </div>
+      <div class="flow-tagline">One menu. Every platform.</div>
+
+      <!-- Mobile fallback -->
+      <div class="flow-mobile">
+        <div class="fm-step"><h3>📸 Import Your Menu</h3><p>Photo, PDF, spreadsheet, another POS, or type it in</p></div>
+        <div class="fm-arrow">↓</div>
+        <div class="fm-step"><h3>🤖 AI Reads &amp; Organizes It</h3><p>Items, prices, categories — all automatic</p></div>
+        <div class="fm-arrow">↓</div>
+        <div class="fm-step"><h3>✏️ You Review &amp; Edit</h3><p>Simple editor, fix anything with a click</p></div>
+        <div class="fm-arrow">↓</div>
+        <div class="fm-step"><h3>📤 Export Everywhere</h3><p>Square, Toast, Clover, QR Menu, Website</p></div>
       </div>
     </div>
-
     <!-- Bottom CTA -->
     <div class="cta-bottom">
       <a href="/register" class="btn-land btn-land-primary" style="padding:0.75rem 2.5rem; font-size:1.05rem;">Create Your Free Account</a>
