@@ -97,13 +97,13 @@
   }
   .btn-land-primary {
     background: #B85C38;
-    color: #fff;
+    color: #fff !important;
     border: 2px solid #B85C38;
   }
   .btn-land-primary:hover {
     background: #A04E2E;
     border-color: #A04E2E;
-    color: #fff;
+    color: #fff !important;
   }
   .btn-land-outline {
     background: transparent;
@@ -169,13 +169,13 @@
     margin-top: 10px;
   }
   .feature-block .pos-badge {
-    background: #FAF4EC;
-    border: 1.5px solid #E8DACA;
+    background: #B85C38 !important;
+    border: 1.5px solid #A04E2E !important;
     border-radius: 10px;
     padding: 10px 20px;
     font-size: 1rem;
     font-weight: 700;
-    color: #2C2C2C;
+    color: #FFFFFF !important;
   }
   .feature-block .highlight-box {
     background: #FAF4EC;
@@ -187,6 +187,65 @@
   .feature-block .highlight-box p {
     margin: 0;
     font-size: 0.85rem;
+  }
+  .premium-tag {
+    display: inline-block;
+    background: #B85C38;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  .free-tag {
+    display: inline-block;
+    background: #2E5B5E;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  .star-feature {
+    border: 2px solid #B85C38;
+    border-radius: 14px;
+    padding: 20px;
+    background: linear-gradient(135deg, #FAF4EC 0%, #F5EBD9 100%);
+    position: relative;
+  }
+  .star-feature::before {
+    content: '\2B50 \2B50 \2B50';
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #EFE2D3;
+    padding: 0 12px;
+    font-size: 1.1rem;
+    letter-spacing: 4px;
+  }
+  .import-methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .import-method {
+    background: #B85C38 !important;
+    border: 1.5px solid #A04E2E !important;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #FFFFFF !important;
   }
   .feature-divider {
     border: none;
@@ -259,64 +318,88 @@
         <div class="flow-tagline">One menu. Every platform.</div>
       </div>
 
-      <!-- RIGHT: Feature blocks -->
+      <!-- RIGHT: Feature blocks (follows the flow) -->
       <div class="split-right">
 
+        <!-- 1. IMPORT -->
         <div class="feature-block">
-          <h2><span class="accent">AI-Powered</span> Menu Reading</h2>
-          <p>Snap a photo of your paper menu or upload a PDF. Our AI reads every item, price, description, and category — no typing required. It even catches sizes, combos, and modifiers that other tools miss.</p>
-        </div>
-
-        <hr class="feature-divider">
-
-        <div class="feature-block">
-          <h2>Push to <span class="teal">Any POS</span> in One Click</h2>
-          <p>Connect your account and push your finished menu directly to your POS system. No more retyping everything into a tablet. Update once, and it syncs.</p>
-          <div class="pos-logos">
-            <span class="pos-badge">Square</span>
-            <span class="pos-badge">Toast</span>
-            <span class="pos-badge">Clover</span>
-            <span class="pos-badge">+ More Coming</span>
+          <h2><span class="accent">Import</span> Your Menu — Any Way You Have It</h2>
+          <p>However your menu exists today, we can work with it. No special format needed.</p>
+          <div class="import-methods">
+            <span class="import-method">📷 Photo</span>
+            <span class="import-method">📄 PDF</span>
+            <span class="import-method">📊 Excel / Spreadsheet</span>
+            <span class="import-method">✍️ Type It In</span>
+            <span class="import-method">🤖 AI Photo Scan</span>
+            <span class="import-method">💻 Import from Another POS</span>
           </div>
         </div>
 
         <hr class="feature-divider">
 
+        <!-- 2. AI READS -->
         <div class="feature-block">
-          <h2><span class="accent">QR Code</span> Digital Menus</h2>
+          <h2><span class="teal">AI Reads</span> &amp; Organizes It</h2>
+          <p>Our AI scans your menu and pulls out every item name, description, price, and category — no typing required. It catches sizes, combos, and modifiers that other tools miss.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <!-- 3. KNOW YOUR MARKET — the star feature -->
+        <div class="feature-block star-feature">
+          <h2><span class="accent">Know Your Market</span> — Price Intelligence</h2>
+          <p>While you review your menu, MenuFlow scans nearby restaurants and shows you how your prices compare — category by category, in real time.</p>
+          <div class="highlight-box">
+            <p><strong>Example:</strong> "Your burgers average $13.50 — nearby restaurants average $11.75. You're 15% above market, which supports premium positioning."</p>
+          </div>
+          <p style="margin-top:8px;">No guessing. No spreadsheets. Real competitor data delivered right when you need it.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <!-- 4. REVIEW & EDIT -->
+        <div class="feature-block">
+          <h2>Review, Edit &amp; <span class="teal">Approve</span></h2>
+          <p>Walk through your menu in a simple, guided editor. Rename items, fix prices, reorganize categories, or add anything the AI missed — all with a few clicks. Nothing goes live until you say so.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <!-- 5. SMART SUGGESTIONS -->
+        <div class="feature-block">
+          <h2><span class="accent">Smart</span> Menu Suggestions</h2>
+          <p>Get AI-powered suggestions for missing descriptions, price inconsistencies, and better category organization. Your menu works harder for your customers without you lifting a finger.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <!-- 6. EXPORT -->
+        <div class="feature-block">
+          <h2>Export <span class="teal">Everywhere</span></h2>
+          <p>Push your finished menu to your POS, generate a QR code, publish to your website, or download a ready-to-import file.</p>
+          <div class="pos-logos" style="margin-bottom:10px;">
+            <span class="pos-badge">Square</span>
+            <span class="pos-badge">Toast</span>
+            <span class="pos-badge">Clover</span>
+          </div>
+          <p>Direct API push for major POS systems. For everyone else, download a formatted file that your POS can import — CSV, Excel, or JSON. No matter what system you use, your menu is ready to go.</p>
+          <p style="font-size:0.82rem; color:#8A8578;">Don't see your POS? Let us know — we're always adding new integrations.</p>
+        </div>
+
+        <hr class="feature-divider">
+
+        <!-- 7. QR MENUS -->
+        <div class="feature-block">
+          <h2><span class="accent">QR Code</span> Digital Menus <span class="free-tag">Free</span></h2>
           <p>Generate a scannable QR code for your tables — free to create. Customers scan and see your full menu on their phone. New background designs released regularly so your menu always looks fresh.</p>
         </div>
 
         <hr class="feature-divider">
 
+        <!-- 8. SECURE STORAGE -->
         <div class="feature-block">
           <h2>Your Menu, <span class="teal">Stored Securely</span></h2>
           <p>Every menu you build is saved to your account. Come back anytime to edit, update seasonal items, or create a new version. Your menus are always safe and ready when you need them.</p>
-        </div>
-
-        <hr class="feature-divider">
-
-        <div class="feature-block">
-          <h2><span class="accent">Know Your Market</span> — Price Intelligence</h2>
-          <p>See how your menu prices stack up against nearby restaurants. During setup, MenuFlow scans competitors in your area and shows you exactly where you stand — category by category.</p>
-          <div class="highlight-box">
-            <p><strong>Example:</strong> "Your burgers average $13.50 — similar restaurants nearby average $11.75. You're 15% above market, which fits a premium positioning."</p>
-          </div>
-          <p style="margin-top:8px;">No guessing. No spreadsheets. Just real data from restaurants near you, delivered right when you need it — while you're reviewing your menu.</p>
-        </div>
-
-        <hr class="feature-divider">
-
-        <div class="feature-block">
-          <h2><span class="teal">Smart</span> Menu Suggestions</h2>
-          <p>Our AI doesn't just read your menu — it helps you improve it. Get suggestions for missing descriptions, price inconsistencies, and category organization that makes your menu easier for customers to navigate.</p>
-        </div>
-
-        <hr class="feature-divider">
-
-        <div class="feature-block">
-          <h2>Export <span class="teal">Anywhere</span></h2>
-          <p>Your menu isn't locked in. Download as Excel, CSV, or JSON. Embed it on your website. Print it. Send it to your delivery partners. MenuFlow is your menu's home base — everything flows out from here.</p>
         </div>
 
       </div>
