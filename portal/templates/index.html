@@ -184,15 +184,17 @@
     color: #FFFFFF !important;
   }
   .feature-block .highlight-box {
-    background: #FAF4EC;
-    border: 1.5px solid #E8DACA;
+    background: #F5EBD9;
+    border: none;
     border-radius: 12px;
     padding: 16px 20px;
     margin-top: 10px;
+    display: inline-block;
   }
   .feature-block .highlight-box p {
     margin: 0;
     font-size: 0.85rem;
+    color: #B85C38;
   }
   .premium-tag {
     display: inline-block;
@@ -219,24 +221,6 @@
     letter-spacing: 0.5px;
     vertical-align: middle;
     margin-left: 8px;
-  }
-  .star-feature {
-    border: 2px solid #B85C38;
-    border-radius: 14px;
-    padding: 20px;
-    background: linear-gradient(135deg, #FAF4EC 0%, #F5EBD9 100%);
-    position: relative;
-  }
-  .star-feature::before {
-    content: '\2B50 \2B50 \2B50';
-    position: absolute;
-    top: -14px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #EFE2D3;
-    padding: 0 12px;
-    font-size: 1.1rem;
-    letter-spacing: 4px;
   }
   .import-methods {
     display: flex;
@@ -329,6 +313,10 @@
       <!-- RIGHT: Feature blocks (follows the flow) -->
       <div class="split-right">
 
+        <h1 style="text-align:center; font-size:2.6rem; font-weight:800; color:#2C2C2C; margin:0 0 10px; letter-spacing:-0.5px; line-height:1.2;">So <span style="color:#B85C38;">Much</span> <span style="color:#2E5B5E;">More</span> Than Menu Exports</h1>
+
+        <hr class="feature-divider">
+
         <!-- 1. IMPORT -->
         <div class="feature-block">
           <h2><span class="accent">Import</span> Your Menu — Any Way You Have It</h2>
@@ -354,8 +342,8 @@
         <hr class="feature-divider">
 
         <!-- 3. KNOW YOUR MARKET — the star feature -->
-        <div class="feature-block star-feature">
-          <h2><span class="accent">Know Your Market</span> — Price Intelligence</h2>
+        <div class="feature-block" style="text-align:center;">
+          <h2 style="text-align:center;">&#11088; <span class="accent">Know Your Market</span> — Price Intelligence &#11088;</h2>
           <p>While you review your menu, MenuFlow scans nearby restaurants and shows you how your prices compare — category by category, in real time.</p>
           <div class="highlight-box">
             <p><strong>Example:</strong> "Your burgers average $13.50 — nearby restaurants average $11.75. You're 15% above market, which supports premium positioning."</p>
@@ -391,7 +379,7 @@
             <span class="pos-badge">Clover</span>
           </div>
           <p>Direct API push for major POS systems. For everyone else, download a formatted file that your POS can import — CSV, Excel, or JSON. No matter what system you use, your menu is ready to go.</p>
-          <p style="font-size:0.82rem; color:#8A8578;">Don't see your POS? Let us know — we're always adding new integrations.</p>
+          <p style="font-size:0.82rem; color:#B85C38;">Don't see your POS? Let us know — we're always adding new integrations.</p>
         </div>
 
         <hr class="feature-divider">
