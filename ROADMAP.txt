@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 131 (March 25, 2026) — Sprint 13.1 Day 6: Free Tier Access Controls (32 tests, 2,836 total)
+Last Updated: Day 132 (March 26, 2026) — Sprint 13.1 Complete, Sprint 13.2 planned (Price Comparison Intelligence)
 
 ================================================================================
 PROJECT MISSION
@@ -2161,24 +2161,63 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
     Day 131 test suite: 32 cases, 100% pass rate
     Cumulative: 2,836 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
-Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
+Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
+..........................................................
+  CONTEXT: Before building the wizard, we need the price comparison engine
+  that powers the wizard's per-category price intelligence. Customers pay
+  $50 for this — accuracy matters more than speed. Google Places API +
+  Claude Call 4 provide local market context for every menu item.
+
+  [ ] Restaurant profile collection (Day 133)
+      - Pre-upload form: cuisine type, zip code, restaurant name
+      - Cuisine type already exists on restaurants table (22 VALID_CUISINE_TYPES)
+      - Add zip_code column to restaurants table
+      - Wire into upload flow — collect before parsing begins
+  [ ] Google Places API integration (Day 134)
+      - Nearby restaurant search by cuisine type + zip code
+      - Pull comparable restaurants: names, price tier ($-$$$$), cuisine match
+      - Cache results per zip+cuisine (avoid repeat API calls)
+      - Rate limiting + error handling for API failures
+      - Store results in price_comparison_data table
+  [ ] Claude Call 4 — Price Intelligence (Day 135)
+      - Input: extracted menu items + Google Places context + cuisine type + region
+      - Output: per-item price assessment (underpriced/fair/overpriced)
+      - Regional average estimates per item category
+      - Suggested price ranges based on local market
+      - Store results alongside draft items for wizard display
+  [ ] Pipeline integration + loading screen (Day 136)
+      - Wire Call 4 into parsing pipeline (after Call 3 reconciliation)
+      - 5-stage progress screen: Extracting → Verifying → Reconciling →
+        Analyzing Prices → Finalizing
+      - Real stage-based progress (each stage fills when it actually completes)
+      - MenuFlow logo + tablecloth animation during wait
+      - "Feel free to grab a coffee — we'll keep your progress" messaging
+      - 5-15 minute expected duration, progress persists if browser refreshes
+
+Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
 ......................................................
   CONTEXT: The wizard IS the $50 experience. When someone pays for AI parse,
   THIS is what they get — not just a dump into the raw editor. Must ship
-  before Stripe goes live. Auth first (wizard needs user context).
-
-  Full spec: memory/project_wizard_sprint123.md
+  before Stripe goes live. Price intelligence (Sprint 13.2) feeds into
+  the category-by-category review. Auth (Sprint 13.1) provides user context.
 
   [ ] Wizard shell + routing
       - /drafts/<id>/wizard — multi-step guided flow
       - Step indicator: Upload → Processing → Review → Editor → Export
       - Only accessible for drafts created via AI parse (not manual)
+      - "Great news, your menu has been processed! Let's walk through it together"
   [ ] Category-by-category review
       - One category at a time, focused view
-      - Show items with confidence indicators
+      - Price comparison intelligence at top of each category page
+        (local market averages, overpriced/underpriced flags, suggested ranges)
+      - All items fully editable (name, price, category, modifiers)
+      - "Save & Continue" per category — progress saved to draft
       - Quick-fix actions: rename, re-categorize, delete, merge duplicates
-      - "Looks good" / "Needs changes" per category
       - Suggested modifier group templates per category ("Apply Size to all?")
+  [ ] Session persistence
+      - Progress saved if customer leaves mid-session
+      - Return to wizard picks up where they left off
+      - Draft tracks which categories have been reviewed
   [ ] Review summary + handoff
       - Summary screen: X items across Y categories, Z modifier groups
       - Stats: high/medium/low confidence breakdown
@@ -2190,7 +2229,7 @@ Sprint 13.2 — Guided Onboarding Wizard (Days 133-139)
       - Format selection: Square CSV, Toast CSV, Generic POS JSON
       - Download or direct push (when POS OAuth ships later)
 
-Sprint 13.3 — Stripe Payment Gate (Days 140-144)
+Sprint 13.4 — Stripe Payment Gate (Days 144-148)
 ..................................................
   [ ] Stripe Checkout integration
       - $50 AI parse — one-time payment per menu
@@ -2215,7 +2254,7 @@ Sprint 13.3 — Stripe Payment Gate (Days 140-144)
       - Seasonal menu change or major overhaul → new $50 payment
       - Existing saved menus remain editable/exportable forever
 
-Sprint 13.4 — POS Partner Integration & B2B Go-To-Market (Days 145-150)
+Sprint 13.5 — POS Partner Integration & B2B Go-To-Market (Days 149-154)
 .......................................................................
 
   GO-TO-MARKET STRATEGY:
@@ -2289,7 +2328,7 @@ Sprint 13.4 — POS Partner Integration & B2B Go-To-Market (Days 145-150)
       - Request queuing for high-volume partners
       - Usage logging for renegotiation data (the receipts)
 
-Sprint 13.5 — POS OAuth & Live Push (Days 151-163)
+Sprint 13.6 — POS OAuth & Live Push (Days 155-167)
 ...................................................
   CONTEXT: The $10 POS export should push directly into the restaurant's POS
   account — not just download a file. This is what makes $10 feel effortless.
@@ -2335,7 +2374,7 @@ Sprint 13.5 — POS OAuth & Live Push (Days 151-163)
       - Push confirmation screen: "X items, Y modifiers sent to Square ✓"
       - Push history: when, what, how many items, success/failure
 
-Sprint 13.6 — QR Code Digital Menus (Days 164-170)
+Sprint 13.7 — QR Code Digital Menus (Days 168-174)
 ...................................................
   CONTEXT: You already have clean, structured menu data. Generating a hosted
   digital menu with a QR code is trivial on top of that — and it's a killer
@@ -2408,7 +2447,7 @@ Sprint 13.6 — QR Code Digital Menus (Days 164-170)
       - Multiple sizes: small (table sticker), medium (tent card), large (poster)
       - Instructions page: "How to use your QR code menu"
 
-Phase 14 — Menu Intelligence Features (Days 171-190)
+Phase 14 — Menu Intelligence Features (Days 175-194)
 ------------------------------------------------------
   CONTEXT: These features are the competitive moat. Any engineer can build
   OCR + AI verification. What they can't replicate is a system that truly
@@ -2478,7 +2517,7 @@ Sprint 14.4 — Menu Quality Score (Days 183-187)
   [ ] Quality score in API response (POS companies can surface to restaurants)
   [ ] Quality dashboard in ServLine editor
 
-Phase 15 — Production Hardening & Polish (Days 191-205)
+Phase 15 — Production Hardening & Polish (Days 195-209)
 --------------------------------------------------------
   [ ] Performance optimization and caching layer
   [ ] Monitoring, alerting, and error dashboards
