@@ -3950,6 +3950,27 @@ def test_json_form():
 
 
 # ------------------------
+# Blank draft (manual menu entry)
+# ------------------------
+@app.post("/drafts/new-blank")
+@login_required
+def create_blank_draft_manual():
+    """Create an empty draft and redirect to the editor for manual entry."""
+    restaurant_id = _resolve_restaurant_id_from_request()
+    title = f"New Menu — {datetime.utcnow().strftime('%b %d, %Y')}"
+    create_fn = getattr(drafts_store, "create_draft_from_structured_items", None)
+    if not callable(create_fn):
+        flash("Draft creation not available.", "error")
+        return redirect(url_for("import_upload"))
+    draft = create_fn(title=title, restaurant_id=restaurant_id, items=[])
+    draft_id = draft.get("id") or draft.get("draft_id")
+    if draft_id:
+        return redirect(f"/drafts/{draft_id}/edit")
+    flash("Failed to create draft.", "error")
+    return redirect(url_for("import_upload"))
+
+
+# ------------------------
 # **NEW** Import landing page + HTML POST handler
 # ------------------------
 @app.route("/import", methods=["GET", "POST"], strict_slashes=False)

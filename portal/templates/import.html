@@ -322,6 +322,15 @@
       <div class="progress-label" id="uploadLabel">Preparing upload…</div>
     </div>
 
+    <!-- Manual entry option -->
+    <div style="text-align:center; margin-top:24px; padding-top:20px; border-top:1px solid var(--line);">
+      <p style="font-size:.95rem; color:#2C2C2C; margin-bottom:10px;">Don't have a file? No problem.</p>
+      <form action="/drafts/new-blank" method="post" style="display:inline;">
+        {% if for_rest_id %}<input type="hidden" name="restaurant_id" value="{{ for_rest_id }}">{% endif %}
+        <button type="submit" class="btn" style="background:var(--panel); border:1px solid var(--line); color:#2C2C2C; font-weight:600; padding:10px 28px; border-radius:10px; font-size:.95rem; cursor:pointer;">Type It In Manually</button>
+      </form>
+    </div>
+
     <div class="mt-4 text-xs muted">
       Max file size: 20&nbsp;MB. Allowed: PNG, JPG, PDF, CSV, XLSX, JSON.
     </div>
