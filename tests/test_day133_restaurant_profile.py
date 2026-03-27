@@ -396,14 +396,14 @@ class TestRestaurantDetailFormLayout:
         assert 'name="state"' in html
         assert 'name="zip_code"' in html
 
-    def test_cuisine_before_phone(self, app_client, mock_db):
-        """Cuisine type should appear before phone in the form."""
+    def test_cuisine_before_address(self, app_client, mock_db):
+        """Cuisine type should appear before address in the form."""
         self._setup_customer_with_restaurant(app_client, mock_db)
         resp = app_client.get("/restaurants/1/detail")
         html = resp.data.decode()
         cuisine_pos = html.index('name="cuisine_type"')
-        phone_pos = html.index('name="phone"')
-        assert cuisine_pos < phone_pos
+        address_pos = html.index('name="address"')
+        assert cuisine_pos < address_pos
 
     def test_state_maxlength_2(self, app_client, mock_db):
         self._setup_customer_with_restaurant(app_client, mock_db)

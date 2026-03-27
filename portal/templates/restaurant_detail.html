@@ -1,168 +1,479 @@
 {% extends "base.html" %}
-{% block title %}{{ restaurant.name }} — ServLine{% endblock %}
+{% block title %}My Restaurants — MenuFlow{% endblock %}
 
 {% block head %}
 <style>
-  .stat-card {
-    background:var(--panel); border:1px solid var(--line); border-radius:12px;
-    padding:16px 20px; text-align:center; min-width:120px;
+  .rest-page { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start; }
+  @media(max-width:860px){ .rest-page { grid-template-columns:1fr; } }
+
+  /* ---- Left: Add form ---- */
+  .add-panel {
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:24px; position:relative; overflow:hidden;
   }
-  .stat-card .num { font-size:1.8rem; font-weight:700; color:#7aa2ff; }
-  .stat-card .label { font-size:.8rem; color:var(--muted); margin-top:2px; }
-  .detail-section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
-  #edit-cuisine option { color: #2C2C2C; }
-  #edit-cuisine option[value=""] { color: #999; }
+  .add-panel h2 { font-size:1.25rem; font-weight:700; margin-bottom:16px; color:#2C2C2C; }
+  .form-label { color:#2C2C2C; font-size:.85rem; font-weight:500; display:block; margin-bottom:2px; }
+  .form-label .optional { font-size:.75rem; opacity:.5; font-weight:400; }
+  .form-row { margin-bottom:12px; }
+  .form-row input, .form-row select { width:100%; }
+  .addr-grid { display:grid; grid-template-columns:1fr 70px 100px; gap:8px; }
+
+  #add-cuisine option { color:#2C2C2C; }
+  #add-cuisine option[value=""] { color:#999; }
+
+  .btn-add {
+    width:100%; padding:10px; font-size:.95rem; font-weight:600;
+    border-radius:10px; cursor:pointer; transition:all .3s ease;
+    position:relative; overflow:hidden;
+  }
+  .btn-add:active { transform:scale(.97); }
+
+  /* ---- Right: Restaurants grid ---- */
+  .rest-grid-panel {
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:24px; min-height:300px;
+  }
+  .rest-grid-panel h2 { font-size:1.25rem; font-weight:700; margin-bottom:16px; color:#2C2C2C; }
+  .rest-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media(max-width:500px){ .rest-grid { grid-template-columns:1fr; } }
+
+  .rest-tile {
+    background:#fff; border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; cursor:pointer; transition:all .2s ease;
+    text-decoration:none; color:inherit; display:block; position:relative;
+  }
+  .rest-tile:hover { border-color:var(--terracotta, #B85C38); box-shadow:0 2px 12px rgba(0,0,0,.06); transform:translateY(-1px); }
+  .rest-tile.selected { border-color:var(--terracotta, #B85C38); border-width:2px; box-shadow:0 2px 12px rgba(184,92,56,.12); }
+  .rest-tile .tile-name { font-weight:600; font-size:.95rem; color:#2C2C2C; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rest-tile .tile-addr { font-size:.78rem; color:#888; line-height:1.3; }
+  .rest-tile .tile-cuisine { display:inline-block; font-size:.7rem; color:var(--terracotta, #B85C38); background:rgba(184,92,56,.08); padding:2px 8px; border-radius:8px; margin-top:6px; }
+  .rest-tile .tile-active { position:absolute; top:10px; right:12px; width:8px; height:8px; border-radius:50%; background:#50dc78; }
+
+  .empty-state { text-align:center; padding:40px 20px; color:#aaa; }
+  .empty-state .icon { font-size:2.5rem; margin-bottom:8px; opacity:.4; }
+  .empty-state p { font-size:.9rem; }
+
+  /* ---- Detail panel (below grid) ---- */
+  .detail-expand {
+    background:#fff; border:1px solid var(--line); border-radius:14px;
+    padding:0; margin-top:16px; overflow:hidden;
+    max-height:0; opacity:0; transition:max-height .4s ease, opacity .3s ease, padding .3s ease;
+  }
+  .detail-expand.open {
+    max-height:600px; opacity:1; padding:24px;
+  }
+  .detail-expand h3 {
+    font-size:1.1rem; font-weight:700; color:#2C2C2C; margin:0 0 16px 0;
+    display:flex; align-items:center; gap:10px;
+  }
+  .detail-expand h3 .close-detail {
+    margin-left:auto; cursor:pointer; font-size:1.2rem; color:#999;
+    background:none; border:none; padding:0 4px; line-height:1;
+    transition:color .2s;
+  }
+  .detail-expand h3 .close-detail:hover { color:#2C2C2C; }
+
+  .detail-info { display:grid; grid-template-columns:1fr 1fr; gap:12px 24px; margin-bottom:20px; }
+  .detail-field label { font-size:.75rem; color:#999; text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:2px; }
+  .detail-field .val { font-size:.9rem; color:#2C2C2C; font-weight:500; }
+  .detail-field .val.empty { color:#ccc; font-style:italic; font-weight:400; }
+
+  .detail-actions { display:flex; gap:10px; padding-top:16px; border-top:1px solid var(--line); }
+  .btn-detail { padding:8px 18px; border-radius:8px; font-size:.85rem; font-weight:600; cursor:pointer; transition:all .2s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .btn-upload { background:var(--terracotta, #B85C38); color:#fff !important; border:none; }
+  .btn-upload:hover { opacity:.9; }
+  .btn-menus { background:#2E5B5E; color:#fff !important; border:none; }
+  .btn-menus:hover { opacity:.9; }
+  .btn-del { background:none; color:#e55 !important; border:1px solid rgba(238,85,85,.3); }
+  .btn-del:hover { background:rgba(238,85,85,.06); }
+
+  /* ---- Confirm modal ---- */
+  .confirm-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:10000;
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity .2s ease;
+  }
+  .confirm-overlay.open { opacity:1; pointer-events:auto; }
+  .confirm-box {
+    background:var(--panel, #FAF4EC); border:1px solid var(--line); border-radius:16px;
+    padding:28px 32px; max-width:380px; width:90%;
+    box-shadow:0 8px 40px rgba(0,0,0,.12); transform:scale(.92); transition:transform .25s ease;
+    text-align:center;
+  }
+  .confirm-overlay.open .confirm-box { transform:scale(1); }
+  .confirm-box .confirm-icon { font-size:2.2rem; margin-bottom:10px; }
+  .confirm-box h3 { font-size:1.1rem; font-weight:700; color:#2C2C2C; margin:0 0 8px; }
+  .confirm-box p { font-size:.88rem; color:#666; margin:0 0 20px; line-height:1.4; }
+  .confirm-box .confirm-actions { display:flex; gap:10px; justify-content:center; }
+  .confirm-box .btn-conf-cancel {
+    background:var(--panel, #FAF4EC); border:1px solid var(--line); color:#2C2C2C !important;
+    padding:9px 22px; border-radius:10px; font-size:.88rem; font-weight:500; cursor:pointer; transition:all .15s;
+  }
+  .confirm-box .btn-conf-cancel:hover { background:#eee; }
+  .confirm-box .btn-conf-yes {
+    background:#e55; border:none; color:#fff !important;
+    padding:9px 22px; border-radius:10px; font-size:.88rem; font-weight:600; cursor:pointer; transition:all .15s;
+  }
+  .confirm-box .btn-conf-yes:hover { background:#d33; }
+
+  /* ---- Fly animation ---- */
+  .fly-clone {
+    position:fixed; z-index:9999; pointer-events:none;
+    border-radius:12px; background:#fff; border:1px solid var(--line);
+    padding:10px 14px; box-shadow:0 4px 20px rgba(0,0,0,.12);
+    transition:all .6s cubic-bezier(.4, 0, .2, 1);
+    opacity:1;
+  }
+  .fly-clone.flying { opacity:0; transform:scale(.3); }
+
+  @keyframes tile-pop {
+    0%   { opacity:0; transform:scale(.3); }
+    60%  { opacity:1; transform:scale(1.05); }
+    100% { opacity:1; transform:scale(1); }
+  }
+  .rest-tile.just-added { animation:tile-pop .4s ease-out forwards; }
+
+  @keyframes flash-green {
+    0%   { box-shadow:0 0 0 0 rgba(80,220,120,.4); }
+    50%  { box-shadow:0 0 20px 6px rgba(80,220,120,.25); }
+    100% { box-shadow:0 0 0 0 rgba(80,220,120,0); }
+  }
+  .rest-tile.flash { animation:flash-green .8s ease-out; }
 </style>
 {% endblock %}
 
 {% block content %}
-  <p class="crumbs"><a href="/dashboard">Dashboard</a> / <a href="/restaurants">My Restaurants</a> / {{ restaurant.name }}</p>
-  <h1 class="text-2xl font-bold mb-4">{{ restaurant.name }}</h1>
+  <p class="crumbs"><a href="/dashboard">Dashboard</a> / My Restaurants</p>
+  <h1 class="text-2xl font-bold mb-5">My Restaurants</h1>
 
-  <!-- Stats Overview -->
-  <div class="flex flex-wrap gap-3 mb-4">
-    <div class="stat-card">
-      <div class="num">{{ stats.menu_count }}</div>
-      <div class="label">Menu{{ 's' if stats.menu_count != 1 }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="num">{{ stats.draft_count }}</div>
-      <div class="label">Draft{{ 's' if stats.draft_count != 1 }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="num">{{ stats.item_count }}</div>
-      <div class="label">Item{{ 's' if stats.item_count != 1 }}</div>
-    </div>
-  </div>
-
-  <!-- Quick Actions -->
-  <div class="flex flex-wrap gap-2 mb-4">
-    <a href="/restaurants/{{ restaurant.id }}/menus" class="btn btn-primary">View Menus</a>
-    <a href="/import" class="btn">Upload Menu</a>
-  </div>
-
-  <!-- Edit Restaurant Details -->
-  <div class="detail-section">
-    <h2 class="text-lg font-semibold mb-3">Restaurant Details</h2>
-    <form action="/restaurants/{{ restaurant.id }}/update" method="post" style="display:grid; gap:12px; max-width:520px;">
-      <div>
-        <label for="edit-name" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Restaurant Name *</label>
-        <input id="edit-name" name="name" type="text" required value="{{ restaurant.name }}" style="width:100%;">
-      </div>
-      <div>
-        <label for="edit-cuisine" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Cuisine Type</label>
-        <select id="edit-cuisine" name="cuisine_type" style="width:100%;">
-          <option value="" style="color:#999;">-- Select --</option>
-          {% for ct in cuisine_types %}
-            <option value="{{ ct }}" {% if restaurant.cuisine_type == ct %}selected{% endif %}>{{ ct|capitalize }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="edit-address" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Address</label>
-        <input id="edit-address" name="address" type="text" value="{{ restaurant.address or '' }}" placeholder="123 Main St" style="width:100%;">
-      </div>
-      <div>
-        <label for="edit-address2" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Apt / Suite <span style="font-size:.8rem; opacity:.6;">(optional)</span></label>
-        <input id="edit-address2" name="address_line2" type="text" value="{{ restaurant.address_line2 or '' }}" placeholder="Apt 4B, Suite 200, etc." style="width:100%;">
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 80px 110px; gap:10px;">
-        <div>
-          <label for="edit-city" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">City</label>
-          <input id="edit-city" name="city" type="text" value="{{ restaurant.city or '' }}" placeholder="New York" style="width:100%;">
+  <div class="rest-page">
+    <!-- LEFT: Add a Restaurant -->
+    <div class="add-panel" id="addPanel">
+      <h2>Add a Restaurant</h2>
+      <form id="addRestForm" action="/restaurants" method="post">
+        <input type="hidden" name="_redirect" value="/restaurants/{{ restaurant.id }}/detail">
+        <div class="form-row">
+          <label class="form-label" for="add-name">Restaurant Name *</label>
+          <input id="add-name" name="name" type="text" required placeholder="Mario's Italian Kitchen">
         </div>
-        <div>
-          <label for="edit-state" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">State</label>
-          <input id="edit-state" name="state" type="text" value="{{ restaurant.state or '' }}" placeholder="NY" maxlength="2" style="width:100%; text-transform:uppercase;">
+        <div class="form-row">
+          <label class="form-label" for="add-cuisine">Cuisine Type</label>
+          <select id="add-cuisine" name="cuisine_type">
+            <option value="" style="color:#999;">-- Select --</option>
+            {% for ct in cuisine_types %}
+              <option value="{{ ct }}">{{ ct|capitalize }}</option>
+            {% endfor %}
+          </select>
         </div>
-        <div>
-          <label for="edit-zip" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Zip Code</label>
-          <input id="edit-zip" name="zip_code" type="text" value="{{ restaurant.zip_code or '' }}" placeholder="10001" maxlength="10" style="width:100%;">
+        <div class="form-row">
+          <label class="form-label" for="add-address">Address</label>
+          <input id="add-address" name="address" type="text" placeholder="123 Main St">
         </div>
-      </div>
-      <div>
-        <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
-      </div>
-    </form>
-    <script>
-      (function(){
-        var s = document.getElementById('edit-cuisine');
-        function upd(){ s.style.setProperty('color', s.value ? '#2C2C2C' : '#999', 'important'); }
-        s.addEventListener('change', upd);
-        upd();
-      })();
-    </script>
-  </div>
+        <div class="form-row">
+          <label class="form-label" for="add-address2">Apt / Suite <span class="optional">(optional)</span></label>
+          <input id="add-address2" name="address_line2" type="text" placeholder="Apt 4B, Suite 200">
+        </div>
+        <div class="form-row">
+          <div class="addr-grid">
+            <div>
+              <label class="form-label" for="add-city">City</label>
+              <input id="add-city" name="city" type="text" placeholder="New York">
+            </div>
+            <div>
+              <label class="form-label" for="add-state">State</label>
+              <input id="add-state" name="state" type="text" placeholder="NY" maxlength="2" style="text-transform:uppercase;">
+            </div>
+            <div>
+              <label class="form-label" for="add-zip">Zip Code</label>
+              <input id="add-zip" name="zip_code" type="text" placeholder="10001" maxlength="10">
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-add" id="addBtn">Add Restaurant</button>
+      </form>
+    </div>
 
-  <!-- Recent Drafts -->
-  <div class="detail-section">
-    <h2 class="text-lg font-semibold mb-3">Recent Drafts</h2>
-    {% if recent_drafts|length == 0 %}
-      <p class="muted">No drafts yet. <a href="/import" class="underline">Upload a menu</a> to get started.</p>
-    {% else %}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for d in recent_drafts %}
-          <tr>
-            <td>{{ d.title or 'Untitled' }}</td>
-            <td>
-              <span class="text-xs px-2 py-0.5 rounded-full border border-line
-                {% if d.status == 'approved' %}text-green-400 border-green-500/30
-                {% elif d.status == 'editing' %}text-brand-500 border-brand-500/30
-                {% else %}text-muted{% endif %}">{{ d.status or 'unknown' }}</span>
-            </td>
-            <td class="text-sm text-muted">{{ d.created_at[:10] if d.created_at else '' }}</td>
-            <td><a href="/drafts/{{ d.id }}/edit" class="btn btn-sm">Edit</a></td>
-          </tr>
+    <!-- RIGHT: Your Restaurants + expandable detail -->
+    <div>
+      <div class="rest-grid-panel" id="restGridPanel">
+        <h2>Your Restaurants</h2>
+        <div class="rest-grid" id="restGrid">
+          {% for r in all_restaurants %}
+          <div class="rest-tile" data-rest-id="{{ r.id }}"
+               data-name="{{ r.name }}"
+               data-cuisine="{{ r.cuisine_type or '' }}"
+               data-address="{{ r.address or '' }}"
+               data-address2="{{ r.address_line2 or '' }}"
+               data-city="{{ r.city or '' }}"
+               data-state="{{ r.state or '' }}"
+               data-zip="{{ r.zip_code or '' }}">
+            <div class="tile-active" title="Active"></div>
+            <div class="tile-name">{{ r.name }}</div>
+            <div class="tile-addr">
+              {% if r.address %}{{ r.address }}{% endif %}
+              {% if r.city or r.state or r.zip_code %}<br>{{ r.city or '' }}{% if r.city and r.state %}, {% endif %}{{ r.state or '' }} {{ r.zip_code or '' }}{% endif %}
+            </div>
+            {% if r.cuisine_type %}<span class="tile-cuisine">{{ r.cuisine_type|capitalize }}</span>{% endif %}
+          </div>
           {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
+        </div>
+        {% if all_restaurants|length == 0 %}
+        <div class="empty-state" id="emptyState">
+          <div class="icon">🍽</div>
+          <p>No restaurants yet.<br>Add your first one to get started.</p>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Detail expand panel -->
+      <div class="detail-expand" id="detailPanel">
+        <h3>
+          <span id="detailTitle"></span>
+          <button class="close-detail" id="closeDetail" title="Close">&times;</button>
+        </h3>
+        <div class="detail-info" id="detailInfo"></div>
+        <div class="detail-actions" id="detailActions"></div>
+      </div>
+    </div>
   </div>
 
-  <!-- Menus -->
-  <div class="detail-section">
-    <h2 class="text-lg font-semibold mb-3">Menus</h2>
-    {% if menus|length == 0 %}
-      <p class="muted">No menus yet. Create one from the <a href="/restaurants/{{ restaurant.id }}/menus" class="underline">Menus page</a>.</p>
-    {% else %}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Versions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for m in menus %}
-          <tr>
-            <td>{{ m.name }}</td>
-            <td>{{ m.menu_type or '' }}</td>
-            <td>{{ m.version_count if m.version_count is defined else '' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
+  <!-- Delete confirm modal -->
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+      <div class="confirm-icon">🗑</div>
+      <h3>Delete Restaurant</h3>
+      <p>Are you sure you want to delete <strong id="confirmName"></strong>? This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button class="btn-conf-cancel" id="confirmCancel">Cancel</button>
+        <button class="btn-conf-yes" id="confirmYes">Yes, Delete</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Danger Zone -->
-  <div class="detail-section" style="border-color:rgba(248,113,113,.3);">
-    <h2 class="text-lg font-semibold mb-3" style="color:#f87171;">Danger Zone</h2>
-    <p class="text-sm muted mb-3">Permanently remove this restaurant and unlink it from your account. Drafts and menus will be preserved but unassigned.</p>
-    <button class="btn btn-danger btn-sm"
-      onclick="if(confirm('Are you sure you want to delete this restaurant? This cannot be undone.')) document.getElementById('delete-rest-form').submit();">
-      Delete Restaurant
-    </button>
-    <form id="delete-rest-form" action="/restaurants/{{ restaurant.id }}/delete" method="post" style="display:none;"></form>
-  </div>
+  <script>
+  (function(){
+    // ---- Cuisine select placeholder color ----
+    var cs = document.getElementById('add-cuisine');
+    function updC(){ cs.style.setProperty('color', cs.value ? '#2C2C2C' : '#999', 'important'); }
+    cs.addEventListener('change', updC);
+    updC();
+
+    // ---- Tile click → expand detail ----
+    var grid = document.getElementById('restGrid');
+    var detailPanel = document.getElementById('detailPanel');
+    var detailTitle = document.getElementById('detailTitle');
+    var detailInfo = document.getElementById('detailInfo');
+    var detailActions = document.getElementById('detailActions');
+    var closeBtn = document.getElementById('closeDetail');
+    var activeTileId = null;
+
+    function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+    function field(label, value) {
+      return '<div class="detail-field"><label>' + label + '</label>'
+        + '<div class="val' + (value ? '' : ' empty') + '">' + (esc(value) || 'Not set') + '</div></div>';
+    }
+
+    function openDetail(tile) {
+      var id = tile.dataset.restId;
+      var name = tile.dataset.name;
+      var cuisine = tile.dataset.cuisine;
+      var addr = tile.dataset.address;
+      var addr2 = tile.dataset.address2;
+      var city = tile.dataset.city;
+      var state = tile.dataset.state;
+      var zip = tile.dataset.zip;
+
+      // Build full address string
+      var fullAddr = addr || '';
+      if (addr2) fullAddr += (fullAddr ? ', ' : '') + addr2;
+      var cityLine = '';
+      if (city) cityLine += city;
+      if (city && state) cityLine += ', ';
+      if (state) cityLine += state;
+      if (zip) cityLine += ' ' + zip;
+      if (cityLine) fullAddr += (fullAddr ? '\n' : '') + cityLine;
+
+      // Highlight selected tile
+      grid.querySelectorAll('.rest-tile').forEach(function(t){ t.classList.remove('selected'); });
+      tile.classList.add('selected');
+      activeTileId = id;
+
+      detailTitle.textContent = name;
+      detailInfo.innerHTML =
+        field('Cuisine Type', cuisine ? cuisine.charAt(0).toUpperCase() + cuisine.slice(1) : '')
+        + field('Address', addr)
+        + field('Apt / Suite', addr2)
+        + field('City', city)
+        + field('State', state ? state.toUpperCase() : '')
+        + field('Zip Code', zip);
+
+      detailActions.innerHTML =
+        '<a href="/import?for_restaurant=' + id + '&rest_name=' + encodeURIComponent(name) + '&rest_addr=' + encodeURIComponent(fullAddr) + '" class="btn-detail btn-upload">Add Menu</a>'
+        + '<a href="/restaurants/' + id + '/menus" class="btn-detail btn-menus">View Menus</a>'
+        + '<button class="btn-detail btn-del" onclick="deleteRestaurant(' + id + ', this)">Delete Restaurant</button>';
+
+      // Open with animation
+      if (!detailPanel.classList.contains('open')) {
+        detailPanel.classList.add('open');
+        // Scroll into view smoothly
+        setTimeout(function(){ detailPanel.scrollIntoView({behavior:'smooth', block:'nearest'}); }, 50);
+      }
+    }
+
+    function closeDetail() {
+      detailPanel.classList.remove('open');
+      grid.querySelectorAll('.rest-tile').forEach(function(t){ t.classList.remove('selected'); });
+      activeTileId = null;
+    }
+
+    grid.addEventListener('click', function(e){
+      var tile = e.target.closest('.rest-tile');
+      if (!tile) return;
+      e.preventDefault();
+      // Toggle if already selected
+      if (tile.dataset.restId === activeTileId) {
+        closeDetail();
+      } else {
+        openDetail(tile);
+      }
+    });
+
+    closeBtn.addEventListener('click', closeDetail);
+
+    // ---- Delete restaurant (themed confirm) ----
+    var confirmOverlay = document.getElementById('confirmOverlay');
+    var confirmName = document.getElementById('confirmName');
+    var confirmYes = document.getElementById('confirmYes');
+    var confirmCancel = document.getElementById('confirmCancel');
+    var pendingDeleteId = null;
+
+    function showConfirm(id, name) {
+      pendingDeleteId = id;
+      confirmName.textContent = name;
+      confirmOverlay.classList.add('open');
+    }
+    function hideConfirm() {
+      confirmOverlay.classList.remove('open');
+      pendingDeleteId = null;
+    }
+
+    confirmCancel.addEventListener('click', hideConfirm);
+    confirmOverlay.addEventListener('click', function(e){ if(e.target === confirmOverlay) hideConfirm(); });
+
+    confirmYes.addEventListener('click', function(){
+      if (!pendingDeleteId) return;
+      var delId = pendingDeleteId;
+      confirmYes.disabled = true;
+      confirmYes.textContent = 'Deleting...';
+
+      var fd = new FormData();
+      fetch('/restaurants/' + delId + '/delete', {
+        method: 'POST', body: fd, redirect: 'manual'
+      }).then(function(){
+        hideConfirm();
+        var tile = grid.querySelector('[data-rest-id="' + delId + '"]');
+        if (tile) {
+          tile.style.transition = 'all .3s ease';
+          tile.style.opacity = '0';
+          tile.style.transform = 'scale(.8)';
+          setTimeout(function(){ tile.remove(); }, 300);
+        }
+        closeDetail();
+        // Redirect to /restaurants after animation so URL stays valid on refresh
+        setTimeout(function(){ window.location.href = '/restaurants'; }, 500);
+      }).catch(function(){
+        hideConfirm();
+        confirmYes.disabled = false;
+        confirmYes.textContent = 'Yes, Delete';
+        alert('Failed to delete. Please try again.');
+      });
+    });
+
+    window.deleteRestaurant = function(id) {
+      var tile = grid.querySelector('[data-rest-id="' + id + '"]');
+      var name = tile ? tile.dataset.name : 'this restaurant';
+      showConfirm(id, name);
+    };
+
+    // ---- Add restaurant: AJAX + fly animation ----
+    var form = document.getElementById('addRestForm');
+    var addBtn = document.getElementById('addBtn');
+    var panel = document.getElementById('restGridPanel');
+
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding...';
+
+      var fd = new FormData(form);
+      fetch('/restaurants', {
+        method: 'POST',
+        body: fd,
+        redirect: 'manual'
+      }).then(function(){
+        var name = fd.get('name') || 'New Restaurant';
+        var addr = fd.get('address') || '';
+        var city = fd.get('city') || '';
+        var state = fd.get('state') || '';
+        var zip = fd.get('zip_code') || '';
+        var cuisine = fd.get('cuisine_type') || '';
+        var addrLine = addr;
+        if (city || state || zip) {
+          addrLine += (addrLine ? '<br>' : '') + city;
+          if (city && state) addrLine += ', ';
+          addrLine += state + ' ' + zip;
+        }
+
+        // Flying clone
+        var btnRect = addBtn.getBoundingClientRect();
+        var clone = document.createElement('div');
+        clone.className = 'fly-clone';
+        clone.innerHTML = '<div style="font-weight:600;font-size:.85rem;color:#2C2C2C;">' + name.replace(/</g,'&lt;') + '</div>'
+          + '<div style="font-size:.72rem;color:#888;margin-top:2px;">' + addrLine + '</div>';
+        clone.style.left = btnRect.left + 'px';
+        clone.style.top = btnRect.top + 'px';
+        clone.style.width = btnRect.width + 'px';
+        document.body.appendChild(clone);
+
+        var es = document.getElementById('emptyState');
+        if (es) es.style.display = 'none';
+
+        var gridRect = panel.getBoundingClientRect();
+        var targetX = gridRect.left + gridRect.width / 2 - btnRect.width / 3;
+        var targetY = gridRect.top + 60;
+
+        requestAnimationFrame(function(){
+          clone.style.left = targetX + 'px';
+          clone.style.top = targetY + 'px';
+          clone.classList.add('flying');
+        });
+
+        setTimeout(function(){
+          clone.remove();
+          var tile = document.createElement('div');
+          tile.className = 'rest-tile just-added';
+          tile.innerHTML = '<div class="tile-active" title="Active"></div>'
+            + '<div class="tile-name">' + name.replace(/</g,'&lt;') + '</div>'
+            + '<div class="tile-addr">' + addrLine + '</div>'
+            + (cuisine ? '<span class="tile-cuisine">' + cuisine.charAt(0).toUpperCase() + cuisine.slice(1) + '</span>' : '');
+          grid.appendChild(tile);
+          setTimeout(function(){ tile.classList.add('flash'); }, 50);
+
+          form.reset();
+          updC();
+          addBtn.disabled = false;
+          addBtn.textContent = 'Add Restaurant';
+          setTimeout(function(){ window.location.href = '/restaurants'; }, 1200);
+        }, 600);
+
+      }).catch(function(){
+        addBtn.disabled = false;
+        addBtn.textContent = 'Add Restaurant';
+        alert('Failed to add restaurant. Please try again.');
+      });
+    });
+  })();
+  </script>
+
 {% endblock %}

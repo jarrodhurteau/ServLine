@@ -24,7 +24,7 @@
     <div class="flex items-center mb-3">
       <h2 class="text-lg font-semibold">My Restaurants</h2>
       <div class="ml-auto">
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-restaurant-form').style.display='block'">Add Restaurant</button>
+        <a href="/restaurants" class="btn btn-primary btn-sm">Add Restaurant</a>
       </div>
     </div>
 
@@ -63,30 +63,6 @@
         {% endfor %}
       </div>
     {% endif %}
-  </section>
-
-  <!-- Add Restaurant Form (hidden) -->
-  <section id="add-restaurant-form" class="card mb-4" style="display:none;">
-    <h2 class="text-lg font-semibold mb-3">Add New Restaurant</h2>
-    <form action="/restaurants" method="post" style="display:grid; gap:12px; max-width:480px;">
-      <input type="hidden" name="_redirect" value="/dashboard">
-      <div>
-        <label for="dash-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
-        <input id="dash-name" name="name" type="text" required placeholder="e.g. Mario's Italian Kitchen" style="width:100%;">
-      </div>
-      <div>
-        <label for="dash-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
-        <input id="dash-phone" name="phone" type="text" placeholder="e.g. (555) 123-4567" style="width:100%;">
-      </div>
-      <div>
-        <label for="dash-address" style="color:var(--muted); font-size:.9rem;">Address</label>
-        <input id="dash-address" name="address" type="text" placeholder="e.g. 123 Main St, Anytown USA" style="width:100%;">
-      </div>
-      <div class="flex gap-2">
-        <button type="submit" class="btn btn-primary">Create Restaurant</button>
-        <button type="button" class="btn btn-ghost" onclick="document.getElementById('add-restaurant-form').style.display='none'">Cancel</button>
-      </div>
-    </form>
   </section>
 
   <!-- Quick Links -->

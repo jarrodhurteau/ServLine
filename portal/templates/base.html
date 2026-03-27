@@ -169,6 +169,10 @@
       {% if is_customer %}
         <div><a href="/dashboard" class="hover:underline">Dashboard</a></div>
         <div><a href="/restaurants" class="hover:underline">My Restaurants</a></div>
+        {% if session.get('user', {}).get('restaurant_id') %}
+        <div><a href="/restaurants/{{ session['user']['restaurant_id'] }}/menus" class="hover:underline">My Menus</a></div>
+        {% endif %}
+        <div><a href="/import" class="hover:underline">Add Menu</a></div>
       {% elif show_admin %}
         <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
       {% endif %}
@@ -184,10 +188,10 @@
       <div class="ml-auto">
         {% if session.get('user') %}
           {% if is_customer %}
-            <a href="/account" class="btn btn-ghost btn-sm mr-2">Account</a>
+            <a href="/account" class="btn btn-sm mr-2" style="background:var(--terracotta, #B85C38); color:#fff !important; border-color:var(--terracotta, #B85C38);">Account</a>
           {% endif %}
           <form method="post" action="/logout" style="display:inline">
-            <button class="btn btn-sm">Logout</button>
+            <button class="btn btn-sm" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Logout</button>
           </form>
         {% else %}
           <a href="/login" class="btn btn-ghost btn-sm mr-2">Sign In</a>

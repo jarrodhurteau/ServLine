@@ -3,10 +3,20 @@
 
 {% block content %}
   <section class="card max-w-3xl mx-auto">
-    <h1 class="text-xl font-semibold mb-2">Import a Menu</h1>
+    <h1 class="text-xl font-semibold mb-2">Add Your Menu</h1>
     <p class="muted mb-4">
-      Upload a photo, PDF, or structured CSV/XLSX/JSON. We'll create a draft you can review and publish into your menus.
+      Choose how you'd like to get your menu into the system. We'll turn it into an editable draft you can review and export.
     </p>
+
+    {% if for_rest_name %}
+    <div style="background:rgba(46,91,94,.08); border:1px solid rgba(46,91,94,.2); border-radius:10px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
+      <span style="font-size:1.3rem;">🍽</span>
+      <div>
+        <span style="font-size:.9rem; font-weight:600; color:#2C2C2C;">You are adding a menu to {{ for_rest_name }}</span>
+        {% if for_rest_addr %}<br><span style="font-size:.8rem; color:#666;">{{ for_rest_addr }}</span>{% endif %}
+      </div>
+    </div>
+    {% endif %}
 
     {% if show_admin %}
     <!-- Toolbar (admin only) -->
@@ -17,6 +27,23 @@
 
     <!-- Lock/unlock styles + fireworks animation -->
     <style>
+      .btn-secondary { background:var(--terracotta, #B85C38) !important; color:#fff !important; border-color:var(--terracotta, #B85C38) !important; }
+      .btn-secondary:hover { opacity:.9; }
+      .info-icon {
+        position:absolute; top:10px; right:12px; width:22px; height:22px;
+        border-radius:50%; background:rgba(46,91,94,.1); color:#2E5B5E;
+        font-size:13px; font-weight:700; line-height:22px; text-align:center;
+        cursor:pointer; z-index:2; font-style:italic; font-family:Georgia,serif;
+        transition:all .2s;
+      }
+      .info-icon:hover { background:#2E5B5E; color:#fff; }
+      .info-tooltip {
+        display:none; position:absolute; top:38px; right:8px; z-index:10;
+        background:#fff; border:1px solid var(--line); border-radius:10px;
+        padding:10px 14px; font-size:.8rem; color:#444; line-height:1.45;
+        box-shadow:0 4px 16px rgba(0,0,0,.1); max-width:240px; width:max-content;
+      }
+      .info-icon:hover + .info-tooltip, .info-tooltip:hover { display:block; }
       .tier-badge {
         display: inline-flex;
         align-items: center;
@@ -30,14 +57,14 @@
         transition: all 0.4s ease;
       }
       .tier-badge.locked {
-        background: rgba(255, 80, 80, 0.15);
-        color: #ff6b6b;
-        border: 1px solid rgba(255, 80, 80, 0.3);
+        background: rgba(211, 47, 47, 0.12);
+        color: #d32f2f;
+        border: 1px solid rgba(211, 47, 47, 0.35);
       }
       .tier-badge.unlocked {
-        background: rgba(80, 220, 120, 0.15);
-        color: #50dc78;
-        border: 1px solid rgba(80, 220, 120, 0.3);
+        background: rgba(46, 91, 94, 0.12);
+        color: #2E5B5E;
+        border: 1px solid rgba(46, 91, 94, 0.3);
       }
       .card-locked {
         position: relative;
@@ -48,9 +75,10 @@
         position: absolute;
         inset: 0;
         border-radius: inherit;
-        border: 2px dashed rgba(255, 80, 80, 0.35);
+        border: 2px dashed rgba(211, 47, 47, 0.5);
         pointer-events: none;
       }
+      .card-locked .btn { opacity:1 !important; }
       .card-unlocked {
         position: relative;
         overflow: visible;
@@ -76,10 +104,10 @@
 
       /* --- Card glow pulse on unlock --- */
       @keyframes card-glow {
-        0%   { box-shadow: 0 0 0 0 rgba(80, 220, 120, 0); }
-        30%  { box-shadow: 0 0 20px 6px rgba(80, 220, 120, 0.35); }
-        70%  { box-shadow: 0 0 35px 10px rgba(122, 162, 255, 0.25); }
-        100% { box-shadow: 0 0 0 0 rgba(80, 220, 120, 0); }
+        0%   { box-shadow: 0 0 0 0 rgba(46, 91, 94, 0); }
+        30%  { box-shadow: 0 0 24px 8px rgba(46, 91, 94, 0.3); }
+        70%  { box-shadow: 0 0 40px 12px rgba(184, 92, 56, 0.2); }
+        100% { box-shadow: 0 0 0 0 rgba(46, 91, 94, 0); }
       }
       .card-unlocked.glow {
         animation: card-glow 1.5s ease-out forwards;
@@ -101,26 +129,28 @@
         pointer-events: none;
         animation: fw-shoot var(--fw-dur, 1.2s) cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
         opacity: 0;
+        box-shadow: 0 0 4px currentColor;
       }
       @keyframes fw-shoot {
-        0%   { opacity: 1; transform: translate(0, 0) scale(1); }
-        20%  { opacity: 1; }
-        100% { opacity: 0; transform: translate(var(--fw-x), var(--fw-y)) scale(0.1); }
+        0%   { opacity: 1; transform: translate(0, 0) scale(1.2); }
+        30%  { opacity: 1; }
+        100% { opacity: 0; transform: translate(var(--fw-x), var(--fw-y)) scale(0.2); }
       }
 
       /* --- Sparkle stars (larger, float up and out) --- */
       .fw-star {
         position: absolute;
         pointer-events: none;
-        font-size: 18px;
+        font-size: 24px;
         opacity: 0;
+        text-shadow: 0 0 6px currentColor;
         animation: fw-star-rise var(--star-dur, 1.5s) ease-out forwards;
       }
       @keyframes fw-star-rise {
         0%   { opacity: 0; transform: translate(0, 0) scale(0) rotate(0deg); }
-        15%  { opacity: 1; transform: translate(var(--star-x1), var(--star-y1)) scale(1.2) rotate(90deg); }
-        60%  { opacity: 1; transform: translate(var(--star-x2), var(--star-y2)) scale(1) rotate(200deg); }
-        100% { opacity: 0; transform: translate(var(--star-x3), var(--star-y3)) scale(0.4) rotate(360deg); }
+        15%  { opacity: 1; transform: translate(var(--star-x1), var(--star-y1)) scale(1.4) rotate(90deg); }
+        60%  { opacity: 0.9; transform: translate(var(--star-x2), var(--star-y2)) scale(1.1) rotate(200deg); }
+        100% { opacity: 0; transform: translate(var(--star-x3), var(--star-y3)) scale(0.5) rotate(360deg); }
       }
 
       /* --- Ring burst --- */
@@ -132,14 +162,14 @@
         height: 10px;
         margin: -5px 0 0 -5px;
         border-radius: 50%;
-        border: 2px solid rgba(122, 162, 255, 0.8);
+        border: 3px solid rgba(184, 92, 56, 0.7);
         pointer-events: none;
         opacity: 0;
         animation: fw-ring-expand 1s ease-out forwards;
       }
       @keyframes fw-ring-expand {
         0%   { opacity: 0.9; transform: scale(0); }
-        50%  { opacity: 0.6; border-color: rgba(80, 220, 120, 0.6); }
+        50%  { opacity: 0.5; border-color: rgba(46, 91, 94, 0.6); }
         100% { opacity: 0; transform: scale(12); }
       }
 
@@ -147,7 +177,7 @@
         display: block;
         margin-top: 8px;
         font-size: .8rem;
-        color: #ff6b6b;
+        color: #d32f2f;
         font-style: italic;
       }
 
@@ -169,9 +199,9 @@
       /* --- Badge color transition for unlock (red → green) --- */
       .tier-badge.transitioning {
         transition: background 2s ease, color 2s ease, border-color 2s ease;
-        background: rgba(80, 220, 120, 0.15) !important;
-        color: #50dc78 !important;
-        border-color: rgba(80, 220, 120, 0.3) !important;
+        background: rgba(46, 91, 94, 0.12) !important;
+        color: #2E5B5E !important;
+        border-color: rgba(46, 91, 94, 0.3) !important;
       }
 
       /* Hide sparkle elements until JS triggers them */
@@ -208,91 +238,113 @@
     </div>
     {% endif %}
 
-    <!-- Upload panels -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-      <!-- Upload Image -->
+    <!-- Premium upload panels (Photo + PDF) -->
+    <h2 style="text-align:center; font-size:1.4rem; font-weight:700; color:#2C2C2C; margin:12px 0 14px;">Upload a picture of your menu!</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4" id="premiumGrid" style="position:relative;">
+      <!-- Photo Upload -->
       {% if account_tier == 'lightning' %}
-      <div class="card card-unlocked" data-unlock-panel>
+      <div class="card card-unlocked" data-unlock-panel style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">Use your phone to take a photo of your paper menu. We'll use AI to read the items, prices, and categories automatically.</div>
         <div class="firework-canvas"></div>
-        <h2 class="text-lg font-semibold mb-2">Upload Image
+        <h2 class="text-lg font-semibold mb-2">JPG File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
         </h2>
         <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
-          <button type="submit" class="btn btn-primary w-full" id="imgBtn">Upload Image</button>
+          <button type="submit" class="btn w-full" id="imgBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload Photo</button>
         </form>
-        <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
+        <p class="muted mt-2 text-sm">Snap a picture of your printed menu and we'll read it for you.</p>
       </div>
       {% else %}
-      <div class="card card-locked" data-locked-panel>
-        <h2 class="text-lg font-semibold mb-2">Upload Image
+      <div class="card card-locked" data-locked-panel style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">Use your phone to take a photo of your paper menu. We'll use AI to read the items, prices, and categories automatically.</div>
+        <h2 class="text-lg font-semibold mb-2">JPG File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> Locked</span>
         </h2>
         <form class="space-y-2">
           <input type="file" disabled class="form-control w-full" style="cursor:not-allowed" />
-          <button type="button" disabled class="btn btn-primary w-full" style="cursor:not-allowed; opacity:0.5">Upload Image</button>
+          <button type="button" disabled class="btn w-full" style="cursor:not-allowed; background:#d32f2f !important; color:#fff !important; border-color:#d32f2f !important;">Upload Photo</button>
         </form>
-        <p class="muted mt-2 text-sm">PNG or JPG. Great for phone photos of printed menus.</p>
+        <p class="muted mt-2 text-sm">Snap a picture of your printed menu and we'll read it for you.</p>
         <a href="{{ url_for('choose_plan') }}" class="upgrade-hint" style="text-decoration:underline; pointer-events:auto;">Upgrade to Premium to unlock photo uploads</a>
       </div>
       {% endif %}
 
-      <!-- Upload PDF -->
+      <!-- PDF Upload -->
       {% if account_tier == 'lightning' %}
-      <div class="card card-unlocked" data-unlock-panel>
+      <div class="card card-unlocked" data-unlock-panel style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">If your menu is saved as a PDF on your computer or email, upload it here. We'll extract all the text and organize it for you.</div>
         <div class="firework-canvas"></div>
-        <h2 class="text-lg font-semibold mb-2">Upload PDF
+        <h2 class="text-lg font-semibold mb-2">PDF File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
         </h2>
         <form id="pdfForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
-          <button type="submit" class="btn btn-primary w-full" id="pdfBtn">Upload PDF</button>
+          <button type="submit" class="btn w-full" id="pdfBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload PDF</button>
         </form>
-        <p class="muted mt-2 text-sm">For digital menus. We'll extract text and structure a draft.</p>
+        <p class="muted mt-2 text-sm">Already have a digital menu as a PDF? Upload it and we'll pull everything out.</p>
       </div>
       {% else %}
-      <div class="card card-locked" data-locked-panel>
-        <h2 class="text-lg font-semibold mb-2">Upload PDF
+      <div class="card card-locked" data-locked-panel style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">If your menu is saved as a PDF on your computer or email, upload it here. We'll extract all the text and organize it for you.</div>
+        <h2 class="text-lg font-semibold mb-2">PDF File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> Locked</span>
         </h2>
         <form class="space-y-2">
           <input type="file" disabled class="form-control w-full" style="cursor:not-allowed" />
-          <button type="button" disabled class="btn btn-primary w-full" style="cursor:not-allowed; opacity:0.5">Upload PDF</button>
+          <button type="button" disabled class="btn w-full" style="cursor:not-allowed; background:#d32f2f !important; color:#fff !important; border-color:#d32f2f !important;">Upload PDF</button>
         </form>
-        <p class="muted mt-2 text-sm">For digital menus. We'll extract text and structure a draft.</p>
+        <p class="muted mt-2 text-sm">Already have a digital menu as a PDF? Upload it and we'll pull everything out.</p>
         <a href="{{ url_for('choose_plan') }}" class="upgrade-hint" style="text-decoration:underline; pointer-events:auto;">Upgrade to Premium to unlock PDF uploads</a>
       </div>
       {% endif %}
 
-      <!-- Structured CSV Import (always available) -->
-      <div class="card">
-        <h2 class="text-lg font-semibold mb-2">Structured CSV (POS export)</h2>
+    </div>
+
+    <!-- Standard import panels (CSV + Excel + JSON) -->
+    <h2 style="text-align:center; font-size:1.4rem; font-weight:700; color:#2C2C2C; margin:24px 0 14px;">Already have a file?</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+      <!-- CSV Import -->
+      <div class="card" style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">A CSV is a simple spreadsheet file. If you exported your menu from your POS system or typed it into Google Sheets, save it as a .csv file and upload here.</div>
+        <h2 class="text-lg font-semibold mb-2">Spreadsheet (CSV)</h2>
         <form id="csvForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept=".csv,text/csv" required class="form-control w-full" />
-          <button type="submit" class="btn btn-secondary w-full" id="csvBtn">Import CSV to Draft</button>
+          <button type="submit" class="btn btn-secondary w-full" id="csvBtn">Import CSV</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For POS-style CSV exports (name, price, category, etc.). We'll create a structured draft in the Draft Editor.
+          Have a spreadsheet from your POS or typed up yourself? Drop in a CSV file.
         </p>
       </div>
 
-      <!-- Structured XLSX Import (always available) -->
-      <div class="card">
-        <h2 class="text-lg font-semibold mb-2">Structured Excel (XLSX)</h2>
+      <!-- XLSX Import -->
+      <div class="card" style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">Upload a .xlsx file from Microsoft Excel or Google Sheets (File &gt; Download &gt; Excel). One row per menu item works best.</div>
+        <h2 class="text-lg font-semibold mb-2">Excel File (XLSX)</h2>
         <form id="xlsxForm" action="{{ url_for('import_xlsx') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+          {% if for_rest_id %}<input type="hidden" name="restaurant_id" value="{{ for_rest_id }}">{% endif %}
           <input type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="form-control w-full" />
-          <button type="submit" class="btn btn-secondary w-full" id="xlsxBtn">Import XLSX to Draft</button>
+          <button type="submit" class="btn btn-secondary w-full" id="xlsxBtn">Import Excel</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For Excel-style exports (one row per item). We'll create a structured draft in the Draft Editor.
+          Got your menu in an Excel file? Upload the .xlsx and we'll handle the rest.
         </p>
       </div>
 
-      <!-- Structured JSON Import (always available) -->
-      <div class="card">
-        <h2 class="text-lg font-semibold mb-2">Structured JSON</h2>
+      <!-- JSON Import -->
+      <div class="card" style="position:relative;">
+        <span class="info-icon">i</span>
+        <div class="info-tooltip">JSON is a data format used by developers and some POS systems. If your POS has a "data export" or API option, it may give you a .json file.</div>
+        <h2 class="text-lg font-semibold mb-2">Data File (JSON)</h2>
         <form id="jsonForm" action="{{ url_for('import_json') }}" method="post" enctype="multipart/form-data" class="space-y-2">
+          {% if for_rest_id %}<input type="hidden" name="restaurant_id" value="{{ for_rest_id }}">{% endif %}
           <input
             type="file"
             name="file"
@@ -300,10 +352,10 @@
             required
             class="form-control w-full"
           />
-          <button type="submit" class="btn btn-secondary w-full" id="jsonBtn">Import JSON to Draft</button>
+          <button type="submit" class="btn btn-secondary w-full" id="jsonBtn">Import JSON</button>
         </form>
         <p class="muted mt-2 text-sm">
-          For API-style JSON exports (items array or list of objects). We'll create a structured draft in the Draft Editor.
+          For developers or POS exports in JSON format. We'll turn it into a menu draft.
         </p>
       </div>
     </div>
@@ -343,6 +395,10 @@
       document.getElementById('csvBtn')?.toggleAttribute('disabled', disabled);
     }
 
+    // Day 133: grab restaurant_id from URL if coming from "Add Menu"
+    const _urlParams = new URLSearchParams(window.location.search);
+    const _forRestId = _urlParams.get('for_restaurant') || '';
+
     function doUpload(formEl) {
       const fileInput = formEl.querySelector('input[type="file"]');
       if (!fileInput || !fileInput.files || !fileInput.files[0]) {
@@ -352,6 +408,7 @@
 
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
+      if (_forRestId) fd.append('restaurant_id', _forRestId);
 
       setActive(true);
       disableDuringUpload(true);
@@ -405,6 +462,7 @@
 
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
+      if (_forRestId) fd.append('restaurant_id', _forRestId);
 
       setActive(true);
       disableDuringUpload(true);
@@ -502,36 +560,47 @@
       clone.play().catch(() => {});
     }
 
-    // Play fireworks video as centered overlay with feathered edges
+    // Play fireworks video — screen blend (black bg becomes transparent)
     function playFireworkVideo() {
       const wrap = document.createElement('div');
       wrap.style.cssText = `
         position:fixed; top:50%; left:50%;
         transform:translate(-50%,-50%);
-        width:70vw; height:70vh;
+        width:100vw; height:100vh;
         pointer-events:none;
         z-index:9999;
         mix-blend-mode:screen;
-        -webkit-mask-image:radial-gradient(ellipse at center, black 25%, transparent 58%);
-        mask-image:radial-gradient(ellipse at center, black 25%, transparent 58%);
       `;
       const vid = document.createElement('video');
-      vid.src = '/static/audio/fireworks.webm';
+      vid.src = '/static/audio/fireworks_new.mp4';
       vid.muted = true;
       vid.playsInline = true;
       vid.style.cssText = `
         width:100%; height:100%;
         object-fit:cover;
-        opacity:0.9;
       `;
       wrap.appendChild(vid);
       document.body.appendChild(wrap);
       vid.play().catch(() => {});
-      vid.onended = () => wrap.remove();
+
+      // Stop video when firework audio would end
+      var dur = fireworkAudio.duration;
+      if (!dur || isNaN(dur)) dur = 5;
+      dur = dur - 1; // trim to match audio ending
+      // Start fading 1 second before the end
+      setTimeout(() => {
+        wrap.style.transition = 'opacity 1s ease';
+        wrap.style.opacity = '0';
+      }, (dur - 1) * 1000);
+      setTimeout(() => {
+        vid.pause();
+        wrap.remove();
+      }, dur * 1000);
+      vid.onended = () => { wrap.remove(); };
     }
 
     // ======== Firework Helpers ========
-    const COLORS = ['#50dc78','#7aa2ff','#ffcc44','#ff6bab','#44eeff','#ff8844','#cc77ff'];
+    const COLORS = ['#B85C38','#2E5B5E','#d4760a','#c2185b','#1565c0','#e65100','#7b1fa2'];
     const STARS  = ['✦','✧','⚡','★','✶','✹','💥','🎉'];
 
     function rand(min, max) { return Math.random() * (max - min) + min; }

@@ -617,22 +617,25 @@ def _resolve_restaurant_id_for_action(job_row: sqlite3.Row) -> Optional[int]:
 def _resolve_restaurant_id_from_request() -> Optional[int]:
     """
     Used at upload time:
-      - If customer: force their own restaurant_id.
+      - Explicit form['restaurant_id'] takes priority (e.g. "Add Menu" from restaurant page).
+      - Else customer: fall back to session restaurant_id.
       - Else (admin): try form['restaurant_id'] if provided.
     """
+    # Explicit restaurant_id from form (Day 133: "Add Menu" flow)
+    rid = request.form.get("restaurant_id")
+    if rid and str(rid).strip():
+        try:
+            return int(rid)
+        except Exception:
+            pass
+    # Customer fallback: session restaurant
     u = (session.get("user") or {})
     if u.get("role") == "customer" and u.get("restaurant_id"):
         try:
             return int(u["restaurant_id"])
         except Exception:
             return None
-    rid = request.form.get("restaurant_id")
-    if rid is None or str(rid).strip() == "":
-        return None
-    try:
-        return int(rid)
-    except Exception:
-        return None
+    return None
 
 def _find_or_create_menu_for_restaurant(conn: sqlite3.Connection, restaurant_id: int) -> int:
     """Return an existing active menu for the restaurant, or create a new one."""
@@ -2566,22 +2569,17 @@ def import_status(job_id):
 @login_required
 def restaurants_page():
     u = session.get("user") or {}
-    # Customers see only their linked restaurants; admins see all
+    # Customers: redirect to restaurant detail (which is now the restaurants management page)
     if _is_customer() and u.get("user_id") and users_store:
         links = users_store.get_user_restaurants(u["user_id"])
         rest_ids = [lnk["restaurant_id"] for lnk in links]
         if rest_ids:
-            placeholders = ",".join("?" * len(rest_ids))
-            with db_connect() as conn:
-                rows = conn.execute(
-                    f"SELECT * FROM restaurants WHERE id IN ({placeholders}) AND active=1 ORDER BY id",
-                    rest_ids,
-                ).fetchall()
-        else:
-            rows = []
-    else:
-        with db_connect() as conn:
-            rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
+            return redirect(url_for("restaurant_detail", rest_id=rest_ids[0]))
+        # No restaurants yet — show the page with empty grid
+        return redirect(url_for("restaurant_detail", rest_id=0))
+    # Admins: show the old table view
+    with db_connect() as conn:
+        rows = conn.execute("SELECT * FROM restaurants WHERE active=1 ORDER BY id").fetchall()
     return _safe_render("restaurants.html", restaurants=rows)
 
 @app.post("/restaurants")
@@ -3683,20 +3681,31 @@ def account_delete():
 # ------------------------
 @app.get("/restaurants/<int:rest_id>/detail")
 @login_required
-@require_restaurant_access
 def restaurant_detail(rest_id):
-    """Customer-facing restaurant detail page with edit form + stats."""
+    """Customer-facing restaurants management page."""
+    # rest_id=0 means "no restaurant yet, just show the add form"
     rest = None
-    if users_store:
-        rest = users_store.get_restaurant(rest_id)
-    if not rest:
-        with db_connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM restaurants WHERE id = ? AND active = 1", (rest_id,)
-            ).fetchone()
-            rest = dict(row) if row else None
-    if not rest:
-        abort(404)
+    if rest_id > 0:
+        # Verify access (non-zero rest_id)
+        u_check = session.get("user") or {}
+        role = u_check.get("role")
+        if role not in ("admin", None):
+            uid = u_check.get("user_id")
+            if not (uid and users_store and users_store.user_owns_restaurant(uid, rest_id)):
+                abort(403)
+        if users_store:
+            rest = users_store.get_restaurant(rest_id)
+        if not rest:
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM restaurants WHERE id = ? AND active = 1", (rest_id,)
+                ).fetchone()
+                rest = dict(row) if row else None
+        if not rest:
+            abort(404)
+    else:
+        # Dummy restaurant object for the template (empty state)
+        rest = {"id": 0, "name": ""}
 
     stats = {"draft_count": 0, "menu_count": 0, "item_count": 0}
     if users_store:
@@ -3726,11 +3735,25 @@ def restaurant_detail(rest_id):
 
     cuisine_types = sorted(users_store.VALID_CUISINE_TYPES) if users_store else []
 
+    # Fetch all user's restaurants for the tiles panel
+    all_restaurants = []
+    u = session.get("user") or {}
+    if _is_customer() and u.get("user_id") and users_store:
+        links = users_store.get_user_restaurants(u["user_id"])
+        r_ids = [lnk["restaurant_id"] for lnk in links]
+        if r_ids:
+            ph = ",".join("?" * len(r_ids))
+            with db_connect() as conn:
+                all_restaurants = [dict(r) for r in conn.execute(
+                    f"SELECT * FROM restaurants WHERE id IN ({ph}) AND active=1 ORDER BY id", r_ids
+                ).fetchall()]
+
     return _safe_render("restaurant_detail.html",
                         restaurant=rest, stats=stats,
                         recent_drafts=recent_drafts,
                         menus=menu_list,
-                        cuisine_types=cuisine_types)
+                        cuisine_types=cuisine_types,
+                        all_restaurants=all_restaurants)
 
 
 @app.post("/restaurants/<int:rest_id>/update")
@@ -3952,7 +3975,13 @@ def import_upload():
                 rest_profile = users_store.get_restaurant(int(rest_id))
             except Exception:
                 pass
-        return _safe_render("import.html", account_tier=tier, rest_profile=rest_profile)
+        # Day 133: "Add Menu" banner when coming from restaurant page
+        for_rest_name = request.args.get("rest_name", "")
+        for_rest_addr = request.args.get("rest_addr", "")
+        for_rest_id = request.args.get("for_restaurant", "")
+        return _safe_render("import.html", account_tier=tier, rest_profile=rest_profile,
+                            for_rest_name=for_rest_name, for_rest_addr=for_rest_addr,
+                            for_rest_id=for_rest_id)
 
     # POST: actual upload handler — OCR image upload requires lightning tier
     _raw = session.get("user")
