@@ -379,11 +379,12 @@ def get_restaurant(restaurant_id: int) -> Optional[Dict[str, Any]]:
 
 def update_restaurant(restaurant_id: int, **fields) -> bool:
     """
-    Update restaurant fields.  Accepted: name, phone, address,
-    cuisine_type, website.  Returns True if a row was updated.
+    Update restaurant fields.  Accepted: name, phone, address, address_line2,
+    city, state, zip_code, cuisine_type, website.  Returns True if a row was updated.
     Raises ValueError if name is blank.
     """
-    allowed = {"name", "phone", "address", "cuisine_type", "website"}
+    allowed = {"name", "phone", "address", "address_line2", "city", "state",
+               "zip_code", "cuisine_type", "website"}
     to_set = {k: v for k, v in fields.items() if k in allowed}
     if not to_set:
         return False
@@ -394,9 +395,21 @@ def update_restaurant(restaurant_id: int, **fields) -> bool:
             raise ValueError("Restaurant name cannot be empty")
         to_set["name"] = n
     # Sanitize optional text fields
-    for fld in ("phone", "address", "website"):
+    for fld in ("phone", "address", "address_line2", "city", "website"):
         if fld in to_set:
             to_set[fld] = (to_set[fld] or "").strip() or None
+    # Validate state — uppercase, max 2 chars
+    if "state" in to_set:
+        st = (to_set["state"] or "").strip().upper() or None
+        if st:
+            st = st[:2]
+        to_set["state"] = st
+    # Validate zip_code — strip, max 10 chars
+    if "zip_code" in to_set:
+        zc = (to_set["zip_code"] or "").strip() or None
+        if zc:
+            zc = zc[:10]
+        to_set["zip_code"] = zc
     # Validate cuisine_type
     if "cuisine_type" in to_set:
         ct = (to_set["cuisine_type"] or "").strip().lower() or None
@@ -451,13 +464,21 @@ def get_restaurant_stats(restaurant_id: int) -> Dict[str, int]:
 
 
 def _ensure_restaurant_columns() -> None:
-    """Add cuisine_type, website, updated_at columns if missing (idempotent)."""
+    """Add cuisine_type, website, address fields, updated_at columns if missing (idempotent)."""
     with db_connect() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(restaurants)").fetchall()}
         if "cuisine_type" not in cols:
             conn.execute("ALTER TABLE restaurants ADD COLUMN cuisine_type TEXT")
         if "website" not in cols:
             conn.execute("ALTER TABLE restaurants ADD COLUMN website TEXT")
+        if "zip_code" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN zip_code TEXT")
+        if "address_line2" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN address_line2 TEXT")
+        if "city" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN city TEXT")
+        if "state" not in cols:
+            conn.execute("ALTER TABLE restaurants ADD COLUMN state TEXT")
         if "updated_at" not in cols:
             conn.execute("ALTER TABLE restaurants ADD COLUMN updated_at TEXT")
         conn.commit()

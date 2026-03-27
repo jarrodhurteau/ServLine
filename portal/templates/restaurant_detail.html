@@ -10,6 +10,8 @@
   .stat-card .num { font-size:1.8rem; font-weight:700; color:#7aa2ff; }
   .stat-card .label { font-size:.8rem; color:var(--muted); margin-top:2px; }
   .detail-section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  #edit-cuisine option { color: #2C2C2C; }
+  #edit-cuisine option[value=""] { color: #999; }
 </style>
 {% endblock %}
 
@@ -44,34 +46,52 @@
     <h2 class="text-lg font-semibold mb-3">Restaurant Details</h2>
     <form action="/restaurants/{{ restaurant.id }}/update" method="post" style="display:grid; gap:12px; max-width:520px;">
       <div>
-        <label for="edit-name" style="color:var(--muted); font-size:.9rem;">Name *</label>
+        <label for="edit-name" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Restaurant Name *</label>
         <input id="edit-name" name="name" type="text" required value="{{ restaurant.name }}" style="width:100%;">
       </div>
       <div>
-        <label for="edit-phone" style="color:var(--muted); font-size:.9rem;">Phone</label>
-        <input id="edit-phone" name="phone" type="text" value="{{ restaurant.phone or '' }}" placeholder="(555) 123-4567" style="width:100%;">
-      </div>
-      <div>
-        <label for="edit-address" style="color:var(--muted); font-size:.9rem;">Address</label>
-        <input id="edit-address" name="address" type="text" value="{{ restaurant.address or '' }}" placeholder="123 Main St, Anytown USA" style="width:100%;">
-      </div>
-      <div>
-        <label for="edit-cuisine" style="color:var(--muted); font-size:.9rem;">Cuisine Type</label>
+        <label for="edit-cuisine" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Cuisine Type</label>
         <select id="edit-cuisine" name="cuisine_type" style="width:100%;">
-          <option value="">-- Select --</option>
+          <option value="" style="color:#999;">-- Select --</option>
           {% for ct in cuisine_types %}
             <option value="{{ ct }}" {% if restaurant.cuisine_type == ct %}selected{% endif %}>{{ ct|capitalize }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
-        <label for="edit-website" style="color:var(--muted); font-size:.9rem;">Website</label>
-        <input id="edit-website" name="website" type="text" value="{{ restaurant.website or '' }}" placeholder="https://example.com" style="width:100%;">
+        <label for="edit-address" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Address</label>
+        <input id="edit-address" name="address" type="text" value="{{ restaurant.address or '' }}" placeholder="123 Main St" style="width:100%;">
+      </div>
+      <div>
+        <label for="edit-address2" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Apt / Suite <span style="font-size:.8rem; opacity:.6;">(optional)</span></label>
+        <input id="edit-address2" name="address_line2" type="text" value="{{ restaurant.address_line2 or '' }}" placeholder="Apt 4B, Suite 200, etc." style="width:100%;">
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 80px 110px; gap:10px;">
+        <div>
+          <label for="edit-city" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">City</label>
+          <input id="edit-city" name="city" type="text" value="{{ restaurant.city or '' }}" placeholder="New York" style="width:100%;">
+        </div>
+        <div>
+          <label for="edit-state" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">State</label>
+          <input id="edit-state" name="state" type="text" value="{{ restaurant.state or '' }}" placeholder="NY" maxlength="2" style="width:100%; text-transform:uppercase;">
+        </div>
+        <div>
+          <label for="edit-zip" style="color:#2C2C2C; font-size:.9rem; font-weight:500;">Zip Code</label>
+          <input id="edit-zip" name="zip_code" type="text" value="{{ restaurant.zip_code or '' }}" placeholder="10001" maxlength="10" style="width:100%;">
+        </div>
       </div>
       <div>
         <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
       </div>
     </form>
+    <script>
+      (function(){
+        var s = document.getElementById('edit-cuisine');
+        function upd(){ s.style.setProperty('color', s.value ? '#2C2C2C' : '#999', 'important'); }
+        s.addEventListener('change', upd);
+        upd();
+      })();
+    </script>
   </div>
 
   <!-- Recent Drafts -->

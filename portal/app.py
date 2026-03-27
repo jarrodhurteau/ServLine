@@ -2595,11 +2595,16 @@ def create_restaurant():
         return redirect(redirect_to or url_for("restaurants_page"))
     phone = (request.form.get("phone") or "").strip() or None
     address = (request.form.get("address") or "").strip() or None
+    address_line2 = (request.form.get("address_line2") or "").strip() or None
+    city = (request.form.get("city") or "").strip() or None
+    state = (request.form.get("state") or "").strip().upper() or None
+    zip_code = (request.form.get("zip_code") or "").strip() or None
+    cuisine_type = (request.form.get("cuisine_type") or "").strip() or None
     try:
         with db_connect() as conn:
             cur = conn.execute(
-                "INSERT INTO restaurants (name, phone, address, active, created_at) VALUES (?, ?, ?, 1, datetime('now'))",
-                (name, phone, address),
+                "INSERT INTO restaurants (name, phone, address, address_line2, city, state, zip_code, cuisine_type, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))",
+                (name, phone, address, address_line2, city, state, zip_code, cuisine_type),
             )
             rest_id = cur.lastrowid
             conn.commit()
@@ -3732,7 +3737,7 @@ def restaurant_detail(rest_id):
 @login_required
 @require_restaurant_access
 def update_restaurant(rest_id):
-    """Update restaurant details (name, phone, address, cuisine_type, website)."""
+    """Update restaurant details (name, phone, address, cuisine_type, website, zip_code)."""
     if not users_store:
         flash("Restaurant updates not available.", "error")
         return redirect(url_for("restaurant_detail", rest_id=rest_id))
@@ -3740,12 +3745,18 @@ def update_restaurant(rest_id):
     name = (request.form.get("name") or "").strip()
     phone = (request.form.get("phone") or "").strip() or None
     address = (request.form.get("address") or "").strip() or None
+    address_line2 = (request.form.get("address_line2") or "").strip() or None
+    city = (request.form.get("city") or "").strip() or None
+    state = (request.form.get("state") or "").strip() or None
+    zip_code = (request.form.get("zip_code") or "").strip() or None
     cuisine_type = (request.form.get("cuisine_type") or "").strip() or None
     website = (request.form.get("website") or "").strip() or None
 
     try:
         users_store.update_restaurant(rest_id,
                                       name=name, phone=phone, address=address,
+                                      address_line2=address_line2, city=city,
+                                      state=state, zip_code=zip_code,
                                       cuisine_type=cuisine_type, website=website)
         flash("Restaurant updated.", "success")
     except ValueError as exc:
@@ -3753,7 +3764,8 @@ def update_restaurant(rest_id):
     except Exception as e:
         flash(f"Update failed: {e}", "error")
 
-    return redirect(url_for("restaurant_detail", rest_id=rest_id))
+    redirect_to = request.form.get("_redirect") or None
+    return redirect(redirect_to or url_for("restaurant_detail", rest_id=rest_id))
 
 
 @app.post("/restaurants/<int:rest_id>/delete")
@@ -3932,7 +3944,15 @@ def import_upload():
         _raw_g = session.get("user")
         u_g = _raw_g if isinstance(_raw_g, dict) else {}
         tier = u_g.get("account_tier")
-        return _safe_render("import.html", account_tier=tier)
+        # Day 133: fetch restaurant profile for cuisine/zip prompt
+        rest_profile = None
+        rest_id = u_g.get("restaurant_id")
+        if rest_id and users_store:
+            try:
+                rest_profile = users_store.get_restaurant(int(rest_id))
+            except Exception:
+                pass
+        return _safe_render("import.html", account_tier=tier, rest_profile=rest_profile)
 
     # POST: actual upload handler — OCR image upload requires lightning tier
     _raw = session.get("user")

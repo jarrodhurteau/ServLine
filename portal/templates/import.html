@@ -178,6 +178,36 @@
       .sparkle-container { display: none; }
     </style>
 
+    <!-- Day 133: Restaurant profile collection — cuisine + zip for price intelligence -->
+    {% if rest_profile and (not rest_profile.cuisine_type or not rest_profile.zip_code) %}
+    <div id="profileBanner" class="card mb-4" style="border:1px solid var(--brand, #7aa2ff); background:var(--panel);">
+      <h2 class="text-lg font-semibold mb-2">Complete Your Restaurant Profile</h2>
+      <p class="muted text-sm mb-3">
+        We use your cuisine type and zip code to provide local price intelligence when parsing your menu.
+      </p>
+      <form action="/restaurants/{{ rest_profile.id }}/update" method="post" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+        <input type="hidden" name="name" value="{{ rest_profile.name }}">
+        <div style="flex:1; min-width:160px;">
+          <label for="prof-cuisine" style="color:var(--muted); font-size:.85rem;">Cuisine Type</label>
+          <select id="prof-cuisine" name="cuisine_type" style="width:100%;">
+            <option value="">-- Select --</option>
+            {% for ct in ["american","italian","mexican","chinese","japanese","thai","indian","mediterranean","french","korean","vietnamese","greek","caribbean","bbq","seafood","pizza","burger","deli","bakery","cafe","bar","other"] %}
+              <option value="{{ ct }}" {% if rest_profile.cuisine_type == ct %}selected{% endif %}>{{ ct|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:0 0 140px;">
+          <label for="prof-zip" style="color:var(--muted); font-size:.85rem;">Zip Code</label>
+          <input id="prof-zip" name="zip_code" type="text" value="{{ rest_profile.zip_code or '' }}" placeholder="10001" maxlength="10" style="width:100%;">
+        </div>
+        <div>
+          <input type="hidden" name="_redirect" value="{{ url_for('import_upload') }}">
+          <button type="submit" class="btn btn-primary btn-sm">Save &amp; Continue</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
     <!-- Upload panels -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 
