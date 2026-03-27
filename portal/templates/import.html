@@ -194,7 +194,7 @@
     <h2 style="text-align:center; font-size:2.6rem; font-weight:700; color:#2E5B5E; margin:12px 0 14px; font-family:'Dancing Script',cursive;">Upload a picture of your menu!</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4" id="premiumGrid" style="position:relative;">
       <!-- Photo Upload -->
-      {% if account_tier == 'lightning' %}
+      {% if account_tier == 'premium' %}
       <div class="card card-unlocked" data-unlock-panel style="position:relative;">
         <span class="info-icon">i</span>
         <div class="info-tooltip">Use your phone to take a photo of your paper menu. We'll use AI to read the items, prices, and categories automatically.</div>
@@ -224,7 +224,7 @@
       {% endif %}
 
       <!-- PDF Upload -->
-      {% if account_tier == 'lightning' %}
+      {% if account_tier == 'premium' %}
       <div class="card card-unlocked" data-unlock-panel style="position:relative;">
         <span class="info-icon">i</span>
         <div class="info-tooltip">If your menu is saved as a PDF on your computer or email, upload it here. We'll extract all the text and organize it for you.</div>
@@ -561,7 +561,7 @@
         const cleanUrl = window.location.pathname;
         window.history.replaceState({}, '', cleanUrl);
       }
-      const alreadyPlayed = localStorage.getItem(PLAYED_KEY) === 'lightning';
+      const alreadyPlayed = localStorage.getItem(PLAYED_KEY) === 'premium';
 
       if (alreadyPlayed) {
         // Already seen — show final unlocked state immediately, no animation
@@ -577,7 +577,7 @@
         });
       } else {
         // First visit this session — animate the full unlock
-        localStorage.setItem(PLAYED_KEY, 'lightning');
+        localStorage.setItem(PLAYED_KEY, 'premium');
 
         // Start with red/locked appearance
         unlockPanels.forEach(panel => {

@@ -2521,7 +2521,7 @@ def import_menu():
     # Tier gate: free-tier users cannot upload images/PDFs via API
     _raw = session.get("user")
     _u = _raw if isinstance(_raw, dict) else {}
-    if _u.get("role") != "admin" and _u.get("user_id") and _u.get("account_tier") != "lightning":
+    if _u.get("role") != "admin" and _u.get("user_id") and _u.get("account_tier") != "premium":
         return jsonify({"error": "Photo/PDF upload requires the Premium Package."}), 403
     try:
         if "file" not in request.files:
@@ -3333,7 +3333,7 @@ def logout():
 @app.get("/choose-plan")
 @login_required
 def choose_plan():
-    """Show the plan selection page (free vs lightning).
+    """Show the plan selection page (free vs premium).
 
     Always accessible so users can upgrade their plan.
     """
@@ -3357,7 +3357,7 @@ def choose_plan_post():
         flash("Unable to set plan.", "error")
         return redirect(url_for("choose_plan"))
 
-    if tier not in ("free", "lightning"):
+    if tier not in ("free", "premium"):
         flash("Please select a plan.", "error")
         return redirect(url_for("choose_plan"))
 
@@ -3370,7 +3370,7 @@ def choose_plan_post():
     # Update session with tier
     session["user"] = {**u, "account_tier": tier}
 
-    if tier == "lightning":
+    if tier == "premium":
         flash("Premium Package activated! All features unlocked — upload your menu to get started.", "success")
         return redirect(url_for("import_upload", unlocked="1"))
     else:
@@ -3404,8 +3404,8 @@ def _require_tier_chosen(f):
     return decorated
 
 
-def _require_lightning(f):
-    """Decorator: block access unless user has lightning tier.
+def _require_premium(f):
+    """Decorator: block access unless user has premium tier.
     Returns 403 with upgrade prompt for free-tier users."""
     from functools import wraps
 
@@ -3421,7 +3421,7 @@ def _require_lightning(f):
         if not tier:
             if user_id and users_store:
                 tier = users_store.get_user_tier(user_id)
-        if tier == "lightning":
+        if tier == "premium":
             return f(*args, **kwargs)
         flash("This feature requires the Premium Package.", "error")
         return redirect(url_for("dashboard"))
@@ -3983,11 +3983,11 @@ def import_upload():
                             for_rest_name=for_rest_name, for_rest_addr=for_rest_addr,
                             for_rest_id=for_rest_id)
 
-    # POST: actual upload handler — OCR image upload requires lightning tier
+    # POST: actual upload handler — OCR image upload requires premium tier
     _raw = session.get("user")
     u = _raw if isinstance(_raw, dict) else {}
     tier = u.get("account_tier")
-    if u.get("role") != "admin" and u.get("user_id") and tier != "lightning":
+    if u.get("role") != "admin" and u.get("user_id") and tier != "premium":
         flash("Photo/PDF upload requires the Premium Package.", "error")
         return redirect(url_for("import_upload"))
 

@@ -10,7 +10,7 @@ Deliverables:
   5. Registration redirects to /choose-plan
   6. Login redirects to /choose-plan when no tier chosen
   7. Dashboard requires tier chosen
-  8. OCR image upload gated to lightning tier
+  8. OCR image upload gated to premium tier
   9. POS exports require tier chosen
   10. Template context includes account_tier
 
@@ -288,25 +288,25 @@ class TestTierCRUD:
         assert result is True
         assert _users.get_user_tier(user["id"]) == "free"
 
-    def test_set_tier_lightning(self, mock_db):
+    def test_set_tier_premium(self, mock_db):
         import storage.users as _users
         user = _users.create_user("light@x.com", "password123")
-        result = _users.set_user_tier(user["id"], "lightning")
+        result = _users.set_user_tier(user["id"], "premium")
         assert result is True
-        assert _users.get_user_tier(user["id"]) == "lightning"
+        assert _users.get_user_tier(user["id"]) == "premium"
 
     def test_set_invalid_tier_raises(self, mock_db):
         import storage.users as _users
         user = _users.create_user("bad@x.com", "password123")
         with pytest.raises(ValueError, match="Invalid tier"):
-            _users.set_user_tier(user["id"], "premium")
+            _users.set_user_tier(user["id"], "gold")
 
 
 # ===========================================================================
 # 2. Feature access checks (4 tests)
 # ===========================================================================
 class TestFeatureAccess:
-    """Test check_feature_access for free vs lightning tiers."""
+    """Test check_feature_access for free vs premium tiers."""
 
     def test_free_tier_has_editor(self, mock_db):
         import storage.users as _users
@@ -324,10 +324,10 @@ class TestFeatureAccess:
         assert _users.check_feature_access(user["id"], "ocr_upload") is False
         assert _users.check_feature_access(user["id"], "wizard") is False
 
-    def test_lightning_has_everything(self, mock_db):
+    def test_premium_has_everything(self, mock_db):
         import storage.users as _users
         user = _users.create_user("l@x.com", "password123")
-        _users.set_user_tier(user["id"], "lightning")
+        _users.set_user_tier(user["id"], "premium")
         for feat in ("editor", "csv_json_export", "pos_export", "ai_parse", "ocr_upload", "wizard"):
             assert _users.check_feature_access(user["id"], feat) is True
 
@@ -381,16 +381,16 @@ class TestChoosePlanPost:
         assert resp.status_code in (302, 303)
         assert "/import" in resp.headers.get("Location", "")
 
-    def test_choose_lightning_sets_tier(self, app_client, mock_db):
+    def test_choose_premium_sets_tier(self, app_client, mock_db):
         _register_customer(app_client)
-        resp = app_client.post("/choose-plan", data={"tier": "lightning"})
+        resp = app_client.post("/choose-plan", data={"tier": "premium"})
         assert resp.status_code in (302, 303)
         # Verify in DB
         import storage.users as _users
         conn = mock_db()
         row = conn.execute("SELECT account_tier FROM users WHERE email = 'cust@example.com'").fetchone()
         conn.close()
-        assert row["account_tier"] == "lightning"
+        assert row["account_tier"] == "premium"
 
     def test_choose_invalid_tier_stays_on_page(self, app_client):
         _register_customer(app_client)
@@ -467,12 +467,12 @@ class TestLoginTierHandling:
         assert "/choose-plan" in resp.headers.get("Location", "")
 
     def test_login_session_includes_tier(self, app_client, mock_db):
-        _register_and_choose_tier(app_client, tier="lightning")
+        _register_and_choose_tier(app_client, tier="premium")
         app_client.post("/logout")
         _login_customer(app_client)
         with app_client.session_transaction() as sess:
             user = sess.get("user", {})
-            assert user.get("account_tier") == "lightning"
+            assert user.get("account_tier") == "premium"
 
     def test_admin_login_skips_tier(self, app_client, monkeypatch):
         import portal.app as _app
@@ -506,8 +506,8 @@ class TestDashboardTierGate:
         html = resp.data.decode()
         assert "Dashboard" in html
 
-    def test_dashboard_with_lightning_tier_shows_page(self, app_client):
-        _register_and_choose_tier(app_client, tier="lightning")
+    def test_dashboard_with_premium_tier_shows_page(self, app_client):
+        _register_and_choose_tier(app_client, tier="premium")
         resp = app_client.get("/dashboard")
         assert resp.status_code == 200
 
@@ -529,7 +529,7 @@ class TestDashboardTierGate:
 # 8. Route gating by tier (4 tests)
 # ===========================================================================
 class TestRouteGating:
-    """Test that OCR upload is gated to lightning, free can still use structured imports."""
+    """Test that OCR upload is gated to premium, free can still use structured imports."""
 
     def test_import_get_accessible_with_any_tier(self, app_client):
         _register_and_choose_tier(app_client, tier="free")
@@ -546,8 +546,8 @@ class TestRouteGating:
         html = resp.data.decode()
         assert "Premium Package" in html
 
-    def test_import_post_allowed_for_lightning_tier(self, app_client, tmp_path, monkeypatch):
-        _register_and_choose_tier(app_client, tier="lightning")
+    def test_import_post_allowed_for_premium_tier(self, app_client, tmp_path, monkeypatch):
+        _register_and_choose_tier(app_client, tier="premium")
         # Mock the OCR so it doesn't actually run
         import portal.app as _app
         monkeypatch.setattr(_app, "run_ocr_and_make_draft", lambda *a, **k: None, raising=False)

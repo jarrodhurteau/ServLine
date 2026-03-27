@@ -28,7 +28,7 @@ from storage.drafts import db_connect, _now
 # Constants
 # -------------------------------------------------------------------
 VALID_ROLES = frozenset({"owner", "manager", "staff"})
-VALID_TIERS = frozenset({"free", "lightning"})
+VALID_TIERS = frozenset({"free", "premium"})
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LENGTH = 8
 
@@ -485,11 +485,15 @@ def _ensure_restaurant_columns() -> None:
 
 
 def _ensure_tier_column() -> None:
-    """Add account_tier column to users table if missing (idempotent, Day 131)."""
+    """Add account_tier column to users table if missing (idempotent, Day 131).
+    Day 133: migrate 'lightning' → 'premium' for existing users.
+    """
     with db_connect() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "account_tier" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN account_tier TEXT")
+        # Day 133: rename lightning → premium
+        conn.execute("UPDATE users SET account_tier = 'premium' WHERE account_tier = 'lightning'")
         conn.commit()
 
 
@@ -639,7 +643,7 @@ def consume_reset_token(token: str, new_password: str) -> bool:
 def set_user_tier(user_id: int, tier: str) -> bool:
     """Set the account tier for a user.  Returns True on success.
 
-    Valid tiers: 'free', 'lightning'.
+    Valid tiers: 'free', 'premium'.
     Raises ValueError on invalid tier.
     """
     tier = (tier or "").strip().lower()
@@ -670,19 +674,19 @@ def check_feature_access(user_id: int, feature: str) -> bool:
     """Check if a user has access to a feature based on their tier.
 
     Features:
-      'editor'          — free + lightning
-      'save_menus'      — free + lightning
-      'csv_json_import' — free + lightning
-      'csv_json_export' — free + lightning
-      'pos_export'      — free ($10) + lightning (first free)
-      'ai_parse'        — lightning only
-      'ocr_upload'      — lightning only
-      'wizard'          — lightning only
+      'editor'          — free + premium
+      'save_menus'      — free + premium
+      'csv_json_import' — free + premium
+      'csv_json_export' — free + premium
+      'pos_export'      — free ($10) + premium (first free)
+      'ai_parse'        — premium only
+      'ocr_upload'      — premium only
+      'wizard'          — premium only
     """
     FREE_FEATURES = {"editor", "save_menus", "csv_json_import", "csv_json_export", "pos_export"}
     LIGHTNING_FEATURES = FREE_FEATURES | {"ai_parse", "ocr_upload", "wizard"}
     tier = get_user_tier(user_id)
-    if tier == "lightning":
+    if tier == "premium":
         return feature in LIGHTNING_FEATURES
     # free tier (default for anyone with tier set)
     if tier == "free":

@@ -12,7 +12,7 @@ Deliverables:
   7. /api/menus/import blocks free-tier image uploads (API-level gate)
   8. /choose-plan redirects to /import (not /dashboard)
   9. Import page shows locked panels for free tier
-  10. Import page shows unlocked panels with sparkle for lightning tier
+  10. Import page shows unlocked panels with sparkle for premium tier
 
 32 tests across 8 classes:
   1. Hard delete removes user row (4)
@@ -480,9 +480,9 @@ class TestApiTierGate:
         assert resp.status_code == 403
         assert b"Premium" in resp.data
 
-    def test_lightning_tier_allowed_api_upload(self, app_client, mock_db):
+    def test_premium_tier_allowed_api_upload(self, app_client, mock_db):
         """Lightning-tier user is not blocked (may still fail for other reasons, but not 403)."""
-        _register_and_choose_tier(app_client, tier="lightning", email="pro@example.com")
+        _register_and_choose_tier(app_client, tier="premium", email="pro@example.com")
         import io
         data = {"file": (io.BytesIO(b"fake image data"), "menu.png")}
         resp = app_client.post("/api/menus/import", data=data, content_type="multipart/form-data")
@@ -528,14 +528,14 @@ class TestPlanRedirectToImport:
         assert resp.status_code in (302, 303)
         assert "/import" in resp.headers.get("Location", "")
 
-    def test_choose_lightning_redirects_to_import(self, app_client, mock_db):
+    def test_choose_premium_redirects_to_import(self, app_client, mock_db):
         app_client.post("/register", data={
             "email": "redir2@example.com",
             "password": "securepass1",
             "confirm_password": "securepass1",
             "display_name": "Redir2",
         })
-        resp = app_client.post("/choose-plan", data={"tier": "lightning"}, follow_redirects=False)
+        resp = app_client.post("/choose-plan", data={"tier": "premium"}, follow_redirects=False)
         assert resp.status_code in (302, 303)
         assert "/import" in resp.headers.get("Location", "")
 
@@ -576,18 +576,18 @@ class TestImportPageTierUI:
         assert b'id="imgForm"' not in html
         assert b'id="pdfForm"' not in html
 
-    def test_lightning_tier_shows_unlocked_badges(self, app_client, mock_db):
+    def test_premium_tier_shows_unlocked_badges(self, app_client, mock_db):
         """Lightning-tier import page shows unlocked badges."""
-        _register_and_choose_tier(app_client, tier="lightning", email="ui3@example.com")
+        _register_and_choose_tier(app_client, tier="premium", email="ui3@example.com")
         resp = app_client.get("/import")
         html = resp.data
         assert b"card-unlocked" in html
         assert b"Unlocked" in html
 
-    def test_lightning_tier_has_fireworks(self, app_client, mock_db):
-        """Lightning-tier import page includes firework animation elements."""
-        _register_and_choose_tier(app_client, tier="lightning", email="ui4@example.com")
+    def test_premium_tier_has_fireworks(self, app_client, mock_db):
+        """Premium-tier import page includes firework video unlock sequence."""
+        _register_and_choose_tier(app_client, tier="premium", email="ui4@example.com")
         resp = app_client.get("/import")
         html = resp.data
-        assert b"firework-canvas" in html
-        assert b"fw-particle" in html
+        assert b"fireworks_new.mp4" in html
+        assert b"playFireworkVideo" in html

@@ -240,7 +240,7 @@ def app_client(mock_db, monkeypatch):
     return _app.app.test_client()
 
 
-def _register_and_choose_tier(client, tier="lightning", email="cust@example.com", password="securepass1"):
+def _register_and_choose_tier(client, tier="premium", email="cust@example.com", password="securepass1"):
     client.post("/register", data={
         "email": email,
         "password": password,
@@ -329,7 +329,7 @@ class TestUpdateRestaurantZipCode:
 # =====================================================================
 class TestCreateRestaurantWithZip:
     def test_create_with_zip_and_cuisine(self, app_client, mock_db):
-        _register_and_choose_tier(app_client, tier="lightning")
+        _register_and_choose_tier(app_client, tier="premium")
         resp = app_client.post("/restaurants", data={
             "name": "Pizza Palace",
             "zip_code": "60614",
@@ -343,7 +343,7 @@ class TestCreateRestaurantWithZip:
         assert row["cuisine_type"] == "pizza"
 
     def test_create_without_zip(self, app_client, mock_db):
-        _register_and_choose_tier(app_client, tier="lightning")
+        _register_and_choose_tier(app_client, tier="premium")
         app_client.post("/restaurants", data={"name": "No Zip Cafe"}, follow_redirects=True)
         with mock_db() as conn:
             row = conn.execute("SELECT zip_code FROM restaurants WHERE name = 'No Zip Cafe'").fetchone()
@@ -351,7 +351,7 @@ class TestCreateRestaurantWithZip:
         assert row["zip_code"] is None
 
     def test_create_with_blank_zip_stores_null(self, app_client, mock_db):
-        _register_and_choose_tier(app_client, tier="lightning")
+        _register_and_choose_tier(app_client, tier="premium")
         app_client.post("/restaurants", data={"name": "Blank Zip", "zip_code": ""}, follow_redirects=True)
         with mock_db() as conn:
             row = conn.execute("SELECT zip_code FROM restaurants WHERE name = 'Blank Zip'").fetchone()
@@ -359,7 +359,7 @@ class TestCreateRestaurantWithZip:
         assert row["zip_code"] is None
 
     def test_create_with_cuisine_stored(self, app_client, mock_db):
-        _register_and_choose_tier(app_client, tier="lightning")
+        _register_and_choose_tier(app_client, tier="premium")
         app_client.post("/restaurants", data={
             "name": "Thai Place", "cuisine_type": "thai",
         }, follow_redirects=True)
@@ -375,7 +375,7 @@ class TestCreateRestaurantWithZip:
 class TestRestaurantDetailFormLayout:
     def _setup_customer_with_restaurant(self, client, mock_db):
         """Register customer, link to restaurant #1."""
-        _register_and_choose_tier(client, tier="lightning")
+        _register_and_choose_tier(client, tier="premium")
         import storage.users as _users
         with mock_db() as conn:
             uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()[0]
@@ -417,7 +417,7 @@ class TestRestaurantDetailFormLayout:
 # =====================================================================
 class TestImportProfileBanner:
     def _setup_customer(self, client, mock_db, zip_code=None, cuisine_type=None):
-        _register_and_choose_tier(client, tier="lightning")
+        _register_and_choose_tier(client, tier="premium")
         import storage.users as _users
         with mock_db() as conn:
             uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()[0]
@@ -464,7 +464,7 @@ class TestImportProfileBanner:
 # =====================================================================
 class TestProfileUpdateRedirect:
     def _setup_customer(self, client, mock_db):
-        _register_and_choose_tier(client, tier="lightning")
+        _register_and_choose_tier(client, tier="premium")
         import storage.users as _users
         with mock_db() as conn:
             uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()[0]
