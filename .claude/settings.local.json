@@ -37,7 +37,19 @@
       "WebFetch(domain:agentestudio.com)",
       "Bash(for f:*)",
       "Read(//c/Users/Owner/Desktop/servline/tests/**)",
-      "Bash(do grep:*)"
+      "Bash(do grep:*)",
+      "Bash(set PYTHONUTF8=1)",
+      "Bash(python -c \":*)",
+      "Bash(git rm:*)",
+      "Bash(git stash:*)",
+      "Bash(pytest tests/test_day126_user_accounts.py tests/test_day127_dashboard_scoping.py -v --tb=no)",
+      "Bash(pytest tests/test_day126_user_accounts.py tests/test_day127_dashboard_scoping.py -v --tb=short)",
+      "Bash(timeout 3)",
+      "Bash(curl -s http://localhost:5000/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(curl -s -b /tmp/admin_cookies.txt http://localhost:5000/drafts/)",
+      "Bash(curl -s -b /tmp/admin_cookies.txt http://localhost:5000/drafts)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c \"import sys; sys.path.insert\\(0,''''.''''\\); import portal.app as app; app.app.config[''''TESTING'''']=True; c=app.app.test_client\\(\\); c.post\\(''''/register'''',data={''''email'''':''''x@x.com'''',''''password'''':''''test1234'''',''''confirm_password'''':''''test1234'''',''''display_name'''':''''X''''}\\); html=c.get\\(''''/drafts/1/edit''''\\).data.decode\\(\\); print\\(''''len='''',len\\(html\\)\\); print\\(''''has_catbtn='''',''''add-category-btn'''' in html\\); print\\(''''script_count='''',html.count\\(''''<script''''\\)\\); idx=html.find\\(''''add-category-btn''''\\); print\\(''''first_at='''',idx\\)\")"
     ]
   }
 }

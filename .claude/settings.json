@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python << 'PYEOF':*)",
+      "Bash(awk 'NR>=2530 && NR<=2560' portal/templates/draft_editor.html)",
+      "Read(//c/Users/Owner/**)",
+      "WebSearch",
+      "WebFetch(domain:soundbible.com)",
+      "Bash(curl -sI -L \"http://soundbible.com/grab.php?id=830&type=mp3\")",
+      "WebFetch(domain:mixkit.co)",
+      "Bash(curl -sI -L \"https://assets.mixkit.co/active_storage/sfx/2921/2921.wav\")",
+      "WebFetch(domain:freeforvideo.com)",
+      "WebFetch(domain:opengameart.org)",
+      "Bash(curl -sI -L \"https://assets.mixkit.co/active_storage/sfx/209/209.wav\")",
+      "Bash(curl -sI -L \"https://assets.mixkit.co/sfx/download/mixkit-lock-metal-click-2855.wav\")",
+      "Bash(curl -sI -L \"https://assets.mixkit.co/sfx/download/mixkit-small-firework-explosion-2969.wav\")",
+      "Bash(curl -sI -L \"https://opengameart.org/sites/default/files/25-CC0-bang-sfx.zip\")",
+      "Bash(curl -sI -L \"https://soundbible.com/grab.php?id=830&type=mp3\")",
+      "Bash(curl -sI -L \"https://soundbible.com/grab.php?id=692&type=mp3\")",
+      "Bash(curl -sL \"https://soundbible.com/grab.php?id=692&type=mp3\" -o /tmp/fireworks_test.mp3)",
+      "Read(//tmp/**)",
+      "Bash(curl -sL \"https://soundbible.com/grab.php?id=830&type=mp3\" -o /tmp/doorunlock_test.mp3)",
+      "Bash(ffprobe -i /tmp/fireworks_test.mp3 -show_entries format=duration -v quiet -of csv=\"p=0\")",
+      "Bash(ffprobe -i /tmp/doorunlock_test.mp3 -show_entries format=duration -v quiet -of csv=\"p=0\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Owner\\.claude\\projects\\c--Users-Owner-Desktop-servline\\memory",
+      "C:\\Users\\Owner\\Downloads"
+    ]
+  }
+}

@@ -62,9 +62,9 @@
         border: 1px solid rgba(211, 47, 47, 0.35);
       }
       .tier-badge.unlocked {
-        background: rgba(46, 91, 94, 0.12);
-        color: #2E5B5E;
-        border: 1px solid rgba(46, 91, 94, 0.3);
+        background: rgba(80, 220, 120, 0.15);
+        color: #50dc78;
+        border: 1px solid rgba(80, 220, 120, 0.3);
       }
       .card-locked {
         position: relative;
@@ -82,6 +82,16 @@
       .card-unlocked {
         position: relative;
         overflow: visible;
+        border: 2px dashed rgba(211, 47, 47, 0.5);
+        transition: border-color 2s ease;
+      }
+      .card-unlocked.border-teal {
+        border-color: rgba(46, 91, 94, 0.5);
+        border-style: solid;
+      }
+      .unlock-btn.btn-teal {
+        background: #2E5B5E !important;
+        border-color: #2E5B5E !important;
       }
 
       /* --- Lock icon: starts locked, animates to unlocked --- */
@@ -114,64 +124,6 @@
       }
 
       /* --- Firework particles (spawned by JS, overflow outside card) --- */
-      .firework-canvas {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 0;
-        height: 0;
-        pointer-events: none;
-        z-index: 100;
-      }
-      .fw-particle {
-        position: absolute;
-        border-radius: 50%;
-        pointer-events: none;
-        animation: fw-shoot var(--fw-dur, 1.2s) cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
-        opacity: 0;
-        box-shadow: 0 0 4px currentColor;
-      }
-      @keyframes fw-shoot {
-        0%   { opacity: 1; transform: translate(0, 0) scale(1.2); }
-        30%  { opacity: 1; }
-        100% { opacity: 0; transform: translate(var(--fw-x), var(--fw-y)) scale(0.2); }
-      }
-
-      /* --- Sparkle stars (larger, float up and out) --- */
-      .fw-star {
-        position: absolute;
-        pointer-events: none;
-        font-size: 24px;
-        opacity: 0;
-        text-shadow: 0 0 6px currentColor;
-        animation: fw-star-rise var(--star-dur, 1.5s) ease-out forwards;
-      }
-      @keyframes fw-star-rise {
-        0%   { opacity: 0; transform: translate(0, 0) scale(0) rotate(0deg); }
-        15%  { opacity: 1; transform: translate(var(--star-x1), var(--star-y1)) scale(1.4) rotate(90deg); }
-        60%  { opacity: 0.9; transform: translate(var(--star-x2), var(--star-y2)) scale(1.1) rotate(200deg); }
-        100% { opacity: 0; transform: translate(var(--star-x3), var(--star-y3)) scale(0.5) rotate(360deg); }
-      }
-
-      /* --- Ring burst --- */
-      .fw-ring {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 10px;
-        height: 10px;
-        margin: -5px 0 0 -5px;
-        border-radius: 50%;
-        border: 3px solid rgba(184, 92, 56, 0.7);
-        pointer-events: none;
-        opacity: 0;
-        animation: fw-ring-expand 1s ease-out forwards;
-      }
-      @keyframes fw-ring-expand {
-        0%   { opacity: 0.9; transform: scale(0); }
-        50%  { opacity: 0.5; border-color: rgba(46, 91, 94, 0.6); }
-        100% { opacity: 0; transform: scale(12); }
-      }
 
       .upgrade-hint {
         display: block;
@@ -199,9 +151,9 @@
       /* --- Badge color transition for unlock (red → green) --- */
       .tier-badge.transitioning {
         transition: background 2s ease, color 2s ease, border-color 2s ease;
-        background: rgba(46, 91, 94, 0.12) !important;
-        color: #2E5B5E !important;
-        border-color: rgba(46, 91, 94, 0.3) !important;
+        background: rgba(80, 220, 120, 0.15) !important;
+        color: #50dc78 !important;
+        border-color: rgba(80, 220, 120, 0.3) !important;
       }
 
       /* Hide sparkle elements until JS triggers them */
@@ -239,20 +191,19 @@
     {% endif %}
 
     <!-- Premium upload panels (Photo + PDF) -->
-    <h2 style="text-align:center; font-size:1.4rem; font-weight:700; color:#2C2C2C; margin:12px 0 14px;">Upload a picture of your menu!</h2>
+    <h2 style="text-align:center; font-size:2.6rem; font-weight:700; color:#2E5B5E; margin:12px 0 14px; font-family:'Dancing Script',cursive;">Upload a picture of your menu!</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4" id="premiumGrid" style="position:relative;">
       <!-- Photo Upload -->
       {% if account_tier == 'lightning' %}
       <div class="card card-unlocked" data-unlock-panel style="position:relative;">
         <span class="info-icon">i</span>
         <div class="info-tooltip">Use your phone to take a photo of your paper menu. We'll use AI to read the items, prices, and categories automatically.</div>
-        <div class="firework-canvas"></div>
         <h2 class="text-lg font-semibold mb-2">JPG File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
         </h2>
         <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
-          <button type="submit" class="btn w-full" id="imgBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload Photo</button>
+          <button type="submit" class="btn w-full unlock-btn" id="imgBtn" style="background:#d32f2f; color:#fff !important; border-color:#d32f2f; transition:background 2s ease, border-color 2s ease;">Upload Photo</button>
         </form>
         <p class="muted mt-2 text-sm">Snap a picture of your printed menu and we'll read it for you.</p>
       </div>
@@ -277,13 +228,12 @@
       <div class="card card-unlocked" data-unlock-panel style="position:relative;">
         <span class="info-icon">i</span>
         <div class="info-tooltip">If your menu is saved as a PDF on your computer or email, upload it here. We'll extract all the text and organize it for you.</div>
-        <div class="firework-canvas"></div>
         <h2 class="text-lg font-semibold mb-2">PDF File
           <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
         </h2>
         <form id="pdfForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
-          <button type="submit" class="btn w-full" id="pdfBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload PDF</button>
+          <button type="submit" class="btn w-full unlock-btn" id="pdfBtn" style="background:#d32f2f; color:#fff !important; border-color:#d32f2f; transition:background 2s ease, border-color 2s ease;">Upload PDF</button>
         </form>
         <p class="muted mt-2 text-sm">Already have a digital menu as a PDF? Upload it and we'll pull everything out.</p>
       </div>
@@ -306,7 +256,7 @@
     </div>
 
     <!-- Standard import panels (CSV + Excel + JSON) -->
-    <h2 style="text-align:center; font-size:1.4rem; font-weight:700; color:#2C2C2C; margin:24px 0 14px;">Already have a file?</h2>
+    <h2 style="text-align:center; font-size:2.6rem; font-weight:700; color:var(--terracotta, #B85C38); margin:24px 0 14px; font-family:'Dancing Script',cursive;">Already have a file?</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
       <!-- CSV Import -->
@@ -599,64 +549,18 @@
       vid.onended = () => { wrap.remove(); };
     }
 
-    // ======== Firework Helpers ========
-    const COLORS = ['#B85C38','#2E5B5E','#d4760a','#c2185b','#1565c0','#e65100','#7b1fa2'];
-    const STARS  = ['✦','✧','⚡','★','✶','✹','💥','🎉'];
-
-    function rand(min, max) { return Math.random() * (max - min) + min; }
-    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-    function spawnBurst(canvas, count, radius) {
-      for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 * i) / count + rand(-0.2, 0.2);
-        const dist  = rand(radius * 0.5, radius * 1.3);
-        const x = Math.cos(angle) * dist;
-        const y = Math.sin(angle) * dist;
-        const size = rand(4, 9);
-        const dur  = rand(0.8, 1.6);
-        const dot = document.createElement('div');
-        dot.className = 'fw-particle';
-        dot.style.cssText = `width:${size}px;height:${size}px;background:${pick(COLORS)};--fw-x:${x}px;--fw-y:${y}px;--fw-dur:${dur}s;`;
-        canvas.appendChild(dot);
-        setTimeout(() => dot.remove(), dur * 1000 + 100);
-      }
-    }
-
-    function spawnStars(canvas, count) {
-      for (let i = 0; i < count; i++) {
-        const angle = rand(0, Math.PI * 2);
-        const r1 = rand(20, 50), r2 = rand(50, 90), r3 = rand(80, 140);
-        const x1 = Math.cos(angle) * r1, y1 = Math.sin(angle) * r1 - 10;
-        const x2 = Math.cos(angle + 0.3) * r2, y2 = Math.sin(angle + 0.3) * r2 - 20;
-        const x3 = Math.cos(angle + 0.5) * r3, y3 = Math.sin(angle + 0.5) * r3 - 30;
-        const dur = rand(1.2, 2.0);
-        const delay = rand(0, 0.4);
-        const star = document.createElement('span');
-        star.className = 'fw-star';
-        star.textContent = pick(STARS);
-        star.style.cssText = `--star-x1:${x1}px;--star-y1:${y1}px;--star-x2:${x2}px;--star-y2:${y2}px;--star-x3:${x3}px;--star-y3:${y3}px;--star-dur:${dur}s;animation-delay:${delay}s;color:${pick(COLORS)};`;
-        canvas.appendChild(star);
-        setTimeout(() => star.remove(), (dur + delay) * 1000 + 100);
-      }
-    }
-
-    function spawnRing(canvas, delay) {
-      setTimeout(() => {
-        const ring = document.createElement('div');
-        ring.className = 'fw-ring';
-        canvas.appendChild(ring);
-        setTimeout(() => ring.remove(), 1200);
-      }, delay);
-    }
-
-    // ======== FREE TIER: Repeating lock rattle every 3s ========
     // ======== LIGHTNING TIER: Full unlock sequence (plays once per session) ========
     const unlockPanels = document.querySelectorAll('[data-unlock-panel]');
     if (unlockPanels.length) {
       const PLAYED_KEY = 'servline_unlock_tier';
       // Force animation if redirected from plan upgrade (?unlocked=1)
       const freshUnlock = new URLSearchParams(window.location.search).has('unlocked');
-      if (freshUnlock) localStorage.removeItem(PLAYED_KEY);
+      if (freshUnlock) {
+        localStorage.removeItem(PLAYED_KEY);
+        // Strip ?unlocked=1 from URL so refresh won't replay
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+      }
       const alreadyPlayed = localStorage.getItem(PLAYED_KEY) === 'lightning';
 
       if (alreadyPlayed) {
@@ -668,6 +572,8 @@
           if (lock) lock.textContent = '🔓';
           if (label) label.textContent = 'Unlocked';
           if (badge) { badge.classList.remove('locked'); badge.classList.add('unlocked'); }
+          panel.classList.add('border-teal');
+          panel.querySelectorAll('.unlock-btn').forEach(b => b.classList.add('btn-teal'));
         });
       } else {
         // First visit this session — animate the full unlock
@@ -693,14 +599,13 @@
           setTimeout(() => {
             const lock = panel.querySelector('.lock-icon');
             const badge = panel.querySelector('.tier-badge');
-            const canvas = panel.querySelector('.firework-canvas');
 
             // Phase 1: Shake the lock
             if (lock) {
               lock.classList.add('unlocking');
             }
 
-            // Phase 2: After shake — swap icon + text, transition badge red→green
+            // Phase 2: After shake — swap icon + text, transition badge red→teal
             setTimeout(() => {
               if (lock) lock.textContent = '🔓';
               const label = panel.querySelector('.lock-label');
@@ -715,15 +620,8 @@
               }
 
               panel.classList.add('glow');
-
-              // Particles per panel
-              if (canvas) {
-                spawnBurst(canvas, 18, 80);
-                spawnStars(canvas, 10);
-                spawnRing(canvas, 0);
-                setTimeout(() => { spawnBurst(canvas, 12, 110); spawnStars(canvas, 6); }, 400);
-                setTimeout(() => { spawnBurst(canvas, 8, 60); spawnStars(canvas, 4); }, 900);
-              }
+              panel.classList.add('border-teal');
+              panel.querySelectorAll('.unlock-btn').forEach(b => b.classList.add('btn-teal'));
 
               // Fullscreen firework video + sound — only on first panel
               if (idx === 0) {
