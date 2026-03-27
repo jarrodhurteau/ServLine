@@ -174,7 +174,8 @@
         {% if session.get('user', {}).get('restaurant_id') %}
         <div><a href="/restaurants/{{ session['user']['restaurant_id'] }}/menus" class="hover:underline">My Menus</a></div>
         {% endif %}
-        <div><a href="/import" class="hover:underline">Add Menu</a></div>
+        <div><a href="/drafts" class="hover:underline">Editor</a></div>
+        <div><a href="/import" class="hover:underline">Upload a Menu</a></div>
       {% elif show_admin %}
         <div><a href="/restaurants" class="hover:underline">Restaurants</a></div>
       {% endif %}

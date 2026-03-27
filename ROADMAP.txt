@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 132 (March 26, 2026) — Sprint 13.1 Complete, Sprint 13.2 planned (Price Comparison Intelligence)
+Last Updated: Day 133 (March 27, 2026) — Sprint 13.2 started (Restaurant Profile Collection + UX Polish)
 
 ================================================================================
 PROJECT MISSION
@@ -2161,6 +2161,29 @@ Sprint 13.1 — User Accounts & Auth (Days 126-132)
     Day 131 test suite: 32 cases, 100% pass rate
     Cumulative: 2,836 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
+  [x] Restaurant Profile Collection + UX Polish: ✓ Day 133
+      - zip_code, address_line2, city, state columns added to restaurants
+      - Address breakdown form (address / apt / city+state+zip)
+      - Restaurant detail page → two-column layout (add form + tile grid)
+      - Expandable restaurant detail panel with Add Menu / View Menus / Delete
+      - Delete restaurant: themed confirmation modal
+      - Fly-to-tile animation with whoosh sound on restaurant creation
+      - Import page: restaurant profile banner, restaurant_id passthrough
+      - Import page UX overhaul: section headers (Dancing Script), info tooltips,
+        teal premium buttons, terracotta standard buttons, red locked state
+      - "Type It In Manually" blank draft creation route + button
+      - Nav: My Menus, Editor, Upload a Menu links; Account (terracotta) + Logout (teal)
+      - Choose plan: terracotta/teal buttons, confetti with green-screen chroma key
+      - Fireworks video: screen blend, fade-out synced to audio duration
+      - Removed mini particle/star/ring animations (replaced by fullscreen video)
+      - Editor light theme: full customer theme override (cream/saddle palette)
+      - Tier rename: "lightning" → "premium" across entire codebase + DB migration
+      - Dashboard: Add Restaurant routes to My Restaurants page
+      - Menus page: removed Active Now, renamed Health → Menu Health
+
+    Day 133 test suite: 32 cases, 100% pass rate (+ 64 passing in day131/132)
+    Cumulative: 2,868 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
 Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
 ..........................................................
   CONTEXT: Before building the wizard, we need the price comparison engine
@@ -2611,6 +2634,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
+Day 133: Restaurant Profile Collection + UX Polish — zip_code/address_line2/city/state columns, address breakdown form, two-column restaurant management page with tile grid + expandable detail + fly animation + whoosh sound + themed delete modal, import page UX overhaul (Dancing Script headers, info tooltips, teal/terracotta/red button system, green-screen confetti chroma key, screen-blend fireworks video synced to audio), editor light theme (full customer palette override), tier rename lightning→premium with DB migration, nav links (My Menus, Editor, Upload a Menu), blank draft manual entry route, dashboard Add Restaurant routes to restaurants page (32 tests)
 Day 130: Email Verification & Password Reset — email_verification_tokens + password_reset_tokens tables (SHA-256 hashed), generate/verify email tokens (one active per user, auto-generated on registration), generate/validate/consume reset tokens (1-hour expiry, used flag), /verify-email/<token>, /resend-verification, /forgot-password (GET+POST, no email existence leak), /reset-password/<token> (GET+POST), account page Verified/Unverified badge + Resend button, login label "Login Email" + "Forgot password?" link, forgot_password.html + reset_password.html templates (32 tests)
 Day 129: Customer-Facing Editor Cleanup — draft_editor.html split into customer-clean vs admin view using {% if show_admin %} conditionals. Hidden from customers: header info chips, Pipeline Debug, Clean & Refine, Finalize with AI, confidence slider, Auto Kitchen Names, Position column, confidence badges, provenance pins, quality scores, Low Confidence panel. Sidebar dev tools consolidated into collapsible "Dev Tools" section (Backfill, OCR Debug, Pipeline Debug, Back to Import). OCR Debug CSV removed from export dropdown. JS addRow/addVariantRow conditional rendering. Zero backend changes. Customers retain: search, table/cards toggle, kitchen names, add item, bulk category, delete selected, full export dropdown, save, approve & export (32 tests)
 Day 128: Restaurant Management & Multi-Restaurant Support — /restaurants/<id>/detail page (stats, edit, delete), POST /restaurants/<id>/update (name, phone, address, cuisine_type, website), POST /restaurants/<id>/delete (soft-delete), POST /switch-restaurant (session switcher), storage/users.py (get_restaurant, update_restaurant, delete_restaurant, get_restaurant_stats, VALID_CUISINE_TYPES), _ensure_restaurant_columns migration, dashboard enhanced (item_count, cuisine badge, active badge, switcher), restaurant_detail.html template (33 tests)

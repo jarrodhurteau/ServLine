@@ -3,7 +3,7 @@
 
 {% block content %}
   <section class="card max-w-3xl mx-auto">
-    <h1 class="text-xl font-semibold mb-2">Add Your Menu</h1>
+    <h1 class="text-xl font-semibold mb-2">Upload a Menu</h1>
     <p class="muted mb-4">
       Choose how you'd like to get your menu into the system. We'll turn it into an editable draft you can review and export.
     </p>
@@ -82,11 +82,14 @@
       .card-unlocked {
         position: relative;
         overflow: visible;
-        border: 2px dashed rgba(211, 47, 47, 0.5);
-        transition: border-color 2s ease;
+        border: 2px solid rgba(80, 220, 120, 0.4);
       }
-      .card-unlocked.border-teal {
-        border-color: rgba(46, 91, 94, 0.5);
+      .card-unlocked.start-red {
+        border: 2px dashed rgba(211, 47, 47, 0.5);
+        transition: border-color 2s ease, border-style 0s 2s;
+      }
+      .card-unlocked.start-red.border-green {
+        border-color: rgba(80, 220, 120, 0.4);
         border-style: solid;
       }
       .unlock-btn.btn-teal {
@@ -199,11 +202,11 @@
         <span class="info-icon">i</span>
         <div class="info-tooltip">Use your phone to take a photo of your paper menu. We'll use AI to read the items, prices, and categories automatically.</div>
         <h2 class="text-lg font-semibold mb-2">JPG File
-          <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
+          <span class="tier-badge unlocked"><span class="lock-icon">🔓</span> <span class="lock-label">Unlocked</span></span>
         </h2>
         <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
-          <button type="submit" class="btn w-full unlock-btn" id="imgBtn" style="background:#d32f2f; color:#fff !important; border-color:#d32f2f; transition:background 2s ease, border-color 2s ease;">Upload Photo</button>
+          <button type="submit" class="btn w-full unlock-btn" id="imgBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload Photo</button>
         </form>
         <p class="muted mt-2 text-sm">Snap a picture of your printed menu and we'll read it for you.</p>
       </div>
@@ -229,11 +232,11 @@
         <span class="info-icon">i</span>
         <div class="info-tooltip">If your menu is saved as a PDF on your computer or email, upload it here. We'll extract all the text and organize it for you.</div>
         <h2 class="text-lg font-semibold mb-2">PDF File
-          <span class="tier-badge locked"><span class="lock-icon">🔒</span> <span class="lock-label">Locked</span></span>
+          <span class="tier-badge unlocked"><span class="lock-icon">🔓</span> <span class="lock-label">Unlocked</span></span>
         </h2>
         <form id="pdfForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
           <input type="file" name="file" accept="application/pdf" required class="form-control w-full" />
-          <button type="submit" class="btn w-full unlock-btn" id="pdfBtn" style="background:#d32f2f; color:#fff !important; border-color:#d32f2f; transition:background 2s ease, border-color 2s ease;">Upload PDF</button>
+          <button type="submit" class="btn w-full unlock-btn" id="pdfBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload PDF</button>
         </form>
         <p class="muted mt-2 text-sm">Already have a digital menu as a PDF? Upload it and we'll pull everything out.</p>
       </div>
@@ -324,10 +327,10 @@
 
     <!-- Manual entry option -->
     <div style="text-align:center; margin-top:24px; padding-top:20px; border-top:1px solid var(--line);">
-      <p style="font-size:.95rem; color:#2C2C2C; margin-bottom:10px;">Don't have a file? No problem.</p>
+      <h2 style="font-size:1.3rem; font-weight:700; color:#2C2C2C; margin-bottom:12px;">Don't have a file? No problem! Type it in manually in our editor.</h2>
       <form action="/drafts/new-blank" method="post" style="display:inline;">
         {% if for_rest_id %}<input type="hidden" name="restaurant_id" value="{{ for_rest_id }}">{% endif %}
-        <button type="submit" class="btn" style="background:var(--panel); border:1px solid var(--line); color:#2C2C2C; font-weight:600; padding:10px 28px; border-radius:10px; font-size:.95rem; cursor:pointer;">Type It In Manually</button>
+        <button type="submit" class="btn" style="background:var(--terracotta, #B85C38); border-color:var(--terracotta, #B85C38); color:#fff !important; font-weight:600; padding:10px 28px; border-radius:10px; font-size:.95rem; cursor:pointer;">Menu Editor</button>
       </form>
     </div>
 
@@ -558,21 +561,19 @@
       vid.onended = () => { wrap.remove(); };
     }
 
-    // ======== LIGHTNING TIER: Full unlock sequence (plays once per session) ========
+    // ======== PREMIUM TIER: Unlock sequence (plays ONLY on fresh purchase) ========
     const unlockPanels = document.querySelectorAll('[data-unlock-panel]');
     if (unlockPanels.length) {
       const PLAYED_KEY = 'servline_unlock_tier';
-      // Force animation if redirected from plan upgrade (?unlocked=1)
+      // Only animate if redirected from plan upgrade (?unlocked=1)
       const freshUnlock = new URLSearchParams(window.location.search).has('unlocked');
       if (freshUnlock) {
-        localStorage.removeItem(PLAYED_KEY);
         // Strip ?unlocked=1 from URL so refresh won't replay
         const cleanUrl = window.location.pathname;
         window.history.replaceState({}, '', cleanUrl);
       }
-      const alreadyPlayed = localStorage.getItem(PLAYED_KEY) === 'premium';
 
-      if (alreadyPlayed) {
+      if (!freshUnlock) {
         // Already seen — show final unlocked state immediately, no animation
         unlockPanels.forEach(panel => {
           const lock = panel.querySelector('.lock-icon');
@@ -581,15 +582,20 @@
           if (lock) lock.textContent = '🔓';
           if (label) label.textContent = 'Unlocked';
           if (badge) { badge.classList.remove('locked'); badge.classList.add('unlocked'); }
-          panel.classList.add('border-teal');
-          panel.querySelectorAll('.unlock-btn').forEach(b => b.classList.add('btn-teal'));
+          // Final state — buttons already teal, border already green from CSS
         });
       } else {
-        // First visit this session — animate the full unlock
+        // Fresh purchase — animate the unlock sequence (one time only)
         localStorage.setItem(PLAYED_KEY, 'premium');
 
-        // Start with red/locked appearance
+        // Start with red/locked appearance for animation
         unlockPanels.forEach(panel => {
+          panel.classList.add('start-red');
+          panel.querySelectorAll('.unlock-btn').forEach(b => {
+            b.style.background = '#d32f2f';
+            b.style.borderColor = '#d32f2f';
+            b.style.transition = 'background 2s ease, border-color 2s ease';
+          });
           const badge = panel.querySelector('.tier-badge');
           if (badge) {
             badge.classList.remove('unlocked');
@@ -629,7 +635,7 @@
               }
 
               panel.classList.add('glow');
-              panel.classList.add('border-teal');
+              panel.classList.add('border-green');
               panel.querySelectorAll('.unlock-btn').forEach(b => b.classList.add('btn-teal'));
 
               // Fullscreen firework video + sound — only on first panel

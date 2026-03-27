@@ -252,6 +252,11 @@
 
   <script>
   (function(){
+    // ---- Whoosh sound for fly animation ----
+    var whooshAudio = new Audio('/static/audio/whoosh.mp3');
+    whooshAudio.preload = 'auto';
+    whooshAudio.volume = 0.7;
+
     // ---- Cuisine select placeholder color ----
     var cs = document.getElementById('add-cuisine');
     function updC(){ cs.style.setProperty('color', cs.value ? '#2C2C2C' : '#999', 'important'); }
@@ -447,6 +452,8 @@
           clone.style.left = targetX + 'px';
           clone.style.top = targetY + 'px';
           clone.classList.add('flying');
+          whooshAudio.currentTime = 0;
+          whooshAudio.play().catch(function(){});
         });
 
         setTimeout(function(){

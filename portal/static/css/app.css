@@ -267,3 +267,185 @@ main.wrap:has(> .draft-editor-page) {
   outline-offset: 2px;
   border-color: #7aa2ff;
 }
+
+/* =======================================================================
+   CUSTOMER LIGHT THEME — Editor overrides
+   Applied when html.theme-customer is active (all non-admin users)
+   ======================================================================= */
+
+/* Root palette */
+.theme-customer .draft-editor-page {
+  --panel: #FAF4EC;
+  --brand: #2E5B5E;
+  --chip: #F5EBD9;
+  --chipBorder: #E8DACA;
+}
+
+/* Sidebar */
+.theme-customer .draft-editor-page .sidebar {
+  background: #FAF4EC !important;
+  border: 1px solid #E8DACA;
+}
+.theme-customer .draft-editor-page .sidebar h3 { color: #2C2C2C; }
+.theme-customer .draft-editor-page .sidebar .cat .row {
+  background: #F5EBD9;
+  border-color: #E8DACA;
+  color: #2C2C2C;
+}
+.theme-customer .draft-editor-page .sidebar .cat .row.active {
+  border-color: var(--terracotta, #B85C38);
+  background: rgba(184, 92, 56, 0.08);
+}
+.theme-customer .draft-editor-page .sidebar .cat .row:hover {
+  border-color: #B85C38;
+}
+.theme-customer .draft-editor-page .sidebar .cat .row .count { color: #8A8578; }
+
+/* Main editor container */
+.theme-customer .draft-editor-page .editor-main {
+  background: #FAF4EC;
+  border-color: #E8DACA;
+}
+
+/* Toolbar */
+.theme-customer .draft-editor-page .toolbar,
+.theme-customer .draft-editor-page .toolbar-sticky {
+  background: rgba(239, 226, 211, 0.9) !important;
+  border-color: #E8DACA !important;
+  backdrop-filter: blur(8px);
+}
+
+/* Buttons */
+.theme-customer .draft-editor-page .btn {
+  background: #F5EBD9;
+  border-color: #E8DACA;
+  color: #2C2C2C;
+}
+.theme-customer .draft-editor-page .btn:hover {
+  background: #EFE2D3;
+}
+.theme-customer .draft-editor-page .btn-primary {
+  background: var(--terracotta, #B85C38) !important;
+  color: #fff !important;
+  border-color: var(--terracotta, #B85C38) !important;
+}
+.theme-customer .draft-editor-page .btn-primary:hover {
+  background: #a04e30 !important;
+}
+.theme-customer .draft-editor-page .btn-secondary {
+  background: #2E5B5E !important;
+  color: #fff !important;
+  border-color: #2E5B5E !important;
+}
+.theme-customer .draft-editor-page .btn-success {
+  background: #2E5B5E !important;
+  color: #fff !important;
+  border-color: #2E5B5E !important;
+}
+.theme-customer .draft-editor-page .btn-success:hover {
+  background: #245050 !important;
+  border-color: #245050 !important;
+}
+.theme-customer .draft-editor-page .btn-danger {
+  background: #d32f2f !important;
+  color: #fff !important;
+  border-color: #d32f2f !important;
+}
+
+/* Table */
+.theme-customer .draft-editor-page table.editor thead th {
+  background: #EFE2D3 !important;
+  color: #2C2C2C !important;
+  border-bottom-color: #E8DACA !important;
+}
+.theme-customer .draft-editor-page table.editor tbody tr:nth-child(odd) {
+  background: #FAF4EC !important;
+}
+.theme-customer .draft-editor-page table.editor tbody tr:nth-child(even) {
+  background: #F5EBD9 !important;
+}
+.theme-customer .draft-editor-page table.editor tbody td {
+  border-bottom-color: #E8DACA !important;
+  color: #2C2C2C;
+}
+.theme-customer .draft-editor-page .table-wrap {
+  border-color: #E8DACA;
+}
+
+/* Inputs (already white, just ensure borders match) */
+.theme-customer .draft-editor-page table.editor input,
+.theme-customer .draft-editor-page table.editor textarea,
+.theme-customer .draft-editor-page table.editor select {
+  border-color: #E8DACA;
+}
+.theme-customer .draft-editor-page table.editor input:focus,
+.theme-customer .draft-editor-page table.editor textarea:focus,
+.theme-customer .draft-editor-page table.editor select:focus,
+.theme-customer .draft-editor-page .title-input:focus {
+  outline-color: #2E5B5E;
+  border-color: #2E5B5E;
+}
+
+/* Title input */
+.theme-customer .draft-editor-page .title-input {
+  background: #fff !important;
+  color: #2C2C2C !important;
+  border-color: #E8DACA !important;
+}
+
+/* Toast */
+.theme-customer .draft-editor-page .toast {
+  background: #2C2C2C;
+  color: #fff;
+}
+
+/* Search */
+.theme-customer .draft-editor-page input[type="search"],
+.theme-customer .draft-editor-page .search-input {
+  background: #fff !important;
+  color: #2C2C2C !important;
+  border-color: #E8DACA !important;
+}
+
+/* Status pill override in header */
+.theme-customer .draft-editor-page .pill {
+  font-weight: 600;
+}
+
+/* Row focus */
+.theme-customer .draft-editor-page .row-focus {
+  outline-color: #B85C38;
+}
+
+/* Confidence badges — keep colors, they work on light */
+
+/* Export dropdown */
+.theme-customer .draft-editor-page details.export .menu {
+  background: #fff !important;
+  border-color: #E8DACA !important;
+  box-shadow: 0 8px 20px rgba(0,0,0,.08) !important;
+  color: #2C2C2C !important;
+}
+.theme-customer .draft-editor-page details.export .menu a,
+.theme-customer .draft-editor-page details.export .menu button {
+  color: #2C2C2C !important;
+}
+.theme-customer .draft-editor-page details.export .menu a:hover,
+.theme-customer .draft-editor-page details.export .menu button:hover {
+  background: #F5EBD9 !important;
+  color: #2C2C2C !important;
+}
+.theme-customer .draft-editor-page details.export .menu .export-divider {
+  border-top-color: #E8DACA !important;
+}
+.theme-customer .draft-editor-page details.export .menu .export-section-label {
+  color: #8A8578 !important;
+}
+
+/* Variant rows */
+.theme-customer .draft-editor-page tr.variant-row {
+  background: rgba(184, 92, 56, 0.04) !important;
+}
+.theme-customer .draft-editor-page tr.variant-row td {
+  border-bottom-color: #E8DACA !important;
+}
