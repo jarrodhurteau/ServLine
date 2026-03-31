@@ -187,6 +187,14 @@ try:
 except Exception:
     price_intel = None
 
+# Price intelligence — Claude Call 4 (Phase 13 Day 135+)
+ai_price_intel = None  # type: ignore[assignment]
+try:
+    from storage import ai_price_intel
+    print("[APP] Loaded ai_price_intel OK")
+except Exception:
+    ai_price_intel = None
+
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
     from storage.ocr_facade import build_structured_menu
@@ -3869,6 +3877,69 @@ def api_price_intel(rest_id):
         comps = price_intel.get_cached_comparisons(rest_id)
         summary = price_intel.get_market_summary(rest_id)
         return jsonify({"comparisons": comps, "summary": summary})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------------------------------------------
+# Price Intelligence — Claude Call 4 (Day 135)
+# -------------------------------------------------------------------
+@app.post("/drafts/<int:draft_id>/price_intelligence")
+@login_required
+def run_price_intelligence(draft_id):
+    """Trigger Claude Call 4: price intelligence analysis on a draft."""
+    if not ai_price_intel:
+        flash("Price intelligence not available.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    u = session.get("user") or {}
+    rest_id = u.get("restaurant_id", 0)
+    force = request.form.get("force_refresh") == "1"
+
+    try:
+        result = ai_price_intel.analyze_menu_prices(
+            draft_id, rest_id, force_refresh=force,
+        )
+        if result.get("error"):
+            flash(result["error"], "error")
+        else:
+            assessed = result.get("items_assessed", 0)
+            total = result.get("total_items", 0)
+            flash(f"Price intelligence complete: {assessed}/{total} items assessed.", "success")
+    except Exception as exc:
+        log.error("Price intelligence error: %s", exc)
+        flash("Price intelligence failed. Please try again.", "error")
+
+    return redirect(url_for("draft_editor", draft_id=draft_id))
+
+
+@app.get("/api/drafts/<int:draft_id>/price_intelligence")
+@login_required
+def api_price_intelligence(draft_id):
+    """JSON endpoint: return price intelligence results for a draft."""
+    if not ai_price_intel:
+        return jsonify({"error": "Price intelligence not available"}), 503
+    try:
+        result = ai_price_intel.get_price_intelligence(draft_id)
+        if not result:
+            return jsonify({"error": "No price intelligence data", "has_data": False})
+        result["has_data"] = True
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/drafts/<int:draft_id>/price_intelligence/<int:item_id>")
+@login_required
+def api_item_price_assessment(draft_id, item_id):
+    """JSON endpoint: return price assessment for a single item."""
+    if not ai_price_intel:
+        return jsonify({"error": "Price intelligence not available"}), 503
+    try:
+        result = ai_price_intel.get_item_assessment(draft_id, item_id)
+        if not result:
+            return jsonify({"error": "No assessment for this item"})
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

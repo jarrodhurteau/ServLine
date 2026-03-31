@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 134 (March 31, 2026) — Sprint 13.2: Google Places API integration for price intelligence
+Last Updated: Day 135 (March 31, 2026) — Sprint 13.2: Claude Call 4 — Price Intelligence
 
 ================================================================================
 PROJECT MISSION
@@ -2207,12 +2207,18 @@ Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
 
     Day 134 test suite: 32 cases, 100% pass rate
     Cumulative: 2,900 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
-  [ ] Claude Call 4 — Price Intelligence (Day 135)
-      - Input: extracted menu items + Google Places context + cuisine type + region
-      - Output: per-item price assessment (underpriced/fair/overpriced)
+  [x] Claude Call 4 — Price Intelligence (Day 135)
+      - storage/ai_price_intel.py (~370 LOC): Claude Sonnet 4.5 price analysis
+      - Input: extracted menu items + Google Places context + cuisine type + zip code
+      - Output: per-item assessment (underpriced/fair/overpriced) + suggested ranges
       - Regional average estimates per item category
-      - Suggested price ranges based on local market
-      - Store results alongside draft items for wizard display
+      - price_intelligence_results + price_intelligence_summary tables
+      - Caching: skip Claude if results already exist, force_refresh to bypass
+      - Portal routes: POST trigger + GET JSON API + per-item assessment endpoint
+      - Result validation: normalize assessments, clamp confidence, match item IDs
+
+    Day 135 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,932 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
   [ ] Pipeline integration + loading screen (Day 136)
       - Wire Call 4 into parsing pipeline (after Call 3 reconciliation)
       - 5-stage progress screen: Extracting → Verifying → Reconciling →
