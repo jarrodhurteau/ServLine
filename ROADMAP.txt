@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 133 (March 27, 2026) — Sprint 13.2 started (Restaurant Profile Collection + UX Polish)
+Last Updated: Day 134 (March 31, 2026) — Sprint 13.2: Google Places API integration for price intelligence
 
 ================================================================================
 PROJECT MISSION
@@ -2191,17 +2191,22 @@ Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
   $50 for this — accuracy matters more than speed. Google Places API +
   Claude Call 4 provide local market context for every menu item.
 
-  [ ] Restaurant profile collection (Day 133)
+  [x] Restaurant profile collection (Day 133)
       - Pre-upload form: cuisine type, zip code, restaurant name
       - Cuisine type already exists on restaurants table (22 VALID_CUISINE_TYPES)
       - Add zip_code column to restaurants table
       - Wire into upload flow — collect before parsing begins
-  [ ] Google Places API integration (Day 134)
-      - Nearby restaurant search by cuisine type + zip code
-      - Pull comparable restaurants: names, price tier ($-$$$$), cuisine match
-      - Cache results per zip+cuisine (avoid repeat API calls)
-      - Rate limiting + error handling for API failures
-      - Store results in price_comparison_data table
+  [x] Google Places API integration (Day 134)
+      - storage/price_intel.py (~340 LOC): geocode zip → nearby search → cache
+      - price_comparison_cache + price_comparison_results tables (7-day TTL)
+      - Rate limiting (10 calls/min), error handling for API failures
+      - Portal routes: POST trigger + GET JSON API
+      - "Scan Market" button on restaurant detail panel
+      - Market summary: avg rating, price distribution ($-$$$$), competitor count
+      - UI polish: saddle buttons, teal detail border, deep red delete
+
+    Day 134 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,900 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
   [ ] Claude Call 4 — Price Intelligence (Day 135)
       - Input: extracted menu items + Google Places context + cuisine type + region
       - Output: per-item price assessment (underpriced/fair/overpriced)
@@ -2552,6 +2557,49 @@ Phase 15 — Production Hardening & Polish (Days 195-209)
   [ ] Drag-and-drop menu reordering
   [ ] Undo/redo functionality
   [ ] Keyboard shortcuts
+
+Phase 16 — AI-Powered Catalogue Updates (Days 210+)
+------------------------------------------------------
+  CONTEXT: Validated by real business owner interviews (March 2026). Owners
+  said the #1 value-add would be a smart AI that can bulk-update prices from
+  natural language prompts. One owner said they conservatively pay $1,000 for
+  manual catalogue updates when suppliers change pricing.
+
+  This feature turns MenuFlow from a one-time import tool into an ongoing
+  catalogue management platform — recurring value = recurring revenue.
+
+Sprint 16.1 — Natural Language Price Updates
+..............................................
+  [ ] AI prompt input in editor (chat-style input bar)
+      - Owner types: "Everstar just increased pricing by 7%"
+      - Claude API parses intent into structured action:
+        {brand: "Everstar", operation: "multiply", value: 1.07}
+  [ ] Batch item matching
+      - Match by brand, category, keyword, or any combination
+      - Fuzzy matching for brand name variations
+      - Show match count before applying: "Found 43 Everstar items"
+  [ ] Before/after preview
+      - Table showing every affected item with old price → new price
+      - Highlight items with large changes (>20%) for owner attention
+      - Running total of price impact across catalogue
+  [ ] Confirm & apply — one click to update all matched items
+  [ ] Push to POS — updated catalogue exports immediately available
+
+Sprint 16.2 — Advanced Update Operations
+..........................................
+  [ ] Percentage increases/decreases: "increase all pool chemicals by 7%"
+  [ ] Flat amount changes: "add $2 to all Shimano reels"
+  [ ] Rounding rules: "round everything to .99 after the increase"
+  [ ] Category-scoped updates: "increase all appetizers by 10%"
+  [ ] Multi-brand in one prompt: "Everstar +7%, AquaPure +5%"
+  [ ] Undo last batch update (with full audit trail)
+
+Sprint 16.3 — Update History & Audit Trail
+...........................................
+  [ ] Log every AI-driven update: who, when, what prompt, what changed
+  [ ] Diff view: "Last Tuesday you increased Everstar by 7% (43 items)"
+  [ ] Rollback any batch update to pre-change prices
+  [ ] Export update history (for accounting / supplier negotiations)
 
 ================================================================================
 LONG-TERM VISION

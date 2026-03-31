@@ -179,6 +179,14 @@ try:
 except Exception:
     users_store = None  # guarded below
 
+# Price comparison intelligence (Phase 13 Day 134+)
+price_intel = None  # type: ignore[assignment]
+try:
+    from storage import price_intel
+    print("[APP] Loaded price_intel OK")
+except Exception:
+    price_intel = None
+
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
     from storage.ocr_facade import build_structured_menu
@@ -3748,12 +3756,24 @@ def restaurant_detail(rest_id):
                     f"SELECT * FROM restaurants WHERE id IN ({ph}) AND active=1 ORDER BY id", r_ids
                 ).fetchall()]
 
+    # Price intel: cached comparisons + market summary (Day 134)
+    market_summary = {"has_data": False}
+    comparisons = []
+    if price_intel and rest_id > 0:
+        try:
+            comparisons = price_intel.get_cached_comparisons(rest_id)
+            market_summary = price_intel.get_market_summary(rest_id)
+        except Exception:
+            pass
+
     return _safe_render("restaurant_detail.html",
                         restaurant=rest, stats=stats,
                         recent_drafts=recent_drafts,
                         menus=menu_list,
                         cuisine_types=cuisine_types,
-                        all_restaurants=all_restaurants)
+                        all_restaurants=all_restaurants,
+                        market_summary=market_summary,
+                        comparisons=comparisons)
 
 
 @app.post("/restaurants/<int:rest_id>/update")
@@ -3811,6 +3831,46 @@ def delete_restaurant(rest_id):
         flash(f"Delete failed: {e}", "error")
 
     return redirect(url_for("dashboard"))
+
+
+# -------------------------------------------------------------------
+# Price Comparison Intelligence (Day 134)
+# -------------------------------------------------------------------
+@app.post("/restaurants/<int:rest_id>/price_intel")
+@login_required
+@require_restaurant_access
+def run_price_intel(rest_id):
+    """Trigger a Google Places nearby search for price comparison."""
+    if not price_intel:
+        flash("Price comparison not available.", "error")
+        return redirect(url_for("restaurant_detail", rest_id=rest_id))
+    force = request.form.get("force_refresh") == "1"
+    try:
+        result = price_intel.search_nearby_restaurants(rest_id, force_refresh=force)
+        if result.get("error"):
+            flash(result["error"], "error")
+        else:
+            flash(f"Found {result['result_count']} comparable restaurants nearby.", "success")
+    except RuntimeError as e:
+        flash(str(e), "error")
+    except Exception as e:
+        flash(f"Price comparison failed: {e}", "error")
+    return redirect(url_for("restaurant_detail", rest_id=rest_id))
+
+
+@app.get("/api/restaurants/<int:rest_id>/price_intel")
+@login_required
+@require_restaurant_access
+def api_price_intel(rest_id):
+    """JSON endpoint: return cached price comparison data + market summary."""
+    if not price_intel:
+        return jsonify({"error": "Price comparison not available"}), 503
+    try:
+        comps = price_intel.get_cached_comparisons(rest_id)
+        summary = price_intel.get_market_summary(rest_id)
+        return jsonify({"comparisons": comps, "summary": summary})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.post("/switch-restaurant")

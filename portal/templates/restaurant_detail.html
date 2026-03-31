@@ -42,8 +42,8 @@
     padding:14px 16px; cursor:pointer; transition:all .2s ease;
     text-decoration:none; color:inherit; display:block; position:relative;
   }
-  .rest-tile:hover { border-color:var(--terracotta, #B85C38); box-shadow:0 2px 12px rgba(0,0,0,.06); transform:translateY(-1px); }
-  .rest-tile.selected { border-color:var(--terracotta, #B85C38); border-width:2px; box-shadow:0 2px 12px rgba(184,92,56,.12); }
+  .rest-tile:hover { border-color:#2E5B5E; box-shadow:0 2px 12px rgba(0,0,0,.06); transform:translateY(-1px); }
+  .rest-tile.selected { border-color:#2E5B5E; border-width:2px; box-shadow:0 2px 12px rgba(46,91,94,.12); }
   .rest-tile .tile-name { font-weight:600; font-size:.95rem; color:#2C2C2C; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rest-tile .tile-addr { font-size:.78rem; color:#888; line-height:1.3; }
   .rest-tile .tile-cuisine { display:inline-block; font-size:.7rem; color:var(--terracotta, #B85C38); background:rgba(184,92,56,.08); padding:2px 8px; border-radius:8px; margin-top:6px; }
@@ -55,7 +55,7 @@
 
   /* ---- Detail panel (below grid) ---- */
   .detail-expand {
-    background:#fff; border:1px solid var(--line); border-radius:14px;
+    background:var(--panel); border:2px solid #2E5B5E; border-radius:14px;
     padding:0; margin-top:16px; overflow:hidden;
     max-height:0; opacity:0; transition:max-height .4s ease, opacity .3s ease, padding .3s ease;
   }
@@ -80,12 +80,28 @@
 
   .detail-actions { display:flex; gap:10px; padding-top:16px; border-top:1px solid var(--line); }
   .btn-detail { padding:8px 18px; border-radius:8px; font-size:.85rem; font-weight:600; cursor:pointer; transition:all .2s; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-  .btn-upload { background:var(--terracotta, #B85C38); color:#fff !important; border:none; }
-  .btn-upload:hover { opacity:.9; }
-  .btn-menus { background:#2E5B5E; color:#fff !important; border:none; }
-  .btn-menus:hover { opacity:.9; }
-  .btn-del { background:none; color:#e55 !important; border:1px solid rgba(238,85,85,.3); }
-  .btn-del:hover { background:rgba(238,85,85,.06); }
+  .btn-upload { background:var(--saddle, #EFE2D3); color:#2C2C2C !important; border:1px solid rgba(0,0,0,.08); }
+  .btn-upload:hover { opacity:.85; }
+  .btn-menus { background:var(--saddle, #EFE2D3); color:#2C2C2C !important; border:1px solid rgba(0,0,0,.08); }
+  .btn-menus:hover { opacity:.85; }
+  .btn-del { background:#cc2222; color:#fff !important; border:none; }
+  .btn-del:hover { opacity:.85; }
+  .btn-intel { background:var(--saddle, #EFE2D3); color:#2C2C2C !important; border:1px solid rgba(0,0,0,.08); }
+  .btn-intel:hover { opacity:.85; }
+  .btn-intel:disabled { opacity:.5; cursor:wait; }
+
+  /* ---- Market intel ---- */
+  .intel-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; }
+  .intel-card { background:#fff; border:1px solid var(--line, #e5e5e5); border-radius:10px; padding:12px 14px; }
+  .intel-card .ic-name { font-size:.85rem; font-weight:600; color:#2C2C2C; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .intel-card .ic-addr { font-size:.72rem; color:#999; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .intel-card .ic-meta { display:flex; gap:8px; align-items:center; font-size:.78rem; }
+  .ic-price { color:var(--terracotta, #B85C38); font-weight:600; }
+  .ic-rating { color:#e6a817; }
+  .intel-summary { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
+  .intel-stat { background:rgba(46,91,94,.06); border-radius:8px; padding:8px 14px; font-size:.8rem; color:#2C2C2C; }
+  .intel-stat strong { display:block; font-size:1.1rem; color:#2E5B5E; }
+  .intel-none { font-size:.82rem; color:#999; font-style:italic; }
 
   /* ---- Confirm modal ---- */
   .confirm-overlay {
@@ -233,6 +249,10 @@
         </h3>
         <div class="detail-info" id="detailInfo"></div>
         <div class="detail-actions" id="detailActions"></div>
+        <div class="detail-intel" id="detailIntel" style="display:none;">
+          <h4 style="font-size:.9rem; font-weight:600; color:#2C2C2C; margin:16px 0 8px; border-top:1px solid var(--line, #e5e5e5); padding-top:14px;">Local Market</h4>
+          <div id="intelContent"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -316,7 +336,11 @@
       detailActions.innerHTML =
         '<a href="/import?for_restaurant=' + id + '&rest_name=' + encodeURIComponent(name) + '&rest_addr=' + encodeURIComponent(fullAddr) + '" class="btn-detail btn-upload">Add Menu</a>'
         + '<a href="/restaurants/' + id + '/menus" class="btn-detail btn-menus">View Menus</a>'
+        + '<button class="btn-detail btn-intel" id="scanMarketBtn" onclick="scanMarket(' + id + ', this)">Scan Market</button>'
         + '<button class="btn-detail btn-del" onclick="deleteRestaurant(' + id + ', this)">Delete Restaurant</button>';
+
+      // Load cached price intel
+      loadIntel(id);
 
       // Open with animation
       if (!detailPanel.classList.contains('open')) {
@@ -345,6 +369,65 @@
     });
 
     closeBtn.addEventListener('click', closeDetail);
+
+    // ---- Price intel (Day 134) ----
+    var intelPanel = document.getElementById('detailIntel');
+    var intelContent = document.getElementById('intelContent');
+
+    function loadIntel(restId) {
+      intelPanel.style.display = 'none';
+      intelContent.innerHTML = '';
+      fetch('/api/restaurants/' + restId + '/price_intel')
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if (data.error || !data.summary || !data.summary.has_data) {
+            intelPanel.style.display = 'none';
+            return;
+          }
+          var s = data.summary;
+          var html = '<div class="intel-summary">';
+          html += '<div class="intel-stat"><strong>' + s.competitor_count + '</strong>Nearby</div>';
+          if (s.avg_rating) html += '<div class="intel-stat"><strong>' + s.avg_rating + '</strong>Avg Rating</div>';
+          var prices = s.price_distribution || {};
+          Object.keys(prices).forEach(function(k){
+            html += '<div class="intel-stat"><strong>' + prices[k] + '</strong>' + k + '</div>';
+          });
+          html += '</div>';
+          if (data.comparisons && data.comparisons.length) {
+            html += '<div class="intel-grid">';
+            data.comparisons.slice(0, 8).forEach(function(c){
+              html += '<div class="intel-card">'
+                + '<div class="ic-name">' + (c.place_name || '').replace(/</g,'&lt;') + '</div>'
+                + '<div class="ic-addr">' + (c.place_address || '').replace(/</g,'&lt;') + '</div>'
+                + '<div class="ic-meta">'
+                + '<span class="ic-price">' + (c.price_label || 'N/A') + '</span>'
+                + (c.rating ? '<span class="ic-rating">' + c.rating + '</span>' : '')
+                + '</div></div>';
+            });
+            html += '</div>';
+          }
+          intelContent.innerHTML = html;
+          intelPanel.style.display = 'block';
+        })
+        .catch(function(){ intelPanel.style.display = 'none'; });
+    }
+
+    window.scanMarket = function(restId, btn) {
+      btn.disabled = true;
+      btn.textContent = 'Scanning...';
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/restaurants/' + restId + '/price_intel';
+      // CSRF token
+      var csrf = document.querySelector('input[name=csrf_token]');
+      if (csrf) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = csrf.value;
+        form.appendChild(inp);
+      }
+      document.body.appendChild(form);
+      form.submit();
+    };
 
     // ---- Delete restaurant (themed confirm) ----
     var confirmOverlay = document.getElementById('confirmOverlay');
