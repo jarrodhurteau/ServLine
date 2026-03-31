@@ -35,9 +35,10 @@ STEP_CALL1_EXTRACT = "call_1_claude_extraction"
 STEP_CALL2_VISION = "call_2_vision_verification"
 STEP_SEMANTIC = "semantic_pipeline"
 STEP_CALL3_RECONCILE = "call_3_targeted_reconciliation"
+STEP_CALL4_PRICE = "call_4_price_intelligence"
 
 # Canonical ordering for item_flow output
-_STEP_ORDER = [STEP_OCR_TEXT, STEP_CALL1_EXTRACT, STEP_CALL2_VISION, STEP_SEMANTIC, STEP_CALL3_RECONCILE]
+_STEP_ORDER = [STEP_OCR_TEXT, STEP_CALL1_EXTRACT, STEP_CALL2_VISION, STEP_SEMANTIC, STEP_CALL3_RECONCILE, STEP_CALL4_PRICE]
 
 
 # ---------------------------------------------------------------------------

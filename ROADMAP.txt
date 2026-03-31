@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 135 (March 31, 2026) — Sprint 13.2: Claude Call 4 — Price Intelligence
+Last Updated: Day 136 (March 31, 2026) — Sprint 13.2: Pipeline Integration + Loading Screen
 
 ================================================================================
 PROJECT MISSION
@@ -2219,14 +2219,22 @@ Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
 
     Day 135 test suite: 32 cases, 100% pass rate
     Cumulative: 2,932 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
-  [ ] Pipeline integration + loading screen (Day 136)
-      - Wire Call 4 into parsing pipeline (after Call 3 reconciliation)
-      - 5-stage progress screen: Extracting → Verifying → Reconciling →
-        Analyzing Prices → Finalizing
-      - Real stage-based progress (each stage fills when it actually completes)
-      - MenuFlow logo + tablecloth animation during wait
-      - "Feel free to grab a coffee — we'll keep your progress" messaging
-      - 5-15 minute expected duration, progress persists if browser refreshes
+  [x] Pipeline integration + loading screen (Day 136)
+      - Call 4 wired into main pipeline (after gate pass + draft persist)
+      - Non-blocking: Call 4 skip/fail does not break import
+      - STEP_CALL4_PRICE in pipeline_metrics with full tracker support
+      - pipeline_stage column on import_jobs (idempotent migration)
+      - Stage tracking: extracting → verifying → reconciling →
+        analyzing_prices → finalizing → done
+      - Status API returns pipeline_stage for frontend polling
+      - 5-stage progress screen with MenuFlow logo + branded UI
+      - Terracotta pulse on active stage, teal checkmarks on done stages
+      - Tablecloth wave animation (terracotta/cream stripe scroll)
+      - "Feel free to grab a coffee" messaging + refresh persistence
+      - Server-rendered data-initial-stage for instant state on page load
+
+    Day 136 test suite: 32 cases, 100% pass rate
+    Cumulative: 2,964 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
 
 Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
 ......................................................

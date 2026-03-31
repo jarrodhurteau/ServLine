@@ -195,6 +195,20 @@ try:
 except Exception:
     ai_price_intel = None
 
+# Day 136: ensure pipeline_stage column exists on import_jobs
+def _ensure_import_jobs_columns():
+    """Add pipeline_stage column to import_jobs if missing (idempotent)."""
+    try:
+        with db_connect() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(import_jobs)").fetchall()}
+            if "pipeline_stage" not in cols:
+                conn.execute("ALTER TABLE import_jobs ADD COLUMN pipeline_stage TEXT")
+                conn.commit()
+    except Exception as _e:
+        print(f"[APP] import_jobs column backfill: {_e}")
+
+_ensure_import_jobs_columns()
+
 # OCR engine (Day-21 revamp / One Brain façade)
 try:
     from storage.ocr_facade import build_structured_menu
@@ -2005,7 +2019,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
     helper_error: Optional[str] = None
 
     try:
-        update_import_job(job_id, status="processing")
+        update_import_job(job_id, status="processing", pipeline_stage="extracting")
 
         # Always create a user-rotatable working preview up-front
         try:
@@ -2201,6 +2215,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                     else:
                         # Legacy 3-call mode: Call 2 vision verification
                         extraction_strategy = "claude_api"
+                        update_import_job(job_id, pipeline_stage="verifying")
                         try:
                             if tracker:
                                 tracker.start_step(STEP_CALL2_VISION)
@@ -2280,6 +2295,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
         # already self-verified during Call 1 thinking phase.
         # =====================================================================
         reconcile_result = None
+        update_import_job(job_id, pipeline_stage="reconciling")
         if _thinking_active and items:
             # Extended thinking mode: skip Call 3
             reconcile_result = {"skipped": True, "skip_reason": "extended_thinking"}
@@ -2438,6 +2454,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             except Exception as _gate_err:
                 print(f"[Draft] Confidence gate failed: {_gate_err}")
 
+        price_intel_result = None  # populated after draft persistence (Call 4)
+
+        update_import_job(job_id, pipeline_stage="finalizing")
+
         # ✅ CRITICAL (SUCCESS PATH): hydrate DB-backed draft items + save OCR debug payload
         # status="done" is set AFTER items are in the DB so auto-redirect
         # lands on a populated editor.
@@ -2519,15 +2539,61 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             print(f"[Draft] ERROR creating draft items: {_draft_err}")
             import traceback; traceback.print_exc()
 
+        # =====================================================================
+        # CALL 4: PRICE INTELLIGENCE — Sprint 13.2 (Day 136)
+        # Runs after draft items are persisted (needs draft_id to read from DB).
+        # Non-blocking: if it fails, the import still succeeds.
+        # =====================================================================
+        _gate_passed = (gate_result is None or gate_result.passed)
+        if items and _gate_passed and draft_id:
+            update_import_job(job_id, pipeline_stage="analyzing_prices")
+            try:
+                from storage.pipeline_metrics import STEP_CALL4_PRICE
+                if tracker:
+                    tracker.start_step(STEP_CALL4_PRICE)
+                _job_row = get_import_job(job_id)
+                _rest_id = _job_row["restaurant_id"] if _job_row else None
+                if _rest_id and ai_price_intel:
+                    price_intel_result = ai_price_intel.analyze_menu_prices(
+                        draft_id=int(draft_id),
+                        restaurant_id=int(_rest_id),
+                    )
+                    if price_intel_result and not price_intel_result.get("error"):
+                        assessed = price_intel_result.get("items_assessed", 0)
+                        total = price_intel_result.get("total_items", 0)
+                        if tracker:
+                            tracker.end_step(STEP_CALL4_PRICE, items_assessed=assessed, total=total)
+                        print(f"[Draft] Call 4 (Price Intel): {assessed}/{total} items assessed")
+                    elif price_intel_result and price_intel_result.get("error"):
+                        if tracker:
+                            tracker.fail_step(STEP_CALL4_PRICE, price_intel_result["error"])
+                        print(f"[Draft] Call 4 error: {price_intel_result['error']}")
+                    else:
+                        if tracker:
+                            tracker.skip_step(STEP_CALL4_PRICE, "empty_result")
+                else:
+                    skip_reason = "no_restaurant" if not _rest_id else "ai_price_intel_unavailable"
+                    if tracker:
+                        tracker.skip_step(STEP_CALL4_PRICE, skip_reason)
+                    print(f"[Draft] Call 4 skipped ({skip_reason})")
+            except Exception as _price_err:
+                if tracker:
+                    try:
+                        from storage.pipeline_metrics import STEP_CALL4_PRICE as _s4
+                        tracker.fail_step(_s4, str(_price_err))
+                    except Exception:
+                        pass
+                print(f"[Draft] Call 4 (Price Intel) failed: {_price_err}")
+
         # Mark done AFTER items are in DB so auto-redirect shows populated editor
         if gate_result is not None and not gate_result.passed:
-            update_import_job(job_id, status="rejected", error=gate_result.customer_message)
+            update_import_job(job_id, status="rejected", pipeline_stage="done", error=gate_result.customer_message)
         else:
-            update_import_job(job_id, status="done")
+            update_import_job(job_id, status="done", pipeline_stage="done")
 
 
     except Exception as e:
-        update_import_job(job_id, status="failed", error=str(e))
+        update_import_job(job_id, status="failed", pipeline_stage="done", error=str(e))
 
 
 # Upload route (JSON API) — returns job id

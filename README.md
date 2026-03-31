@@ -1244,6 +1244,8 @@ Day 134 — Sprint 13.2 Day 2: Google Places API Integration. New storage/price_
 
 Day 135 — Sprint 13.2 Day 3: Claude Call 4 — Price Intelligence. New storage/ai_price_intel.py (~370 LOC): Claude Sonnet 4.5 price analysis module — the fourth Claude API call in the production pipeline. Takes extracted menu items + Google Places competitor context + cuisine type + zip code, sends to Claude for per-item price assessment. Output: 5-level assessment (underpriced/slightly_underpriced/fair/slightly_overpriced/overpriced) + suggested price ranges (low/high cents) + regional average per item + reasoning + confidence score. Category-level averages with typical ranges. Market context: tier ($-$$$$), price pressure, summary. Two new tables: price_intelligence_results (per-item assessments with FK to drafts) + price_intelligence_summary (draft-level rollup with assessment counts, category_avgs JSON, model_used). Caching: get_price_intelligence() returns stored results, analyze_menu_prices() skips Claude if data exists, force_refresh bypasses cache. Validation: _normalize_assessment() maps to valid values, _validate_results() matches items by name, clamps confidence 0-1, truncates reasoning. Portal: POST /drafts/<id>/price_intelligence triggers analysis, GET /api/drafts/<id>/price_intelligence returns full JSON, GET /api/drafts/<id>/price_intelligence/<item_id> returns per-item assessment. 32 tests, 2,932 cumulative.
 
+Day 136 — Sprint 13.2 Day 4: Pipeline Integration + Loading Screen. Call 4 (price intelligence) wired into the main parsing pipeline — runs automatically after confidence gate passes and draft items are persisted, using the job's restaurant_id. Non-blocking: Call 4 failure or skip (no restaurant, no API key) does not break the import. New STEP_CALL4_PRICE constant in pipeline_metrics.py with full tracker support (start/end/skip/fail). New pipeline_stage column on import_jobs table (idempotent ALTER TABLE migration) — tracks current pipeline step in real-time: extracting → verifying → reconciling → analyzing_prices → finalizing → done. Status API (/api/menus/import/<id>/status) returns pipeline_stage for frontend polling. New 5-stage progress screen on import_view.html: MenuFlow logo + branded pipeline stages with numbered icons (checkmarks for completed), terracotta pulse animation on active stage, teal fill for completed stages, connector lines between stages. Tablecloth-stripe wave animation (alternating terracotta/cream scrolling). "Feel free to grab a coffee" messaging with reassurance about progress persistence. Server-rendered data-initial-stage attribute ensures progress survives browser refresh. Pipeline_stage set to "done" on all terminal states (done, rejected, failed). 32 tests, 2,964 cumulative.
+
 ---
 
 ## 🌄 System State Summary
@@ -1335,6 +1337,10 @@ ServLine now has:
 - ✅ Session scoping — require_restaurant_access, restaurant switching
 - ✅ Email verification — token-based verification with SHA-256 hashed tokens
 - ✅ Password reset — token-based reset with 1-hour expiry, no email existence leak
+- ✅ Google Places API price comparison — nearby competitor search, market summary
+- ✅ Claude Call 4 price intelligence — per-item assessment, suggested ranges, market context
+- ✅ 5-stage pipeline progress screen — real-time stage tracking with MenuFlow branding
+- ✅ Pipeline stage persistence — survives browser refresh, non-blocking Call 4
 
 ---
 

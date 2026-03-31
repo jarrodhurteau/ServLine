@@ -26,7 +26,7 @@
     .ai-title { font-weight:700; letter-spacing:.02em; }
     .ai-note { font-size:.9rem; color:var(--muted); margin-top:2px; }
 
-    /* Indeterminate progress bar */
+    /* Legacy indeterminate progress bar (hidden, replaced by pipeline stages) */
     .progress-wrap { display:none; height:10px; background:rgba(122,162,255,.15); border-radius:999px; overflow:hidden; border:1px solid var(--line); }
     .progress-bar { height:100%; width:40%; border-radius:999px; background:var(--brand, #7aa2ff); animation: indet 1.2s infinite linear; transform:translateX(-40%); }
     @keyframes indet {
@@ -34,6 +34,66 @@
       50%  { transform: translateX(60%); }
       100% { transform: translateX(140%); }
     }
+
+    /* ===== 5-Stage Pipeline Progress (Day 136) ===== */
+    .pipeline-progress { display:none; margin-top:16px; border:1px solid var(--line, #e5e7eb); border-radius:16px; padding:24px; background:var(--bg, #EFE2D3); }
+    .pipeline-progress.visible { display:block; }
+
+    .pipeline-header { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+    .pipeline-logo { width:48px; height:48px; object-fit:contain; }
+    .pipeline-title { font-size:1.1rem; font-weight:700; color:var(--text, #2C2C2C); }
+    .pipeline-subtitle { font-size:.85rem; color:var(--muted, #6b7280); margin-top:2px; }
+
+    .pipeline-stages { display:flex; align-items:flex-start; gap:0; position:relative; }
+    .pipeline-stage { flex:1; display:flex; flex-direction:column; align-items:center; text-align:center; position:relative; z-index:1; }
+    .pipeline-stage-icon {
+      width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+      font-size:1rem; font-weight:700; border:3px solid #d1d5db; background:#f9fafb; color:#9ca3af;
+      transition: all .4s ease;
+    }
+    .pipeline-stage.active .pipeline-stage-icon {
+      border-color:#B85C38; background:#B85C38; color:#fff;
+      animation: stage-pulse 1.5s ease-in-out infinite;
+    }
+    .pipeline-stage.done .pipeline-stage-icon {
+      border-color:#2E5B5E; background:#2E5B5E; color:#fff;
+    }
+    .pipeline-stage-label {
+      margin-top:6px; font-size:.75rem; font-weight:600; color:#9ca3af;
+      transition: color .3s;
+    }
+    .pipeline-stage.active .pipeline-stage-label { color:#B85C38; }
+    .pipeline-stage.done .pipeline-stage-label { color:#2E5B5E; }
+
+    /* connector line between stages */
+    .pipeline-connector {
+      flex:0 0 auto; width:calc(100% / 6); height:3px; background:#d1d5db;
+      margin-top:20px; /* vertically center with icon */
+      transition: background .4s;
+    }
+    .pipeline-connector.filled { background:#2E5B5E; }
+
+    @keyframes stage-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(184,92,56,.4); }
+      50%      { box-shadow: 0 0 0 8px rgba(184,92,56,0); }
+    }
+
+    /* Tablecloth wave animation */
+    .tablecloth-wave {
+      height:6px; margin-top:16px; border-radius:3px; overflow:hidden;
+      background: repeating-linear-gradient(90deg, #B85C38 0px, #B85C38 12px, #F5EBD9 12px, #F5EBD9 24px);
+      background-size: 48px 6px;
+      animation: wave-scroll 2s linear infinite;
+    }
+    @keyframes wave-scroll {
+      0%   { background-position: 0 0; }
+      100% { background-position: 48px 0; }
+    }
+
+    .pipeline-message {
+      margin-top:14px; text-align:center; font-size:.9rem; color:var(--muted, #6b7280);
+    }
+    .pipeline-message strong { color:var(--text, #2C2C2C); }
 
     /* Rejection banner (Day 107) */
     .rejection-banner { display:none; background:#fee2e2; border:1px solid #fca5a5; border-radius:12px; padding:12px 16px; color:#991b1b; margin-top:12px; }
@@ -75,10 +135,56 @@
       </div>
     </div>
 
-    <!-- live progress (indeterminate while processing) -->
+    <!-- legacy indeterminate bar (kept for non-pipeline jobs) -->
     <div id="progress-wrap" class="progress-wrap mt-3" aria-hidden="true">
       <div class="progress-bar"></div>
     </div>
+
+    <!-- ===== 5-Stage Pipeline Progress (Day 136) ===== -->
+    <div id="pipeline-progress" class="pipeline-progress{% if job.status in ['processing', 'pending'] and job.pipeline_stage %} visible{% endif %}" data-initial-stage="{{ job.pipeline_stage or '' }}">
+      <div class="pipeline-header">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="MenuFlow" class="pipeline-logo">
+        <div>
+          <div class="pipeline-title">Processing your menu…</div>
+          <div class="pipeline-subtitle">Our AI is reading, verifying, and analyzing your prices.</div>
+        </div>
+      </div>
+
+      <div class="pipeline-stages" id="pipeline-stages">
+        <div class="pipeline-stage" data-stage="extracting">
+          <div class="pipeline-stage-icon">1</div>
+          <div class="pipeline-stage-label">Extracting</div>
+        </div>
+        <div class="pipeline-connector" data-after="extracting"></div>
+        <div class="pipeline-stage" data-stage="verifying">
+          <div class="pipeline-stage-icon">2</div>
+          <div class="pipeline-stage-label">Verifying</div>
+        </div>
+        <div class="pipeline-connector" data-after="verifying"></div>
+        <div class="pipeline-stage" data-stage="reconciling">
+          <div class="pipeline-stage-icon">3</div>
+          <div class="pipeline-stage-label">Reconciling</div>
+        </div>
+        <div class="pipeline-connector" data-after="reconciling"></div>
+        <div class="pipeline-stage" data-stage="analyzing_prices">
+          <div class="pipeline-stage-icon">4</div>
+          <div class="pipeline-stage-label">Analyzing Prices</div>
+        </div>
+        <div class="pipeline-connector" data-after="analyzing_prices"></div>
+        <div class="pipeline-stage" data-stage="finalizing">
+          <div class="pipeline-stage-icon">5</div>
+          <div class="pipeline-stage-label">Finalizing</div>
+        </div>
+      </div>
+
+      <div class="tablecloth-wave"></div>
+
+      <div class="pipeline-message">
+        <strong>Feel free to grab a coffee</strong> — we'll keep your progress safe.<br>
+        This typically takes 2–5 minutes. You can close this tab and come back later.
+      </div>
+    </div>
+    <!-- ===== /Pipeline Progress ===== -->
 
     <!-- Rejection banner (Day 107): shown when confidence gate fails -->
     <div id="rejection-banner" class="rejection-banner{% if job.status == 'rejected' %} visible{% endif %}" role="alert">
@@ -231,6 +337,45 @@
     const updatedAtEl = document.getElementById('updated-at');
     const previewImg  = document.getElementById('preview-img');
     const previewPh   = document.getElementById('preview-placeholder');
+    const pipelineEl  = document.getElementById('pipeline-progress');
+
+    // Pipeline stage ordering for progress display
+    const STAGE_ORDER = ['extracting', 'verifying', 'reconciling', 'analyzing_prices', 'finalizing'];
+
+    function updatePipelineStages(currentStage) {
+      if (!pipelineEl || !currentStage) return;
+      const idx = STAGE_ORDER.indexOf(currentStage);
+      if (idx < 0) return;
+
+      // Show the pipeline progress panel
+      pipelineEl.classList.add('visible');
+
+      // Update each stage node
+      document.querySelectorAll('#pipeline-stages .pipeline-stage').forEach(el => {
+        const s = el.dataset.stage;
+        const si = STAGE_ORDER.indexOf(s);
+        el.classList.remove('active', 'done');
+        if (si < idx) el.classList.add('done');
+        else if (si === idx) el.classList.add('active');
+        // Update icon: checkmark for done stages
+        const icon = el.querySelector('.pipeline-stage-icon');
+        if (icon) {
+          if (si < idx) icon.textContent = '✓';
+          else icon.textContent = String(si + 1);
+        }
+      });
+
+      // Update connectors
+      document.querySelectorAll('#pipeline-stages .pipeline-connector').forEach(el => {
+        const after = el.dataset.after;
+        const ci = STAGE_ORDER.indexOf(after);
+        el.classList.toggle('filled', ci < idx);
+      });
+    }
+
+    // Apply initial stage from server-rendered data (survives refresh)
+    const initialStage = (pipelineEl && pipelineEl.dataset.initialStage) || '';
+    if (initialStage) updatePipelineStages(initialStage);
 
     const previewURL  = "{{ preview_img_url if preview_img_url else url_for('imports_preview_image', job_id=job.id) }}";
     const statusURL   = "{{ url_for('import_status', job_id=job.id) }}";
@@ -313,11 +458,18 @@
         statusPill.textContent = (st ? st[0].toUpperCase()+st.slice(1) : '—');
         statusPill.className = 'pill ' + (PILL_CLASSES[st] || 'pill-gray');
 
-        // show/hide progress bar
+        // show/hide progress — prefer pipeline stages, fallback to indeterminate bar
         if (st === 'pending' || st === 'processing'){
-          progressWrap.style.display = 'block';
+          const stage = data.pipeline_stage || '';
+          if (stage && STAGE_ORDER.indexOf(stage) >= 0) {
+            updatePipelineStages(stage);
+            progressWrap.style.display = 'none';
+          } else {
+            progressWrap.style.display = 'block';
+          }
         } else {
           progressWrap.style.display = 'none';
+          if (pipelineEl) pipelineEl.classList.remove('visible');
         }
 
         // update "Updated" time if backend changed it
