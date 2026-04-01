@@ -2227,14 +2227,23 @@ Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
       - Stage tracking: extracting → verifying → reconciling →
         analyzing_prices → finalizing → done
       - Status API returns pipeline_stage for frontend polling
-      - 5-stage progress screen with MenuFlow logo + branded UI
-      - Terracotta pulse on active stage, teal checkmarks on done stages
-      - Tablecloth wave animation (terracotta/cream stripe scroll)
+      - 5-stage progress timeline with pip indicators + stage labels
+      - Animated MenuFlow logo video (1080p MP4 from Midjourney)
+        - White bg replaced with saddle (#EFE2D3) per-frame
+        - CSS right-edge fade mask for smooth wind line cutoff
+        - Table image split into layered PNGs (base/cloth/wind) with
+          feathered edges for independent CSS animation (fallback)
+        - Wind sound effects with mute/unmute toggle button
+      - Timeline centered on middle table leg via translateX offset
       - "Feel free to grab a coffee" messaging + refresh persistence
       - Server-rendered data-initial-stage for instant state on page load
+      - Debug preview at /debug/pipeline-progress with stage cycling
 
     Day 136 test suite: 32 cases, 100% pass rate
     Cumulative: 2,964 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+  Sprint 13.2 COMPLETE (Days 133-136): Google Places API, Claude Call 4
+  price intelligence, pipeline integration, animated loading screen.
 
 Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
 ......................................................
