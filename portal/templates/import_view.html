@@ -42,8 +42,8 @@
     /* Stage bar (overlaid on the table top) */
     .stage-bar { display:flex; align-items:center; gap:0; width:100%; margin-bottom:8px; }
     .stage-pip {
-      flex:0 0 auto; width:26px; height:26px; border-radius:50%;
-      border:3.5px solid #c0c0c0; background:#f3f4f6;
+      flex:0 0 auto; width:34px; height:34px; border-radius:50%;
+      border:4px solid #c0c0c0; background:#f3f4f6;
       transition: all .4s ease; position:relative; z-index:2;
     }
     .stage-pip.active {
@@ -51,7 +51,7 @@
       animation: pip-glow 1.5s ease-in-out infinite;
     }
     .stage-pip.done { border-color:#2E5B5E; background:#2E5B5E; }
-    .stage-rail { flex:1; height:5px; background:#c0c0c0; transition: background .4s; }
+    .stage-rail { flex:1; height:6px; background:#c0c0c0; transition: background .4s; border-radius:3px; }
     .stage-rail.filled { background:#2E5B5E; }
 
     @keyframes pip-glow {
@@ -61,44 +61,23 @@
 
     /* Stage labels */
     .stage-label-row { display:flex; justify-content:space-between; width:100%; margin-bottom:0; }
-    .stage-lbl { font-size:.85rem; font-weight:600; color:#b0b0b0; text-align:center; width:80px; transition: color .3s; line-height:1.3; }
+    .stage-lbl { font-size:.95rem; font-weight:600; color:#b0b0b0; text-align:center; width:90px; transition: color .3s; line-height:1.3; }
     .stage-lbl.active { color:#B85C38; }
     .stage-lbl.done { color:#2E5B5E; }
 
     /* Table + timeline wrapper */
-    .table-wrapper { position:relative; width:100%; max-width:700px; display:flex; flex-direction:column; align-items:center; transform: translateX(10%); }
+    .table-wrapper { position:relative; width:100%; max-width:700px; display:flex; flex-direction:column; align-items:center; transform: translateX(6%); }
     .table-overlay {
-      position:absolute; top:-24%; left:37%; transform: translateX(-50%);
+      position:absolute; top:-18%; left:39%; transform: translateX(-50%);
       width:80%; display:flex; flex-direction:column; align-items:center; z-index:2;
     }
 
-    /* Layered table with independent animations */
-    .table-hero { position:relative; width:100%; max-width:700px; margin-top:30px; overflow:visible; }
-    .table-hero .layer-base { width:100%; height:auto; display:block; }
-    .table-hero .layer-cloth {
-      position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;
-      animation: cloth-sway 3s ease-in-out infinite; transform-origin: 55% 50%;
-    }
-    .table-hero .layer-cloth img { width:100%; height:auto; display:block; }
-    .table-hero .layer-wind {
-      position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;
-      animation: wind-drift 4s ease-in-out infinite; transform-origin: 60% 30%;
-    }
-    .table-hero .layer-wind img { width:100%; height:auto; display:block; }
-    @keyframes cloth-sway {
-      0%   { transform: translateX(0) translateY(0) rotate(0deg); }
-      25%  { transform: translateX(3px) translateY(-2px) rotate(0.3deg); }
-      50%  { transform: translateX(1px) translateY(1px) rotate(-0.15deg); }
-      75%  { transform: translateX(4px) translateY(-1px) rotate(0.2deg); }
-      100% { transform: translateX(0) translateY(0) rotate(0deg); }
-    }
-    @keyframes wind-drift {
-      0%   { transform: translateX(0) translateY(0); }
-      20%  { transform: translateX(6px) translateY(-3px); }
-      40%  { transform: translateX(3px) translateY(2px); }
-      60%  { transform: translateX(8px) translateY(-2px); }
-      80%  { transform: translateX(2px) translateY(1px); }
-      100% { transform: translateX(0) translateY(0); }
+    /* Animated table video */
+    .table-hero { position:relative; width:100%; max-width:700px; }
+    .table-hero video {
+      width:100%; height:auto; display:block;
+      -webkit-mask-image: linear-gradient(to right, black 75%, transparent 98%);
+      mask-image: linear-gradient(to right, black 75%, transparent 98%);
     }
 
     /* Step text + message */
@@ -177,16 +156,15 @@
           </div>
         </div>
         <div class="table-hero">
-          <img class="layer-base" src="{{ url_for('static', filename='table_base.png') }}" alt="">
-          <div class="layer-cloth"><img src="{{ url_for('static', filename='table_cloth.png') }}" alt=""></div>
-          <div class="layer-wind"><img src="{{ url_for('static', filename='table_wind.png') }}" alt=""></div>
+          <video autoplay loop muted playsinline>
+            <source src="{{ url_for('static', filename='table_anim_audio.mp4') }}" type="video/mp4">
+          </video>
         </div>
       </div>
 
       <div class="step-text" id="step-text">Reading your menu...</div>
       <div class="pipeline-message">
-        <strong>Feel free to grab a coffee</strong> — we'll keep your progress safe.<br>
-        This typically takes 2-5 minutes. You can close this tab and come back.
+        <strong>Feel free to grab a coffee</strong> — we'll keep your progress safe.
       </div>
     </div>
     <!-- ===== /Hero Table Loading Scene ===== -->
@@ -555,5 +533,6 @@
         });
       }
     })();
+
   </script>
 {% endblock %}
