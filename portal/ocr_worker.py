@@ -14,7 +14,7 @@ from storage.ocr_utils import normalize_orientation  # type: ignore
 
 
 # -------- version banner (visible on server start) ----------
-OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + psm6→psm3 fallback / debug-save + multi-price parse v3.7 (fix: multi-token size header) [legacy auto-rotate disabled]"
+OCR_WORKER_VERSION = "Day22 / grayscale-first + upscale + psm6->psm3 fallback / debug-save + multi-price parse v3.7 (fix: multi-token size header) [legacy auto-rotate disabled]"
 print(f"[OCR] Loaded ocr_worker.py -> {OCR_WORKER_VERSION}")
 
 # Debug saves

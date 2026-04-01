@@ -4861,6 +4861,13 @@ def imports_draft(job_id: int):
         draft_id = None
 
     if draft_id:
+        # Day 137: Route to wizard for first-time review, editor if already completed
+        try:
+            d = drafts_store.get_draft(int(draft_id))
+            if d and not d.get("wizard_completed"):
+                return redirect(url_for("draft_wizard", draft_id=int(draft_id)))
+        except Exception:
+            pass
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
     # NEW: On-demand DB draft creation/linking (no OCR)
@@ -4870,6 +4877,13 @@ def imports_draft(job_id: int):
         draft_id = None
 
     if draft_id:
+        # Day 137: Route to wizard for first-time review
+        try:
+            d = drafts_store.get_draft(int(draft_id))
+            if d and not d.get("wizard_completed"):
+                return redirect(url_for("draft_wizard", draft_id=int(draft_id)))
+        except Exception:
+            pass
         return redirect(url_for("draft_editor", draft_id=int(draft_id)))
 
     # Fallback: legacy file draft (still read-only)
@@ -5973,6 +5987,312 @@ def draft_editor(draft_id: int):
         # Day 122: stats bar
         editor_stats=editor_stats,
     )
+
+
+# ===== Day 137: Guided Onboarding Wizard =====
+
+@app.get("/drafts/<int:draft_id>/wizard")
+@login_required
+def draft_wizard(draft_id: int):
+    """Guided category-by-category review wizard."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404, description=f"Draft {draft_id} not found")
+
+    items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
+
+    # Compute per-item quality (reuse same logic as editor)
+    for it in items:
+        try:
+            score, is_low = _compute_item_quality(it)
+        except Exception:
+            score, is_low = 70, False
+        it["quality"] = score
+        it["low_confidence"] = bool(is_low)
+
+    # Initialize wizard category tracking (idempotent)
+    drafts_store.init_wizard_categories(draft_id)
+    progress = drafts_store.get_wizard_progress(draft_id)
+
+    # Group items by category
+    flat_groups = {}
+    for it in items:
+        cat = (it.get("category") or "Uncategorized").strip()
+        flat_groups.setdefault(cat, []).append(it)
+
+    # Determine current step: summary (first page), or a category name
+    requested_step = request.args.get("step", "").strip()
+    requested_cat = request.args.get("category", "").strip()
+    category_list = [c["name"] for c in progress["categories"]]
+
+    # Default: summary page on first visit, otherwise first unreviewed
+    wizard_step = "summary"  # "summary" or a category name
+    current_category = None
+
+    if requested_cat and requested_cat in category_list:
+        wizard_step = "category"
+        current_category = requested_cat
+    elif requested_step == "summary" or (not requested_step and not requested_cat):
+        wizard_step = "summary"
+    else:
+        # First unreviewed category
+        wizard_step = "category"
+        for c in progress["categories"]:
+            if not c["reviewed"]:
+                current_category = c["name"]
+                break
+        # All reviewed — show the last one
+        if current_category is None and category_list:
+            current_category = category_list[-1]
+
+    # Price intelligence (if available)
+    price_intel = None
+    try:
+        from storage.ai_price_intel import get_price_intelligence
+        price_intel = get_price_intelligence(draft_id)
+    except Exception:
+        pass
+
+    # Build per-item price assessment lookup
+    price_map = {}
+    if price_intel and price_intel.get("assessments"):
+        for a in price_intel["assessments"]:
+            if a.get("item_id"):
+                price_map[a["item_id"]] = a
+
+    # Restaurant info for summary page
+    restaurant = None
+    if draft.get("restaurant_id"):
+        try:
+            with db_connect() as conn:
+                restaurant = conn.execute(
+                    "SELECT id, name, cuisine_type, zip_code FROM restaurants WHERE id = ?",
+                    (draft["restaurant_id"],),
+                ).fetchone()
+                if restaurant:
+                    restaurant = dict(restaurant)
+        except Exception:
+            pass
+
+    # Source job id for original file preview
+    source_job_id = draft.get("source_job_id")
+
+    return _safe_render(
+        "wizard.html",
+        draft=draft,
+        items=items,
+        flat_groups=flat_groups,
+        progress=progress,
+        category_list=category_list,
+        current_category=current_category,
+        wizard_step=wizard_step,
+        restaurant=restaurant,
+        price_map=price_map,
+        price_intel=price_intel,
+        source_job_id=source_job_id,
+    )
+
+
+@app.post("/drafts/<int:draft_id>/wizard/confirm")
+@login_required
+def wizard_confirm_category(draft_id: int):
+    """Mark a category as reviewed and advance to next."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+
+    category = (request.form.get("category") or "").strip()
+    if not category:
+        flash("No category specified.", "error")
+        return redirect(url_for("draft_wizard", draft_id=draft_id))
+
+    drafts_store.mark_category_reviewed(draft_id, category)
+    progress = drafts_store.get_wizard_progress(draft_id)
+
+    # If all reviewed, mark wizard complete and go to editor
+    if progress["complete"]:
+        drafts_store.mark_wizard_completed(draft_id)
+        flash("All categories reviewed! Welcome to the full editor.", "success")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    # Advance to next unreviewed category
+    for c in progress["categories"]:
+        if not c["reviewed"]:
+            return redirect(url_for("draft_wizard", draft_id=draft_id, category=c["name"]))
+
+    return redirect(url_for("draft_wizard", draft_id=draft_id))
+
+
+@app.post("/drafts/<int:draft_id>/wizard/unconfirm")
+@login_required
+def wizard_unconfirm_category(draft_id: int):
+    """Unmark a category to allow re-review."""
+    _require_drafts_storage()
+    category = (request.form.get("category") or "").strip()
+    if category:
+        drafts_store.unmark_category_reviewed(draft_id, category)
+    return redirect(url_for("draft_wizard", draft_id=draft_id, category=category))
+
+
+@app.get("/api/drafts/<int:draft_id>/wizard/progress")
+@login_required
+def wizard_progress_api(draft_id: int):
+    """JSON endpoint for wizard progress (for AJAX polling)."""
+    _require_drafts_storage()
+    progress = drafts_store.get_wizard_progress(draft_id)
+    return jsonify({"ok": True, **progress})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/item/<int:item_id>")
+@login_required
+def wizard_save_item(draft_id: int, item_id: int):
+    """Save a single item edit from the wizard (AJAX)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+
+    item = {
+        "id": item_id,
+        "name": (data.get("name") or "").strip(),
+        "description": (data.get("description") or "").strip(),
+        "price_cents": data.get("price_cents", 0),
+        "category": (data.get("category") or "").strip(),
+    }
+    if not item["name"]:
+        return jsonify({"ok": False, "error": "Name is required"}), 400
+
+    try:
+        drafts_store.upsert_draft_items(draft_id, [item])
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "item_id": item_id})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/item/<int:item_id>/delete")
+@login_required
+def wizard_delete_item(draft_id: int, item_id: int):
+    """Delete a single item from the wizard (AJAX)."""
+    _require_drafts_storage()
+    try:
+        deleted = drafts_store.delete_draft_items(draft_id, [item_id])
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/variant/<int:variant_id>")
+@login_required
+def wizard_save_variant(draft_id: int, variant_id: int):
+    """Save a single variant edit from the wizard (AJAX)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    price_cents = data.get("price_cents", 0)
+
+    if not label:
+        return jsonify({"ok": False, "error": "Label is required"}), 400
+
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE draft_item_variants SET label=?, price_cents=?, updated_at=? WHERE id=?",
+                (label, int(price_cents), _now_iso(), variant_id),
+            )
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "variant_id": variant_id})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/variant/<int:variant_id>/delete")
+@login_required
+def wizard_delete_variant(draft_id: int, variant_id: int):
+    """Delete a single variant (AJAX)."""
+    _require_drafts_storage()
+    try:
+        with db_connect() as conn:
+            conn.execute("DELETE FROM draft_item_variants WHERE id=?", (variant_id,))
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/item/<int:item_id>/add_variant")
+@login_required
+def wizard_add_variant(draft_id: int, item_id: int):
+    """Add a new blank variant to an item (AJAX)."""
+    _require_drafts_storage()
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                """INSERT INTO draft_item_variants (item_id, label, price_cents, kind, position, created_at, updated_at)
+                   VALUES (?, '', 0, 'size', (SELECT COALESCE(MAX(position),0)+1 FROM draft_item_variants WHERE item_id=?), ?, ?)""",
+                (item_id, item_id, _now_iso(), _now_iso()),
+            )
+            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "variant_id": new_id})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/reorder")
+@login_required
+def wizard_reorder(draft_id: int):
+    """Save new item positions after drag reorder (AJAX)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    order = data.get("order") or []  # list of item_id ints in new order
+
+    if not order:
+        return jsonify({"ok": False, "error": "No order provided"}), 400
+
+    try:
+        with db_connect() as conn:
+            for pos, item_id in enumerate(order, start=1):
+                conn.execute(
+                    "UPDATE draft_items SET position=?, updated_at=? WHERE id=? AND draft_id=?",
+                    (pos, _now_iso(), int(item_id), draft_id),
+                )
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "count": len(order)})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/add_item")
+@login_required
+def wizard_add_item(draft_id: int):
+    """Add a new blank item to a category (AJAX)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip()
+    if not category:
+        return jsonify({"ok": False, "error": "Category required"}), 400
+
+    # Insert at the end of the category
+    result = drafts_store.upsert_draft_items(draft_id, [{
+        "name": "New Item",
+        "description": "",
+        "price_cents": 0,
+        "category": category,
+    }])
+
+    new_id = result.get("inserted_ids", [None])[0]
+    return jsonify({"ok": True, "item_id": new_id})
 
 
 # --- NEW: Draft status probe for polling ---

@@ -397,6 +397,31 @@ def _ensure_schema() -> None:
                 "ALTER TABLE drafts ADD COLUMN category_order TEXT;"
             )
 
+        # Day 137 — wizard category review tracking
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_category_reviews (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              draft_id    INTEGER NOT NULL,
+              category    TEXT NOT NULL,
+              reviewed    INTEGER NOT NULL DEFAULT 0,
+              reviewed_at TEXT,
+              FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE,
+              UNIQUE(draft_id, category)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cat_reviews_draft "
+            "ON draft_category_reviews(draft_id)"
+        )
+
+        # Day 137 — track whether wizard has been completed for a draft
+        if not _col_exists("drafts", "wizard_completed"):
+            cur.execute(
+                "ALTER TABLE drafts ADD COLUMN wizard_completed INTEGER DEFAULT 0;"
+            )
+
         conn.commit()
 
 
@@ -3237,3 +3262,101 @@ def migrate_draft_modifier_groups(draft_id: int) -> Dict[str, int]:
             migrated += 1
 
     return {"item_count": len(item_ids), "migrated_count": migrated}
+
+
+# ------------------------------------------------------------
+# Wizard category review tracking (Day 137)
+# ------------------------------------------------------------
+
+def init_wizard_categories(draft_id: int) -> List[str]:
+    """
+    Initialize category review rows for all categories in the draft.
+    Returns the list of category names in position order.
+    Idempotent — only inserts categories not yet tracked.
+    """
+    items = get_draft_items(draft_id) or []
+    categories = []
+    seen = set()
+    for it in items:
+        cat = (it.get("category") or "Uncategorized").strip()
+        if cat not in seen:
+            seen.add(cat)
+            categories.append(cat)
+
+    now = datetime.utcnow().isoformat()
+    with db_connect() as conn:
+        for cat in categories:
+            conn.execute(
+                """INSERT OR IGNORE INTO draft_category_reviews
+                   (draft_id, category, reviewed, reviewed_at)
+                   VALUES (?, ?, 0, NULL)""",
+                (draft_id, cat),
+            )
+        conn.commit()
+    return categories
+
+
+def get_wizard_progress(draft_id: int) -> Dict[str, Any]:
+    """
+    Get wizard review progress for a draft.
+    Returns {categories: [{name, reviewed, reviewed_at}], total, reviewed_count, complete}.
+    """
+    with db_connect() as conn:
+        rows = conn.execute(
+            """SELECT category, reviewed, reviewed_at
+               FROM draft_category_reviews
+               WHERE draft_id = ?
+               ORDER BY id""",
+            (draft_id,),
+        ).fetchall()
+
+    cats = [
+        {"name": r["category"], "reviewed": bool(r["reviewed"]), "reviewed_at": r["reviewed_at"]}
+        for r in rows
+    ]
+    total = len(cats)
+    reviewed_count = sum(1 for c in cats if c["reviewed"])
+    return {
+        "categories": cats,
+        "total": total,
+        "reviewed_count": reviewed_count,
+        "complete": total > 0 and reviewed_count == total,
+    }
+
+
+def mark_category_reviewed(draft_id: int, category: str) -> bool:
+    """Mark a single category as reviewed. Returns True if updated."""
+    now = datetime.utcnow().isoformat()
+    with db_connect() as conn:
+        cur = conn.execute(
+            """UPDATE draft_category_reviews
+               SET reviewed = 1, reviewed_at = ?
+               WHERE draft_id = ? AND category = ?""",
+            (now, draft_id, category),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def unmark_category_reviewed(draft_id: int, category: str) -> bool:
+    """Unmark a category (allow re-review). Returns True if updated."""
+    with db_connect() as conn:
+        cur = conn.execute(
+            """UPDATE draft_category_reviews
+               SET reviewed = 0, reviewed_at = NULL
+               WHERE draft_id = ? AND category = ?""",
+            (draft_id, category),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def mark_wizard_completed(draft_id: int) -> None:
+    """Flag the draft as having completed the wizard review."""
+    now = datetime.utcnow().isoformat()
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE drafts SET wizard_completed = 1, updated_at = ? WHERE id = ?",
+            (now, draft_id),
+        )
+        conn.commit()

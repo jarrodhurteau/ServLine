@@ -1,0 +1,1362 @@
+{% extends "base.html" %}
+{% block title %}Review Wizard · Draft #{{ draft.id }}{% endblock %}
+
+{% block content %}
+<style>
+  /* Override the base.html main.wrap constraint so wizard uses full viewport width */
+  main.wrap:has(.wizard-page) {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+</style>
+<div class="wizard-page">
+  <style>
+    /* ===== Wizard Layout ===== */
+    .wizard-container {
+      display: grid;
+      grid-template-columns: 220px 1fr 450px;
+      gap: 0;
+      width: 100%;
+      min-height: calc(100vh - 200px);
+    }
+    @media (max-width: 900px) {
+      .wizard-container { grid-template-columns: 1fr; }
+      .wizard-sidebar, .wizard-preview { position: static !important; max-height: none !important; }
+    }
+
+    /* ===== Progress Header ===== */
+    .wizard-header {
+      max-width: 100%;
+      margin: 20px 0 16px;
+      padding: 0 24px;
+    }
+    .wizard-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+    .wizard-subtitle {
+      color: var(--muted);
+      font-size: .9rem;
+      margin-bottom: 12px;
+    }
+    .progress-track {
+      height: 8px;
+      background: var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #2E5B5E, #3a7a7e);
+      border-radius: 999px;
+      transition: width .4s ease;
+    }
+    body.theme-customer .progress-fill { background: linear-gradient(90deg, #B85C38, #d4724e); }
+
+    .progress-label {
+      font-size: .82rem;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    /* ===== Sidebar ===== */
+    .wizard-sidebar {
+      position: sticky;
+      top: 80px;
+      max-height: calc(100vh - 120px);
+      overflow-y: auto;
+      padding: 0 12px 0 16px;
+    }
+    .cat-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .cat-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: .9rem;
+      color: var(--muted);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .cat-list li:hover { background: rgba(0,0,0,.04); }
+
+    .cat-list li.active {
+      background: rgba(122,162,255,.08);
+      color: var(--ink);
+      font-weight: 600;
+      border-color: var(--line);
+    }
+    body.theme-customer .cat-list li.active {
+      background: rgba(184,92,56,.08);
+      border-color: #E8DACA;
+    }
+
+    .cat-list li.reviewed {
+      color: var(--muted);
+    }
+    .cat-check {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: .75rem;
+      transition: all .2s;
+    }
+    .cat-list li.reviewed .cat-check {
+      background: #2E5B5E;
+      border-color: #2E5B5E;
+      color: #fff;
+    }
+    body.theme-customer .cat-list li.reviewed .cat-check {
+      background: #B85C38;
+      border-color: #B85C38;
+    }
+    .cat-count {
+      margin-left: auto;
+      font-size: .75rem;
+      color: var(--muted);
+      background: rgba(255,255,255,.06);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    body.theme-customer .cat-count { background: rgba(0,0,0,.05); }
+
+    /* ===== Main Content ===== */
+    .wizard-main {
+      min-width: 0;
+      padding: 0 24px;
+    }
+    .category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .category-name {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .category-stats {
+      font-size: .85rem;
+      color: var(--muted);
+    }
+
+    /* ===== Item Cards ===== */
+    .wizard-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .wiz-item {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px 16px;
+      transition: border-color .15s;
+    }
+    .wiz-item:hover {
+      border-color: rgba(122,162,255,.3);
+    }
+    body.theme-customer .wiz-item:hover { border-color: rgba(184,92,56,.3); }
+
+    .wiz-item.is-low {
+      border-left: 3px solid #dc3545;
+    }
+    .wiz-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .wiz-item-name {
+      font-weight: 600;
+      font-size: .95rem;
+      color: var(--ink);
+      flex: 1;
+      word-break: break-word;
+    }
+    .wiz-item-price {
+      font-size: .95rem;
+      font-weight: 600;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .wiz-item-desc {
+      font-size: .82rem;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-bottom: 6px;
+    }
+    .wiz-item-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .wiz-badge {
+      font-size: .72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .wiz-badge-variant {
+      background: rgba(122,162,255,.12);
+      color: #7aa2ff;
+      border: 1px solid rgba(122,162,255,.25);
+    }
+    .wiz-badge-mg {
+      background: rgba(168,85,247,.12);
+      color: #c084fc;
+      border: 1px solid rgba(168,85,247,.25);
+    }
+    .wiz-badge-low {
+      background: rgba(220,53,69,.12);
+      color: #ff8a95;
+      border: 1px solid rgba(220,53,69,.25);
+    }
+    body.theme-customer .wiz-badge-variant { background: rgba(46,91,94,.1); color: #2E5B5E; border-color: rgba(46,91,94,.25); }
+    body.theme-customer .wiz-badge-mg { background: rgba(139,92,246,.1); color: #7c3aed; border-color: rgba(139,92,246,.25); }
+
+    /* Price intelligence badge */
+    .wiz-price-tag {
+      font-size: .72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .price-fair       { background: rgba(40,167,69,.12); color: #34d058; border: 1px solid rgba(40,167,69,.25); }
+    .price-under      { background: rgba(59,130,246,.12); color: #60a5fa; border: 1px solid rgba(59,130,246,.25); }
+    .price-over       { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.25); }
+    body.theme-customer .price-fair  { color: #16a34a; }
+    body.theme-customer .price-under { color: #2563eb; }
+    body.theme-customer .price-over  { color: #d97706; }
+
+    .price-tooltip {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: 4px;
+      padding-left: 2px;
+    }
+
+    /* ===== Variants / Modifiers inline ===== */
+    .wiz-variants {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--line);
+    }
+    .wiz-variant-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 0;
+      font-size: .82rem;
+      color: var(--muted);
+    }
+    .wiz-variant-label { font-weight: 500; flex: 1; min-width: 0; }
+    .wiz-variant-price { font-weight: 600; color: var(--ink); }
+    /* Editable variant inputs */
+    .wiz-variant-row input {
+      border: none !important; background: none !important; outline: none !important;
+      box-shadow: none !important; -webkit-appearance: none; appearance: none;
+      padding: 0 !important; margin: 0 !important; font-family: inherit;
+    }
+    .wiz-variant-row input:focus { border-bottom: 1px dashed rgba(184,92,56,.5) !important; }
+    .wiz-variant-row input.wiz-vf-label { font-weight: 500; font-size: .82rem; color: var(--muted); flex: 1; min-width: 0; }
+    .wiz-variant-row input.wiz-vf-price { font-weight: 600; font-size: .82rem; color: var(--ink); text-align: right; width: 60px; }
+    .wiz-vf-delete {
+      border: none !important; background: none !important; outline: none !important;
+      color: #dc3545; font-size: 1rem; cursor: pointer; padding: 0 4px !important;
+      opacity: .3; transition: opacity .15s; flex-shrink: 0;
+    }
+    .wiz-variant-row:hover .wiz-vf-delete { opacity: .8; }
+    .wiz-vf-delete:hover { opacity: 1 !important; }
+    .wiz-variant-price.missing-price { color: #dc3545 !important; }
+    .wiz-variant-price.missing-price::after { content: ' (missing)'; font-size: .7rem; font-weight: 400; }
+    .wiz-variant-label.missing-label { color: #dc3545 !important; font-style: italic; }
+    .wiz-mg-name {
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin-top: 6px;
+      margin-bottom: 2px;
+    }
+    .wiz-modifier-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0 2px 12px;
+      font-size: .78rem;
+      color: var(--muted);
+    }
+
+    /* ===== Action Bar ===== */
+    .wizard-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 0;
+      border-top: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+    .wizard-actions .btn {
+      padding: 10px 24px;
+      font-size: .9rem;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      transition: all .15s;
+    }
+    .wizard-actions .btn:hover { border-color: var(--muted); }
+    .wizard-actions .btn-confirm {
+      background: #2E5B5E;
+      border-color: #2E5B5E;
+      color: #fff;
+    }
+    .wizard-actions .btn-confirm:hover { background: #24504f; }
+    body.theme-customer .wizard-actions .btn-confirm {
+      background: #B85C38 !important;
+      border-color: #B85C38 !important;
+      color: #fff !important;
+    }
+    body.theme-customer .wizard-actions .btn-confirm:hover {
+      background: #A04E2E !important;
+    }
+    .wizard-actions .btn-skip {
+      background: transparent;
+      border-color: transparent;
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .wizard-actions .btn-skip:hover { color: var(--ink); }
+
+    /* Reviewed overlay */
+    .reviewed-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: rgba(40,167,69,.08);
+      border: 1px solid rgba(40,167,69,.2);
+      border-radius: 10px;
+      margin-bottom: 16px;
+      color: #34d058;
+      font-size: .9rem;
+      font-weight: 600;
+    }
+    body.theme-customer .reviewed-banner { color: #16a34a; background: rgba(40,167,69,.06); }
+
+    /* ===== Item Number ===== */
+    .wiz-item-num {
+      font-size: .78rem;
+      font-weight: 700;
+      color: var(--muted);
+      min-width: 28px;
+      flex-shrink: 0;
+    }
+
+    /* ===== Inline Editing ===== */
+    .wiz-item .wiz-display { cursor: pointer; }
+    .wiz-item .wiz-display:hover { background: rgba(0,0,0,.02); border-radius: 4px; }
+    .wiz-edit-form { display: none; }
+    .wiz-item.editing .wiz-display { display: none; }
+    .wiz-item.editing .wiz-edit-form { display: block; }
+
+    /* Inputs styled to be invisible — match display text exactly */
+    .wiz-edit-form .wiz-f-name,
+    .wiz-edit-form .wiz-f-price,
+    .wiz-edit-form .wiz-f-desc {
+      border: none !important; background: none !important; outline: none !important;
+      box-shadow: none !important; -webkit-appearance: none; appearance: none;
+      padding: 0 !important; margin: 0 !important;
+      font-family: inherit;
+    }
+    .wiz-edit-form .wiz-f-name {
+      font-weight: 600; font-size: .95rem; color: var(--ink);
+      flex: 1; min-width: 0; word-break: break-word;
+    }
+    .wiz-edit-form .wiz-f-price {
+      font-weight: 600; font-size: .95rem; color: var(--ink);
+      text-align: right; width: 80px; flex-shrink: 0;
+    }
+    .wiz-edit-form .wiz-f-desc {
+      font-size: .82rem; color: var(--muted); line-height: 1.4;
+      width: 100%; resize: none; min-height: 0; height: auto;
+    }
+    /* Subtle caret underline on focus only */
+    .wiz-edit-form .wiz-f-name:focus,
+    .wiz-edit-form .wiz-f-price:focus,
+    .wiz-edit-form .wiz-f-desc:focus {
+      border-bottom: 1px dashed rgba(184,92,56,.5) !important;
+    }
+    .wiz-edit-actions {
+      display: flex; gap: 6px; align-items: center; margin-top: 6px;
+      opacity: .6; transition: opacity .15s;
+    }
+    .wiz-item.editing:hover .wiz-edit-actions { opacity: 1; }
+    .wiz-edit-actions button {
+      padding: 2px 8px; border-radius: 4px; font-size: .72rem;
+      font-weight: 600; cursor: pointer;
+      border: none; background: transparent; color: var(--muted);
+    }
+    .wiz-edit-actions .btn-save { color: #B85C38; }
+    .wiz-edit-actions .btn-save:hover { background: rgba(184,92,56,.08); }
+    .wiz-edit-actions .btn-add-variant { color: #2E5B5E; }
+    .wiz-edit-actions .btn-add-variant:hover { background: rgba(46,91,94,.08); }
+    .wiz-edit-actions .btn-delete { margin-left: auto; color: #dc3545; }
+    .wiz-edit-actions .btn-delete:hover { background: rgba(220,53,69,.08); }
+    .wiz-save-ok {
+      color: #16a34a; font-size: .72rem;
+      font-weight: 600; margin-left: 4px;
+      opacity: 0; transition: opacity .3s;
+      pointer-events: none;
+    }
+    .wiz-save-ok.flash { opacity: 1; }
+    .wiz-item.deleted {
+      opacity: .4;
+      pointer-events: none;
+      text-decoration: line-through;
+    }
+
+    /* ===== Drag Reorder ===== */
+    .wiz-drag-handle {
+      cursor: grab;
+      color: var(--muted);
+      font-size: 1.1rem;
+      user-select: none;
+      padding: 0 4px;
+      flex-shrink: 0;
+      opacity: .4;
+      transition: opacity .15s;
+    }
+    .wiz-item:hover .wiz-drag-handle { opacity: .8; }
+    .wiz-drag-handle:active { cursor: grabbing; }
+    .wiz-item.dragging {
+      opacity: .5;
+      border: 2px dashed #B85C38;
+    }
+    .wiz-item.drag-over {
+      border-top: 3px solid #B85C38;
+    }
+
+    /* ===== Add Item ===== */
+    .wiz-add-item {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px;
+      border: 2px dashed var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: .9rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .wiz-add-item:hover {
+      border-color: #B85C38;
+      color: #B85C38;
+    }
+
+    /* ===== Original File Preview (right column) ===== */
+    .wizard-preview {
+      position: sticky;
+      top: 80px;
+      max-height: calc(100vh - 100px);
+      overflow: hidden;
+      padding: 0 16px;
+    }
+    .preview-thumb {
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+      border-radius: 10px;
+      border: 2px solid var(--line);
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s;
+      display: block;
+      max-height: calc(100vh - 140px);
+    }
+    .preview-thumb:hover {
+      border-color: #B85C38;
+      box-shadow: 0 4px 16px rgba(0,0,0,.15);
+    }
+    .preview-label {
+      font-size: .7rem;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    /* Lightbox overlay */
+    .preview-lightbox {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,.85);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    .preview-lightbox.open { display: flex; }
+    .preview-lightbox img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 10px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    }
+  </style>
+
+  {% if wizard_step == "summary" %}
+  <!-- ===================================================================
+       SUMMARY PAGE (first page of wizard)
+       =================================================================== -->
+  <div class="wizard-header">
+    <div class="wizard-title">Menu Extraction Complete</div>
+    <div class="wizard-subtitle">
+      Here's what we found. You'll review each category one by one to make sure everything looks right.
+    </div>
+  </div>
+
+  <div style="max-width:720px; margin:0 auto; padding:0 16px;">
+    <!-- Restaurant info -->
+    {% if restaurant %}
+    <div class="card" style="margin-bottom:16px; padding:20px;">
+      <div style="font-size:1.1rem; font-weight:700; color:var(--ink); margin-bottom:4px;">{{ restaurant.name|e }}</div>
+      <div style="font-size:.85rem; color:var(--muted);">
+        {% if restaurant.cuisine_type %}{{ restaurant.cuisine_type|e }}{% endif %}
+        {% if restaurant.zip_code %}{% if restaurant.cuisine_type %} &middot; {% endif %}{{ restaurant.zip_code|e }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Stats cards -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
+      <div class="card" style="text-align:center; padding:24px 16px; background:#B85C38 !important; border-color:#A04E2E !important;">
+        <div style="font-size:2.2rem; font-weight:800; color:#fff;">{{ items|length }}</div>
+        <div style="font-size:.85rem; color:rgba(255,255,255,.75); margin-top:4px;">Menu Items</div>
+      </div>
+      <div class="card" style="text-align:center; padding:24px 16px; background:#2E5B5E !important; border-color:#24504f !important;">
+        <div style="font-size:2.2rem; font-weight:800; color:#fff;">{{ category_list|length }}</div>
+        <div style="font-size:.85rem; color:rgba(255,255,255,.75); margin-top:4px;">Categories</div>
+      </div>
+    </div>
+
+    <!-- Category breakdown -->
+    <div class="card" style="padding:20px; margin-bottom:20px;">
+      <div style="font-weight:700; font-size:.95rem; margin-bottom:12px; color:var(--ink);">Categories</div>
+      {% for cat_name in category_list %}
+      {% set cat_items = flat_groups.get(cat_name, []) %}
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line);">
+        <span style="font-size:.9rem; color:var(--ink);">{{ cat_name|e }}</span>
+        <span style="font-size:.82rem; color:var(--muted);">{{ cat_items|length }} item{{ 's' if cat_items|length != 1 else '' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if price_intel and price_intel.items_assessed %}
+    <div class="card" style="padding:20px; margin-bottom:20px;">
+      <div style="font-weight:700; font-size:.95rem; margin-bottom:12px; color:var(--ink);">Price Intelligence</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
+        <div>
+          <div style="font-size:1.3rem; font-weight:700; color:#34d058;">{{ price_intel.fair_priced }}</div>
+          <div style="font-size:.78rem; color:var(--muted);">Fair</div>
+        </div>
+        <div>
+          <div style="font-size:1.3rem; font-weight:700; color:#60a5fa;">{{ price_intel.underpriced }}</div>
+          <div style="font-size:.78rem; color:var(--muted);">Underpriced</div>
+        </div>
+        <div>
+          <div style="font-size:1.3rem; font-weight:700; color:#fbbf24;">{{ price_intel.overpriced }}</div>
+          <div style="font-size:.78rem; color:var(--muted);">Overpriced</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Begin review button -->
+    <div style="text-align:center; padding:16px 0;">
+      <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=category_list[0]) }}" class="btn btn-confirm" style="display:inline-block; padding:14px 40px; font-size:1rem; border-radius:10px; font-weight:700; text-decoration:none; background:#B85C38; color:#fff; border:none;">
+        Begin Review &rarr;
+      </a>
+    </div>
+  </div>
+
+  {% else %}
+  <!-- ===================================================================
+       CATEGORY REVIEW PAGE
+       =================================================================== -->
+  <div class="wizard-header">
+    <div class="wizard-title">Review Your Menu</div>
+    <div class="wizard-subtitle">
+      Confirm the extracted items look correct in each category.
+      You can edit everything in the full editor afterward.
+    </div>
+    {% set pct = (progress.reviewed_count / progress.total * 100) if progress.total > 0 else 0 %}
+    <div class="progress-track">
+      <div class="progress-fill" style="width: {{ pct|round|int }}%"></div>
+    </div>
+    <div class="progress-label">{{ progress.reviewed_count }} / {{ progress.total }} categories reviewed</div>
+  </div>
+
+  <div class="wizard-container">
+    <!-- ===== Sidebar: Category List ===== -->
+    <div class="wizard-sidebar">
+      <div class="card" style="padding: 12px;">
+        <ul class="cat-list">
+          {% for cat in progress.categories %}
+          {% set is_active = cat.name == current_category %}
+          <li class="{% if is_active %}active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
+              onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">
+            <span class="cat-check">{% if cat.reviewed %}&#10003;{% endif %}</span>
+            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ cat.name|e }}</span>
+            {% set item_count = flat_groups.get(cat.name, [])|length %}
+            <span class="cat-count">{{ item_count }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <!-- ===== Main: Current Category Items ===== -->
+    <div class="wizard-main">
+      {% if current_category %}
+      {% set cat_items = flat_groups.get(current_category, []) %}
+
+      <div class="category-header">
+        <div>
+          <div class="category-name">{{ current_category|e }}</div>
+          <div class="category-stats">
+            {{ cat_items|length }} item{{ 's' if cat_items|length != 1 else '' }}
+            {% set total_price = cat_items|selectattr('price_cents')|map(attribute='price_cents')|sum %}
+            {% if total_price %}
+            &middot; Avg price: ${{ '%.2f'|format(total_price / cat_items|length / 100) }}
+            {% endif %}
+          </div>
+        </div>
+
+        {% set cat_idx = category_list.index(current_category) if current_category in category_list else 0 %}
+        <div style="font-size:.85rem; color:var(--muted);">
+          Category {{ cat_idx + 1 }} of {{ category_list|length }}
+        </div>
+      </div>
+
+      {# Show banner if already reviewed #}
+      {% set is_reviewed = false %}
+      {% for c in progress.categories %}
+        {% if c.name == current_category and c.reviewed %}
+          {% set is_reviewed = true %}
+        {% endif %}
+      {% endfor %}
+
+      {% if is_reviewed %}
+      <div class="reviewed-banner">
+        &#10003; This category has been reviewed
+        <form method="POST" action="{{ url_for('wizard_unconfirm_category', draft_id=draft.id) }}" style="margin-left:auto;">
+          <input type="hidden" name="category" value="{{ current_category|e }}" />
+          <button type="submit" class="btn-skip" style="background:none; border:none; cursor:pointer; color:var(--muted); font-size:.82rem;">Undo</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <!-- Item Cards -->
+      <div class="wizard-items">
+        {% for it in cat_items %}
+        <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
+          <!-- Display mode (click to edit) -->
+          <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle'))wizEdit(this.parentElement)">
+            <div class="wiz-item-header">
+              <span class="wiz-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;&#8942;</span>
+              <span class="wiz-item-num">{{ loop.index }}.</span>
+              <div class="wiz-item-name">{{ it.name|e }}</div>
+              {% if it.price_cents %}
+              <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
+              {% endif %}
+            </div>
+
+            {% if it.description %}
+            <div class="wiz-item-desc">{{ it.description|e }}</div>
+            {% endif %}
+
+            <div class="wiz-item-meta">
+              {% if it.variants %}
+              <span class="wiz-badge wiz-badge-variant">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.modifier_groups %}
+              <span class="wiz-badge wiz-badge-mg">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.low_confidence %}
+              <span class="wiz-badge wiz-badge-low">Low confidence</span>
+              {% endif %}
+
+              {% set pi = price_map.get(it.id) %}
+              {% if pi %}
+                {% set assess = pi.assessment or '' %}
+                {% if 'under' in assess %}
+                <span class="wiz-price-tag price-under" title="{{ pi.reasoning or '' }}">&#8593; Underpriced</span>
+                {% elif assess == 'fair' %}
+                <span class="wiz-price-tag price-fair" title="{{ pi.reasoning or '' }}">&#10003; Fair price</span>
+                {% elif 'over' in assess %}
+                <span class="wiz-price-tag price-over" title="{{ pi.reasoning or '' }}">&#8595; Overpriced</span>
+                {% endif %}
+              {% endif %}
+            </div>
+
+            {% if pi and pi.suggested_low and pi.suggested_high %}
+            <div class="price-tooltip">
+              Suggested range: ${{ '%.2f'|format(pi.suggested_low / 100) }} &ndash; ${{ '%.2f'|format(pi.suggested_high / 100) }}
+              {% if pi.regional_avg %} &middot; Regional avg: ${{ '%.2f'|format(pi.regional_avg / 100) }}{% endif %}
+            </div>
+            {% endif %}
+
+            {% if it.variants %}
+            <div class="wiz-variants">
+              {% for v in it.variants %}
+              <div class="wiz-variant-row" data-variant-id="{{ v.id }}">
+                <span class="wiz-variant-label">{{ v.label|e }}</span>
+                {% if v.price_cents %}
+                <span class="wiz-variant-price">${{ '%.2f'|format(v.price_cents / 100) }}</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if it.modifier_groups %}
+            <div class="wiz-variants">
+              {% for mg in it.modifier_groups %}
+              <div class="wiz-mg-name">{{ mg.name|e }}{% if mg.required %} <span style="color:#dc3545; font-size:.7rem;">(required)</span>{% endif %}</div>
+              {% for mod in mg.modifiers %}
+              <div class="wiz-modifier-row">
+                <span>{{ mod.label|e }}</span>
+                {% if mod.price_cents %}
+                <span>+${{ '%.2f'|format(mod.price_cents / 100) }}</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+              {% endfor %}
+            </div>
+            {% endif %}
+            <span class="wiz-save-ok">saved</span>
+          </div>
+
+          <!-- Edit form (hidden until clicked, mirrors display layout) -->
+          <div class="wiz-edit-form">
+            <div class="wiz-item-header">
+              <span class="wiz-drag-handle">&#8942;&#8942;</span>
+              <span class="wiz-item-num">{{ loop.index }}.</span>
+              <input type="text" class="wiz-f-name" value="{{ it.name|e }}" placeholder="Item name" />
+              <span style="font-weight:600; font-size:.95rem; color:var(--ink); flex-shrink:0; display:flex; align-items:baseline;">$<input type="text" class="wiz-f-price" value="{% if it.price_cents %}{{ '%.2f'|format(it.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" /></span>
+            </div>
+            <textarea class="wiz-f-desc" placeholder="Description (optional)" rows="1">{{ (it.description or '')|e }}</textarea>
+
+            {% if it.variants %}
+            <div class="wiz-variants">
+              {% for v in it.variants %}
+              <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}">
+                <input type="text" class="wiz-vf-label" value="{{ v.label|e }}" placeholder="Label" onblur="wizSaveVariant(this)" />
+                <span style="font-weight:600; font-size:.82rem; color:var(--ink); display:flex; align-items:baseline;">$<input type="text" class="wiz-vf-price" value="{% if v.price_cents %}{{ '%.2f'|format(v.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>
+                <button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if it.modifier_groups %}
+            <div class="wiz-variants">
+              {% for mg in it.modifier_groups %}
+              <div class="wiz-mg-name">{{ mg.name|e }}{% if mg.required %} <span style="color:#dc3545; font-size:.7rem;">(required)</span>{% endif %}</div>
+              {% for mod in mg.modifiers %}
+              <div class="wiz-modifier-row">
+                <span>{{ mod.label|e }}</span>
+                {% if mod.price_cents %}
+                <span>+${{ '%.2f'|format(mod.price_cents / 100) }}</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="wiz-edit-actions">
+              <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ add variant</button>
+              <button type="button" class="btn-save" onclick="wizSave(this)" style="display:none;">save</button>
+              <button type="button" class="btn-delete" onclick="wizDelete(this)">delete</button>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Add Item button -->
+      <div class="wiz-add-item" onclick="wizAddItem(this)" data-draft-id="{{ draft.id }}" data-category="{{ current_category|e }}">
+        + Add Item
+      </div>
+
+      <!-- ===== Action Bar ===== -->
+      <div class="wizard-actions">
+        {# Back button #}
+        {% if cat_idx > 0 %}
+        <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=category_list[cat_idx - 1]) }}" class="btn">
+          &larr; {{ category_list[cat_idx - 1]|e }}
+        </a>
+        {% else %}
+        <span></span>
+        {% endif %}
+
+        {# Confirm / Next #}
+        {% if not is_reviewed %}
+        <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
+          <input type="hidden" name="category" value="{{ current_category|e }}" />
+          <button type="submit" class="btn btn-confirm">
+            Confirm &amp; {% if cat_idx < category_list|length - 1 %}Next{% else %}Finish{% endif %} &rarr;
+          </button>
+        </form>
+        {% else %}
+          {% if cat_idx < category_list|length - 1 %}
+          <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=category_list[cat_idx + 1]) }}" class="btn btn-confirm">
+            Next &rarr; {{ category_list[cat_idx + 1]|e }}
+          </a>
+          {% else %}
+          {# All done — go to editor #}
+          <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
+            <input type="hidden" name="category" value="{{ current_category|e }}" />
+            <button type="submit" class="btn btn-confirm">Open Full Editor &rarr;</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      {% else %}
+      <div class="card" style="text-align:center; padding:40px;">
+        <p style="color:var(--muted);">No categories found in this draft.</p>
+        <a href="{{ url_for('draft_editor', draft_id=draft.id) }}" class="btn btn-primary" style="margin-top:12px;">Open Editor</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ===== Right Column: Original File Preview ===== -->
+    <div class="wizard-preview">
+      {% if source_job_id %}
+      <img class="preview-thumb" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}"
+           alt="Original menu" onclick="document.getElementById('preview-lightbox').classList.add('open')" />
+      <div class="preview-label">Click to expand</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <script>
+    /* ===== Wizard Inline Editing ===== */
+    function wizEdit(card) {
+      // Auto-save and close any other open editors first
+      document.querySelectorAll('.wiz-item.editing').forEach(c => {
+        if (c !== card) {
+          c.querySelector('.btn-save').click();
+        }
+      });
+      card.classList.add('editing');
+      const nameInput = card.querySelector('.wiz-f-name');
+      if (nameInput) { nameInput.focus(); }
+    }
+
+    function wizCancel(btn) {
+      const card = btn.closest('.wiz-item');
+      card.classList.remove('editing');
+    }
+
+    async function wizSave(btn) {
+      const card = btn.closest('.wiz-item');
+      const itemId = card.dataset.itemId;
+      const draftId = card.dataset.draftId;
+      const name = card.querySelector('.wiz-f-name').value.trim();
+      const priceStr = card.querySelector('.wiz-f-price').value.trim();
+      const desc = card.querySelector('.wiz-f-desc').value.trim();
+
+      if (!name) { alert('Name is required'); return; }
+
+      // Convert price string to cents
+      let priceCents = 0;
+      if (priceStr) {
+        const cleaned = priceStr.replace(/[$,]/g, '');
+        const parsed = parseFloat(cleaned);
+        if (!isNaN(parsed)) priceCents = Math.round(parsed * 100);
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ name, description: desc, price_cents: priceCents,
+            category: '{{ current_category|e }}' })
+        });
+        const data = await res.json();
+        if (!data.ok) { alert(data.error || 'Save failed'); return; }
+
+        // Update display values
+        const display = card.querySelector('.wiz-display');
+        display.querySelector('.wiz-item-name').textContent = name;
+        const priceEl = display.querySelector('.wiz-item-price');
+        if (priceCents > 0) {
+          if (priceEl) {
+            priceEl.textContent = '$' + (priceCents / 100).toFixed(2);
+          } else {
+            const newPrice = document.createElement('div');
+            newPrice.className = 'wiz-item-price';
+            newPrice.textContent = '$' + (priceCents / 100).toFixed(2);
+            display.querySelector('.wiz-item-header').appendChild(newPrice);
+          }
+        }
+        const descEl = display.querySelector('.wiz-item-desc');
+        if (desc) {
+          if (descEl) { descEl.textContent = desc; }
+          else {
+            const newDesc = document.createElement('div');
+            newDesc.className = 'wiz-item-desc';
+            newDesc.textContent = desc;
+            display.querySelector('.wiz-item-header').insertAdjacentElement('afterend', newDesc);
+          }
+        } else if (descEl) { descEl.remove(); }
+
+        // Clean up empty variants and flag missing prices before closing
+        await wizCleanupVariants(card);
+
+        card.classList.remove('editing');
+
+        // Flash saved indicator on the display view
+        const okEl = card.querySelector('.wiz-display .wiz-save-ok');
+        if (okEl) {
+          okEl.classList.add('flash');
+          setTimeout(() => { okEl.classList.remove('flash'); }, 1500);
+        }
+      } catch (e) {
+        alert('Network error — try again');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    }
+
+    async function wizDelete(btn) {
+      if (!confirm('Delete this item?')) return;
+      const card = btn.closest('.wiz-item');
+      const itemId = card.dataset.itemId;
+      const draftId = card.dataset.draftId;
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin'
+        });
+        const data = await res.json();
+        if (data.ok) {
+          card.classList.add('deleted');
+          card.classList.remove('editing');
+        } else {
+          alert(data.error || 'Delete failed');
+        }
+      } catch (e) { alert('Network error'); }
+    }
+
+    // Allow Enter to save, Escape to cancel
+    document.querySelectorAll('.wiz-edit-form').forEach(form => {
+      form.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          form.querySelector('.btn-save').click();
+        }
+        if (e.key === 'Escape') {
+          form.querySelector('.btn-cancel').click();
+        }
+      });
+    });
+
+    // Click outside an editing card = auto-save and close
+    // Only on clean clicks, not after drag-selecting text
+    let mouseDownPos = null;
+    document.addEventListener('mousedown', e => {
+      mouseDownPos = { x: e.clientX, y: e.clientY };
+    });
+    document.addEventListener('click', e => {
+      // Ignore if mouse moved significantly (was selecting text)
+      if (mouseDownPos) {
+        const dx = Math.abs(e.clientX - mouseDownPos.x);
+        const dy = Math.abs(e.clientY - mouseDownPos.y);
+        if (dx > 5 || dy > 5) return;
+      }
+      const openCard = document.querySelector('.wiz-item.editing');
+      if (!openCard) return;
+      if (openCard.contains(e.target)) return;
+      openCard.querySelector('.btn-save').click();
+    });
+
+    /* ===== Variant Cleanup (empty auto-delete + missing price flag) ===== */
+    async function wizCleanupVariants(card) {
+      const draftId = card.dataset.draftId;
+      const editRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+
+      for (const row of editRows) {
+        const variantId = row.dataset.variantId;
+        const label = (row.querySelector('.wiz-vf-label')?.value || '').trim();
+        const priceStr = (row.querySelector('.wiz-vf-price')?.value || '').trim();
+
+        // If both label and price are empty, auto-delete
+        if (!label && !priceStr) {
+          try {
+            await fetch(`/api/drafts/${draftId}/wizard/variant/${variantId}/delete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin'
+            });
+            row.remove();
+            const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
+            if (displayRow) displayRow.remove();
+          } catch (e) { /* silent */ }
+          continue;
+        }
+      }
+
+      // Flag missing prices/labels on display view
+      const displayRows = card.querySelectorAll('.wiz-display .wiz-variant-row');
+      displayRows.forEach(dr => {
+        const vid = dr.dataset.variantId;
+        const editRow = card.querySelector(`.wiz-edit-form .wiz-variant-row[data-variant-id="${vid}"]`);
+        let labelEl = dr.querySelector('.wiz-variant-label');
+        let priceEl = dr.querySelector('.wiz-variant-price');
+
+        if (editRow) {
+          const label = (editRow.querySelector('.wiz-vf-label')?.value || '').trim();
+          const priceStr = (editRow.querySelector('.wiz-vf-price')?.value || '').trim();
+          const priceCents = priceStr ? Math.round(parseFloat(priceStr.replace(/[$,]/g, '')) * 100) : 0;
+
+          // Flag missing price
+          if (label && (!priceCents || isNaN(priceCents))) {
+            if (priceEl) {
+              priceEl.classList.add('missing-price');
+              priceEl.textContent = '$0.00';
+            } else {
+              priceEl = document.createElement('span');
+              priceEl.className = 'wiz-variant-price missing-price';
+              priceEl.textContent = '$0.00';
+              dr.appendChild(priceEl);
+            }
+          } else if (priceEl) {
+            priceEl.classList.remove('missing-price');
+          }
+
+          // Flag missing label
+          if (priceCents > 0 && !label) {
+            if (labelEl) {
+              labelEl.classList.add('missing-label');
+              labelEl.textContent = '(no label)';
+            } else {
+              labelEl = document.createElement('span');
+              labelEl.className = 'wiz-variant-label missing-label';
+              labelEl.textContent = '(no label)';
+              dr.prepend(labelEl);
+            }
+          } else if (labelEl) {
+            labelEl.classList.remove('missing-label');
+          }
+        }
+      });
+    }
+
+    /* ===== Add Variant ===== */
+    async function wizAddVariant(btn) {
+      const card = btn.closest('.wiz-item');
+      const itemId = card.dataset.itemId;
+      const draftId = card.dataset.draftId;
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/add_variant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin'
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Find or create variants container in edit form
+          let editForm = card.querySelector('.wiz-edit-form');
+          let variantsDiv = editForm.querySelector('.wiz-variants');
+          if (!variantsDiv) {
+            variantsDiv = document.createElement('div');
+            variantsDiv.className = 'wiz-variants';
+            editForm.querySelector('.wiz-edit-actions').insertAdjacentElement('beforebegin', variantsDiv);
+          }
+          // Inject new editable row
+          const row = document.createElement('div');
+          row.className = 'wiz-variant-row';
+          row.dataset.variantId = data.variant_id;
+          row.dataset.draftId = draftId;
+          row.innerHTML = `<input type="text" class="wiz-vf-label" value="" placeholder="New Variant" onblur="wizSaveVariant(this)" />`
+            + `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>`
+            + `<button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>`;
+          variantsDiv.appendChild(row);
+
+          // Also add to display view
+          let displayDiv = card.querySelector('.wiz-display .wiz-variants');
+          if (!displayDiv) {
+            displayDiv = document.createElement('div');
+            displayDiv.className = 'wiz-variants';
+            card.querySelector('.wiz-display').appendChild(displayDiv);
+          }
+          const dRow = document.createElement('div');
+          dRow.className = 'wiz-variant-row';
+          dRow.dataset.variantId = data.variant_id;
+          dRow.innerHTML = `<span class="wiz-variant-label">New Variant</span>`;
+          displayDiv.appendChild(dRow);
+
+          // Focus the new label
+          row.querySelector('.wiz-vf-label').focus();
+        } else {
+          alert(data.error || 'Failed to add variant');
+        }
+      } catch (e) { alert('Network error'); }
+    }
+
+    async function wizDeleteVariant(btn) {
+      const row = btn.closest('.wiz-variant-row');
+      const variantId = row.dataset.variantId;
+      const draftId = row.dataset.draftId;
+      const card = row.closest('.wiz-item');
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/variant/${variantId}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin'
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Remove from edit form
+          row.remove();
+          // Remove from display view
+          const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
+          if (displayRow) displayRow.remove();
+        } else {
+          alert(data.error || 'Delete failed');
+        }
+      } catch (e) { alert('Network error'); }
+    }
+
+    /* ===== Variant Inline Save ===== */
+    async function wizSaveVariant(input) {
+      const row = input.closest('.wiz-variant-row');
+      const variantId = row.dataset.variantId;
+      const draftId = row.dataset.draftId;
+      const label = row.querySelector('.wiz-vf-label').value.trim();
+      const priceStr = row.querySelector('.wiz-vf-price').value.trim();
+
+      if (!label) return;
+
+      let priceCents = 0;
+      if (priceStr) {
+        const cleaned = priceStr.replace(/[$,]/g, '');
+        const parsed = parseFloat(cleaned);
+        if (!isNaN(parsed)) priceCents = Math.round(parsed * 100);
+      }
+
+      try {
+        await fetch(`/api/drafts/${draftId}/wizard/variant/${variantId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ label, price_cents: priceCents })
+        });
+
+        // Update the display-mode variant row too
+        const card = row.closest('.wiz-item');
+        const displayRows = card.querySelectorAll('.wiz-display .wiz-variant-row');
+        displayRows.forEach(dr => {
+          if (dr.dataset.variantId === variantId) {
+            const lblEl = dr.querySelector('.wiz-variant-label');
+            const prEl = dr.querySelector('.wiz-variant-price');
+            if (lblEl) lblEl.textContent = label;
+            if (prEl) prEl.textContent = priceCents > 0 ? '$' + (priceCents / 100).toFixed(2) : '';
+          }
+        });
+      } catch (e) { /* silent */ }
+    }
+
+    /* ===== Drag & Drop Reorder ===== */
+    let dragItem = null;
+    let scrollInterval = null;
+
+    function startAutoScroll(e) {
+      const threshold = 80;
+      const speed = 12;
+      const y = e.clientY;
+      const vh = window.innerHeight;
+
+      clearInterval(scrollInterval);
+      if (y < threshold) {
+        scrollInterval = setInterval(() => window.scrollBy(0, -speed), 16);
+      } else if (y > vh - threshold) {
+        scrollInterval = setInterval(() => window.scrollBy(0, speed), 16);
+      }
+    }
+
+    function stopAutoScroll() {
+      clearInterval(scrollInterval);
+      scrollInterval = null;
+    }
+
+    document.addEventListener('dragover', e => startAutoScroll(e));
+    document.addEventListener('dragend', () => stopAutoScroll());
+    document.addEventListener('drop', () => stopAutoScroll());
+
+    // Only allow drag from the handle
+    // Handles need draggable on the parent set BEFORE dragstart fires,
+    // so we use mousedown to prep it and a flag to gate dragstart.
+    let dragReady = false;
+
+    document.addEventListener('mousedown', e => {
+      const handle = e.target.closest('.wiz-drag-handle');
+      if (!handle) { dragReady = false; return; }
+      const item = handle.closest('.wiz-item');
+      item.setAttribute('draggable', 'true');
+      dragReady = true;
+    });
+
+    document.addEventListener('mouseup', () => {
+      // Small delay so dragend fires first
+      setTimeout(() => {
+        document.querySelectorAll('.wiz-item[draggable]').forEach(el => el.removeAttribute('draggable'));
+        dragReady = false;
+      }, 50);
+    });
+
+    document.querySelectorAll('.wiz-item').forEach(item => {
+      item.addEventListener('dragstart', e => {
+        if (!dragReady) { e.preventDefault(); return; }
+        dragItem = item;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', ''); // Required for Firefox
+      });
+
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        document.querySelectorAll('.wiz-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+        dragItem = null;
+        // Save new order + renumber
+        wizSaveOrder();
+      });
+
+      item.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (item !== dragItem && !item.classList.contains('deleted')) {
+          // Clear all others
+          document.querySelectorAll('.wiz-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+          item.classList.add('drag-over');
+        }
+      });
+
+      item.addEventListener('dragleave', () => {
+        item.classList.remove('drag-over');
+      });
+
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        item.classList.remove('drag-over');
+        if (dragItem && dragItem !== item) {
+          const container = item.parentElement;
+          const allItems = [...container.querySelectorAll('.wiz-item')];
+          const dragIdx = allItems.indexOf(dragItem);
+          const dropIdx = allItems.indexOf(item);
+          if (dragIdx < dropIdx) {
+            item.insertAdjacentElement('afterend', dragItem);
+          } else {
+            item.insertAdjacentElement('beforebegin', dragItem);
+          }
+          // Renumber visually
+          wizRenumber();
+        }
+      });
+    });
+
+    function wizRenumber() {
+      const items = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+      items.forEach((item, i) => {
+        const numEl = item.querySelector('.wiz-item-num');
+        if (numEl) numEl.textContent = (i + 1) + '.';
+      });
+    }
+
+    async function wizSaveOrder() {
+      const items = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+      const order = [...items].map(el => parseInt(el.dataset.itemId)).filter(id => !isNaN(id));
+      const draftId = items[0]?.dataset.draftId;
+      if (!draftId || !order.length) return;
+
+      try {
+        await fetch(`/api/drafts/${draftId}/wizard/reorder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ order })
+        });
+      } catch (e) { /* silent */ }
+    }
+
+    /* ===== Add Item ===== */
+    async function wizAddItem(btn) {
+      const draftId = btn.dataset.draftId;
+      const category = btn.dataset.category;
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/add_item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ category })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Reload the page to show the new item
+          window.location.reload();
+        } else {
+          alert(data.error || 'Failed to add item');
+        }
+      } catch (e) { alert('Network error'); }
+    }
+  </script>
+
+  {# Lightbox for original file preview #}
+  {% if source_job_id %}
+  <div id="preview-lightbox" class="preview-lightbox" onclick="this.classList.remove('open')">
+    <img src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" />
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

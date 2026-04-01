@@ -2252,23 +2252,25 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
   before Stripe goes live. Price intelligence (Sprint 13.2) feeds into
   the category-by-category review. Auth (Sprint 13.1) provides user context.
 
-  [ ] Wizard shell + routing
-      - /drafts/<id>/wizard — multi-step guided flow
-      - Step indicator: Upload → Processing → Review → Editor → Export
-      - Only accessible for drafts created via AI parse (not manual)
-      - "Great news, your menu has been processed! Let's walk through it together"
-  [ ] Category-by-category review
-      - One category at a time, focused view
-      - Price comparison intelligence at top of each category page
-        (local market averages, overpriced/underpriced flags, suggested ranges)
-      - All items fully editable (name, price, category, modifiers)
-      - "Save & Continue" per category — progress saved to draft
-      - Quick-fix actions: rename, re-categorize, delete, merge duplicates
-      - Suggested modifier group templates per category ("Apply Size to all?")
-  [ ] Session persistence
-      - Progress saved if customer leaves mid-session
-      - Return to wizard picks up where they left off
-      - Draft tracks which categories have been reviewed
+  [x] Day 137: Wizard foundation + inline editing
+      - /drafts/<id>/wizard — three-column layout (categories | items | original file preview)
+      - Summary page first: item count, category count, category breakdown, Begin Review button
+      - Category-by-category review with progress bar + sidebar tracking
+      - Inline editing: click item to edit name/price/description in-place (invisible inputs)
+      - Auto-save on click-away or Enter, "saved" fade indicator
+      - Variant inline editing: label + price, + add variant, × delete variant
+      - Auto-delete empty variants, red flags for missing price/label
+      - Drag-to-reorder with handle-only dragging, auto-scroll, positions saved to DB
+      - + Add Item button per category
+      - Original file preview: sticky right column, click-to-expand lightbox
+      - Auto-redirect from import view after pipeline completes
+      - draft_category_reviews table + wizard_completed flag
+      - 7 new routes: wizard view, confirm/unconfirm, progress API, item/variant CRUD, reorder
+  [ ] Category-level price intelligence display
+      - Price comparison badges per item (underpriced/fair/overpriced)
+      - Suggested price ranges from Claude Call 4
+  [ ] Quick-fix actions: merge duplicates, bulk re-categorize
+  [ ] Suggested modifier group templates per category ("Apply Size to all?")
   [ ] Review summary + handoff
       - Summary screen: X items across Y categories, Z modifier groups
       - Stats: high/medium/low confidence breakdown

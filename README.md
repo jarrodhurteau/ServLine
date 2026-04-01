@@ -1246,6 +1246,8 @@ Day 135 — Sprint 13.2 Day 3: Claude Call 4 — Price Intelligence. New storage
 
 Day 136 — Sprint 13.2 Day 4: Pipeline Integration + Loading Screen. Call 4 (price intelligence) wired into the main parsing pipeline — runs automatically after confidence gate passes and draft items are persisted, using the job's restaurant_id. Non-blocking: Call 4 failure or skip (no restaurant, no API key) does not break the import. New STEP_CALL4_PRICE constant in pipeline_metrics.py with full tracker support (start/end/skip/fail). New pipeline_stage column on import_jobs table (idempotent ALTER TABLE migration) — tracks current pipeline step in real-time: extracting → verifying → reconciling → analyzing_prices → finalizing → done. Status API (/api/menus/import/<id>/status) returns pipeline_stage for frontend polling. Animated hero loading screen: 1080p MenuFlow logo video (Midjourney-generated, cloth + wind animation) with white-to-saddle per-frame bg replacement, CSS right-edge fade mask, layered PNG fallback (base/cloth/wind with feathered edges), wind sound toggle. 5-stage progress timeline with pip indicators centered on middle table leg. "Feel free to grab a coffee" messaging. Progress persists on browser refresh via server-rendered data-initial-stage. Debug preview at /debug/pipeline-progress. Sprint 13.2 COMPLETE. 32 tests, 2,964 cumulative.
 
+Day 137 — Sprint 13.3 Day 1: Guided Onboarding Wizard Foundation. New wizard.html template (~500 LOC) — full three-column layout: category sidebar (left), item review (center), original file preview (right). Wizard flow: summary page first (item count, category count, category breakdown) → category-by-category review → confirm each → redirect to full editor. New draft_category_reviews table tracks per-category review state + wizard_completed flag on drafts. Inline editing: click any item to edit name/price/description in-place with invisible inputs matching display layout exactly. Auto-save on click-away or Enter, "saved" indicator fades in/out on display view. Variant editing: inline label/price editing, + add variant button, × delete per variant, auto-delete empty variants on click-away, red flags for missing price or missing label. Drag-to-reorder with handle-only dragging (text selection preserved), auto-scroll near edges, position saved to DB. + Add Item button per category. Original file preview: sticky right column with click-to-expand lightbox. Import view auto-redirects to wizard after pipeline completes (no button needed). Full-width layout using :has() CSS to override base.html 960px constraint. 7 new routes: wizard view, confirm/unconfirm category, progress API, item save/delete, variant save/delete, add variant, add item, reorder. Fixed ocr_worker.py Unicode arrow crash on Windows. 32 tests, 2,964 cumulative.
+
 ---
 
 ## 🌄 System State Summary
@@ -1341,6 +1343,10 @@ ServLine now has:
 - ✅ Claude Call 4 price intelligence — per-item assessment, suggested ranges, market context
 - ✅ 5-stage pipeline progress screen — real-time stage tracking with MenuFlow branding
 - ✅ Pipeline stage persistence — survives browser refresh, non-blocking Call 4
+- ✅ Guided onboarding wizard — category-by-category review with inline editing
+- ✅ Wizard inline editing — click-to-edit items/variants in place, auto-save
+- ✅ Wizard drag reorder — handle-only drag with auto-scroll, positions saved to DB
+- ✅ Original file preview — sticky sidebar with click-to-expand lightbox
 
 ---
 
