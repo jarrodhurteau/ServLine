@@ -4649,6 +4649,16 @@ def imports_detail(job_id):
     return _safe_render("import_view.html", job=row, draft=draft, restaurants=restaurants,
                         preview_img_url=preview_url, rotate_action_url=rotate_url)
 
+
+# Day 136: Pipeline progress preview — cycles through stages without uploading
+@app.get("/debug/pipeline-progress")
+@login_required
+def debug_pipeline_progress():
+    """Preview the 5-stage pipeline progress screen. Cycles through stages automatically."""
+    stage = request.args.get("stage", "extracting")
+    return _safe_render("pipeline_preview.html", stage=stage)
+
+
 # === NEW ===
 # Visual OCR Blocks Debugger page (renders debug_blocks.html)
 @app.get("/debug/blocks/<int:job_id>")

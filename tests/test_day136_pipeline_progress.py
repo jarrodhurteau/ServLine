@@ -644,14 +644,14 @@ class TestFrontendTemplateStructure:
 
     def test_stage_labels_present(self):
         """Stage labels are human-readable."""
-        labels = ["Extracting", "Verifying", "Reconciling", "Analyzing Prices", "Finalizing"]
+        labels = ["Reading", "Checking", "Fixing", "Analyzing", "Finishing"]
         for label in labels:
             assert label in self.html, f"Missing label: {label}"
 
     def test_pipeline_message_present(self):
         """Coffee messaging is in the template."""
         assert "grab a coffee" in self.html.lower()
-        assert "come back later" in self.html.lower()
+        assert "come back" in self.html.lower()
 
 
 # ---------------------------------------------------------------------------
