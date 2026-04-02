@@ -2266,26 +2266,37 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Auto-redirect from import view after pipeline completes
       - draft_category_reviews table + wizard_completed flag
       - 7 new routes: wizard view, confirm/unconfirm, progress API, item/variant CRUD, reorder
-  [ ] Day 138: "Apply to all" variants + lightbox zoom/drag
+  [ ] Day 138: Wizard polish — "Apply to all" variants + lightbox zoom/drag
       - Fix one item's variant labels (e.g. correct "14"-16"" to "Large"),
         click "Apply to all" to push to every item in category with same variant count
       - Solves hallucinated size names (pizza sizes etc.)
       - Lightbox zoom (scroll-to-zoom) + click-drag to pan for reading small text
       - Position backfill: auto-assign positions to null items on wizard load
-  [ ] Day 139+: Vision-based item highlighting on original upload preview
-      - Per-item "Highlight on Original" toggle button in wizard
-      - Per-category "Highlight Category" button at top of each category page
-      - Highlights item/category location on original file in both sidebar + lightbox
-      - MUST WORK FOR ALL IMPORT FORMATS:
-        * Images (JPG/PNG): Claude vision bounding boxes, overlay rectangles
-        * PDFs: render pages as images, then same as images
-        * CSV: render as HTML table preview, highlight source row per item
-        * XLSX: render as HTML table preview, highlight source row per item
-        * JSON: render as formatted/syntax-highlighted view, highlight source object
-      - Universal "show me the original source" viewer — not just photos
-      - Store source coordinates/row numbers during extraction
-      - New draft_item_coordinates table for image/PDF bounding boxes
-      - The killer differentiator — no POS company does source-to-extraction verification
+  [ ] Day 139: NEW PIPELINE — Call 1: Detection + Bounding Boxes
+      - Rework ai_menu_extract.py to return items + categories + bounding box coordinates
+      - PRESERVE all existing prompt engineering (line-breaks, category headers,
+        description inheritance, variant column parsing, OCR garble handling)
+      - New draft_item_coordinates table (item_id, x_pct, y_pct, w_pct, h_pct, page)
+      - Store coordinates during extraction — bounding boxes are first-class, not an afterthought
+  [ ] Day 140: NEW PIPELINE — Call 2: Structured Extraction + Wizard Highlighting
+      - Second call: detected items → full structured data (descriptions, variants, prices)
+      - Wire bounding boxes into wizard: per-item highlight toggle, per-category highlight button
+      - Highlighting works in both sticky sidebar preview AND expanded lightbox
+      - Universal preview renderer (images first, CSV/XLSX/JSON formats in Day 142-143)
+  [ ] Day 141: NEW PIPELINE — Call 3: QA Line-by-Line Verification + Gap Detection
+      - Takes extracted data + original image + bounding boxes
+      - Category by category, checks each item against its highlighted region
+      - TWO JOBS:
+        1. Verify: does each highlighted item match the text in that region?
+        2. Gap scan: are there UNHIGHLIGHTED regions with menu text? Flag as missed items
+      - Flagged regions show in wizard as warnings with red highlight
+      - User clicks flagged region → sees what's there → manually adds item
+      - This is how "Mega Fries" never gets missed again
+  [ ] Day 142-143: Non-image format support + polish
+      - CSV/XLSX: render as HTML table preview, highlight source row per item
+      - JSON: render as formatted view, highlight source object per item
+      - MUST WORK FOR ALL IMPORT FORMATS — universal "show me the original source" viewer
+      - Edge cases, prompt tuning, testing
   [ ] Category-level price intelligence display
       - Price comparison badges per item (underpriced/fair/overpriced)
       - Suggested price ranges from Claude Call 4
