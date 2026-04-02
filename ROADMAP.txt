@@ -2272,26 +2272,30 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Solves hallucinated size names (pizza sizes etc.)
       - Lightbox zoom (scroll-to-zoom) + click-drag to pan for reading small text
       - Position backfill: auto-assign positions to null items on wizard load
-  [ ] Day 139: NEW PIPELINE — Multi-file upload + Call 1: Detection + Bounding Boxes
+  [ ] Day 139: NEW PIPELINE — Call 1: Detect + Classify + Locate
       - Import page: multi-file upload (drag/select multiple JPGs + PDFs in one import)
       - Files ordered as pages of one menu, stored together under one import job
-      - Rework ai_menu_extract.py to return items + categories + bounding box coordinates
-      - All pages sent to Claude as one request — detects items across all pages
-      - PRESERVE all existing prompt engineering (line-breaks, category headers,
-        description inheritance, variant column parsing, OCR garble handling)
+      - Rework ai_menu_extract.py — Call 1 detects + classifies every element:
+        * Category headers, items (name/price/description), variant column headers,
+          section notes/shared descriptions, badges/modifiers (NEW, HOT)
+      - Returns bounding boxes for each — does NOT build parent/child structure
+      - All pages sent as one request — detects across all pages
+      - PRESERVE existing prompt engineering (line-breaks, OCR garble, etc.)
       - New draft_item_coordinates table (item_id, x_pct, y_pct, w_pct, h_pct, page)
-      - Store coordinates during extraction — bounding boxes are first-class, not an afterthought
-  [ ] Day 140: NEW PIPELINE — Call 2: Structured Extraction + Wizard Highlighting
-      - Second call: detected items → full structured data (descriptions, variants, prices)
-      - Wire bounding boxes into wizard: per-item highlight toggle, per-category highlight button
-      - Highlighting works in both sticky sidebar preview AND expanded lightbox
-      - Universal preview renderer (images first, CSV/XLSX/JSON formats in Day 142-143)
-  [ ] Day 141: NEW PIPELINE — Call 3: QA Line-by-Line Verification + Gap Detection
-      - Takes extracted data + original image + bounding boxes
-      - Category by category, checks each item against its highlighted region
-      - TWO JOBS:
+  [ ] Day 140: Code Layer — Build Structure + Wizard Highlighting (NO Claude call)
+      - Code assembles classified elements into structured menu:
+        * Category headers → group items, variant headers → attach to items,
+          section notes → inherit to items below, sort by page + y-coordinate
+      - Wire bounding boxes into wizard: per-item highlight toggle, per-category highlight
+      - Highlighting in both sticky sidebar preview AND expanded lightbox
+      - Universal preview renderer (images first, CSV/XLSX/JSON in Day 142-143)
+  [ ] Day 141: NEW PIPELINE — Call 2: QA Line-by-Line Verification + Gap Detection
+      - Takes assembled data + original image + bounding boxes
+      - Category by category, line by line, compares wizard vs original
+      - THREE JOBS:
         1. Verify: does each highlighted item match the text in that region?
-        2. Gap scan: are there UNHIGHLIGHTED regions with menu text? Flag as missed items
+        2. Infer: contextual reasoning (shared descriptions, variant headers across items)
+        3. Gap scan: UNHIGHLIGHTED regions with menu text? Flag as potential missed items
       - Flagged regions show in wizard as warnings with red highlight
       - User clicks flagged region → sees what's there → manually adds item
       - This is how "Mega Fries" never gets missed again
