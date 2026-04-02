@@ -2272,8 +2272,11 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Solves hallucinated size names (pizza sizes etc.)
       - Lightbox zoom (scroll-to-zoom) + click-drag to pan for reading small text
       - Position backfill: auto-assign positions to null items on wizard load
-  [ ] Day 139: NEW PIPELINE — Call 1: Detection + Bounding Boxes
+  [ ] Day 139: NEW PIPELINE — Multi-file upload + Call 1: Detection + Bounding Boxes
+      - Import page: multi-file upload (drag/select multiple JPGs + PDFs in one import)
+      - Files ordered as pages of one menu, stored together under one import job
       - Rework ai_menu_extract.py to return items + categories + bounding box coordinates
+      - All pages sent to Claude as one request — detects items across all pages
       - PRESERVE all existing prompt engineering (line-breaks, category headers,
         description inheritance, variant column parsing, OCR garble handling)
       - New draft_item_coordinates table (item_id, x_pct, y_pct, w_pct, h_pct, page)
