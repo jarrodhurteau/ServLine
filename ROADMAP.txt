@@ -2266,6 +2266,26 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Auto-redirect from import view after pipeline completes
       - draft_category_reviews table + wizard_completed flag
       - 7 new routes: wizard view, confirm/unconfirm, progress API, item/variant CRUD, reorder
+  [ ] Day 138: "Apply to all" variants + lightbox zoom/drag
+      - Fix one item's variant labels (e.g. correct "14"-16"" to "Large"),
+        click "Apply to all" to push to every item in category with same variant count
+      - Solves hallucinated size names (pizza sizes etc.)
+      - Lightbox zoom (scroll-to-zoom) + click-drag to pan for reading small text
+      - Position backfill: auto-assign positions to null items on wizard load
+  [ ] Day 139+: Vision-based item highlighting on original upload preview
+      - Per-item "Highlight on Original" toggle button in wizard
+      - Per-category "Highlight Category" button at top of each category page
+      - Highlights item/category location on original file in both sidebar + lightbox
+      - MUST WORK FOR ALL IMPORT FORMATS:
+        * Images (JPG/PNG): Claude vision bounding boxes, overlay rectangles
+        * PDFs: render pages as images, then same as images
+        * CSV: render as HTML table preview, highlight source row per item
+        * XLSX: render as HTML table preview, highlight source row per item
+        * JSON: render as formatted/syntax-highlighted view, highlight source object
+      - Universal "show me the original source" viewer — not just photos
+      - Store source coordinates/row numbers during extraction
+      - New draft_item_coordinates table for image/PDF bounding boxes
+      - The killer differentiator — no POS company does source-to-extraction verification
   [ ] Category-level price intelligence display
       - Price comparison badges per item (underpriced/fair/overpriced)
       - Suggested price ranges from Claude Call 4
