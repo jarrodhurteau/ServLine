@@ -274,12 +274,12 @@
     .wiz-variant-label { font-weight: 500; flex: 1; min-width: 0; }
     .wiz-variant-price { font-weight: 600; color: var(--ink); }
     /* Editable variant inputs */
-    .wiz-variant-row input {
+    .wiz-variant-row input:not([type="checkbox"]) {
       border: none !important; background: none !important; outline: none !important;
       box-shadow: none !important; -webkit-appearance: none; appearance: none;
       padding: 0 !important; margin: 0 !important; font-family: inherit;
     }
-    .wiz-variant-row input:focus { border-bottom: 1px dashed rgba(184,92,56,.5) !important; }
+    .wiz-variant-row input:not([type="checkbox"]):focus { border-bottom: 1px dashed rgba(184,92,56,.5) !important; }
     .wiz-variant-row input.wiz-vf-label { font-weight: 500; font-size: .82rem; color: var(--muted); flex: 1; min-width: 0; }
     .wiz-variant-row input.wiz-vf-price { font-weight: 600; font-size: .82rem; color: var(--ink); text-align: right; width: 60px; }
     .wiz-vf-delete {
