@@ -282,6 +282,8 @@
     .wiz-variant-row input:not([type="checkbox"]):focus { border-bottom: 1px dashed rgba(184,92,56,.5) !important; }
     .wiz-variant-row input.wiz-vf-label { font-weight: 500; font-size: .82rem; color: var(--muted); flex: 1; min-width: 0; }
     .wiz-variant-row input.wiz-vf-price { font-weight: 600; font-size: .82rem; color: var(--ink); text-align: right; width: 60px; }
+    .wiz-variant-row input.wiz-vf-price.price-zero { color: #dc3545; }
+    .wiz-variant-row input.wiz-vf-price.price-zero::placeholder { color: #dc3545; opacity: .6; }
     .wiz-vf-delete {
       border: none !important; background: none !important; outline: none !important;
       color: #dc3545; font-size: 1rem; cursor: pointer; padding: 0 4px !important;
@@ -423,8 +425,12 @@
     }
     .wiz-edit-actions .btn-save { color: #B85C38; }
     .wiz-edit-actions .btn-save:hover { background: rgba(184,92,56,.08); }
-    .wiz-edit-actions .btn-add-variant { color: #2E5B5E; }
+    .wiz-edit-actions .btn-add-variant { color: #28a745; }
     .wiz-edit-actions .btn-add-variant:hover { background: rgba(46,91,94,.08); }
+    .wiz-edit-actions .btn-undo { color: #E8A317; font-size: .78rem; }
+    .wiz-edit-actions .btn-undo:hover { color: #CC8F0E; background: rgba(232,163,23,.08); }
+    .wiz-edit-actions .btn-undo.visible { margin-left: auto; }
+    .wiz-edit-actions .btn-undo.visible + .btn-delete { margin-left: 8px; }
     .wiz-edit-actions .btn-delete { margin-left: auto; color: #dc3545; }
     .wiz-edit-actions .btn-delete:hover { background: rgba(220,53,69,.08); }
     .wiz-save-ok {
@@ -435,10 +441,56 @@
     }
     .wiz-save-ok.flash { opacity: 1; }
     .wiz-item.deleted {
-      opacity: .4;
-      pointer-events: none;
-      text-decoration: line-through;
+      position: relative;
+      background: #e8e0d5;
     }
+    .wiz-item.deleted .wiz-display { opacity: .4; text-decoration: line-through; pointer-events: none; }
+    .wiz-item.deleted .wiz-display .wiz-drag-handle { pointer-events: auto; opacity: .4; }
+    .wiz-item.deleted .wiz-edit-form { display: none; }
+    /* ===== Inline Error Toast ===== */
+    .wiz-toast {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #dc3545;
+      color: #fff;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-size: .85rem;
+      font-weight: 600;
+      z-index: 10001;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+    }
+    .wiz-toast.show { opacity: 1; }
+
+    .wiz-deleted-actions {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      z-index: 5;
+    }
+    .wiz-deleted-actions button {
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: .78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .wiz-deleted-undo { background: #E8A317; color: #fff; }
+    .wiz-deleted-undo:hover { background: #CC8F0E; }
+    .wiz-deleted-move { background: transparent; color: var(--muted); border: 1.5px solid rgba(0,0,0,.2) !important; }
+    .wiz-deleted-move:hover { color: var(--ink); border-color: rgba(0,0,0,.4) !important; }
 
     /* ===== Drag Reorder ===== */
     .wiz-drag-handle {
@@ -480,64 +532,34 @@
       color: #B85C38;
     }
 
-    /* ===== Undo Bar ===== */
-    .undo-bar {
-      position: sticky;
-      bottom: 0;
-      background: #2C2C2C;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 10px 10px 0 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: .85rem;
-      z-index: 50;
-      box-shadow: 0 -2px 12px rgba(0,0,0,.15);
-      animation: undo-slide-up .2s ease-out;
-    }
-    @keyframes undo-slide-up {
-      from { transform: translateY(100%); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-    .undo-bar button {
-      background: #B85C38;
-      color: #fff;
-      border: none;
-      padding: 5px 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: .82rem;
-      font-weight: 600;
-      white-space: nowrap;
-      transition: background .15s;
-    }
-    .undo-bar button:hover { background: #a04e2e; }
 
     /* ===== Apply Labels Checkbox + Button ===== */
     .wiz-vf-check {
-      width: 15px;
-      height: 15px;
+      width: 14px;
+      height: 14px;
       flex-shrink: 0;
-      accent-color: #2E5B5E;
+      accent-color: #B85C38;
       cursor: pointer;
       margin: 0;
+      opacity: .45;
+      transition: opacity .15s;
     }
-    .btn-apply-labels {
+    .wiz-vf-check:checked { opacity: .8; }
+    .wiz-vf-check:hover { opacity: .7; }
+    .btn-apply-labels, .btn-delete-variants {
       background: none;
-      border: 1px solid #2E5B5E;
-      color: #2E5B5E;
-      font-size: .75rem;
-      padding: 3px 10px;
-      border-radius: 6px;
+      border: none;
+      font-size: .72rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
       cursor: pointer;
-      transition: background .15s, color .15s;
+      transition: background .15s;
     }
-    .btn-apply-labels:hover {
-      background: #2E5B5E;
-      color: #fff;
-    }
+    .wiz-edit-actions .btn-apply-labels { color: #2E5B5E; }
+    .wiz-edit-actions .btn-apply-labels:hover { background: rgba(46,91,94,.08); }
+    .wiz-edit-actions .btn-delete-variants { color: #dc3545; }
+    .wiz-edit-actions .btn-delete-variants:hover { background: rgba(220,53,69,.08); }
 
     /* ===== Original File Preview (right column) ===== */
     .wizard-preview {
@@ -777,7 +799,7 @@
             <div class="wiz-item-header">
               <span class="wiz-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;&#8942;</span>
               <span class="wiz-item-num">{{ loop.index }}.</span>
-              <div class="wiz-item-name">{{ it.name|e }}</div>
+              <div class="wiz-item-name">{% if it.name %}{{ it.name|e }}{% else %}<span style="color:var(--muted); font-style:italic;">Item name</span>{% endif %}</div>
               {% if it.price_cents %}
               <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
               {% endif %}
@@ -862,10 +884,10 @@
             {% if it.variants %}
             <div class="wiz-variants">
               {% for v in it.variants %}
-              <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}" data-var-pos="{{ loop.index0 }}">
-                <input type="checkbox" class="wiz-vf-check" title="Select to apply this label to all" onchange="wizToggleApplyBtn(this)" />
+              <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}" data-var-pos="{{ loop.index0 }}" data-orig-label="{{ v.label|e }}" data-orig-price="{{ v.price_cents or 0 }}">
+                <input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />
                 <input type="text" class="wiz-vf-label" value="{{ v.label|e }}" placeholder="Label" onblur="wizSaveVariant(this)" />
-                <span style="font-weight:600; font-size:.82rem; color:var(--ink); display:flex; align-items:baseline;">$<input type="text" class="wiz-vf-price" value="{% if v.price_cents %}{{ '%.2f'|format(v.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>
+                <span style="font-weight:600; font-size:.82rem; color:var(--ink); display:flex; align-items:baseline;">$<input type="text" class="wiz-vf-price" value="{% if v.price_cents %}{{ '%.2f'|format(v.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" oninput="wizFlagZeroEditPrices()" /></span>
                 <button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>
               </div>
               {% endfor %}
@@ -889,20 +911,16 @@
             {% endif %}
 
             <div class="wiz-edit-actions">
-              <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ add variant</button>
-              <button type="button" class="btn-apply-labels" onclick="wizApplyLabels(this)" style="display:none;" title="Apply checked variant labels to all items in this category with the same number of variants">&#x21BB; Apply checked to all</button>
+              <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ Add Variant</button>
+              <button type="button" class="btn-apply-labels" onclick="wizApplyLabels(this)" style="display:none;" title="Apply or rename checked variants across all items in this category">&#x21BB; Apply to All</button>
+              <button type="button" class="btn-delete-variants" onclick="wizDeleteVariantsFromAll(this)" style="display:none;" title="Delete variants with checked labels from all items in this category">&times; Delete All</button>
               <button type="button" class="btn-save" onclick="wizSave(this)" style="display:none;">save</button>
-              <button type="button" class="btn-delete" onclick="wizDelete(this)">delete</button>
+              <button type="button" class="btn-undo" onclick="wizUndo()" style="display:none;">undo</button>
+              <button type="button" class="btn-delete" onclick="wizDelete(this)">Delete Card</button>
             </div>
           </div>
         </div>
         {% endfor %}
-      </div>
-
-      <!-- Undo toast bar -->
-      <div id="undo-bar" class="undo-bar" style="display:none;">
-        <span id="undo-msg"></span>
-        <button type="button" onclick="wizUndo()">Undo</button>
       </div>
 
       <!-- Add Item button -->
@@ -963,29 +981,61 @@
   </div>
   {% endif %}
 
+  <div class="wiz-toast" id="wiz-toast"></div>
   <script>
+    function wizToast(msg) {
+      const t = document.getElementById('wiz-toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function wizFlagZeroEditPrices() {
+      document.querySelectorAll('.wiz-edit-form .wiz-vf-price').forEach(inp => {
+        const raw = (inp.value || '').trim().replace(/[$,]/g, '');
+        const val = parseFloat(raw);
+        const isZero = !raw || !val || val === 0;
+        inp.classList.toggle('price-zero', isZero);
+        if (isZero) inp.value = '';
+        const span = inp.closest('span');
+        if (span) span.style.color = isZero ? '#dc3545' : '';
+      });
+    }
+
+    function wizFlagMissingPrices() {
+      document.querySelectorAll('.wiz-item:not(.deleted)').forEach(card => {
+        card.querySelectorAll('.wiz-display .wiz-variant-row').forEach(dr => {
+          const lbl = (dr.querySelector('.wiz-variant-label')?.textContent || '').trim();
+          const prEl = dr.querySelector('.wiz-variant-price');
+          if (lbl && (!prEl || !prEl.textContent.trim() || prEl.textContent.trim() === '$0.00')) {
+            if (!prEl) {
+              const sp = document.createElement('span');
+              sp.className = 'wiz-variant-price missing-price';
+              sp.textContent = '$0.00';
+              dr.appendChild(sp);
+            } else {
+              prEl.classList.add('missing-price');
+              prEl.textContent = '$0.00';
+            }
+          }
+        });
+      });
+    }
+
     /* ===== Undo Stack ===== */
     const undoStack = [];
-    const pendingDeletes = []; // item IDs to delete server-side on confirm/navigate
 
-    function showUndoBar(msg) {
-      const bar = document.getElementById('undo-bar');
-      const msgEl = document.getElementById('undo-msg');
-      if (bar && msgEl) {
-        msgEl.textContent = msg;
-        bar.style.display = '';
-      }
-    }
-
-    function hideUndoBar() {
-      const bar = document.getElementById('undo-bar');
-      if (bar) bar.style.display = 'none';
-    }
-
-    function updateUndoBar() {
-      if (undoStack.length === 0) { hideUndoBar(); return; }
-      const last = undoStack[undoStack.length - 1];
-      showUndoBar(last.message);
+    function updateUndoButtons() {
+      document.querySelectorAll('.wiz-item .btn-undo').forEach(btn => {
+        if (undoStack.length > 0) {
+          btn.style.display = '';
+          btn.classList.add('visible');
+        } else {
+          btn.style.display = 'none';
+          btn.classList.remove('visible');
+        }
+      });
     }
 
     async function wizUndo() {
@@ -1006,73 +1056,132 @@
 
       if (action.type === 'apply') {
         const draftId = action.draftId;
-        // Delete any newly created variants
-        for (const vid of (action.createdIds || [])) {
-          try {
-            await fetch(`/api/drafts/${draftId}/wizard/variant/${vid}/delete`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin'
-            });
-          } catch (e) { /* silent */ }
+        const deleteIds = action.createdIds || [];
+        const restore = (action.oldLabels || []).map(e => ({
+          variant_id: e.variant_id, label: e.old_label, price_cents: e.price_cents
+        }));
+
+        // Single batch API call
+        try {
+          await fetch(`/api/drafts/${draftId}/wizard/batch_undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ delete_ids: deleteIds, restore })
+          });
+        } catch (e) { /* silent */ }
+
+        // Update DOM: remove created variants
+        for (const vid of deleteIds) {
+          document.querySelectorAll(`.wiz-variant-row[data-variant-id="${vid}"]`).forEach(el => el.remove());
         }
-        // Restore old labels on existing variants
+        // Update DOM: restore old labels + prices
         for (const entry of (action.oldLabels || [])) {
-          try {
-            await fetch(`/api/drafts/${draftId}/wizard/variant/${entry.variant_id}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ label: entry.old_label, price_cents: entry.price_cents })
-            });
-          } catch (e) { /* silent */ }
+          document.querySelectorAll(`.wiz-variant-row[data-variant-id="${entry.variant_id}"]`).forEach(el => {
+            const lbl = el.querySelector('.wiz-variant-label');
+            const inp = el.querySelector('.wiz-vf-label');
+            if (lbl) lbl.textContent = entry.old_label;
+            if (inp) inp.value = entry.old_label;
+            if (inp) inp.closest('.wiz-variant-row').dataset.origLabel = entry.old_label;
+            const prEl = el.querySelector('.wiz-variant-price');
+            const prInp = el.querySelector('.wiz-vf-price');
+            const priceStr = entry.price_cents > 0 ? '$' + (entry.price_cents / 100).toFixed(2) : '';
+            if (prEl) prEl.textContent = priceStr;
+            if (prInp) prInp.value = entry.price_cents > 0 ? (entry.price_cents / 100).toFixed(2) : '';
+          });
         }
-        sessionStorage.removeItem('wizUndoEntry');
+        // Update variant badges
+        document.querySelectorAll('.wiz-item').forEach(c => {
+          const badge = c.querySelector('.wiz-display .wiz-badge-variant');
+          const count = c.querySelectorAll('.wiz-display .wiz-variant-row').length;
+          if (badge) {
+            if (count > 0) badge.textContent = count + ' variant' + (count !== 1 ? 's' : '');
+            else badge.remove();
+          }
+        });
+        wizFlagMissingPrices(); wizFlagZeroEditPrices();
+      }
+
+      if (action.type === 'delete_variants') {
+        // Batch re-create deleted variants, then reload
+        const draftId = action.draftId;
+        try {
+          await fetch(`/api/drafts/${draftId}/wizard/batch_create_variants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ variants: action.deletedVariants || [] })
+          });
+        } catch (e) { /* silent */ }
         window.location.reload();
         return;
       }
 
-      updateUndoBar();
+      updateUndoButtons();
     }
 
     // Restore undo state from sessionStorage after reload (from apply-to-all)
-    (function restoreUndoState() {
-      const saved = sessionStorage.getItem('wizUndoEntry');
-      if (saved) {
-        try {
-          const entry = JSON.parse(saved);
-          undoStack.push(entry);
-          updateUndoBar();
-        } catch (e) { /* ignore */ }
-        sessionStorage.removeItem('wizUndoEntry');
+    // Restore soft-deleted cards from sessionStorage on page load
+    (function restoreDeletedState() {
+      const pending = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
+      for (const itemId of pending) {
+        const card = document.querySelector(`.wiz-item[data-item-id="${itemId}"]`);
+        if (!card) {
+          // Item no longer exists (already confirmed) — clean up
+          continue;
+        }
+        card.classList.add('deleted');
+        card.classList.remove('editing');
+        // Inject undo + move buttons
+        if (!card.querySelector('.wiz-deleted-actions')) {
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'wiz-deleted-actions';
+
+          const undoBtn = document.createElement('button');
+          undoBtn.className = 'wiz-deleted-undo';
+          undoBtn.textContent = 'Undo';
+          undoBtn.onclick = () => {
+            card.classList.remove('deleted');
+            actionsDiv.remove();
+            const p = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
+            const idx = p.indexOf(itemId);
+            if (idx !== -1) p.splice(idx, 1);
+            sessionStorage.setItem('wizPendingDeletes', JSON.stringify(p));
+            wizRenumber();
+          };
+
+          const moveBtn = document.createElement('button');
+          moveBtn.className = 'wiz-deleted-move';
+          moveBtn.textContent = '↓ Move to Bottom';
+          moveBtn.onclick = () => {
+            card.parentElement.appendChild(card);
+          };
+
+          actionsDiv.appendChild(undoBtn);
+          actionsDiv.appendChild(moveBtn);
+          card.appendChild(actionsDiv);
+        }
       }
-      // Re-open the card that was being edited before reload
-      const editId = sessionStorage.getItem('wizEditItemId');
-      if (editId) {
-        sessionStorage.removeItem('wizEditItemId');
-        const card = document.querySelector(`.wiz-item[data-item-id="${editId}"]`);
+      // Clean up any stale IDs
+      const validIds = pending.filter(id => document.querySelector(`.wiz-item[data-item-id="${id}"]`));
+      sessionStorage.setItem('wizPendingDeletes', JSON.stringify(validIds));
+      wizRenumber();
+
+      // Auto-open newly created item in edit mode with name cleared
+      const newItemId = sessionStorage.getItem('wizNewItemId');
+      if (newItemId) {
+        sessionStorage.removeItem('wizNewItemId');
+        const card = document.querySelector(`.wiz-item[data-item-id="${newItemId}"]`);
         if (card) {
+          const nameInput = card.querySelector('.wiz-f-name');
+          if (nameInput && nameInput.value === 'New Item') nameInput.value = '';
           wizEdit(card);
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }
+      wizFlagMissingPrices(); wizFlagZeroEditPrices();
     })();
 
-    // Flush pending deletes to server
-    async function flushPendingDeletes() {
-      for (const itemId of pendingDeletes) {
-        try {
-          const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
-          if (!draftId) continue;
-          await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/delete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin'
-          });
-        } catch (e) { /* silent */ }
-      }
-      pendingDeletes.length = 0;
-    }
 
     /* ===== Wizard Inline Editing ===== */
     function wizEdit(card) {
@@ -1083,6 +1192,7 @@
         }
       });
       card.classList.add('editing');
+      wizFlagZeroEditPrices();
       const nameInput = card.querySelector('.wiz-f-name');
       if (nameInput) { nameInput.focus(); }
     }
@@ -1100,7 +1210,7 @@
       const priceStr = card.querySelector('.wiz-f-price').value.trim();
       const desc = card.querySelector('.wiz-f-desc').value.trim();
 
-      if (!name) { alert('Name is required'); return; }
+      if (!name) { wizToast('Name is required'); return; }
 
       // Convert price string to cents
       let priceCents = 0;
@@ -1122,7 +1232,7 @@
             category: '{{ current_category|e }}' })
         });
         const data = await res.json();
-        if (!data.ok) { alert(data.error || 'Save failed'); return; }
+        if (!data.ok) { wizToast(data.error || 'Save failed'); return; }
 
         // Update display values
         const display = card.querySelector('.wiz-display');
@@ -1161,7 +1271,7 @@
           setTimeout(() => { okEl.classList.remove('flash'); }, 1500);
         }
       } catch (e) {
-        alert('Network error — try again');
+        wizToast('Network error — try again');
       } finally {
         btn.disabled = false;
         btn.textContent = 'Save';
@@ -1170,20 +1280,45 @@
 
     function wizDelete(btn) {
       const card = btn.closest('.wiz-item');
-      const itemId = card.dataset.itemId;
-      const name = card.querySelector('.wiz-f-name')?.value || card.querySelector('.wiz-item-name')?.textContent || 'item';
+      const itemId = parseInt(card.dataset.itemId);
 
-      // Soft-delete: hide visually, queue for server delete on confirm/navigate
+      // Grey out card (NO server delete — that happens on Confirm & Next)
       card.classList.add('deleted');
       card.classList.remove('editing');
-      pendingDeletes.push(parseInt(itemId));
 
-      undoStack.push({
-        type: 'delete',
-        itemId: parseInt(itemId),
-        message: `Deleted "${name.trim()}"`
-      });
-      updateUndoBar();
+      // Persist to sessionStorage so it survives reloads
+      const pending = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
+      if (!pending.includes(itemId)) pending.push(itemId);
+      sessionStorage.setItem('wizPendingDeletes', JSON.stringify(pending));
+
+      // Inject undo + move-to-bottom buttons on the deleted card
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'wiz-deleted-actions';
+
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'wiz-deleted-undo';
+      undoBtn.textContent = 'Undo';
+      undoBtn.onclick = () => {
+        card.classList.remove('deleted');
+        actionsDiv.remove();
+        const p = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
+        const idx = p.indexOf(itemId);
+        if (idx !== -1) p.splice(idx, 1);
+        sessionStorage.setItem('wizPendingDeletes', JSON.stringify(p));
+        wizRenumber();
+      };
+
+      const moveBtn = document.createElement('button');
+      moveBtn.className = 'wiz-deleted-move';
+      moveBtn.textContent = '↓ Move to Bottom';
+      moveBtn.onclick = () => {
+        const container = card.parentElement;
+        container.appendChild(card);
+      };
+
+      actionsDiv.appendChild(undoBtn);
+      actionsDiv.appendChild(moveBtn);
+      card.appendChild(actionsDiv);
       wizRenumber();
     }
 
@@ -1318,7 +1453,12 @@
           row.className = 'wiz-variant-row';
           row.dataset.variantId = data.variant_id;
           row.dataset.draftId = draftId;
-          row.innerHTML = `<input type="text" class="wiz-vf-label" value="" placeholder="New Variant" onblur="wizSaveVariant(this)" />`
+          // Set position as next after existing variants
+          const existingRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+          row.dataset.varPos = existingRows.length;
+          row.dataset.origLabel = '';
+          row.innerHTML = `<input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />`
+            + `<input type="text" class="wiz-vf-label" value="" placeholder="New Variant" onblur="wizSaveVariant(this)" />`
             + `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>`
             + `<button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>`;
           variantsDiv.appendChild(row);
@@ -1339,9 +1479,9 @@
           // Focus the new label
           row.querySelector('.wiz-vf-label').focus();
         } else {
-          alert(data.error || 'Failed to add variant');
+          wizToast(data.error || 'Failed to add variant');
         }
-      } catch (e) { alert('Network error'); }
+      } catch (e) { wizToast('Network error'); }
     }
 
     async function wizDeleteVariant(btn) {
@@ -1364,9 +1504,9 @@
           const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
           if (displayRow) displayRow.remove();
         } else {
-          alert(data.error || 'Delete failed');
+          wizToast(data.error || 'Delete failed');
         }
-      } catch (e) { alert('Network error'); }
+      } catch (e) { wizToast('Network error'); }
     }
 
     /* ===== Variant Inline Save ===== */
@@ -1412,8 +1552,11 @@
     function wizToggleApplyBtn(checkbox) {
       const card = checkbox.closest('.wiz-item');
       const anyChecked = card.querySelector('.wiz-vf-check:checked');
-      const applyBtn = card.querySelector('.btn-apply-labels');
-      if (applyBtn) applyBtn.style.display = anyChecked ? '' : 'none';
+      const show = anyChecked ? '' : 'none';
+      const labelBtn = card.querySelector('.btn-apply-labels');
+      const delBtn = card.querySelector('.btn-delete-variants');
+      if (labelBtn) labelBtn.style.display = show;
+      if (delBtn) delBtn.style.display = show;
     }
 
     /* ===== Apply Checked Variant Labels to All ===== */
@@ -1431,6 +1574,8 @@
           checked.push({
             pos: parseInt(r.dataset.varPos),
             label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
+            origLabel: (r.dataset.origLabel || '').trim(),
+            origPrice: parseInt(r.dataset.origPrice || '0'),
             variantId: r.dataset.variantId,
             priceStr: (r.querySelector('.wiz-vf-price')?.value || '').trim()
           });
@@ -1438,24 +1583,9 @@
       });
 
       if (checked.length === 0 || checked.every(c => !c.label)) {
-        alert('Check at least one variant with a label.');
+        wizToast('Check at least one variant with a label.');
         return;
       }
-
-      // Count all other items in category (they'll get labels updated or new variants created)
-      const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
-      let matchCount = 0;
-      allCards.forEach(c => {
-        if (parseInt(c.dataset.itemId) !== itemId) matchCount++;
-      });
-
-      if (matchCount === 0) {
-        alert('No other items in this category.');
-        return;
-      }
-
-      const labelList = checked.map(c => c.label).filter(l => l).join(', ');
-      if (!confirm(`Apply "${labelList}" to ${matchCount} other item${matchCount > 1 ? 's' : ''}?\nItems without enough variants will get new ones created.`)) return;
 
       btn.disabled = true;
       btn.textContent = 'Applying...';
@@ -1478,36 +1608,299 @@
           }
         }
 
+        // Classify each checked variant
+        const renames = {};       // old_label → new_label (label was changed)
+        const priceUpdates = {};  // label → price_cents (label unchanged, update price by name)
+        for (const c of checked) {
+          let priceCents = 0;
+          if (c.priceStr) {
+            const p = parseFloat(c.priceStr.replace(/[$,]/g, ''));
+            if (!isNaN(p)) priceCents = Math.round(p * 100);
+          }
+          if (c.origLabel && c.label && c.origLabel.toLowerCase() !== c.label.toLowerCase()) {
+            // Label was renamed
+            renames[c.origLabel] = c.label;
+          } else if (c.origLabel && c.label) {
+            // Label unchanged — push price update by name
+            priceUpdates[c.label] = priceCents;
+          }
+          // If no origLabel → new variant, handled by the label-mode create path
+        }
+
         const positions = checked.map(c => c.pos);
+        const reqBody = { source_item_id: itemId, category, positions };
+        if (Object.keys(renames).length > 0) reqBody.renames = renames;
+        if (Object.keys(priceUpdates).length > 0) reqBody.price_updates = priceUpdates;
+
         const res = await fetch(`/api/drafts/${draftId}/wizard/apply_variant_labels`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ source_item_id: itemId, category, positions })
+          body: JSON.stringify(reqBody)
         });
         const data = await res.json();
         if (data.ok) {
-          // Store undo data in sessionStorage so it survives the reload
-          const undoEntry = {
+          const labelList = checked.map(c => c.label).filter(l => l).join(', ');
+
+          // Build source card undo entries (so undo reverts the source card too)
+          const sourceOld = checked.map(c => ({
+            variant_id: parseInt(c.variantId),
+            old_label: c.origLabel,
+            price_cents: c.origPrice
+          })).filter(e => e.variant_id);
+
+          // Push undo entry
+          undoStack.push({
             type: 'apply',
             draftId,
-            oldLabels: data.old_labels || [],
-            createdIds: data.created_ids || [],
+            oldLabels: [...(data.old_labels || []), ...sourceOld],
+            createdIds: (data.created_ids || []).map(c => c.variant_id),
             message: `Applied "${labelList}" to ${data.updated_items} item${data.updated_items !== 1 ? 's' : ''}`
-          };
-          sessionStorage.setItem('wizUndoEntry', JSON.stringify(undoEntry));
-          // Remember which card was open so we re-open it after reload
-          sessionStorage.setItem('wizEditItemId', String(itemId));
-          // Reload to show new variant rows
-          window.location.reload();
+          });
+
+          // --- Update DOM in-place (no reload) ---
+          const otherCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+          // Build lookup of created variants by item_id
+          const createdByItem = {};
+          for (const cv of (data.created_ids || [])) {
+            if (!createdByItem[cv.item_id]) createdByItem[cv.item_id] = [];
+            createdByItem[cv.item_id].push(cv);
+          }
+
+          // Build rename + price lookup for DOM updates
+          const hasRenames = Object.keys(renames).length > 0;
+          const renameLower = {};
+          for (const [oldL, newL] of Object.entries(renames)) {
+            renameLower[oldL.toLowerCase()] = newL;
+          }
+          const puLower = {};
+          for (const [lbl, pc] of Object.entries(priceUpdates)) {
+            puLower[lbl.toLowerCase()] = pc;
+          }
+
+          otherCards.forEach(c => {
+            const cId = parseInt(c.dataset.itemId);
+            if (cId === itemId) return;
+
+            // Apply renames: find by old label, update to new
+            if (hasRenames) {
+              c.querySelectorAll('.wiz-display .wiz-variant-row').forEach(dr => {
+                const lbl = dr.querySelector('.wiz-variant-label');
+                if (lbl) {
+                  const key = (lbl.textContent || '').trim().toLowerCase();
+                  if (renameLower[key]) lbl.textContent = renameLower[key];
+                }
+              });
+              c.querySelectorAll('.wiz-edit-form .wiz-variant-row').forEach(er => {
+                const inp = er.querySelector('.wiz-vf-label');
+                if (inp) {
+                  const key = (inp.value || '').trim().toLowerCase();
+                  if (renameLower[key]) {
+                    inp.value = renameLower[key];
+                    er.dataset.origLabel = renameLower[key];
+                  }
+                }
+              });
+            }
+
+            // Apply price updates: find by label name, update price
+            if (Object.keys(puLower).length > 0) {
+              c.querySelectorAll('.wiz-display .wiz-variant-row').forEach(dr => {
+                const lbl = (dr.querySelector('.wiz-variant-label')?.textContent || '').trim().toLowerCase();
+                if (lbl in puLower) {
+                  const prEl = dr.querySelector('.wiz-variant-price');
+                  const formatted = puLower[lbl] > 0 ? '$' + (puLower[lbl] / 100).toFixed(2) : '$0.00';
+                  if (prEl) { prEl.textContent = formatted; prEl.classList.toggle('missing-price', puLower[lbl] === 0); }
+                }
+              });
+              c.querySelectorAll('.wiz-edit-form .wiz-variant-row').forEach(er => {
+                const lbl = (er.querySelector('.wiz-vf-label')?.value || '').trim().toLowerCase();
+                if (lbl in puLower) {
+                  const prInp = er.querySelector('.wiz-vf-price');
+                  if (prInp) prInp.value = puLower[lbl] > 0 ? (puLower[lbl] / 100).toFixed(2) : '';
+                }
+              });
+            }
+
+            // Add DOM rows for newly created variants
+            const created = createdByItem[cId];
+            if (created && created.length > 0) {
+              // Ensure variants container exists in display view
+              let displayDiv = c.querySelector('.wiz-display .wiz-variants');
+              if (!displayDiv) {
+                displayDiv = document.createElement('div');
+                displayDiv.className = 'wiz-variants';
+                const saveOk = c.querySelector('.wiz-display .wiz-save-ok');
+                if (saveOk) saveOk.before(displayDiv);
+                else c.querySelector('.wiz-display').appendChild(displayDiv);
+              }
+              // Ensure variants container exists in edit view
+              let editDiv = c.querySelector('.wiz-edit-form .wiz-variants');
+              if (!editDiv) {
+                editDiv = document.createElement('div');
+                editDiv.className = 'wiz-variants';
+                const actions = c.querySelector('.wiz-edit-actions');
+                if (actions) actions.before(editDiv);
+              }
+
+              for (const cv of created) {
+                // Display row
+                const dRow = document.createElement('div');
+                dRow.className = 'wiz-variant-row';
+                dRow.dataset.variantId = cv.variant_id;
+                const cvPrice = cv.price_cents > 0 ? '$' + (cv.price_cents / 100).toFixed(2) : '';
+                const cvMissing = cv.price_cents > 0 ? '' : ' missing-price';
+                dRow.innerHTML = `<span class="wiz-variant-label">${cv.label}</span>` + (cvPrice ? `<span class="wiz-variant-price">${cvPrice}</span>` : `<span class="wiz-variant-price missing-price">$0.00</span>`);
+                displayDiv.appendChild(dRow);
+
+                // Edit row
+                const eRow = document.createElement('div');
+                eRow.className = 'wiz-variant-row';
+                eRow.dataset.variantId = cv.variant_id;
+                eRow.dataset.draftId = draftId;
+                eRow.dataset.varPos = cv.position;
+                eRow.dataset.origLabel = cv.label;
+                const cvPriceVal = cv.price_cents > 0 ? (cv.price_cents / 100).toFixed(2) : '';
+                eRow.innerHTML = `<input type="checkbox" class="wiz-vf-check" onchange="wizToggleApplyBtn(this)" />`
+                  + `<input type="text" class="wiz-vf-label" value="${cv.label}" placeholder="Label" onblur="wizSaveVariant(this)" />`
+                  + `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="${cvPriceVal}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>`
+                  + `<button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>`;
+                editDiv.appendChild(eRow);
+              }
+
+              // Update variant badge on display view
+              const badge = c.querySelector('.wiz-display .wiz-badge-variant');
+              const totalV = c.querySelectorAll('.wiz-display .wiz-variant-row').length;
+              if (badge) {
+                badge.textContent = totalV + ' variant' + (totalV !== 1 ? 's' : '');
+              } else {
+                const meta = c.querySelector('.wiz-display .wiz-item-meta');
+                if (meta) {
+                  const b = document.createElement('span');
+                  b.className = 'wiz-badge wiz-badge-variant';
+                  b.textContent = totalV + ' variant' + (totalV !== 1 ? 's' : '');
+                  meta.prepend(b);
+                }
+              }
+            }
+          });
+
+          // Update orig values on source card's rows + uncheck
+          allRows.forEach(r => {
+            const cb = r.querySelector('.wiz-vf-check');
+            if (cb) cb.checked = false;
+            const inp = r.querySelector('.wiz-vf-label');
+            if (inp) r.dataset.origLabel = inp.value.trim();
+            const prInp = r.querySelector('.wiz-vf-price');
+            if (prInp) {
+              let pc = 0;
+              const pv = prInp.value.trim().replace(/[$,]/g, '');
+              if (pv) { const p = parseFloat(pv); if (!isNaN(p)) pc = Math.round(p * 100); }
+              r.dataset.origPrice = pc;
+            }
+          });
+          btn.style.display = 'none';
+
+          card.querySelector('.btn-delete-variants').style.display = 'none';
+          wizFlagMissingPrices(); wizFlagZeroEditPrices();
+          updateUndoButtons();
         } else {
-          alert(data.error || 'Apply failed');
+          wizToast(data.error || 'Apply failed');
         }
       } catch (e) {
-        alert('Network error');
+        wizToast('Network error');
       } finally {
         btn.disabled = false;
-        btn.textContent = '\u21BB Apply checked to all';
+        btn.textContent = '\u21BB Apply to All';
+      }
+    }
+
+
+    /* ===== Delete Checked Variants From All Items ===== */
+    async function wizDeleteVariantsFromAll(btn) {
+      const card = btn.closest('.wiz-item');
+      const itemId = parseInt(card.dataset.itemId);
+      const draftId = card.dataset.draftId;
+      const category = '{{ current_category|e }}';
+
+      const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+      const checked = [];
+      allRows.forEach(r => {
+        if (r.querySelector('.wiz-vf-check:checked')) {
+          checked.push({
+            label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
+            variantId: r.dataset.variantId
+          });
+        }
+      });
+
+      const labels = checked.map(c => c.label).filter(l => l);
+      if (labels.length === 0) {
+        wizToast('Check at least one variant with a label.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Deleting...';
+
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/delete_variants_by_label`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ source_item_id: itemId, category, labels })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Push undo entry with deleted variant data for restoration
+          const labelList = labels.join(', ');
+          undoStack.push({
+            type: 'delete_variants',
+            draftId,
+            deletedVariants: data.deleted_variants || [],
+            message: `Deleted "${labelList}" from ${data.updated_items} item${data.updated_items !== 1 ? 's' : ''}`
+          });
+
+          // Remove matching variant rows from DOM on ALL cards (including source)
+          const labelSet = new Set(labels.map(l => l.toLowerCase()));
+          const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+          allCards.forEach(c => {
+            // Remove from display
+            c.querySelectorAll('.wiz-display .wiz-variant-row').forEach(dr => {
+              const lbl = (dr.querySelector('.wiz-variant-label')?.textContent || '').trim().toLowerCase();
+              if (labelSet.has(lbl)) dr.remove();
+            });
+            // Remove from edit
+            c.querySelectorAll('.wiz-edit-form .wiz-variant-row').forEach(er => {
+              const lbl = (er.querySelector('.wiz-vf-label')?.value || '').trim().toLowerCase();
+              if (labelSet.has(lbl)) er.remove();
+            });
+            // Update variant badge
+            const badge = c.querySelector('.wiz-display .wiz-badge-variant');
+            const count = c.querySelectorAll('.wiz-display .wiz-variant-row').length;
+            if (badge) {
+              if (count > 0) badge.textContent = count + ' variant' + (count !== 1 ? 's' : '');
+              else badge.remove();
+            }
+          });
+
+          // Uncheck boxes, hide buttons
+          allRows.forEach(r => {
+            const cb = r.querySelector('.wiz-vf-check');
+            if (cb) cb.checked = false;
+          });
+          btn.style.display = 'none';
+          card.querySelector('.btn-apply-labels').style.display = 'none';
+
+          updateUndoButtons();
+        } else {
+          wizToast(data.error || 'Delete failed');
+        }
+      } catch (e) {
+        wizToast('Network error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '\u00D7 Delete All';
       }
     }
 
@@ -1610,10 +2003,18 @@
     });
 
     function wizRenumber() {
-      const items = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
-      items.forEach((item, i) => {
+      const container = document.querySelector('.wizard-items');
+      if (!container) return;
+      // Number only non-deleted, clear number on deleted
+      const active = container.querySelectorAll('.wiz-item:not(.deleted)');
+      active.forEach((item, i) => {
         const numEl = item.querySelector('.wiz-item-num');
         if (numEl) numEl.textContent = (i + 1) + '.';
+      });
+      const deleted = container.querySelectorAll('.wiz-item.deleted');
+      deleted.forEach(d => {
+        const numEl = d.querySelector('.wiz-item-num');
+        if (numEl) numEl.textContent = '';
       });
     }
 
@@ -1647,41 +2048,37 @@
         });
         const data = await res.json();
         if (data.ok) {
-          // Reload the page to show the new item
+          // Remember new item ID so we auto-open it in edit mode after reload
+          if (data.item_id) sessionStorage.setItem('wizNewItemId', String(data.item_id));
           window.location.reload();
         } else {
-          alert(data.error || 'Failed to add item');
+          wizToast(data.error || 'Failed to add item');
         }
-      } catch (e) { alert('Network error'); }
+      } catch (e) { wizToast('Network error'); }
     }
 
-    /* ===== Flush pending deletes before any navigation ===== */
-    // Intercept confirm forms
-    document.querySelectorAll('form[action*="wizard/confirm"], form[action*="wizard/unconfirm"]').forEach(form => {
+    // Flush pending deletes to server on Confirm & Next
+    document.querySelectorAll('form[action*="wizard/confirm"]').forEach(form => {
       form.addEventListener('submit', async e => {
-        if (pendingDeletes.length > 0) {
+        const pending = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
+        if (pending.length > 0) {
           e.preventDefault();
-          await flushPendingDeletes();
+          const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
+          for (const itemId of pending) {
+            try {
+              await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin'
+              });
+            } catch (err) { /* silent */ }
+          }
+          sessionStorage.removeItem('wizPendingDeletes');
           form.submit();
         }
       });
     });
 
-    // Intercept sidebar category clicks and nav links
-    document.querySelectorAll('.cat-list li, .wizard-actions a.btn').forEach(el => {
-      el.addEventListener('click', async e => {
-        if (pendingDeletes.length > 0) {
-          e.preventDefault();
-          e.stopPropagation();
-          await flushPendingDeletes();
-          // Re-trigger navigation
-          const href = el.getAttribute('onclick')
-            ? el.getAttribute('onclick').match(/window\.location='([^']+)'/)?.[1]
-            : el.getAttribute('href');
-          if (href) window.location = href;
-        }
-      });
-    });
   </script>
 
   {# Lightbox for original file preview #}

@@ -6308,6 +6308,8 @@ def wizard_apply_variant_labels(draft_id: int):
 
     # Only apply specific positions (0-indexed). If omitted, apply all.
     positions = data.get("positions")
+    # mode: "label" = apply labels by position (default), "price" = apply price to matching label names
+    mode = data.get("mode", "label")
 
     try:
         items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
@@ -6328,52 +6330,148 @@ def wizard_apply_variant_labels(draft_id: int):
 
         now = _now_iso()
         updated_items = 0
-        old_labels = []   # for undo: existing variants that were relabeled
+        old_labels = []   # for undo: existing variants that were changed
         created_ids = []  # for undo: new variant IDs that were created
 
+        # renames: {old_label: new_label} for rename operations
+        renames = data.get("renames") or {}
+        # price_updates: {label: price_cents} for price-only updates by name
+        price_updates = data.get("price_updates") or {}
+
         with db_connect() as conn:
-            for it in cat_items:
-                if it["id"] == source_item_id:
-                    continue
-
-                tgt_variants = sorted(
-                    (it.get("variants") or []),
-                    key=lambda v: v.get("position", 0),
-                )
-                changed = False
-
-                for pos in apply_positions:
-                    if pos >= src_count:
+            # Price updates: match by label name, update price
+            if price_updates:
+                pu_lower = {k.strip().lower(): v for k, v in price_updates.items()}
+                for it in cat_items:
+                    if it["id"] == source_item_id:
                         continue
-                    sv = src_variants[pos]
+                    changed = False
+                    for tv in (it.get("variants") or []):
+                        tv_label_lower = (tv.get("label") or "").strip().lower()
+                        if tv_label_lower in pu_lower:
+                            new_price = pu_lower[tv_label_lower]
+                            if tv.get("price_cents", 0) != new_price:
+                                old_labels.append({
+                                    "variant_id": tv["id"],
+                                    "old_label": tv.get("label", ""),
+                                    "price_cents": tv.get("price_cents", 0),
+                                })
+                                conn.execute(
+                                    "UPDATE draft_item_variants SET price_cents=?, updated_at=? WHERE id=?",
+                                    (new_price, now, tv["id"]),
+                                )
+                                changed = True
+                    if changed:
+                        updated_items += 1
 
-                    if pos < len(tgt_variants):
-                        # Existing variant at this position — update its label
-                        tv = tgt_variants[pos]
-                        old_labels.append({
-                            "variant_id": tv["id"],
-                            "old_label": tv.get("label", ""),
-                            "price_cents": tv.get("price_cents", 0),
-                        })
-                        conn.execute(
-                            "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
-                            (sv["label"], now, tv["id"]),
-                        )
-                        changed = True
-                    else:
-                        # No variant at this position — create one
-                        conn.execute(
-                            """INSERT INTO draft_item_variants
-                               (item_id, label, price_cents, kind, position, created_at, updated_at)
-                               VALUES (?, ?, 0, 'size', ?, ?, ?)""",
-                            (it["id"], sv["label"], pos, now, now),
-                        )
-                        new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                        created_ids.append(new_id)
-                        changed = True
+            if renames:
+                # Rename mode: find variants by old label, update label + price
+                # Build lookup: old_label_lower → {new_label, price_cents}
+                rename_lower = {}
+                for old_lbl, new_lbl in renames.items():
+                    # Find the source variant's price for this rename
+                    price = 0
+                    for sv in src_variants:
+                        if (sv.get("label") or "").strip().lower() == new_lbl.strip().lower():
+                            price = sv.get("price_cents", 0)
+                            break
+                    rename_lower[old_lbl.strip().lower()] = {"label": new_lbl, "price_cents": price}
 
-                if changed:
-                    updated_items += 1
+                for it in cat_items:
+                    if it["id"] == source_item_id:
+                        continue
+                    changed = False
+                    for tv in (it.get("variants") or []):
+                        tv_label_lower = (tv.get("label") or "").strip().lower()
+                        if tv_label_lower in rename_lower:
+                            rl = rename_lower[tv_label_lower]
+                            old_labels.append({
+                                "variant_id": tv["id"],
+                                "old_label": tv.get("label", ""),
+                                "price_cents": tv.get("price_cents", 0),
+                            })
+                            conn.execute(
+                                "UPDATE draft_item_variants SET label=?, price_cents=?, updated_at=? WHERE id=?",
+                                (rl["label"], rl["price_cents"], now, tv["id"]),
+                            )
+                            changed = True
+                    if changed:
+                        updated_items += 1
+
+            elif mode == "price":
+                # Price mode: match by label name, update price
+                # Build lookup of source labels → price for checked positions
+                src_label_price = {}
+                for pos in apply_positions:
+                    if pos < src_count:
+                        sv = src_variants[pos]
+                        label_key = (sv.get("label") or "").strip().lower()
+                        if label_key:
+                            src_label_price[label_key] = sv.get("price_cents", 0)
+
+                for it in cat_items:
+                    if it["id"] == source_item_id:
+                        continue
+                    changed = False
+                    for tv in (it.get("variants") or []):
+                        tv_label = (tv.get("label") or "").strip().lower()
+                        if tv_label in src_label_price:
+                            new_price = src_label_price[tv_label]
+                            old_labels.append({
+                                "variant_id": tv["id"],
+                                "old_label": tv.get("label", ""),
+                                "price_cents": tv.get("price_cents", 0),
+                            })
+                            conn.execute(
+                                "UPDATE draft_item_variants SET price_cents=?, updated_at=? WHERE id=?",
+                                (new_price, now, tv["id"]),
+                            )
+                            changed = True
+                    if changed:
+                        updated_items += 1
+            else:
+                # Label mode: for each checked variant, create it on items that
+                # don't already have a variant with that label. Never overwrite.
+                for it in cat_items:
+                    if it["id"] == source_item_id:
+                        continue
+
+                    tgt_variants = it.get("variants") or []
+                    existing_labels = {
+                        (v.get("label") or "").strip().lower()
+                        for v in tgt_variants
+                    }
+                    max_pos = max((v.get("position", 0) for v in tgt_variants), default=-1)
+                    changed = False
+
+                    for pos in apply_positions:
+                        if pos >= src_count:
+                            continue
+                        sv = src_variants[pos]
+                        sv_label_lower = (sv.get("label") or "").strip().lower()
+
+                        if sv_label_lower and sv_label_lower not in existing_labels:
+                            # Create the variant — doesn't exist on this item
+                            max_pos += 1
+                            conn.execute(
+                                """INSERT INTO draft_item_variants
+                                   (item_id, label, price_cents, kind, position, created_at, updated_at)
+                                   VALUES (?, ?, ?, 'size', ?, ?, ?)""",
+                                (it["id"], sv["label"], sv.get("price_cents", 0), max_pos, now, now),
+                            )
+                            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                            created_ids.append({
+                                "variant_id": new_id,
+                                "item_id": it["id"],
+                                "label": sv["label"],
+                                "price_cents": sv.get("price_cents", 0),
+                                "position": max_pos,
+                            })
+                            existing_labels.add(sv_label_lower)
+                            changed = True
+
+                    if changed:
+                        updated_items += 1
             conn.commit()
 
     except Exception as e:
@@ -6386,6 +6484,118 @@ def wizard_apply_variant_labels(draft_id: int):
         "old_labels": old_labels,
         "created_ids": created_ids,
     })
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/delete_variants_by_label")
+@login_required
+def wizard_delete_variants_by_label(draft_id: int):
+    """Delete all variants matching given labels from all items in a category."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    source_item_id = data.get("source_item_id")
+    category = (data.get("category") or "").strip()
+    labels = data.get("labels") or []  # list of label strings to delete
+    if not category or not labels:
+        return jsonify({"ok": False, "error": "category and labels required"}), 400
+
+    label_set = {l.strip().lower() for l in labels if l.strip()}
+    if not label_set:
+        return jsonify({"ok": False, "error": "No valid labels provided"}), 400
+
+    try:
+        items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
+        cat_items = [it for it in items if (it.get("category") or "").strip() == category]
+
+        deleted_variants = []  # for undo: [{variant_id, item_id, label, price_cents, kind, position}]
+        updated_items = 0
+
+        with db_connect() as conn:
+            for it in cat_items:
+                # Include all items (source card too)
+                changed = False
+                for tv in (it.get("variants") or []):
+                    if (tv.get("label") or "").strip().lower() in label_set:
+                        deleted_variants.append({
+                            "variant_id": tv["id"],
+                            "item_id": it["id"],
+                            "label": tv.get("label", ""),
+                            "price_cents": tv.get("price_cents", 0),
+                            "kind": tv.get("kind", "size"),
+                            "position": tv.get("position", 0),
+                        })
+                        conn.execute("DELETE FROM draft_item_variants WHERE id=?", (tv["id"],))
+                        changed = True
+                if changed:
+                    updated_items += 1
+            conn.commit()
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "updated_items": updated_items,
+        "deleted_count": len(deleted_variants),
+        "deleted_variants": deleted_variants,
+    })
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/batch_undo")
+@login_required
+def wizard_batch_undo(draft_id: int):
+    """Batch undo: delete created variants and restore old labels/prices in one call."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    delete_ids = data.get("delete_ids") or []       # variant IDs to delete
+    restore = data.get("restore") or []             # [{variant_id, label, price_cents}]
+
+    try:
+        now = _now_iso()
+        with db_connect() as conn:
+            for vid in delete_ids:
+                conn.execute("DELETE FROM draft_item_variants WHERE id=?", (int(vid),))
+            for r in restore:
+                conn.execute(
+                    "UPDATE draft_item_variants SET label=?, price_cents=?, updated_at=? WHERE id=?",
+                    (r.get("label", ""), int(r.get("price_cents", 0)), now, int(r["variant_id"])),
+                )
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "deleted": len(delete_ids), "restored": len(restore)})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/batch_create_variants")
+@login_required
+def wizard_batch_create_variants(draft_id: int):
+    """Batch create variants: insert multiple variants across items in one call."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    variants = data.get("variants") or []  # [{item_id, label, price_cents, kind, position}]
+
+    try:
+        now = _now_iso()
+        with db_connect() as conn:
+            for v in variants:
+                conn.execute(
+                    """INSERT INTO draft_item_variants
+                       (item_id, label, price_cents, kind, position, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (int(v["item_id"]), v.get("label", ""), int(v.get("price_cents", 0)),
+                     v.get("kind", "size"), int(v.get("position", 0)), now, now),
+                )
+            conn.commit()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "created": len(variants)})
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/add_item")
