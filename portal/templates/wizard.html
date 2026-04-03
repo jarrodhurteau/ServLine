@@ -1046,6 +1046,16 @@
         } catch (e) { /* ignore */ }
         sessionStorage.removeItem('wizUndoEntry');
       }
+      // Re-open the card that was being edited before reload
+      const editId = sessionStorage.getItem('wizEditItemId');
+      if (editId) {
+        sessionStorage.removeItem('wizEditItemId');
+        const card = document.querySelector(`.wiz-item[data-item-id="${editId}"]`);
+        if (card) {
+          wizEdit(card);
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
     })();
 
     // Flush pending deletes to server
@@ -1486,6 +1496,8 @@
             message: `Applied "${labelList}" to ${data.updated_items} item${data.updated_items !== 1 ? 's' : ''}`
           };
           sessionStorage.setItem('wizUndoEntry', JSON.stringify(undoEntry));
+          // Remember which card was open so we re-open it after reload
+          sessionStorage.setItem('wizEditItemId', String(itemId));
           // Reload to show new variant rows
           window.location.reload();
         } else {
