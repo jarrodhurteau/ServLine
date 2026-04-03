@@ -480,6 +480,41 @@
       color: #B85C38;
     }
 
+    /* ===== Undo Bar ===== */
+    .undo-bar {
+      position: sticky;
+      bottom: 0;
+      background: #2C2C2C;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 10px 10px 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: .85rem;
+      z-index: 50;
+      box-shadow: 0 -2px 12px rgba(0,0,0,.15);
+      animation: undo-slide-up .2s ease-out;
+    }
+    @keyframes undo-slide-up {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .undo-bar button {
+      background: #B85C38;
+      color: #fff;
+      border: none;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: .82rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background .15s;
+    }
+    .undo-bar button:hover { background: #a04e2e; }
+
     /* ===== Apply Labels Checkbox + Button ===== */
     .wiz-vf-check {
       width: 15px;
@@ -864,6 +899,12 @@
         {% endfor %}
       </div>
 
+      <!-- Undo toast bar -->
+      <div id="undo-bar" class="undo-bar" style="display:none;">
+        <span id="undo-msg"></span>
+        <button type="button" onclick="wizUndo()">Undo</button>
+      </div>
+
       <!-- Add Item button -->
       <div class="wiz-add-item" onclick="wizAddItem(this)" data-draft-id="{{ draft.id }}" data-category="{{ current_category|e }}">
         + Add Item
@@ -923,6 +964,82 @@
   {% endif %}
 
   <script>
+    /* ===== Undo Stack ===== */
+    const undoStack = [];
+    const pendingDeletes = []; // item IDs to delete server-side on confirm/navigate
+
+    function showUndoBar(msg) {
+      const bar = document.getElementById('undo-bar');
+      const msgEl = document.getElementById('undo-msg');
+      if (bar && msgEl) {
+        msgEl.textContent = msg;
+        bar.style.display = '';
+      }
+    }
+
+    function hideUndoBar() {
+      const bar = document.getElementById('undo-bar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    function updateUndoBar() {
+      if (undoStack.length === 0) { hideUndoBar(); return; }
+      const last = undoStack[undoStack.length - 1];
+      showUndoBar(last.message);
+    }
+
+    async function wizUndo() {
+      if (undoStack.length === 0) return;
+      const action = undoStack.pop();
+
+      if (action.type === 'delete') {
+        // Un-hide the card, remove from pending deletes
+        const card = document.querySelector(`.wiz-item[data-item-id="${action.itemId}"]`);
+        if (card) {
+          card.classList.remove('deleted');
+          card.classList.remove('editing');
+        }
+        const idx = pendingDeletes.indexOf(action.itemId);
+        if (idx !== -1) pendingDeletes.splice(idx, 1);
+        wizRenumber();
+      }
+
+      if (action.type === 'apply') {
+        // Restore old labels via API
+        const draftId = action.draftId;
+        for (const entry of action.oldLabels) {
+          try {
+            await fetch(`/api/drafts/${draftId}/wizard/variant/${entry.variantId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ label: entry.oldLabel, price_cents: entry.priceCents })
+            });
+          } catch (e) { /* silent */ }
+        }
+        window.location.reload();
+        return;
+      }
+
+      updateUndoBar();
+    }
+
+    // Flush pending deletes to server
+    async function flushPendingDeletes() {
+      for (const itemId of pendingDeletes) {
+        try {
+          const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
+          if (!draftId) continue;
+          await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin'
+          });
+        } catch (e) { /* silent */ }
+      }
+      pendingDeletes.length = 0;
+    }
+
     /* ===== Wizard Inline Editing ===== */
     function wizEdit(card) {
       // Auto-save and close any other open editors first
@@ -1017,26 +1134,23 @@
       }
     }
 
-    async function wizDelete(btn) {
-      if (!confirm('Delete this item?')) return;
+    function wizDelete(btn) {
       const card = btn.closest('.wiz-item');
       const itemId = card.dataset.itemId;
-      const draftId = card.dataset.draftId;
+      const name = card.querySelector('.wiz-f-name')?.value || card.querySelector('.wiz-item-name')?.textContent || 'item';
 
-      try {
-        const res = await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}/delete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin'
-        });
-        const data = await res.json();
-        if (data.ok) {
-          card.classList.add('deleted');
-          card.classList.remove('editing');
-        } else {
-          alert(data.error || 'Delete failed');
-        }
-      } catch (e) { alert('Network error'); }
+      // Soft-delete: hide visually, queue for server delete on confirm/navigate
+      card.classList.add('deleted');
+      card.classList.remove('editing');
+      pendingDeletes.push(parseInt(itemId));
+
+      undoStack.push({
+        type: 'delete',
+        itemId: parseInt(itemId),
+        message: `Deleted "${name.trim()}"`
+      });
+      updateUndoBar();
+      wizRenumber();
     }
 
     // Allow Enter to save, Escape to cancel
@@ -1342,7 +1456,43 @@
         });
         const data = await res.json();
         if (data.ok) {
-          window.location.reload();
+          // Push undo entry with old labels from server response
+          const labelList = checked.map(c => c.label).filter(l => l).join(', ');
+          undoStack.push({
+            type: 'apply',
+            draftId,
+            oldLabels: data.old_labels || [],
+            message: `Applied "${labelList}" to ${data.updated_items} item${data.updated_items !== 1 ? 's' : ''}`
+          });
+
+          // Update display in-place: for each affected card, update variant labels
+          const checkedPositions = new Set(positions);
+          const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+          allCards.forEach(c => {
+            if (parseInt(c.dataset.itemId) === itemId) return;
+            const displayRows = c.querySelectorAll('.wiz-display .wiz-variant-row');
+            const editRows = c.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+            if (displayRows.length !== totalVariants) return;
+            checked.forEach(ch => {
+              const pos = ch.pos;
+              if (displayRows[pos]) {
+                const lbl = displayRows[pos].querySelector('.wiz-variant-label');
+                if (lbl) lbl.textContent = ch.label;
+              }
+              if (editRows[pos]) {
+                const inp = editRows[pos].querySelector('.wiz-vf-label');
+                if (inp) inp.value = ch.label;
+              }
+            });
+          });
+
+          // Uncheck the boxes
+          allRows.forEach(r => {
+            const cb = r.querySelector('.wiz-vf-check');
+            if (cb) cb.checked = false;
+          });
+          btn.style.display = 'none';
+          updateUndoBar();
         } else {
           alert(data.error || 'Apply failed');
         }
@@ -1497,6 +1647,34 @@
         }
       } catch (e) { alert('Network error'); }
     }
+
+    /* ===== Flush pending deletes before any navigation ===== */
+    // Intercept confirm forms
+    document.querySelectorAll('form[action*="wizard/confirm"], form[action*="wizard/unconfirm"]').forEach(form => {
+      form.addEventListener('submit', async e => {
+        if (pendingDeletes.length > 0) {
+          e.preventDefault();
+          await flushPendingDeletes();
+          form.submit();
+        }
+      });
+    });
+
+    // Intercept sidebar category clicks and nav links
+    document.querySelectorAll('.cat-list li, .wizard-actions a.btn').forEach(el => {
+      el.addEventListener('click', async e => {
+        if (pendingDeletes.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          await flushPendingDeletes();
+          // Re-trigger navigation
+          const href = el.getAttribute('onclick')
+            ? el.getAttribute('onclick').match(/window\.location='([^']+)'/)?.[1]
+            : el.getAttribute('href');
+          if (href) window.location = href;
+        }
+      });
+    });
   </script>
 
   {# Lightbox for original file preview #}

@@ -6327,6 +6327,7 @@ def wizard_apply_variant_labels(draft_id: int):
 
         # Find all other items in category with same variant count
         updated_items = 0
+        old_labels = []  # for undo support: [{variant_id, old_label, price_cents}]
         with db_connect() as conn:
             for it in cat_items:
                 if it["id"] == source_item_id:
@@ -6339,6 +6340,11 @@ def wizard_apply_variant_labels(draft_id: int):
                 changed = False
                 for idx, (sv, tv) in enumerate(zip(src_variants, tgt_variants)):
                     if idx in apply_positions:
+                        old_labels.append({
+                            "variant_id": tv["id"],
+                            "old_label": tv.get("label", ""),
+                            "price_cents": tv.get("price_cents", 0),
+                        })
                         conn.execute(
                             "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
                             (sv["label"], _now_iso(), tv["id"]),
@@ -6351,7 +6357,12 @@ def wizard_apply_variant_labels(draft_id: int):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    return jsonify({"ok": True, "updated_items": updated_items, "label_count": len(apply_positions)})
+    return jsonify({
+        "ok": True,
+        "updated_items": updated_items,
+        "label_count": len(apply_positions),
+        "old_labels": old_labels,
+    })
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/add_item")
