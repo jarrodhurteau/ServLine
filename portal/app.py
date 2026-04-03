@@ -6302,6 +6302,9 @@ def wizard_apply_variant_labels(draft_id: int):
     if not source_item_id or not category:
         return jsonify({"ok": False, "error": "source_item_id and category required"}), 400
 
+    # Optional: only apply specific positions (0-indexed). If omitted, apply all.
+    positions = data.get("positions")  # e.g. [0, 2] to apply 1st and 3rd variant labels
+
     try:
         items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
         # Filter to this category
@@ -6319,6 +6322,9 @@ def wizard_apply_variant_labels(draft_id: int):
         src_variants = sorted(source["variants"], key=lambda v: v.get("position", 0))
         src_count = len(src_variants)
 
+        # Build set of positions to apply
+        apply_positions = set(positions) if positions is not None else set(range(src_count))
+
         # Find all other items in category with same variant count
         updated_items = 0
         with db_connect() as conn:
@@ -6330,18 +6336,22 @@ def wizard_apply_variant_labels(draft_id: int):
 
                 # Sort target variants by position too
                 tgt_variants = sorted(it["variants"], key=lambda v: v.get("position", 0))
-                for sv, tv in zip(src_variants, tgt_variants):
-                    conn.execute(
-                        "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
-                        (sv["label"], _now_iso(), tv["id"]),
-                    )
-                updated_items += 1
+                changed = False
+                for idx, (sv, tv) in enumerate(zip(src_variants, tgt_variants)):
+                    if idx in apply_positions:
+                        conn.execute(
+                            "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
+                            (sv["label"], _now_iso(), tv["id"]),
+                        )
+                        changed = True
+                if changed:
+                    updated_items += 1
             conn.commit()
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    return jsonify({"ok": True, "updated_items": updated_items, "label_count": src_count})
+    return jsonify({"ok": True, "updated_items": updated_items, "label_count": len(apply_positions)})
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/add_item")

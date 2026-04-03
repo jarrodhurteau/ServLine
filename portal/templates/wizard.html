@@ -480,7 +480,15 @@
       color: #B85C38;
     }
 
-    /* ===== Apply Labels Button ===== */
+    /* ===== Apply Labels Checkbox + Button ===== */
+    .wiz-vf-check {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+      accent-color: #2E5B5E;
+      cursor: pointer;
+      margin: 0;
+    }
     .btn-apply-labels {
       background: none;
       border: 1px solid #2E5B5E;
@@ -819,7 +827,8 @@
             {% if it.variants %}
             <div class="wiz-variants">
               {% for v in it.variants %}
-              <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}">
+              <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}" data-var-pos="{{ loop.index0 }}">
+                <input type="checkbox" class="wiz-vf-check" title="Select to apply this label to all" onchange="wizToggleApplyBtn(this)" />
                 <input type="text" class="wiz-vf-label" value="{{ v.label|e }}" placeholder="Label" onblur="wizSaveVariant(this)" />
                 <span style="font-weight:600; font-size:.82rem; color:var(--ink); display:flex; align-items:baseline;">$<input type="text" class="wiz-vf-price" value="{% if v.price_cents %}{{ '%.2f'|format(v.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>
                 <button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>
@@ -846,9 +855,7 @@
 
             <div class="wiz-edit-actions">
               <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ add variant</button>
-              {% if it.variants and it.variants|length > 0 %}
-              <button type="button" class="btn-apply-labels" onclick="wizApplyLabels(this)" title="Copy this item's variant labels (e.g. Small, Medium, Large) to every other item in this category that has the same number of variants">&#x21BB; Apply labels to all</button>
-              {% endif %}
+              <button type="button" class="btn-apply-labels" onclick="wizApplyLabels(this)" style="display:none;" title="Apply checked variant labels to all items in this category with the same number of variants">&#x21BB; Apply checked to all</button>
               <button type="button" class="btn-save" onclick="wizSave(this)" style="display:none;">save</button>
               <button type="button" class="btn-delete" onclick="wizDelete(this)">delete</button>
             </div>
@@ -1253,75 +1260,88 @@
       } catch (e) { /* silent */ }
     }
 
-    /* ===== Apply Variant Labels to All ===== */
+    /* ===== Apply Variant Labels — Checkbox Toggle ===== */
+    function wizToggleApplyBtn(checkbox) {
+      const card = checkbox.closest('.wiz-item');
+      const anyChecked = card.querySelector('.wiz-vf-check:checked');
+      const applyBtn = card.querySelector('.btn-apply-labels');
+      if (applyBtn) applyBtn.style.display = anyChecked ? '' : 'none';
+    }
+
+    /* ===== Apply Checked Variant Labels to All ===== */
     async function wizApplyLabels(btn) {
       const card = btn.closest('.wiz-item');
       const itemId = parseInt(card.dataset.itemId);
       const draftId = card.dataset.draftId;
       const category = '{{ current_category|e }}';
 
-      // Count variants on this item
-      const editRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
-      const labels = [];
-      editRows.forEach(r => {
-        labels.push((r.querySelector('.wiz-vf-label')?.value || '').trim());
+      // Gather only the checked variant rows
+      const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+      const totalVariants = allRows.length;
+      const checked = [];
+      allRows.forEach(r => {
+        if (r.querySelector('.wiz-vf-check:checked')) {
+          checked.push({
+            pos: parseInt(r.dataset.varPos),
+            label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
+            variantId: r.dataset.variantId,
+            priceStr: (r.querySelector('.wiz-vf-price')?.value || '').trim()
+          });
+        }
       });
 
-      if (labels.length === 0 || labels.every(l => !l)) {
-        alert('This item has no variant labels to apply.');
+      if (checked.length === 0 || checked.every(c => !c.label)) {
+        alert('Check at least one variant with a label.');
         return;
       }
 
-      // Count how many other items in category have same variant count
+      // Count matching items (same total variant count)
       const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
       let matchCount = 0;
       allCards.forEach(c => {
         if (parseInt(c.dataset.itemId) === itemId) return;
         const vRows = c.querySelectorAll('.wiz-display .wiz-variant-row');
-        if (vRows.length === labels.length) matchCount++;
+        if (vRows.length === totalVariants) matchCount++;
       });
 
       if (matchCount === 0) {
-        alert('No other items in this category have ' + labels.length + ' variant(s).');
+        alert('No other items in this category have ' + totalVariants + ' variant(s).');
         return;
       }
 
-      const labelList = labels.filter(l => l).join(', ');
-      if (!confirm(`Apply labels "${labelList}" to ${matchCount} other item${matchCount > 1 ? 's' : ''} with ${labels.length} variant${labels.length > 1 ? 's' : ''}?`)) return;
+      const labelList = checked.map(c => c.label).filter(l => l).join(', ');
+      if (!confirm(`Apply "${labelList}" to ${matchCount} other item${matchCount > 1 ? 's' : ''}?`)) return;
 
       btn.disabled = true;
       btn.textContent = 'Applying...';
 
       try {
-        // First save the current item's variants so they're up-to-date
-        for (const row of editRows) {
-          const vid = row.dataset.variantId;
-          const label = (row.querySelector('.wiz-vf-label')?.value || '').trim();
-          const priceStr = (row.querySelector('.wiz-vf-price')?.value || '').trim();
+        // Save checked variants first so they're up-to-date in DB
+        for (const c of checked) {
           let priceCents = 0;
-          if (priceStr) {
-            const parsed = parseFloat(priceStr.replace(/[$,]/g, ''));
+          if (c.priceStr) {
+            const parsed = parseFloat(c.priceStr.replace(/[$,]/g, ''));
             if (!isNaN(parsed)) priceCents = Math.round(parsed * 100);
           }
-          if (label) {
-            await fetch(`/api/drafts/${draftId}/wizard/variant/${vid}`, {
+          if (c.label) {
+            await fetch(`/api/drafts/${draftId}/wizard/variant/${c.variantId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'same-origin',
-              body: JSON.stringify({ label, price_cents: priceCents })
+              body: JSON.stringify({ label: c.label, price_cents: priceCents })
             });
           }
         }
 
+        const positions = checked.map(c => c.pos);
         const res = await fetch(`/api/drafts/${draftId}/wizard/apply_variant_labels`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ source_item_id: itemId, category })
+          body: JSON.stringify({ source_item_id: itemId, category, positions })
         });
         const data = await res.json();
         if (data.ok) {
-          // Reload to show updated labels everywhere
           window.location.reload();
         } else {
           alert(data.error || 'Apply failed');
@@ -1330,7 +1350,7 @@
         alert('Network error');
       } finally {
         btn.disabled = false;
-        btn.textContent = '\u21BB Apply labels to all';
+        btn.textContent = '\u21BB Apply checked to all';
       }
     }
 
