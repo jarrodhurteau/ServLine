@@ -6292,7 +6292,11 @@ def wizard_reorder(draft_id: int):
 @app.post("/api/drafts/<int:draft_id>/wizard/apply_variant_labels")
 @login_required
 def wizard_apply_variant_labels(draft_id: int):
-    """Apply one item's variant labels to all items in the category with the same variant count."""
+    """Apply checked variant labels to all items in a category.
+
+    For items with existing variants at the target position: update the label.
+    For items with fewer variants (or none): create new variant rows.
+    """
     _require_drafts_storage()
     if not request.is_json:
         return jsonify({"ok": False, "error": "Expected JSON"}), 400
@@ -6302,12 +6306,11 @@ def wizard_apply_variant_labels(draft_id: int):
     if not source_item_id or not category:
         return jsonify({"ok": False, "error": "source_item_id and category required"}), 400
 
-    # Optional: only apply specific positions (0-indexed). If omitted, apply all.
-    positions = data.get("positions")  # e.g. [0, 2] to apply 1st and 3rd variant labels
+    # Only apply specific positions (0-indexed). If omitted, apply all.
+    positions = data.get("positions")
 
     try:
         items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
-        # Filter to this category
         cat_items = [it for it in items if (it.get("category") or "").strip() == category]
 
         # Get source item's variants (sorted by position)
@@ -6321,25 +6324,32 @@ def wizard_apply_variant_labels(draft_id: int):
 
         src_variants = sorted(source["variants"], key=lambda v: v.get("position", 0))
         src_count = len(src_variants)
+        apply_positions = sorted(set(positions) if positions is not None else set(range(src_count)))
 
-        # Build set of positions to apply
-        apply_positions = set(positions) if positions is not None else set(range(src_count))
-
-        # Find all other items in category with same variant count
+        now = _now_iso()
         updated_items = 0
-        old_labels = []  # for undo support: [{variant_id, old_label, price_cents}]
+        old_labels = []   # for undo: existing variants that were relabeled
+        created_ids = []  # for undo: new variant IDs that were created
+
         with db_connect() as conn:
             for it in cat_items:
                 if it["id"] == source_item_id:
                     continue
-                if not it.get("variants") or len(it["variants"]) != src_count:
-                    continue
 
-                # Sort target variants by position too
-                tgt_variants = sorted(it["variants"], key=lambda v: v.get("position", 0))
+                tgt_variants = sorted(
+                    (it.get("variants") or []),
+                    key=lambda v: v.get("position", 0),
+                )
                 changed = False
-                for idx, (sv, tv) in enumerate(zip(src_variants, tgt_variants)):
-                    if idx in apply_positions:
+
+                for pos in apply_positions:
+                    if pos >= src_count:
+                        continue
+                    sv = src_variants[pos]
+
+                    if pos < len(tgt_variants):
+                        # Existing variant at this position — update its label
+                        tv = tgt_variants[pos]
                         old_labels.append({
                             "variant_id": tv["id"],
                             "old_label": tv.get("label", ""),
@@ -6347,9 +6357,21 @@ def wizard_apply_variant_labels(draft_id: int):
                         })
                         conn.execute(
                             "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
-                            (sv["label"], _now_iso(), tv["id"]),
+                            (sv["label"], now, tv["id"]),
                         )
                         changed = True
+                    else:
+                        # No variant at this position — create one
+                        conn.execute(
+                            """INSERT INTO draft_item_variants
+                               (item_id, label, price_cents, kind, position, created_at, updated_at)
+                               VALUES (?, ?, 0, 'size', ?, ?, ?)""",
+                            (it["id"], sv["label"], pos, now, now),
+                        )
+                        new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                        created_ids.append(new_id)
+                        changed = True
+
                 if changed:
                     updated_items += 1
             conn.commit()
@@ -6362,6 +6384,7 @@ def wizard_apply_variant_labels(draft_id: int):
         "updated_items": updated_items,
         "label_count": len(apply_positions),
         "old_labels": old_labels,
+        "created_ids": created_ids,
     })
 
 

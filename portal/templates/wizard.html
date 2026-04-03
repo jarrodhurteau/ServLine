@@ -1005,24 +1005,48 @@
       }
 
       if (action.type === 'apply') {
-        // Restore old labels via API
         const draftId = action.draftId;
-        for (const entry of action.oldLabels) {
+        // Delete any newly created variants
+        for (const vid of (action.createdIds || [])) {
           try {
-            await fetch(`/api/drafts/${draftId}/wizard/variant/${entry.variantId}`, {
+            await fetch(`/api/drafts/${draftId}/wizard/variant/${vid}/delete`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ label: entry.oldLabel, price_cents: entry.priceCents })
+              credentials: 'same-origin'
             });
           } catch (e) { /* silent */ }
         }
+        // Restore old labels on existing variants
+        for (const entry of (action.oldLabels || [])) {
+          try {
+            await fetch(`/api/drafts/${draftId}/wizard/variant/${entry.variant_id}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ label: entry.old_label, price_cents: entry.price_cents })
+            });
+          } catch (e) { /* silent */ }
+        }
+        sessionStorage.removeItem('wizUndoEntry');
         window.location.reload();
         return;
       }
 
       updateUndoBar();
     }
+
+    // Restore undo state from sessionStorage after reload (from apply-to-all)
+    (function restoreUndoState() {
+      const saved = sessionStorage.getItem('wizUndoEntry');
+      if (saved) {
+        try {
+          const entry = JSON.parse(saved);
+          undoStack.push(entry);
+          updateUndoBar();
+        } catch (e) { /* ignore */ }
+        sessionStorage.removeItem('wizUndoEntry');
+      }
+    })();
 
     // Flush pending deletes to server
     async function flushPendingDeletes() {
@@ -1391,7 +1415,6 @@
 
       // Gather only the checked variant rows
       const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
-      const totalVariants = allRows.length;
       const checked = [];
       allRows.forEach(r => {
         if (r.querySelector('.wiz-vf-check:checked')) {
@@ -1409,22 +1432,20 @@
         return;
       }
 
-      // Count matching items (same total variant count)
+      // Count all other items in category (they'll get labels updated or new variants created)
       const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
       let matchCount = 0;
       allCards.forEach(c => {
-        if (parseInt(c.dataset.itemId) === itemId) return;
-        const vRows = c.querySelectorAll('.wiz-display .wiz-variant-row');
-        if (vRows.length === totalVariants) matchCount++;
+        if (parseInt(c.dataset.itemId) !== itemId) matchCount++;
       });
 
       if (matchCount === 0) {
-        alert('No other items in this category have ' + totalVariants + ' variant(s).');
+        alert('No other items in this category.');
         return;
       }
 
       const labelList = checked.map(c => c.label).filter(l => l).join(', ');
-      if (!confirm(`Apply "${labelList}" to ${matchCount} other item${matchCount > 1 ? 's' : ''}?`)) return;
+      if (!confirm(`Apply "${labelList}" to ${matchCount} other item${matchCount > 1 ? 's' : ''}?\nItems without enough variants will get new ones created.`)) return;
 
       btn.disabled = true;
       btn.textContent = 'Applying...';
@@ -1456,43 +1477,17 @@
         });
         const data = await res.json();
         if (data.ok) {
-          // Push undo entry with old labels from server response
-          const labelList = checked.map(c => c.label).filter(l => l).join(', ');
-          undoStack.push({
+          // Store undo data in sessionStorage so it survives the reload
+          const undoEntry = {
             type: 'apply',
             draftId,
             oldLabels: data.old_labels || [],
+            createdIds: data.created_ids || [],
             message: `Applied "${labelList}" to ${data.updated_items} item${data.updated_items !== 1 ? 's' : ''}`
-          });
-
-          // Update display in-place: for each affected card, update variant labels
-          const checkedPositions = new Set(positions);
-          const allCards = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
-          allCards.forEach(c => {
-            if (parseInt(c.dataset.itemId) === itemId) return;
-            const displayRows = c.querySelectorAll('.wiz-display .wiz-variant-row');
-            const editRows = c.querySelectorAll('.wiz-edit-form .wiz-variant-row');
-            if (displayRows.length !== totalVariants) return;
-            checked.forEach(ch => {
-              const pos = ch.pos;
-              if (displayRows[pos]) {
-                const lbl = displayRows[pos].querySelector('.wiz-variant-label');
-                if (lbl) lbl.textContent = ch.label;
-              }
-              if (editRows[pos]) {
-                const inp = editRows[pos].querySelector('.wiz-vf-label');
-                if (inp) inp.value = ch.label;
-              }
-            });
-          });
-
-          // Uncheck the boxes
-          allRows.forEach(r => {
-            const cb = r.querySelector('.wiz-vf-check');
-            if (cb) cb.checked = false;
-          });
-          btn.style.display = 'none';
-          updateUndoBar();
+          };
+          sessionStorage.setItem('wizUndoEntry', JSON.stringify(undoEntry));
+          // Reload to show new variant rows
+          window.location.reload();
         } else {
           alert(data.error || 'Apply failed');
         }
