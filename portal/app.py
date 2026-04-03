@@ -6044,6 +6044,16 @@ def draft_wizard(draft_id: int):
     requested_cat = request.args.get("category", "").strip()
     category_list = [c["name"] for c in progress["categories"]]
 
+    # Apply saved category order if it exists
+    try:
+        saved_order = drafts_store.get_category_order(draft_id)
+        if saved_order:
+            order_map = {name: i for i, name in enumerate(saved_order)}
+            category_list.sort(key=lambda c: order_map.get(c, 9999))
+            progress["categories"].sort(key=lambda c: order_map.get(c["name"], 9999))
+    except Exception:
+        pass
+
     # Default: summary page on first visit, otherwise first unreviewed
     wizard_step = "summary"  # "summary" or a category name
     current_category = None
@@ -6596,6 +6606,98 @@ def wizard_batch_create_variants(draft_id: int):
         return jsonify({"ok": False, "error": str(e)}), 500
 
     return jsonify({"ok": True, "created": len(variants)})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/bulk_move")
+@login_required
+def wizard_bulk_move(draft_id: int):
+    """Move items to a different category (or a new one)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    item_ids = data.get("item_ids") or []
+    target_category = (data.get("target_category") or "").strip()
+    if not item_ids or not target_category:
+        return jsonify({"ok": False, "error": "item_ids and target_category required"}), 400
+
+    try:
+        now = _now_iso()
+        with db_connect() as conn:
+            for iid in item_ids:
+                conn.execute(
+                    "UPDATE draft_items SET category=?, updated_at=? WHERE id=? AND draft_id=?",
+                    (target_category, now, int(iid), draft_id),
+                )
+            conn.commit()
+        # Re-initialize wizard categories to pick up the new category
+        drafts_store.init_wizard_categories(draft_id)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "moved": len(item_ids), "target_category": target_category})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/bulk_delete")
+@login_required
+def wizard_bulk_delete(draft_id: int):
+    """Delete multiple items at once."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    item_ids = data.get("item_ids") or []
+    if not item_ids:
+        return jsonify({"ok": False, "error": "item_ids required"}), 400
+
+    try:
+        deleted = drafts_store.delete_draft_items(draft_id, [int(i) for i in item_ids])
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/rename_category")
+@login_required
+def wizard_rename_category(draft_id: int):
+    """Rename a category across all items and wizard tracking."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    old_name = (data.get("old_name") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+    if not old_name or not new_name:
+        return jsonify({"ok": False, "error": "old_name and new_name required"}), 400
+
+    try:
+        now = _now_iso()
+        with db_connect() as conn:
+            # Update all items in this category
+            conn.execute(
+                "UPDATE draft_items SET category=?, updated_at=? WHERE draft_id=? AND category=?",
+                (new_name, now, draft_id, old_name),
+            )
+            # Update wizard category tracking
+            conn.execute(
+                "UPDATE draft_category_reviews SET category=? WHERE draft_id=? AND category=?",
+                (new_name, draft_id, old_name),
+            )
+            # Update category order if stored
+            conn.commit()
+        # Update category_order JSON on the draft
+        try:
+            order = drafts_store.get_category_order(draft_id)
+            if order and old_name in order:
+                order = [new_name if c == old_name else c for c in order]
+                drafts_store.save_category_order(draft_id, order)
+        except Exception:
+            pass
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "old_name": old_name, "new_name": new_name})
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/add_item")

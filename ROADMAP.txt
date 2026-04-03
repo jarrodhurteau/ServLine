@@ -2266,16 +2266,32 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Auto-redirect from import view after pipeline completes
       - draft_category_reviews table + wizard_completed flag
       - 7 new routes: wizard view, confirm/unconfirm, progress API, item/variant CRUD, reorder
-  [x] Day 138: Wizard polish — "Apply to all" variants + lightbox zoom/drag
-      - "Apply labels to all" button per item with variants: pushes variant labels
-        (e.g. "Small", "Large", "Family") to all items in category with same
-        variant count. Confirm dialog shows count + label preview. Preserves prices.
-        New API endpoint: POST /api/drafts/<id>/wizard/apply_variant_labels
-      - Lightbox zoom + pan: scroll-to-zoom (1x–8x), click-drag to pan, double-click
-        to toggle 3x zoom/reset, × close button + Escape key, touch pinch-zoom +
-        drag on mobile, hint text at bottom
-      - Position backfill: auto-assign positions to items with position=None on
-        wizard load so ordering matches extraction order (4 null items fixed)
+  [x] Day 138: Wizard polish — variant management, category management, UX overhaul
+      - "Apply to All" (teal): smart variant operations — creates new variants with
+        price, renames by old label match, updates prices by name. Never overwrites.
+      - "Delete All" (red): removes checked variant labels from all items including
+        source card. Batch undo via single API call.
+      - Soft-delete cards: persisted in sessionStorage, survives reload, flushed on
+        Confirm & Next. Undo + Move to Bottom buttons centered on deleted cards.
+      - Lightbox zoom + pan: scroll-to-zoom (1x–8x), click-drag pan, double-click
+        toggle, × close + Escape, touch pinch-zoom, hint overlay
+      - Position backfill: auto-assign null positions on wizard load
+      - Item selection system: checkboxes on cards, "Selected" panel under preview
+        with Mark as Read (green checkmark), Move to Category, Delete actions
+      - Move to Category: dropdown of existing categories + Create New Category
+      - Category management: + New Category button, drag-to-reorder (persisted),
+        rename via pencil icon (sidebar + main title), SVG edit icons
+      - Live drag reorder: items shift in real-time during drag, no ghost shadow
+      - Red $0.00 placeholder on zero-price variants (edit + display views)
+      - Alert boxes replaced with red toast notifications
+      - "Enter full price per variant, not adjustments" hint in edit mode
+      - Button colors: + Add Variant (green), Apply to All (teal), Delete All (red),
+        Delete Card (red), Undo (amber), Confirm (teal), Back (terracotta)
+      - Reviewed category bubbles: teal checkmarks
+      - Sidebar expanded to 280px, batch undo/create endpoints for speed
+      - 9 new API endpoints: apply_variant_labels, delete_variants_by_label,
+        batch_undo, batch_create_variants, bulk_move, bulk_delete,
+        rename_category, batch variant operations
   [ ] Day 139: NEW PIPELINE — Call 1: Detect + Classify + Locate
       - Import page: multi-file upload (drag/select multiple JPGs + PDFs in one import)
       - Files ordered as pages of one menu, stored together under one import job
@@ -2749,7 +2765,7 @@ KEY PRINCIPLES
 DAILY LOG REFERENCE
 ================================================================================
 
-Day 138: Wizard Polish — "Apply labels to all" button (pushes variant labels from one item to all same-count items in category, confirm dialog, preserves prices, new /api/drafts/<id>/wizard/apply_variant_labels endpoint), lightbox zoom+pan (scroll-to-zoom 1x-8x, click-drag pan, double-click toggle 3x zoom, close button + Escape, mobile pinch-zoom + touch drag, hint overlay), position backfill (auto-assign positions to null items on wizard load)
+Day 138: Wizard Variant & Category Management Overhaul — Smart "Apply to All" (creates new variants with price, renames by old label, updates prices by name match, never overwrites), "Delete All" (removes checked variants from all items, batch undo), soft-delete cards (sessionStorage persisted, Undo + Move to Bottom buttons, flushed on Confirm), lightbox zoom+pan (scroll 1x-8x, drag pan, double-click toggle, Escape close, touch pinch-zoom), position backfill, item selection system (checkboxes on cards, Selected panel: Mark as Read/Move to Category/Delete), category management (+ New Category, drag-to-reorder persisted, rename via pencil icon on sidebar + title), live drag reorder (items shift in real-time), red $0.00 placeholders, toast notifications replacing alerts, full-price hint for variants, color-coded buttons (green/teal/red/amber/terracotta), teal reviewed bubbles + Confirm button, terracotta Back button, 280px sidebar, 9 new API endpoints (apply_variant_labels, delete_variants_by_label, batch_undo, batch_create_variants, bulk_move, bulk_delete, rename_category)
 Day 133: Restaurant Profile Collection + UX Polish — zip_code/address_line2/city/state columns, address breakdown form, two-column restaurant management page with tile grid + expandable detail + fly animation + whoosh sound + themed delete modal, import page UX overhaul (Dancing Script headers, info tooltips, teal/terracotta/red button system, green-screen confetti chroma key, screen-blend fireworks video synced to audio), editor light theme (full customer palette override), tier rename lightning→premium with DB migration, nav links (My Menus, Editor, Upload a Menu), blank draft manual entry route, dashboard Add Restaurant routes to restaurants page (32 tests)
 Day 130: Email Verification & Password Reset — email_verification_tokens + password_reset_tokens tables (SHA-256 hashed), generate/verify email tokens (one active per user, auto-generated on registration), generate/validate/consume reset tokens (1-hour expiry, used flag), /verify-email/<token>, /resend-verification, /forgot-password (GET+POST, no email existence leak), /reset-password/<token> (GET+POST), account page Verified/Unverified badge + Resend button, login label "Login Email" + "Forgot password?" link, forgot_password.html + reset_password.html templates (32 tests)
 Day 129: Customer-Facing Editor Cleanup — draft_editor.html split into customer-clean vs admin view using {% if show_admin %} conditionals. Hidden from customers: header info chips, Pipeline Debug, Clean & Refine, Finalize with AI, confidence slider, Auto Kitchen Names, Position column, confidence badges, provenance pins, quality scores, Low Confidence panel. Sidebar dev tools consolidated into collapsible "Dev Tools" section (Backfill, OCR Debug, Pipeline Debug, Back to Import). OCR Debug CSV removed from export dropdown. JS addRow/addVariantRow conditional rendering. Zero backend changes. Customers retain: search, table/cards toggle, kitchen names, add item, bulk category, delete selected, full export dropdown, save, approve & export (32 tests)

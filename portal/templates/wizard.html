@@ -15,7 +15,7 @@
     /* ===== Wizard Layout ===== */
     .wizard-container {
       display: grid;
-      grid-template-columns: 220px 1fr 450px;
+      grid-template-columns: 280px 1fr 450px;
       gap: 0;
       width: 100%;
       min-height: calc(100vh - 200px);
@@ -122,8 +122,8 @@
       color: #fff;
     }
     body.theme-customer .cat-list li.reviewed .cat-check {
-      background: #B85C38;
-      border-color: #B85C38;
+      background: #2E5B5E;
+      border-color: #2E5B5E;
     }
     .cat-count {
       margin-left: auto;
@@ -134,6 +134,35 @@
       border-radius: 999px;
     }
     body.theme-customer .cat-count { background: rgba(0,0,0,.05); }
+    .cat-drag {
+      cursor: grab;
+      color: var(--muted);
+      opacity: .3;
+      font-size: .9rem;
+      flex-shrink: 0;
+      transition: opacity .15s;
+      user-select: none;
+    }
+    .cat-list li:hover .cat-drag { opacity: .7; }
+    .cat-drag:active { cursor: grabbing; }
+    .cat-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .cat-list li { position: relative; }
+    .cat-rename { position: absolute; right: 40px; top: 50%; transform: translateY(-50%); font-size: .72rem; color: #B85C38; opacity: 0; cursor: pointer; transition: opacity .15s; z-index: 2; }
+    .cat-list li:hover .cat-rename { opacity: .5; }
+    .cat-rename:hover { opacity: 1 !important; }
+    .cat-list li.cat-drag-over { border-top: 2px solid #B85C38; }
+    .cat-new-btn {
+      text-align: center;
+      padding: 8px;
+      font-size: .78rem;
+      color: #28a745;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+      border-radius: 8px;
+      margin-top: 4px;
+    }
+    .cat-new-btn:hover { background: rgba(40,167,69,.08); }
 
     /* ===== Main Content ===== */
     .wizard-main {
@@ -152,7 +181,18 @@
       font-size: 1.3rem;
       font-weight: 700;
       color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
+    .cat-title-edit {
+      color: #B85C38;
+      opacity: .35;
+      cursor: pointer;
+      transition: opacity .15s;
+      display: flex;
+    }
+    .cat-title-edit:hover { opacity: .8; }
     .category-stats {
       font-size: .85rem;
       color: var(--muted);
@@ -340,12 +380,20 @@
     }
     .wizard-actions .btn-confirm:hover { background: #24504f; }
     body.theme-customer .wizard-actions .btn-confirm {
-      background: #B85C38 !important;
-      border-color: #B85C38 !important;
+      background: #2E5B5E !important;
+      border-color: #2E5B5E !important;
       color: #fff !important;
     }
     body.theme-customer .wizard-actions .btn-confirm:hover {
-      background: #A04E2E !important;
+      background: #24504f !important;
+    }
+    body.theme-customer .wizard-actions .btn:not(.btn-confirm):not(.btn-skip) {
+      background: #B85C38;
+      border-color: #B85C38;
+      color: #fff;
+    }
+    body.theme-customer .wizard-actions .btn:not(.btn-confirm):not(.btn-skip):hover {
+      background: #A04E2E;
     }
     .wizard-actions .btn-skip {
       background: transparent;
@@ -448,6 +496,102 @@
     .wiz-item.deleted .wiz-display { opacity: .4; text-decoration: line-through; pointer-events: none; }
     .wiz-item.deleted .wiz-display .wiz-drag-handle { pointer-events: auto; opacity: .4; }
     .wiz-item.deleted .wiz-edit-form { display: none; }
+    /* ===== Item Selection Checkbox ===== */
+    .wiz-select-box {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+    .wiz-select-check { display: none; }
+    .wiz-select-mark {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #B85C38;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+      opacity: .5;
+      background: transparent;
+    }
+    .wiz-select-box:hover .wiz-select-mark { opacity: 1; background: rgba(184,92,56,.06); }
+    .wiz-select-check:checked + .wiz-select-mark {
+      background: #B85C38;
+      border-color: #B85C38;
+      opacity: 1;
+    }
+    .wiz-select-check:checked + .wiz-select-mark::after {
+      content: '✓';
+      color: #fff;
+      font-size: .7rem;
+      font-weight: 700;
+    }
+    /* Read state */
+    .wiz-item.is-read .wiz-select-mark {
+      background: #28a745;
+      border-color: #28a745;
+      opacity: .8;
+    }
+    .wiz-item.is-read .wiz-select-mark::after {
+      content: '✓';
+      color: #fff;
+      font-size: .7rem;
+      font-weight: 700;
+    }
+
+    /* ===== Selected Panel (under preview) ===== */
+    .wiz-selected-panel {
+      margin-top: 16px;
+      padding: 14px;
+      background: var(--card-bg, #fff);
+      border-radius: 10px;
+      border: 1.5px solid var(--line);
+    }
+    .wiz-selected-title {
+      font-size: .85rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 10px;
+    }
+    .wiz-selected-title span { color: #B85C38; }
+    .wiz-sel-btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      border: none;
+      border-radius: 6px;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      transition: background .15s;
+    }
+    .wiz-sel-delete { background: rgba(220,53,69,.08); color: #dc3545; }
+    .wiz-sel-delete:hover { background: rgba(220,53,69,.15); }
+    .wiz-sel-move { background: rgba(46,91,94,.08); color: #2E5B5E; }
+    .wiz-sel-move:hover { background: rgba(46,91,94,.15); }
+    .wiz-sel-read { background: rgba(40,167,69,.08); color: #28a745; }
+    .wiz-sel-read:hover { background: rgba(40,167,69,.15); }
+    .wiz-sel-confirm { background: #2E5B5E; color: #fff; text-align: center; margin-top: 6px; }
+    .wiz-sel-confirm:hover { background: #24504f; }
+    .wiz-move-dropdown {
+      padding: 8px 0;
+    }
+    .wiz-move-dropdown select, .wiz-move-dropdown input {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: .82rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-bottom: 4px;
+      background: var(--card-bg, #fff);
+      color: var(--ink);
+    }
+
     /* ===== Inline Error Toast ===== */
     .wiz-toast {
       position: fixed;
@@ -507,11 +651,14 @@
     .wiz-item:hover .wiz-drag-handle { opacity: .8; }
     .wiz-drag-handle:active { cursor: grabbing; }
     .wiz-item.dragging {
-      opacity: .5;
-      border: 2px dashed #B85C38;
+      opacity: .4;
+      transform: scale(.98);
+      box-shadow: 0 4px 20px rgba(0,0,0,.15);
+      z-index: 10;
+      position: relative;
     }
-    .wiz-item.drag-over {
-      border-top: 3px solid #B85C38;
+    .wizard-items .wiz-item {
+      transition: transform .15s ease;
     }
 
     /* ===== Add Item ===== */
@@ -735,18 +882,21 @@
     <!-- ===== Sidebar: Category List ===== -->
     <div class="wizard-sidebar">
       <div class="card" style="padding: 12px;">
-        <ul class="cat-list">
+        <ul class="cat-list" id="cat-list">
           {% for cat in progress.categories %}
           {% set is_active = cat.name == current_category %}
           <li class="{% if is_active %}active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
-              onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">
+              data-cat-name="{{ cat.name|e }}" draggable="true">
+            <span class="cat-drag" title="Drag to reorder">&#8942;</span>
             <span class="cat-check">{% if cat.reviewed %}&#10003;{% endif %}</span>
-            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ cat.name|e }}</span>
+            <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">{{ cat.name|e }}</span>
+            <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
             {% set item_count = flat_groups.get(cat.name, [])|length %}
             <span class="cat-count">{{ item_count }}</span>
           </li>
           {% endfor %}
         </ul>
+        <div class="cat-new-btn" onclick="wizNewCategory()">+ New Category</div>
       </div>
     </div>
 
@@ -757,7 +907,10 @@
 
       <div class="category-header">
         <div>
-          <div class="category-name">{{ current_category|e }}</div>
+          <div class="category-name">
+            <span id="cat-title-label">{{ current_category|e }}</span>
+            <span class="cat-title-edit" onclick="wizRenameCatTitle()" title="Rename category"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
+          </div>
           <div class="category-stats">
             {{ cat_items|length }} item{{ 's' if cat_items|length != 1 else '' }}
             {% set total_price = cat_items|selectattr('price_cents')|map(attribute='price_cents')|sum %}
@@ -804,6 +957,10 @@
               {% if it.price_cents %}
               <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
               {% endif %}
+              <label class="wiz-select-box" onclick="event.stopPropagation()">
+                <input type="checkbox" class="wiz-select-check" onchange="wizUpdateSelection()" data-item-id="{{ it.id }}" />
+                <span class="wiz-select-mark"></span>
+              </label>
             </div>
 
             {% if it.description %}
@@ -979,6 +1136,26 @@
            alt="Original menu" onclick="document.getElementById('preview-lightbox').classList.add('open')" />
       <div class="preview-label">Click to expand</div>
       {% endif %}
+
+      <!-- Selected Items Panel -->
+      <div id="wiz-selected-panel" class="wiz-selected-panel" style="display:none;">
+        <div class="wiz-selected-title">Selected <span id="wiz-selected-count">0</span></div>
+        <button class="wiz-sel-btn wiz-sel-read" onclick="wizSelMarkRead()">Mark as Read</button>
+        <button class="wiz-sel-btn wiz-sel-move" onclick="wizSelMoveToggle()">Move to Category</button>
+        <div id="wiz-move-dropdown" class="wiz-move-dropdown" style="display:none;">
+          <select id="wiz-move-select">
+            {% for cat in category_list %}
+            {% if cat != current_category %}
+            <option value="{{ cat|e }}">{{ cat|e }}</option>
+            {% endif %}
+            {% endfor %}
+            <option value="__new__">+ Create New Category</option>
+          </select>
+          <input type="text" id="wiz-new-cat-name" placeholder="New category name" style="display:none;" />
+          <button class="wiz-sel-btn wiz-sel-confirm" onclick="wizSelMoveConfirm()">Move</button>
+        </div>
+        <button class="wiz-sel-btn wiz-sel-delete" onclick="wizSelDelete()">Delete</button>
+      </div>
     </div>
   </div>
   {% endif %}
@@ -1919,100 +2096,73 @@
       }
     }
 
-    /* ===== Drag & Drop Reorder ===== */
+    /* ===== Drag & Drop Reorder (live shift) ===== */
     let dragItem = null;
     let scrollInterval = null;
+    let dragReady = false;
 
     function startAutoScroll(e) {
-      const threshold = 80;
-      const speed = 12;
-      const y = e.clientY;
-      const vh = window.innerHeight;
-
+      const threshold = 80, speed = 12;
+      const y = e.clientY, vh = window.innerHeight;
       clearInterval(scrollInterval);
-      if (y < threshold) {
-        scrollInterval = setInterval(() => window.scrollBy(0, -speed), 16);
-      } else if (y > vh - threshold) {
-        scrollInterval = setInterval(() => window.scrollBy(0, speed), 16);
-      }
+      if (y < threshold) scrollInterval = setInterval(() => window.scrollBy(0, -speed), 16);
+      else if (y > vh - threshold) scrollInterval = setInterval(() => window.scrollBy(0, speed), 16);
     }
-
-    function stopAutoScroll() {
-      clearInterval(scrollInterval);
-      scrollInterval = null;
-    }
+    function stopAutoScroll() { clearInterval(scrollInterval); scrollInterval = null; }
 
     document.addEventListener('dragover', e => startAutoScroll(e));
     document.addEventListener('dragend', () => stopAutoScroll());
     document.addEventListener('drop', () => stopAutoScroll());
 
     // Only allow drag from the handle
-    // Handles need draggable on the parent set BEFORE dragstart fires,
-    // so we use mousedown to prep it and a flag to gate dragstart.
-    let dragReady = false;
-
     document.addEventListener('mousedown', e => {
       const handle = e.target.closest('.wiz-drag-handle');
       if (!handle) { dragReady = false; return; }
-      const item = handle.closest('.wiz-item');
-      item.setAttribute('draggable', 'true');
+      handle.closest('.wiz-item').setAttribute('draggable', 'true');
       dragReady = true;
     });
-
     document.addEventListener('mouseup', () => {
-      // Small delay so dragend fires first
       setTimeout(() => {
         document.querySelectorAll('.wiz-item[draggable]').forEach(el => el.removeAttribute('draggable'));
         dragReady = false;
       }, 50);
     });
 
+    // Prevent default on the container so dragover/drop work
+    const wizItemsContainer = document.querySelector('.wizard-items');
+    if (wizItemsContainer) {
+      wizItemsContainer.addEventListener('dragover', e => e.preventDefault());
+      wizItemsContainer.addEventListener('drop', e => e.preventDefault());
+    }
+
     document.querySelectorAll('.wiz-item').forEach(item => {
       item.addEventListener('dragstart', e => {
         if (!dragReady) { e.preventDefault(); return; }
         dragItem = item;
-        item.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', ''); // Required for Firefox
+        e.dataTransfer.setData('text/plain', '');
+        requestAnimationFrame(() => item.classList.add('dragging'));
       });
 
       item.addEventListener('dragend', () => {
         item.classList.remove('dragging');
-        document.querySelectorAll('.wiz-item.drag-over').forEach(el => el.classList.remove('drag-over'));
         dragItem = null;
-        // Save new order + renumber
+        wizRenumber();
         wizSaveOrder();
       });
 
       item.addEventListener('dragover', e => {
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (item !== dragItem && !item.classList.contains('deleted')) {
-          // Clear all others
-          document.querySelectorAll('.wiz-item.drag-over').forEach(el => el.classList.remove('drag-over'));
-          item.classList.add('drag-over');
-        }
-      });
-
-      item.addEventListener('dragleave', () => {
-        item.classList.remove('drag-over');
-      });
-
-      item.addEventListener('drop', e => {
-        e.preventDefault();
-        item.classList.remove('drag-over');
-        if (dragItem && dragItem !== item) {
-          const container = item.parentElement;
-          const allItems = [...container.querySelectorAll('.wiz-item')];
-          const dragIdx = allItems.indexOf(dragItem);
-          const dropIdx = allItems.indexOf(item);
-          if (dragIdx < dropIdx) {
-            item.insertAdjacentElement('afterend', dragItem);
-          } else {
-            item.insertAdjacentElement('beforebegin', dragItem);
-          }
-          // Renumber visually
-          wizRenumber();
+        if (!dragItem || item === dragItem || item.classList.contains('deleted')) return;
+        const container = item.parentElement;
+        const allItems = [...container.querySelectorAll('.wiz-item:not(.deleted)')];
+        const dragIdx = allItems.indexOf(dragItem);
+        const hoverIdx = allItems.indexOf(item);
+        if (dragIdx < 0 || hoverIdx < 0) return;
+        if (dragIdx < hoverIdx) {
+          item.insertAdjacentElement('afterend', dragItem);
+        } else {
+          item.insertAdjacentElement('beforebegin', dragItem);
         }
       });
     });
@@ -2093,6 +2243,298 @@
         }
       });
     });
+
+    /* ===== Selection Actions ===== */
+    function wizGetSelectedIds() {
+      return [...document.querySelectorAll('.wiz-select-check:checked')]
+        .map(cb => parseInt(cb.dataset.itemId))
+        .filter(id => !isNaN(id));
+    }
+
+    function wizUpdateSelection() {
+      const ids = wizGetSelectedIds();
+      const panel = document.getElementById('wiz-selected-panel');
+      const count = document.getElementById('wiz-selected-count');
+      if (panel) panel.style.display = ids.length > 0 ? '' : 'none';
+      if (count) count.textContent = ids.length;
+      // Hide move dropdown when selection changes
+      const dd = document.getElementById('wiz-move-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+
+    async function wizSelDelete() {
+      const ids = wizGetSelectedIds();
+      if (!ids.length) return;
+      const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/bulk_delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ item_ids: ids })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          ids.forEach(id => {
+            const card = document.querySelector(`.wiz-item[data-item-id="${id}"]`);
+            if (card) card.remove();
+          });
+          wizRenumber();
+          wizUpdateSelection();
+          wizToast(`Deleted ${ids.length} item${ids.length > 1 ? 's' : ''}`);
+        }
+      } catch (e) { wizToast('Network error'); }
+    }
+
+    function wizSelMoveToggle() {
+      const dd = document.getElementById('wiz-move-dropdown');
+      dd.style.display = dd.style.display === 'none' ? '' : 'none';
+    }
+
+    // Show/hide new category input when "Create New" is selected
+    document.getElementById('wiz-move-select')?.addEventListener('change', function() {
+      const newInput = document.getElementById('wiz-new-cat-name');
+      newInput.style.display = this.value === '__new__' ? '' : 'none';
+      if (this.value === '__new__') newInput.focus();
+    });
+
+    async function wizSelMoveConfirm() {
+      const ids = wizGetSelectedIds();
+      if (!ids.length) return;
+      const select = document.getElementById('wiz-move-select');
+      let target = select.value;
+      if (target === '__new__') {
+        target = document.getElementById('wiz-new-cat-name').value.trim();
+        if (!target) { wizToast('Enter a category name'); return; }
+      }
+      const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/bulk_move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ item_ids: ids, target_category: target })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          // Remove moved cards from current view
+          ids.forEach(id => {
+            const card = document.querySelector(`.wiz-item[data-item-id="${id}"]`);
+            if (card) card.remove();
+          });
+          wizRenumber();
+          wizUpdateSelection();
+          wizToast(`Moved ${ids.length} item${ids.length > 1 ? 's' : ''} to ${target}`);
+          // Reload after short delay to update sidebar counts
+          setTimeout(() => window.location.reload(), 1500);
+        }
+      } catch (e) { wizToast('Network error'); }
+    }
+
+    function wizSelMarkRead() {
+      const ids = wizGetSelectedIds();
+      ids.forEach(id => {
+        const card = document.querySelector(`.wiz-item[data-item-id="${id}"]`);
+        if (card) {
+          card.classList.toggle('is-read');
+          // Uncheck the selection
+          const cb = card.querySelector('.wiz-select-check');
+          if (cb) cb.checked = false;
+        }
+      });
+      // Persist read state in sessionStorage
+      const readItems = [...document.querySelectorAll('.wiz-item.is-read')]
+        .map(c => parseInt(c.dataset.itemId));
+      sessionStorage.setItem('wizReadItems', JSON.stringify(readItems));
+      wizUpdateSelection();
+    }
+
+    /* ===== Rename Category (double-click) ===== */
+    function wizRenameCat(span, oldName) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = oldName;
+      input.style.cssText = 'font-size:.9rem; font-weight:600; border:1px solid #B85C38; border-radius:4px; padding:2px 6px; width:100%; background:var(--card-bg,#fff); color:var(--ink);';
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newName = input.value.trim();
+        if (!newName || newName === oldName) {
+          // Revert
+          const newSpan = document.createElement('span');
+          newSpan.className = 'cat-label';
+          newSpan.textContent = oldName;
+          newSpan.onclick = () => window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}?category=${encodeURIComponent(oldName)}`;
+          newSpan.ondblclick = (e) => { e.stopPropagation(); wizRenameCat(newSpan, oldName); };
+          input.replaceWith(newSpan);
+          return;
+        }
+        const draftId = '{{ draft.id }}';
+        try {
+          const res = await fetch(`/api/drafts/${draftId}/wizard/rename_category`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ old_name: oldName, new_name: newName })
+          });
+          const data = await res.json();
+          if (data.ok) {
+            // Redirect to the renamed category
+            window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`;
+          } else {
+            wizToast(data.error || 'Rename failed');
+          }
+        } catch (e) { wizToast('Network error'); }
+      };
+
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = oldName; input.blur(); }
+      });
+    }
+
+    function wizRenameCatTitle() {
+      const label = document.getElementById('cat-title-label');
+      const oldName = label.textContent.trim();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = oldName;
+      input.style.cssText = 'font-size:1.3rem; font-weight:700; border:1px solid #B85C38; border-radius:6px; padding:2px 8px; background:var(--card-bg,#fff); color:var(--ink); width:300px;';
+      const editIcon = label.nextElementSibling;
+      if (editIcon) editIcon.style.display = 'none';
+      label.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newName = input.value.trim();
+        if (!newName || newName === oldName) {
+          const span = document.createElement('span');
+          span.id = 'cat-title-label';
+          span.textContent = oldName;
+          input.replaceWith(span);
+          if (editIcon) editIcon.style.display = '';
+          return;
+        }
+        const draftId = '{{ draft.id }}';
+        try {
+          const res = await fetch(`/api/drafts/${draftId}/wizard/rename_category`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ old_name: oldName, new_name: newName })
+          });
+          const data = await res.json();
+          if (data.ok) {
+            window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`;
+          } else {
+            wizToast(data.error || 'Rename failed');
+          }
+        } catch (e) { wizToast('Network error'); }
+      };
+
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = oldName; input.blur(); }
+      });
+    }
+
+    /* ===== New Category ===== */
+    async function wizNewCategory() {
+      const name = prompt('New category name:');
+      if (!name || !name.trim()) return;
+      const draftId = '{{ draft.id }}';
+      // Create a placeholder item so the category exists, then move to it
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/add_item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ category: name.trim() })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}?category=${encodeURIComponent(name.trim())}`;
+        } else {
+          wizToast(data.error || 'Failed to create category');
+        }
+      } catch (e) { wizToast('Network error'); }
+    }
+
+    /* ===== Category Drag Reorder ===== */
+    (function setupCatDrag() {
+      const list = document.getElementById('cat-list');
+      if (!list) return;
+      let dragLi = null;
+
+      list.addEventListener('dragstart', e => {
+        const li = e.target.closest('li');
+        if (!li) return;
+        dragLi = li;
+        li.style.opacity = '.5';
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+      });
+
+      list.addEventListener('dragend', e => {
+        const li = e.target.closest('li');
+        if (li) li.style.opacity = '';
+        list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+        dragLi = null;
+        // Save new order
+        const cats = [...list.querySelectorAll('li')].map(l => l.dataset.catName);
+        const draftId = '{{ draft.id }}';
+        fetch(`/drafts/${draftId}/reorder_categories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ categories: cats })
+        }).catch(() => {});
+      });
+
+      list.addEventListener('dragover', e => {
+        e.preventDefault();
+        const li = e.target.closest('li');
+        if (li && li !== dragLi) {
+          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+          li.classList.add('cat-drag-over');
+        }
+      });
+
+      list.addEventListener('dragleave', e => {
+        const li = e.target.closest('li');
+        if (li) li.classList.remove('cat-drag-over');
+      });
+
+      list.addEventListener('drop', e => {
+        e.preventDefault();
+        const li = e.target.closest('li');
+        if (li && dragLi && li !== dragLi) {
+          const items = [...list.querySelectorAll('li')];
+          const dragIdx = items.indexOf(dragLi);
+          const dropIdx = items.indexOf(li);
+          if (dragIdx < dropIdx) {
+            li.insertAdjacentElement('afterend', dragLi);
+          } else {
+            li.insertAdjacentElement('beforebegin', dragLi);
+          }
+        }
+        list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+      });
+    })();
+
+    // Restore read state on load
+    (function restoreReadState() {
+      const readItems = JSON.parse(sessionStorage.getItem('wizReadItems') || '[]');
+      readItems.forEach(id => {
+        const card = document.querySelector(`.wiz-item[data-item-id="${id}"]`);
+        if (card) card.classList.add('is-read');
+      });
+    })();
 
   </script>
 
