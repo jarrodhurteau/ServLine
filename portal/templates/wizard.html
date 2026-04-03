@@ -271,6 +271,7 @@
       font-size: .82rem;
       color: var(--muted);
     }
+    .wiz-variants-hint { font-size: .68rem; color: var(--muted); opacity: .6; margin-bottom: 2px; font-style: italic; }
     .wiz-variant-label { font-weight: 500; flex: 1; min-width: 0; }
     .wiz-variant-price { font-weight: 600; color: var(--ink); }
     /* Editable variant inputs */
@@ -883,6 +884,7 @@
 
             {% if it.variants %}
             <div class="wiz-variants">
+              <div class="wiz-variants-hint">Enter full price per variant, not adjustments</div>
               {% for v in it.variants %}
               <div class="wiz-variant-row" data-variant-id="{{ v.id }}" data-draft-id="{{ draft.id }}" data-var-pos="{{ loop.index0 }}" data-orig-label="{{ v.label|e }}" data-orig-price="{{ v.price_cents or 0 }}">
                 <input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />
@@ -1540,9 +1542,22 @@
         displayRows.forEach(dr => {
           if (dr.dataset.variantId === variantId) {
             const lblEl = dr.querySelector('.wiz-variant-label');
-            const prEl = dr.querySelector('.wiz-variant-price');
+            let prEl = dr.querySelector('.wiz-variant-price');
             if (lblEl) lblEl.textContent = label;
-            if (prEl) prEl.textContent = priceCents > 0 ? '$' + (priceCents / 100).toFixed(2) : '';
+            if (priceCents > 0) {
+              if (prEl) {
+                prEl.textContent = '$' + (priceCents / 100).toFixed(2);
+                prEl.classList.remove('missing-price');
+              } else {
+                prEl = document.createElement('span');
+                prEl.className = 'wiz-variant-price';
+                prEl.textContent = '$' + (priceCents / 100).toFixed(2);
+                dr.appendChild(prEl);
+              }
+            } else if (prEl) {
+              prEl.textContent = '$0.00';
+              prEl.classList.add('missing-price');
+            }
           }
         });
       } catch (e) { /* silent */ }
