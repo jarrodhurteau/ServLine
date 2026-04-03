@@ -6002,6 +6002,24 @@ def draft_wizard(draft_id: int):
 
     items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
 
+    # --- Position backfill: auto-assign positions to items with position=None ---
+    needs_backfill = [it for it in items if it.get("position") is None]
+    if needs_backfill:
+        # Find the highest existing position
+        max_pos = max((it.get("position") or 0) for it in items)
+        try:
+            with db_connect() as conn:
+                for it in needs_backfill:
+                    max_pos += 1
+                    conn.execute(
+                        "UPDATE draft_items SET position=?, updated_at=? WHERE id=? AND draft_id=?",
+                        (max_pos, _now_iso(), it["id"], draft_id),
+                    )
+                    it["position"] = max_pos
+                conn.commit()
+        except Exception:
+            pass  # non-critical
+
     # Compute per-item quality (reuse same logic as editor)
     for it in items:
         try:
@@ -6269,6 +6287,61 @@ def wizard_reorder(draft_id: int):
         return jsonify({"ok": False, "error": str(e)}), 500
 
     return jsonify({"ok": True, "count": len(order)})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/apply_variant_labels")
+@login_required
+def wizard_apply_variant_labels(draft_id: int):
+    """Apply one item's variant labels to all items in the category with the same variant count."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    source_item_id = data.get("source_item_id")
+    category = (data.get("category") or "").strip()
+    if not source_item_id or not category:
+        return jsonify({"ok": False, "error": "source_item_id and category required"}), 400
+
+    try:
+        items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
+        # Filter to this category
+        cat_items = [it for it in items if (it.get("category") or "").strip() == category]
+
+        # Get source item's variants (sorted by position)
+        source = None
+        for it in cat_items:
+            if it["id"] == source_item_id:
+                source = it
+                break
+        if not source or not source.get("variants"):
+            return jsonify({"ok": False, "error": "Source item has no variants"}), 400
+
+        src_variants = sorted(source["variants"], key=lambda v: v.get("position", 0))
+        src_count = len(src_variants)
+
+        # Find all other items in category with same variant count
+        updated_items = 0
+        with db_connect() as conn:
+            for it in cat_items:
+                if it["id"] == source_item_id:
+                    continue
+                if not it.get("variants") or len(it["variants"]) != src_count:
+                    continue
+
+                # Sort target variants by position too
+                tgt_variants = sorted(it["variants"], key=lambda v: v.get("position", 0))
+                for sv, tv in zip(src_variants, tgt_variants):
+                    conn.execute(
+                        "UPDATE draft_item_variants SET label=?, updated_at=? WHERE id=?",
+                        (sv["label"], _now_iso(), tv["id"]),
+                    )
+                updated_items += 1
+            conn.commit()
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "updated_items": updated_items, "label_count": src_count})
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/add_item")
