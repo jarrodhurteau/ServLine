@@ -2244,9 +2244,16 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                     extraction_strategy = "detect+assemble"
                     print(f"[Draft] Detection: {n_elements} elements → {len(items)} items assembled"
                           f" ({len(_coord_data or [])} with coordinates)")
+                    # Call 2 (vision verification) is currently disabled on the
+                    # detect+assemble path: verify_menu_with_vision expects the
+                    # Claude-item schema {price, sizes}, but elements_to_draft_rows
+                    # emits draft-row schema {price_cents, _variants}. Wiring it in
+                    # naively (as attempted 2026-04-05) drops all prices and variants.
+                    # Day 140 task: add schema adapters both directions + rebuild
+                    # _coord_data from Call 2's output before re-enabling.
                     if tracker:
-                        tracker.skip_step(STEP_CALL2_VISION, "detect_pipeline")
-                    print("[Draft] Call 2 skipped (detect pipeline)")
+                        tracker.skip_step(STEP_CALL2_VISION, "schema_mismatch_day140")
+                    print("[Draft] Call 2 skipped (schema mismatch — Day 140 fix)")
                 else:
                     # Fallback: legacy extraction
                     print("[Draft] Detection returned no elements, falling back to legacy extraction")
@@ -2279,7 +2286,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
         # auto-repair, and generates quality report.
         # =====================================================================
         semantic_result = None
-        if items and extraction_strategy in ("claude_api", "claude_api+vision"):
+        if items and extraction_strategy in ("claude_api", "claude_api+vision", "detect+assemble", "detect+assemble+vision"):
             try:
                 if tracker:
                     tracker.start_step(STEP_SEMANTIC)
@@ -4056,7 +4063,7 @@ def run_price_intelligence(draft_id):
             total = result.get("total_items", 0)
             flash(f"Price intelligence complete: {assessed}/{total} items assessed.", "success")
     except Exception as exc:
-        log.error("Price intelligence error: %s", exc)
+        print(f"[PriceIntel] error: {exc}")
         flash("Price intelligence failed. Please try again.", "error")
 
     return redirect(url_for("draft_editor", draft_id=draft_id))

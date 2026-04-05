@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 139 (April 4, 2026) — Sprint 13.3: New Detection Pipeline (Detect + Classify + Locate)
+Last Updated: Day 139.5 planning (April 5, 2026) — Pulling Call 2 (Verify + Gap Scan) forward before Day 140
 
 ================================================================================
 PROJECT MISSION
@@ -2306,6 +2306,48 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - FOLLOW-UPS: bbox accuracy poor (Opus hallucinates coords, use Tesseract word
         bboxes + fuzzy match instead), speed ~4min too slow (try adaptive thinking
         or Sonnet), sandwich subcategories, variant label accuracy
+      - POST-SHIP DISCOVERY (Apr 5): Day 139 silently bypassed Phase 11's Call 2
+        (verify_menu_with_vision) AND the Phase 8 semantic pipeline on the happy
+        path. extraction_strategy="detect+assemble" wasn't in the semantic gate's
+        whitelist, and Call 2 was hard-skipped with reason "detect_pipeline".
+        Attempted fix (enable semantic gate + re-wire Call 2) partially shipped:
+        * Fix #1 LIVE: semantic pipeline gate now includes "detect+assemble"
+          and "detect+assemble+vision" strategies (portal/app.py:~2314)
+        * Fix #2 REVERTED: naive Call 2 re-wire failed due to schema mismatch —
+          verify_menu_with_vision expects Claude-item schema {price, sizes},
+          elements_to_draft_rows emits draft-row schema {price_cents, _variants}.
+          Result was 0-price items + dropped variants + broken coord_data.
+          Call 2 still skipped on detect+assemble path pending Day 139.5.
+  [ ] Day 139.5: PULL FORWARD — Call 2 Verify + Gap Scan (was Day 141)
+      - Rationale: Day 140's scope is already full (overlay tracking, bbox
+        accuracy, speed, subcategories, variant labels). Call 2 is high-risk
+        (already regressed once) and deserves isolated focus. Doing it before
+        Day 140 means Day 140 is polish-day, not survival-day, and any Call 2
+        regression can be reverted cleanly without touching Day 140 work.
+      - Build FRESH Call 2 on detect+assemble schema natively — do NOT retrofit
+        Phase 11's verify_menu_with_vision with adapters. The old function
+        assumes Claude-item schema and would require translation both directions
+        plus coord_data reconciliation. Cleaner to write purpose-built.
+      - Three jobs (from original Day 141 plan):
+        1. Verify: does each highlighted item match the text in its bbox region?
+        2. Infer: contextual reasoning (shared descriptions, variant headers
+           that apply across multiple items, section notes)
+        3. Gap scan: find UNHIGHLIGHTED regions with menu text, flag as
+           potential missed items (this is the "Mega Fries never missed again"
+           feature — the reverse-coverage check that makes line-by-line review
+           bulletproof)
+      - Output: corrected item list in draft-row schema + gap warnings with
+        bboxes for the wizard to surface as red flags
+      - Flagged regions show in wizard as warnings with red highlight; user
+        clicks flagged region → sees what's there → manually adds item
+      - Time-box: ~3 hours active work. If still regressing at the mark,
+        revert to Fix #1-only state and defer Call 2 to Phase 14.
+      - Success criteria on test pizza menu:
+        * Item count ≥ Day 139 baseline (134)
+        * Prices present on all items (no zeros)
+        * Variants preserved (no collapse)
+        * Highlights still work for items that survived verification
+        * Gap scan flags at least one region if anything was genuinely missed
   [ ] Day 140: Code Layer — Build Structure + Wizard Highlighting (NO Claude call)
       - Code assembles classified elements into structured menu:
         * Category headers → group items, variant headers → attach to items,
@@ -2313,16 +2355,7 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Wire bounding boxes into wizard: per-item highlight toggle, per-category highlight
       - Highlighting in both sticky sidebar preview AND expanded lightbox
       - Universal preview renderer (images first, CSV/XLSX/JSON in Day 142-143)
-  [ ] Day 141: NEW PIPELINE — Call 2: QA Line-by-Line Verification + Gap Detection
-      - Takes assembled data + original image + bounding boxes
-      - Category by category, line by line, compares wizard vs original
-      - THREE JOBS:
-        1. Verify: does each highlighted item match the text in that region?
-        2. Infer: contextual reasoning (shared descriptions, variant headers across items)
-        3. Gap scan: UNHIGHLIGHTED regions with menu text? Flag as potential missed items
-      - Flagged regions show in wizard as warnings with red highlight
-      - User clicks flagged region → sees what's there → manually adds item
-      - This is how "Mega Fries" never gets missed again
+  [ ] Day 141: (ABSORBED INTO Day 139.5 — scope pulled forward April 5, 2026)
   [ ] Day 142-143: Non-image format support + polish
       - CSV/XLSX: render as HTML table preview, highlight source row per item
       - JSON: render as formatted view, highlight source object per item
