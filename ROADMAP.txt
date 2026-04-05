@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 138 (April 3, 2026) — Sprint 13.3: Wizard Polish (Apply-to-All + Lightbox Zoom)
+Last Updated: Day 139 (April 4, 2026) — Sprint 13.3: New Detection Pipeline (Detect + Classify + Locate)
 
 ================================================================================
 PROJECT MISSION
@@ -2292,16 +2292,20 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - 9 new API endpoints: apply_variant_labels, delete_variants_by_label,
         batch_undo, batch_create_variants, bulk_move, bulk_delete,
         rename_category, batch variant operations
-  [ ] Day 139: NEW PIPELINE — Call 1: Detect + Classify + Locate
-      - Import page: multi-file upload (drag/select multiple JPGs + PDFs in one import)
-      - Files ordered as pages of one menu, stored together under one import job
-      - Rework ai_menu_extract.py — Call 1 detects + classifies every element:
-        * Category headers, items (name/price/description), variant column headers,
-          section notes/shared descriptions, badges/modifiers (NEW, HOT)
-      - Returns bounding boxes for each — does NOT build parent/child structure
-      - All pages sent as one request — detects across all pages
-      - PRESERVE existing prompt engineering (line-breaks, OCR garble, etc.)
-      - New draft_item_coordinates table (item_id, x_pct, y_pct, w_pct, h_pct, page)
+  [x] Day 139: NEW PIPELINE — Detect + Classify + Locate (SHIPPED)
+      - Import page: multi-file upload (select multiple JPGs/PDFs as pages of one menu)
+      - New detect_menu_elements() in ai_menu_extract.py — Claude returns items
+        with category, sizes, AND bounding box coordinates in one call
+      - Extraction quality UP: 136 items / 10 categories from dense pizza menu
+        (vs 115/6 from previous pipeline), Toppings + Sauces + Calzones now
+        properly split out as their own categories instead of merged
+      - draft_item_coordinates table (item_id, x_pct, y_pct, w_pct, h_pct, page)
+      - source_elements JSON column on drafts (raw Claude response)
+      - Wizard shows highlight overlays on sidebar thumb + lightbox (hover item → box)
+      - Multi-page: /api/menus/import accepts file[] list, extra_pages threaded
+      - FOLLOW-UPS: bbox accuracy poor (Opus hallucinates coords, use Tesseract word
+        bboxes + fuzzy match instead), speed ~4min too slow (try adaptive thinking
+        or Sonnet), sandwich subcategories, variant label accuracy
   [ ] Day 140: Code Layer — Build Structure + Wizard Highlighting (NO Claude call)
       - Code assembles classified elements into structured menu:
         * Category headers → group items, variant headers → attach to items,

@@ -196,14 +196,24 @@ except Exception:
     ai_price_intel = None
 
 # Day 136: ensure pipeline_stage column exists on import_jobs
+# Day 139: use sqlite3 directly since db_connect isn't defined yet at import time
 def _ensure_import_jobs_columns():
     """Add pipeline_stage column to import_jobs if missing (idempotent)."""
     try:
-        with db_connect() as conn:
+        import sqlite3 as _sq
+        from pathlib import Path as _P
+        _db_path = _P(__file__).resolve().parents[1] / "storage" / "servline.db"
+        if not _db_path.exists():
+            return
+        conn = _sq.connect(str(_db_path))
+        try:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(import_jobs)").fetchall()}
             if "pipeline_stage" not in cols:
                 conn.execute("ALTER TABLE import_jobs ADD COLUMN pipeline_stage TEXT")
                 conn.commit()
+                print("[APP] Added pipeline_stage column to import_jobs")
+        finally:
+            conn.close()
     except Exception as _e:
         print(f"[APP] import_jobs column backfill: {_e}")
 
@@ -2012,11 +2022,12 @@ def _build_draft_from_worker(job_id: int, saved_file_path: Path, worker_obj: Dic
     return draft
 
 
-def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
+def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: list = None):
     draft: Any = None
     debug_payload: Any = None
     engine = ""
     helper_error: Optional[str] = None
+    all_pages = [saved_file_path] + (extra_pages or [])
 
     try:
         update_import_job(job_id, status="processing", pipeline_stage="extracting")
@@ -2162,16 +2173,32 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             tracker = None
 
         # Get clean OCR text via simple Tesseract (same path as /ai/preview)
+        # Day 139: handle multiple pages — OCR each and concatenate with page markers
         clean_ocr_text = ""
         try:
             if tracker:
                 tracker.start_step(STEP_OCR_TEXT)
-            _suffix = saved_file_path.suffix.lower()
-            if _suffix == ".pdf":
-                clean_ocr_text = _pdf_to_text(saved_file_path)
-            elif _suffix in (".png", ".jpg", ".jpeg"):
-                clean_ocr_text = _ocr_image_to_text(src_for_ocr)
-            print(f"[Draft] Clean OCR text: {len(clean_ocr_text)} chars")
+            if len(all_pages) > 1:
+                # Multi-page: OCR each file, concatenate with page markers
+                page_texts = []
+                for pi, pg_path in enumerate(all_pages, start=1):
+                    _pg_suffix = pg_path.suffix.lower()
+                    pg_text = ""
+                    if _pg_suffix == ".pdf":
+                        pg_text = _pdf_to_text(pg_path)
+                    elif _pg_suffix in (".png", ".jpg", ".jpeg"):
+                        pg_text = _ocr_image_to_text(pg_path)
+                    if pg_text.strip():
+                        page_texts.append(f"--- PAGE {pi} ---\n{pg_text}")
+                clean_ocr_text = "\n\n".join(page_texts)
+                print(f"[Draft] Multi-page OCR: {len(all_pages)} pages, {len(clean_ocr_text)} chars total")
+            else:
+                _suffix = saved_file_path.suffix.lower()
+                if _suffix == ".pdf":
+                    clean_ocr_text = _pdf_to_text(saved_file_path)
+                elif _suffix in (".png", ".jpg", ".jpeg"):
+                    clean_ocr_text = _ocr_image_to_text(src_for_ocr)
+                print(f"[Draft] Clean OCR text: {len(clean_ocr_text)} chars")
             if tracker:
                 tracker.end_step(STEP_OCR_TEXT, chars=len(clean_ocr_text))
         except Exception as _ocr_err:
@@ -2179,85 +2206,69 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
             if tracker:
                 tracker.fail_step(STEP_OCR_TEXT, str(_ocr_err))
 
-        # Strategy 1: Claude API extraction (Call 1) with extended thinking
-        # Day 102.6: Single Opus call with thinking replaces the 3-call pipeline.
-        # Call 2 (vision verify) and Call 3 (reconciliation) are bypassed when
-        # thinking is active — Opus reasons through the menu internally.
+        # Strategy 1: Day 139 Detect+Classify+Locate pipeline
+        # New Call 1 returns classified elements with bounding boxes.
+        # Code layer assembles structure (no AI for grouping).
+        # Falls back to legacy extraction if detection fails.
         vision_result = None
         _thinking_active = False
+        _detected_elements = None  # raw elements for storage
+        _coord_data = None  # bounding box data for post-insert linking
         if clean_ocr_text and not items:
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL1_EXTRACT)
                 from storage.ai_menu_extract import (
+                    detect_menu_elements, elements_to_draft_rows,
                     extract_menu_items_via_claude, claude_items_to_draft_rows,
                     EXTENDED_THINKING, PIPELINE_MODE,
                 )
                 _thinking_active = EXTENDED_THINKING
-                print(f"[Draft] Pipeline mode: {PIPELINE_MODE}")
-                claude_items = extract_menu_items_via_claude(
+                print(f"[Draft] Pipeline mode: detect+classify+locate (Day 139)")
+
+                # New pipeline: detect elements with bounding boxes
+                # Day 139: pass extra pages for multi-file uploads
+                _extra_paths = [str(p) for p in all_pages[1:]] if len(all_pages) > 1 else None
+                _detected_elements = detect_menu_elements(
                     clean_ocr_text, image_path=str(saved_file_path),
+                    extra_image_paths=_extra_paths,
                     use_thinking=_thinking_active,
                 )
-                if claude_items:
-                    if tracker:
-                        tracker.end_step(STEP_CALL1_EXTRACT, items=len(claude_items))
-                    print(f"[Draft] Strategy 1 (Claude API): {len(claude_items)} items extracted"
-                          f"{' (with thinking)' if _thinking_active else ''}")
 
-                    if _thinking_active:
-                        # Extended thinking: Opus self-verifies, skip Call 2
-                        items = claude_items_to_draft_rows(claude_items)
-                        extraction_strategy = "claude_api+thinking"
-                        if tracker:
-                            tracker.skip_step(STEP_CALL2_VISION, "extended_thinking")
-                        print("[Draft] Call 2 skipped (extended thinking self-verifies)")
-                    else:
-                        # Legacy 3-call mode: Call 2 vision verification
-                        extraction_strategy = "claude_api"
-                        update_import_job(job_id, pipeline_stage="verifying")
-                        try:
-                            if tracker:
-                                tracker.start_step(STEP_CALL2_VISION)
-                            from storage.ai_vision_verify import verify_menu_with_vision, verified_items_to_draft_rows
-                            vision_result = verify_menu_with_vision(
-                                str(saved_file_path), claude_items
-                            )
-                            if not vision_result.get("skipped") and not vision_result.get("error"):
-                                items = verified_items_to_draft_rows(vision_result["items"])
-                                extraction_strategy = "claude_api+vision"
-                                n_changes = len(vision_result.get("changes", []))
-                                conf = vision_result.get("confidence", 0)
-                                if tracker:
-                                    tracker.end_step(STEP_CALL2_VISION, items=len(items),
-                                                     changes=n_changes, confidence=conf)
-                                print(f"[Draft] Call 2 (Vision): {len(items)} items, "
-                                      f"{n_changes} changes, confidence={conf:.2f}")
-                                # Stamp Call 2 confidence for semantic signal #6 (Day 106)
-                                try:
-                                    from storage.semantic_confidence import stamp_claude_confidence as _stamp_c2
-                                    if conf:
-                                        _stamp_c2(items, conf)
-                                except Exception:
-                                    pass
-                            else:
-                                items = claude_items_to_draft_rows(claude_items)
-                                skip = vision_result.get("skip_reason") or vision_result.get("error", "unknown")
-                                if tracker:
-                                    tracker.skip_step(STEP_CALL2_VISION, skip)
-                                print(f"[Draft] Call 2 skipped ({skip}), using Call 1 items")
-                        except Exception as _vision_err:
-                            items = claude_items_to_draft_rows(claude_items)
-                            if tracker:
-                                tracker.fail_step(STEP_CALL2_VISION, str(_vision_err))
-                            print(f"[Draft] Call 2 (Vision) failed: {_vision_err}, using Call 1 items")
-                else:
+                if _detected_elements:
+                    # Code assembly: elements → structured items + coordinates
+                    items, _coord_data = elements_to_draft_rows(_detected_elements)
+                    n_elements = len(_detected_elements)
                     if tracker:
-                        tracker.end_step(STEP_CALL1_EXTRACT, items=0)
+                        tracker.end_step(STEP_CALL1_EXTRACT, items=len(items))
+                    extraction_strategy = "detect+assemble"
+                    print(f"[Draft] Detection: {n_elements} elements → {len(items)} items assembled"
+                          f" ({len(_coord_data or [])} with coordinates)")
+                    if tracker:
+                        tracker.skip_step(STEP_CALL2_VISION, "detect_pipeline")
+                    print("[Draft] Call 2 skipped (detect pipeline)")
+                else:
+                    # Fallback: legacy extraction
+                    print("[Draft] Detection returned no elements, falling back to legacy extraction")
+                    claude_items = extract_menu_items_via_claude(
+                        clean_ocr_text, image_path=str(saved_file_path),
+                        use_thinking=_thinking_active,
+                    )
+                    if claude_items:
+                        items = claude_items_to_draft_rows(claude_items)
+                        extraction_strategy = "claude_api+thinking" if _thinking_active else "claude_api"
+                        if tracker:
+                            tracker.end_step(STEP_CALL1_EXTRACT, items=len(claude_items))
+                        print(f"[Draft] Fallback extraction: {len(claude_items)} items")
+                        if _thinking_active and tracker:
+                            tracker.skip_step(STEP_CALL2_VISION, "extended_thinking")
+                    else:
+                        if tracker:
+                            tracker.end_step(STEP_CALL1_EXTRACT, items=0)
             except Exception as _claude_err:
                 if tracker:
                     tracker.fail_step(STEP_CALL1_EXTRACT, str(_claude_err))
-                print(f"[Draft] Strategy 1 (Claude API) failed: {_claude_err}")
+                print(f"[Draft] Detection/extraction failed: {_claude_err}")
 
         # (Day 100.5: Strategy 2 heuristic AI and Strategy 3 legacy JSON removed.
         #  No API key = empty draft for manual input.)
@@ -2479,7 +2490,40 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
                                     print(f"[Draft] Cleared {len(old_ids)} heuristic items before Claude upsert")
                         except Exception as _clear_err:
                             print(f"[Draft] Warning: could not clear old items: {_clear_err}")
-                        drafts_store.upsert_draft_items(draft_id, items)
+                        upsert_result = drafts_store.upsert_draft_items(draft_id, items)
+
+                        # Day 139: Store bounding box coordinates + source elements
+                        if _detected_elements and _coord_data:
+                            try:
+                                import json as _json
+                                # Save raw classified elements on the draft
+                                drafts_store.save_source_elements(
+                                    draft_id, _json.dumps(_detected_elements)
+                                )
+                                # Link coordinates to inserted item IDs by position
+                                inserted_ids = upsert_result.get("inserted_ids", [])
+                                if inserted_ids:
+                                    # Build position→item_id map from the freshly inserted items
+                                    fresh_items = drafts_store.get_draft_items(draft_id, include_variants=False) or []
+                                    pos_to_id = {it["position"]: it["id"] for it in fresh_items if it.get("position")}
+                                    coord_rows = []
+                                    for cd in _coord_data:
+                                        item_id = pos_to_id.get(cd["position"])
+                                        if item_id:
+                                            coord_rows.append({
+                                                "item_id": item_id,
+                                                "x_pct": cd["x_pct"],
+                                                "y_pct": cd["y_pct"],
+                                                "w_pct": cd["w_pct"],
+                                                "h_pct": cd["h_pct"],
+                                                "page": cd.get("page", 1),
+                                                "element_type": cd.get("element_type", "item"),
+                                            })
+                                    if coord_rows:
+                                        drafts_store.store_item_coordinates_bulk(coord_rows)
+                                        print(f"[Draft] Stored {len(coord_rows)} bounding box coordinates")
+                            except Exception as _coord_err:
+                                print(f"[Draft] Warning: coordinate storage failed: {_coord_err}")
 
                 if draft_id and hasattr(drafts_store, "save_ocr_debug"):
                     payload = debug_payload if isinstance(debug_payload, dict) else {}
@@ -2593,7 +2637,17 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path):
 
 
     except Exception as e:
-        update_import_job(job_id, status="failed", pipeline_stage="done", error=str(e))
+        import traceback as _tb
+        _tb.print_exc()
+        print(f"[Draft] run_ocr_and_make_draft CRASHED: {type(e).__name__}: {e}")
+        try:
+            update_import_job(job_id, status="failed", pipeline_stage="done", error=str(e))
+        except Exception as _upd_err:
+            print(f"[Draft] update_import_job also failed: {_upd_err}")
+            try:
+                update_import_job(job_id, status="failed", error=str(e))
+            except Exception:
+                pass
 
 
 # Upload route (JSON API) — returns job id
@@ -2606,26 +2660,55 @@ def import_menu():
     if _u.get("role") != "admin" and _u.get("user_id") and _u.get("account_tier") != "premium":
         return jsonify({"error": "Photo/PDF upload requires the Premium Package."}), 403
     try:
-        if "file" not in request.files:
-            return jsonify({"error": "No file field 'file' provided"}), 400
-        file = request.files["file"]
-        if file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
-        if not allowed_file(file.filename):
-            return jsonify({"error": "Unsupported file type. Allowed: jpg, jpeg, png, pdf"}), 400
+        # Day 139: Accept multiple files (multi-page menu support)
+        files = request.files.getlist("file")
+        if not files or all(f.filename == "" for f in files):
+            # Fallback: single file field
+            if "file" in request.files:
+                files = [request.files["file"]]
+            else:
+                return jsonify({"error": "No file field 'file' provided"}), 400
 
-        base_name = secure_filename(file.filename) or "upload"
-        tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
-        save_path = UPLOAD_FOLDER / tmp_name
-        file.save(str(save_path))
+        # Validate and save all files
+        saved_paths = []
+        primary_name = None
+        for file in files:
+            if not file or file.filename == "":
+                continue
+            if not allowed_file(file.filename):
+                return jsonify({"error": f"Unsupported file type: {file.filename}. Allowed: jpg, jpeg, png, pdf"}), 400
+            base_name = secure_filename(file.filename) or "upload"
+            tmp_name = f"{uuid.uuid4().hex[:8]}_{base_name}"
+            save_path = UPLOAD_FOLDER / tmp_name
+            file.save(str(save_path))
+            saved_paths.append(save_path)
+            if primary_name is None:
+                primary_name = tmp_name
+
+        if not saved_paths:
+            return jsonify({"error": "No valid files uploaded"}), 400
 
         restaurant_id = _resolve_restaurant_id_from_request()
-        job_id = create_import_job(filename=tmp_name, restaurant_id=restaurant_id)
+        job_id = create_import_job(filename=primary_name, restaurant_id=restaurant_id)
 
-        t = threading.Thread(target=run_ocr_and_make_draft, args=(job_id, save_path), daemon=True)
+        # Pass all file paths for multi-page processing
+        if len(saved_paths) == 1:
+            t = threading.Thread(target=run_ocr_and_make_draft, args=(job_id, saved_paths[0]), daemon=True)
+        else:
+            # Multi-file: pass extra_pages kwarg
+            t = threading.Thread(
+                target=run_ocr_and_make_draft,
+                args=(job_id, saved_paths[0]),
+                kwargs={"extra_pages": saved_paths[1:]},
+                daemon=True,
+            )
         t.start()
 
-        return jsonify({"job_id": job_id, "status": "pending", "file": tmp_name, "restaurant_id": restaurant_id}), 200
+        return jsonify({
+            "job_id": job_id, "status": "pending",
+            "file": primary_name, "page_count": len(saved_paths),
+            "restaurant_id": restaurant_id,
+        }), 200
 
     except RequestEntityTooLarge:
         return jsonify({"error": "File too large. Try a smaller image or raise MAX_CONTENT_LENGTH."}), 413
@@ -6106,6 +6189,22 @@ def draft_wizard(draft_id: int):
     # Source job id for original file preview
     source_job_id = draft.get("source_job_id")
 
+    # Day 139: Load bounding box coordinates for item highlighting
+    item_coordinates = {}
+    try:
+        if drafts_store and hasattr(drafts_store, "get_draft_coordinates"):
+            raw_coords = drafts_store.get_draft_coordinates(draft_id)
+            for c in raw_coords:
+                item_coordinates[c["item_id"]] = {
+                    "x_pct": c["x_pct"],
+                    "y_pct": c["y_pct"],
+                    "w_pct": c["w_pct"],
+                    "h_pct": c["h_pct"],
+                    "page": c["page"],
+                }
+    except Exception:
+        pass
+
     return _safe_render(
         "wizard.html",
         draft=draft,
@@ -6119,6 +6218,7 @@ def draft_wizard(draft_id: int):
         price_map=price_map,
         price_intel=price_intel,
         source_job_id=source_job_id,
+        item_coordinates=item_coordinates,
     )
 
 

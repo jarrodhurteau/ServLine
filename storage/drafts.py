@@ -397,6 +397,38 @@ def _ensure_schema() -> None:
                 "ALTER TABLE drafts ADD COLUMN category_order TEXT;"
             )
 
+        # Day 139 — bounding box coordinates for wizard highlighting
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_item_coordinates (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              item_id     INTEGER NOT NULL,
+              x_pct       REAL NOT NULL DEFAULT 0,
+              y_pct       REAL NOT NULL DEFAULT 0,
+              w_pct       REAL NOT NULL DEFAULT 0,
+              h_pct       REAL NOT NULL DEFAULT 0,
+              page        INTEGER NOT NULL DEFAULT 1,
+              element_type TEXT DEFAULT 'item',
+              created_at  TEXT NOT NULL,
+              FOREIGN KEY (item_id) REFERENCES draft_items(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_coords_item "
+            "ON draft_item_coordinates(item_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_coords_page "
+            "ON draft_item_coordinates(page)"
+        )
+
+        # Day 139 — source_elements JSON on drafts (raw classified elements from Call 1)
+        if not _col_exists("drafts", "source_elements"):
+            cur.execute(
+                "ALTER TABLE drafts ADD COLUMN source_elements TEXT;"
+            )
+
         # Day 137 — wizard category review tracking
         cur.execute(
             """
@@ -1911,6 +1943,124 @@ def get_item_variants(item_id: int) -> List[Dict[str, Any]]:
             (int(item_id),),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+
+# ------------------------------------------------------------
+# Item Coordinates (Day 139 — bounding boxes for wizard highlighting)
+# ------------------------------------------------------------
+def store_item_coordinates(
+    item_id: int,
+    x_pct: float,
+    y_pct: float,
+    w_pct: float,
+    h_pct: float,
+    page: int = 1,
+    element_type: str = "item",
+) -> int:
+    """Store a bounding box coordinate for a draft item."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO draft_item_coordinates
+                (item_id, x_pct, y_pct, w_pct, h_pct, page, element_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (int(item_id), x_pct, y_pct, w_pct, h_pct, page, element_type, _now()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def store_item_coordinates_bulk(
+    coords: List[Dict[str, Any]],
+) -> int:
+    """Bulk-insert bounding box coordinates.
+
+    Each dict: {item_id, x_pct, y_pct, w_pct, h_pct, page?, element_type?}
+    Returns number of rows inserted.
+    """
+    if not coords:
+        return 0
+    now = _now()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        rows = []
+        for c in coords:
+            item_id = c.get("item_id")
+            if item_id is None:
+                continue
+            rows.append((
+                int(item_id),
+                float(c.get("x_pct", 0)),
+                float(c.get("y_pct", 0)),
+                float(c.get("w_pct", 0)),
+                float(c.get("h_pct", 0)),
+                int(c.get("page", 1)),
+                c.get("element_type", "item"),
+                now,
+            ))
+        if rows:
+            cur.executemany(
+                """
+                INSERT INTO draft_item_coordinates
+                    (item_id, x_pct, y_pct, w_pct, h_pct, page, element_type, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+        return len(rows)
+
+
+def get_item_coordinates(item_id: int) -> Optional[Dict[str, Any]]:
+    """Get bounding box for a single item."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM draft_item_coordinates WHERE item_id=? LIMIT 1",
+            (int(item_id),),
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+
+
+def get_draft_coordinates(draft_id: int) -> List[Dict[str, Any]]:
+    """Get all bounding boxes for items in a draft."""
+    with db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.* FROM draft_item_coordinates c
+            JOIN draft_items i ON c.item_id = i.id
+            WHERE i.draft_id = ?
+            ORDER BY c.page, c.y_pct
+            """,
+            (int(draft_id),),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def save_source_elements(draft_id: int, elements_json: str) -> None:
+    """Store raw classified elements JSON on the draft."""
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE drafts SET source_elements=?, updated_at=? WHERE id=?",
+            (elements_json, _now(), int(draft_id)),
+        )
+        conn.commit()
+
+
+def get_source_elements(draft_id: int) -> Optional[List[Dict[str, Any]]]:
+    """Retrieve raw classified elements from the draft."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT source_elements FROM drafts WHERE id=?",
+            (int(draft_id),),
+        ).fetchone()
+        if row and row["source_elements"]:
+            try:
+                return json.loads(row["source_elements"])
+            except Exception:
+                return None
+        return None
 
 
 # ------------------------------------------------------------

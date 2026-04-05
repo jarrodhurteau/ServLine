@@ -205,10 +205,10 @@
           <span class="tier-badge unlocked"><span class="lock-icon">🔓</span> <span class="lock-label">Unlocked</span></span>
         </h2>
         <form id="imgForm" action="#" method="post" enctype="multipart/form-data" class="space-y-2">
-          <input type="file" name="file" accept="image/png,image/jpeg" required class="form-control w-full" />
-          <button type="submit" class="btn w-full unlock-btn" id="imgBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload Photo</button>
+          <input type="file" name="file" accept="image/png,image/jpeg" required multiple class="form-control w-full" />
+          <button type="submit" class="btn w-full unlock-btn" id="imgBtn" style="background:#2E5B5E; color:#fff !important; border-color:#2E5B5E;">Upload Photo(s)</button>
         </form>
-        <p class="muted mt-2 text-sm">Snap a picture of your printed menu and we'll read it for you.</p>
+        <p class="muted mt-2 text-sm">Snap photos of your printed menu pages. Select multiple to upload a multi-page menu.</p>
       </div>
       {% else %}
       <div class="card card-locked" data-locked-panel style="position:relative;">
@@ -369,7 +369,10 @@
       }
 
       const fd = new FormData();
-      fd.append('file', fileInput.files[0]);
+      // Day 139: support multiple files (multi-page menu)
+      for (let i = 0; i < fileInput.files.length; i++) {
+        fd.append('file', fileInput.files[i]);
+      }
       if (_forRestId) fd.append('restaurant_id', _forRestId);
 
       setActive(true);

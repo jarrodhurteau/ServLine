@@ -784,6 +784,40 @@
       color: rgba(255,255,255,.45);
       pointer-events: none;
     }
+
+    /* Day 139: Item highlight overlays on preview */
+    .preview-highlight-container {
+      position: relative;
+      display: inline-block;
+    }
+    .item-highlight {
+      position: absolute;
+      border: 2px solid rgba(46, 91, 94, 0.7);
+      background: rgba(46, 91, 94, 0.15);
+      border-radius: 3px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      z-index: 10001;
+    }
+    .item-highlight.active {
+      opacity: 1;
+      border-color: #B85C38;
+      background: rgba(184, 92, 56, 0.25);
+      box-shadow: 0 0 8px rgba(184, 92, 56, 0.4);
+    }
+    .item-highlight.category-active {
+      opacity: 1;
+    }
+    /* Sidebar thumbnail highlights */
+    .preview-thumb-wrap {
+      position: relative;
+      display: inline-block;
+      cursor: pointer;
+    }
+    .preview-thumb-wrap .item-highlight {
+      z-index: 2;
+    }
   </style>
 
   {% if wizard_step == "summary" %}
@@ -1132,9 +1166,12 @@
     <!-- ===== Right Column: Original File Preview ===== -->
     <div class="wizard-preview">
       {% if source_job_id %}
-      <img class="preview-thumb" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}"
-           alt="Original menu" onclick="document.getElementById('preview-lightbox').classList.add('open')" />
-      <div class="preview-label">Click to expand</div>
+      <div class="preview-thumb-wrap" onclick="document.getElementById('preview-lightbox').classList.add('open')">
+        <img class="preview-thumb" id="sidebar-preview-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}"
+             alt="Original menu" />
+        <div id="sidebar-highlights"></div>
+      </div>
+      <div class="preview-label">Click to expand &middot; Hover items to highlight</div>
       {% endif %}
 
       <!-- Selected Items Panel -->
@@ -2542,8 +2579,11 @@
   {% if source_job_id %}
   <div id="preview-lightbox" class="preview-lightbox">
     <span class="lb-close" onclick="lbClose()">&times;</span>
-    <img id="lb-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" />
-    <div class="lb-hint">Scroll to zoom &middot; Drag to pan &middot; Double-click to reset</div>
+    <div id="lb-img-container" class="preview-highlight-container">
+      <img id="lb-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" />
+      <div id="lb-highlights"></div>
+    </div>
+    <div class="lb-hint">Scroll to zoom &middot; Drag to pan &middot; Hover items to highlight</div>
   </div>
   <script>
   (function() {
@@ -2706,6 +2746,83 @@
       lastTouchDist = 0;
       if (!dragMoved && scale <= 1) lbClose();
     });
+  })();
+  </script>
+
+  {# Day 139: Item highlighting on preview #}
+  <script>
+  (function() {
+    const COORDS = {{ item_coordinates | tojson }};
+    if (!COORDS || Object.keys(COORDS).length === 0) return;
+
+    // Create highlight overlays for both sidebar and lightbox
+    function createHighlights(container) {
+      if (!container) return {};
+      const highlights = {};
+      for (const [itemId, bbox] of Object.entries(COORDS)) {
+        const div = document.createElement('div');
+        div.className = 'item-highlight';
+        div.dataset.itemId = itemId;
+        div.style.left = bbox.x_pct + '%';
+        div.style.top = bbox.y_pct + '%';
+        div.style.width = bbox.w_pct + '%';
+        div.style.height = bbox.h_pct + '%';
+        container.appendChild(div);
+        highlights[itemId] = div;
+      }
+      return highlights;
+    }
+
+    const sidebarContainer = document.getElementById('sidebar-highlights');
+    const lbContainer = document.getElementById('lb-highlights');
+
+    const sidebarHL = createHighlights(sidebarContainer);
+    const lbHL = createHighlights(lbContainer);
+
+    // Highlight a single item on both preview and lightbox
+    window.highlightItem = function(itemId) {
+      document.querySelectorAll('.item-highlight.active').forEach(el => el.classList.remove('active'));
+      const id = String(itemId);
+      if (sidebarHL[id]) sidebarHL[id].classList.add('active');
+      if (lbHL[id]) lbHL[id].classList.add('active');
+    };
+
+    window.clearHighlights = function() {
+      document.querySelectorAll('.item-highlight.active').forEach(el => el.classList.remove('active'));
+    };
+
+    // Highlight all items currently visible in the wizard (current category)
+    window.highlightCurrentCategory = function() {
+      document.querySelectorAll('.item-highlight').forEach(el => el.classList.remove('category-active'));
+      document.querySelectorAll('.wiz-item[data-item-id]').forEach(card => {
+        const itemId = card.dataset.itemId;
+        if (itemId) {
+          if (sidebarHL[itemId]) sidebarHL[itemId].classList.add('category-active');
+          if (lbHL[itemId]) lbHL[itemId].classList.add('category-active');
+        }
+      });
+    };
+
+    window.clearCategoryHighlights = function() {
+      document.querySelectorAll('.item-highlight.category-active').forEach(el => el.classList.remove('category-active'));
+    };
+
+    // Wire up item card hover → highlight
+    document.addEventListener('mouseover', e => {
+      const card = e.target.closest('.wiz-item');
+      if (card && card.dataset.itemId) {
+        highlightItem(card.dataset.itemId);
+      }
+    });
+    document.addEventListener('mouseout', e => {
+      const card = e.target.closest('.wiz-item');
+      if (card) {
+        clearHighlights();
+      }
+    });
+
+    // Auto-highlight current category on page load
+    setTimeout(highlightCurrentCategory, 100);
   })();
   </script>
   {% endif %}
