@@ -429,6 +429,12 @@ def _ensure_schema() -> None:
                 "ALTER TABLE drafts ADD COLUMN source_elements TEXT;"
             )
 
+        # Day 139.5 — gap_warnings JSON on drafts (Call 2 missed-region warnings)
+        if not _col_exists("drafts", "gap_warnings"):
+            cur.execute(
+                "ALTER TABLE drafts ADD COLUMN gap_warnings TEXT;"
+            )
+
         # Day 137 — wizard category review tracking
         cur.execute(
             """
@@ -2058,6 +2064,31 @@ def get_source_elements(draft_id: int) -> Optional[List[Dict[str, Any]]]:
         if row and row["source_elements"]:
             try:
                 return json.loads(row["source_elements"])
+            except Exception:
+                return None
+        return None
+
+
+def save_gap_warnings(draft_id: int, warnings_json: str) -> None:
+    """Store Call 2 gap warnings JSON on the draft (Day 139.5)."""
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE drafts SET gap_warnings=?, updated_at=? WHERE id=?",
+            (warnings_json, _now(), int(draft_id)),
+        )
+        conn.commit()
+
+
+def get_gap_warnings(draft_id: int) -> Optional[List[Dict[str, Any]]]:
+    """Retrieve Call 2 gap warnings from the draft."""
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT gap_warnings FROM drafts WHERE id=?",
+            (int(draft_id),),
+        ).fetchone()
+        if row and row.get("gap_warnings"):
+            try:
+                return json.loads(row["gap_warnings"])
             except Exception:
                 return None
         return None

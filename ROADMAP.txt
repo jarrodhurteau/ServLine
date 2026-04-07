@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 139.5 planning (April 5, 2026) — Pulling Call 2 (Verify + Gap Scan) forward before Day 140
+Last Updated: Day 139.5 (April 7, 2026) — Per-category visual diff Call 2 + AI Verify button in wizard
 
 ================================================================================
 PROJECT MISSION
@@ -2318,43 +2318,63 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
           elements_to_draft_rows emits draft-row schema {price_cents, _variants}.
           Result was 0-price items + dropped variants + broken coord_data.
           Call 2 still skipped on detect+assemble path pending Day 139.5.
-  [ ] Day 139.5: PULL FORWARD — Call 2 Verify + Gap Scan (was Day 141)
-      - Rationale: Day 140's scope is already full (overlay tracking, bbox
-        accuracy, speed, subcategories, variant labels). Call 2 is high-risk
-        (already regressed once) and deserves isolated focus. Doing it before
-        Day 140 means Day 140 is polish-day, not survival-day, and any Call 2
-        regression can be reverted cleanly without touching Day 140 work.
-      - Build FRESH Call 2 on detect+assemble schema natively — do NOT retrofit
-        Phase 11's verify_menu_with_vision with adapters. The old function
-        assumes Claude-item schema and would require translation both directions
-        plus coord_data reconciliation. Cleaner to write purpose-built.
-      - Three jobs (from original Day 141 plan):
-        1. Verify: does each highlighted item match the text in its bbox region?
-        2. Infer: contextual reasoning (shared descriptions, variant headers
-           that apply across multiple items, section notes)
-        3. Gap scan: find UNHIGHLIGHTED regions with menu text, flag as
-           potential missed items (this is the "Mega Fries never missed again"
-           feature — the reverse-coverage check that makes line-by-line review
-           bulletproof)
-      - Output: corrected item list in draft-row schema + gap warnings with
-        bboxes for the wizard to surface as red flags
-      - Flagged regions show in wizard as warnings with red highlight; user
-        clicks flagged region → sees what's there → manually adds item
-      - Time-box: ~3 hours active work. If still regressing at the mark,
-        revert to Fix #1-only state and defer Call 2 to Phase 14.
-      - Success criteria on test pizza menu:
-        * Item count ≥ Day 139 baseline (134)
-        * Prices present on all items (no zeros)
-        * Variants preserved (no collapse)
-        * Highlights still work for items that survived verification
-        * Gap scan flags at least one region if anything was genuinely missed
-  [ ] Day 140: Code Layer — Build Structure + Wizard Highlighting (NO Claude call)
-      - Code assembles classified elements into structured menu:
-        * Category headers → group items, variant headers → attach to items,
-          section notes → inherit to items below, sort by page + y-coordinate
-      - Wire bounding boxes into wizard: per-item highlight toggle, per-category highlight
-      - Highlighting in both sticky sidebar preview AND expanded lightbox
-      - Universal preview renderer (images first, CSV/XLSX/JSON in Day 142-143)
+  [x] Day 139.5: Call 2 Visual Diff Architecture (April 7, 2026) *** COMPLETE ***
+      APPROACH EVOLUTION (documented for posterity):
+      1. Full-regeneration Call 2 (Sonnet): FAILED — removed 18 items, renamed
+         categories, 111 items. Sonnet second-guessed Opus's structural decisions.
+      2. Full-regeneration Call 2 (Opus): BETTER — 132 items, categories preserved,
+         filled 37 prices. But 23/37 price fixes were WRONG (wraps $11.95 vs $10.00,
+         French Fries $7.00 vs $6.00). Root cause: 90% of model's attention on JSON
+         formatting, 10% on reading prices.
+      3. Corrections-only Call 2 (Opus): GOOD ARCHITECTURE — model returns only
+         fixes, not all 130 items. But extended thinking + large input = empty
+         responses (max_tokens too low). After fixing tokens: 37 corrections, most
+         reasonable, but still had errors + 6.5 min runtime.
+      4. Per-category visual diff (final): BEST — one focused Sonnet call per
+         category (~10 calls). Each verifies 8-28 items against the full menu image.
+         Corrections-only output. 58 corrections in 1.7 min total. ~$0.40.
+
+      WHAT SHIPPED:
+      - verify_category_visual() in ai_vision_verify.py — per-category visual diff
+      - verify_all_categories_visual() — single-call variant (built but not primary)
+      - Auto pipeline: after Call 1, loops categories with Sonnet visual diff
+      - "AI Verify" button in wizard — user can re-run per category (uses Opus)
+      - gap_warnings column on drafts table + CRUD functions
+      - Windows charmap fix: all print() Unicode arrows replaced with ASCII
+      - Call 2 isolated from Call 1 try/except to prevent cross-contamination
+      - PDF support in image cropping (pdf2image conversion)
+
+      KNOWN ISSUES (Day 140 work):
+      - Call 1 applies wrong column headers to Gourmet Pizza section (4 variants
+        instead of 3, wrong size labels, wrong prices $14.75 vs $17.95). Root cause:
+        regular Pizza has 4 columns, Gourmet Pizza has 3 different columns, and
+        Call 1 doesn't detect per-section column headers.
+      - Call 1 extracts section headers as items ("Gourmet Pizza" as item #28).
+        Prompt says "don't include headers" but it still happens.
+      - Call 2 Sonnet misses obvious price errors ($14.75 vs $17.95 on same image).
+        May need OCR text cross-check or stronger prompt instructions.
+      - Bbox accuracy still poor (crop showed Pizza instead of Sandwiches). Need
+        Tesseract word-level bbox matching instead of Claude coordinate estimates.
+      - "Pita/Wrap/White" hallucinated variant — Sonnet misread bread choice text
+        ("Choice of Rye, White") as a price column. Prompt needs: "bread choices
+        are NOT price columns."
+
+      COST PER UPLOAD (current):
+      - Call 1 (Opus + thinking): ~$2.00, ~4 min
+      - Call 2 (Sonnet x10 categories): ~$0.40, ~1.7 min
+      - Total: ~$2.40, ~6 min
+
+      ARCHITECTURE DECISION: Opus stays on Call 1 (structural quality too important).
+      Sonnet stays on Call 2 corrections (focused task, cheap, fast). Do NOT swap
+      Sonnet into Call 1 — tested and it makes bad structural decisions.
+
+  [ ] Day 140: Call 1 + Call 2 Accuracy Fixes
+      Priority 1: Call 1 prompt — per-section column headers (Gourmet Pizza has
+        12" Sml / 16" Lrg / Family, not 10" Mini / 12" Sm / 14" Lg / Family)
+      Priority 2: Call 1 prompt — stop extracting section headers as items
+      Priority 3: Call 2 prompt — pass OCR text, tighten price reading instructions,
+        add "bread choices are NOT price columns" rule
+      Priority 4: Bbox accuracy — Tesseract word-level matching
   [ ] Day 141: (ABSORBED INTO Day 139.5 — scope pulled forward April 5, 2026)
   [ ] Day 142-143: Non-image format support + polish
       - CSV/XLSX: render as HTML table preview, highlight source row per item

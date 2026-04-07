@@ -364,7 +364,7 @@ def _safe_render(template_name: str, **ctx):
             try:
                 # get_source returns (source, filename, uptodate)
                 _src, _filename, _ = app.jinja_loader.get_source(app.jinja_env, template_name)
-                print(f"[TEMPLATE DEBUG] → {template_name} from {_filename}")
+                print(f"[TEMPLATE DEBUG] -> {template_name} from {_filename}")
             except Exception as e:
                 print(f"[TEMPLATE DEBUG] (could not resolve path for {template_name}): {e}")
     except Exception:
@@ -2236,24 +2236,14 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                 )
 
                 if _detected_elements:
-                    # Code assembly: elements → structured items + coordinates
+                    # Code assembly: elements -> structured items + coordinates
                     items, _coord_data = elements_to_draft_rows(_detected_elements)
                     n_elements = len(_detected_elements)
                     if tracker:
                         tracker.end_step(STEP_CALL1_EXTRACT, items=len(items))
                     extraction_strategy = "detect+assemble"
-                    print(f"[Draft] Detection: {n_elements} elements → {len(items)} items assembled"
+                    print(f"[Draft] Detection: {n_elements} elements -> {len(items)} items assembled"
                           f" ({len(_coord_data or [])} with coordinates)")
-                    # Call 2 (vision verification) is currently disabled on the
-                    # detect+assemble path: verify_menu_with_vision expects the
-                    # Claude-item schema {price, sizes}, but elements_to_draft_rows
-                    # emits draft-row schema {price_cents, _variants}. Wiring it in
-                    # naively (as attempted 2026-04-05) drops all prices and variants.
-                    # Day 140 task: add schema adapters both directions + rebuild
-                    # _coord_data from Call 2's output before re-enabling.
-                    if tracker:
-                        tracker.skip_step(STEP_CALL2_VISION, "schema_mismatch_day140")
-                    print("[Draft] Call 2 skipped (schema mismatch — Day 140 fix)")
                 else:
                     # Fallback: legacy extraction
                     print("[Draft] Detection returned no elements, falling back to legacy extraction")
@@ -2279,6 +2269,139 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
 
         # (Day 100.5: Strategy 2 heuristic AI and Strategy 3 legacy JSON removed.
         #  No API key = empty draft for manual input.)
+
+        # =====================================================================
+        # CALL 2: PER-CATEGORY VISUAL DIFF — Day 139.5
+        # One focused call per category: full menu image + category items.
+        # Same approach that works in the wizard AI Verify button.
+        # Uses Sonnet (fast + cheap) since each call is small and focused.
+        # =====================================================================
+        if items and extraction_strategy == "detect+assemble":
+            try:
+                if tracker:
+                    tracker.start_step(STEP_CALL2_VISION)
+                from storage.ai_vision_verify import verify_category_visual
+
+                _cat_groups: Dict[str, list] = {}
+                for it in items:
+                    cat = (it.get("category") or "Other").strip()
+                    _cat_groups.setdefault(cat, []).append(it)
+
+                _pos_to_item = {it.get("position", 0): it for it in items}
+                total_corrections = 0
+                total_added = 0
+
+                for cat_name, cat_items in _cat_groups.items():
+                    update_import_job(job_id, pipeline_stage=f"verifying:{cat_name}")
+
+                    _items_for_api = []
+                    for it in cat_items:
+                        api_item = dict(it)
+                        api_item["id"] = it.get("position", 0)
+                        _items_for_api.append(api_item)
+
+                    result = verify_category_visual(
+                        str(saved_file_path), cat_name, _items_for_api, {},
+                        model="claude-sonnet-4-5-20250929",
+                    )
+
+                    if result.get("error"):
+                        print(f"[Call2] '{cat_name}': error: {result['error']}")
+                        continue
+
+                    for corr in (result.get("corrections") or []):
+                        if not isinstance(corr, dict):
+                            continue
+                        pos = corr.get("item_id")
+                        target = _pos_to_item.get(pos)
+                        if not target:
+                            continue
+                        fixes = corr.get("fixes") or {}
+                        for field, val in fixes.items():
+                            if field == "price_cents":
+                                try:
+                                    target["price_cents"] = int(round(float(val)))
+                                except (ValueError, TypeError):
+                                    pass
+                            elif field == "name":
+                                target["name"] = str(val).strip()
+                            elif field == "description":
+                                target["description"] = (str(val).strip() if val else None)
+
+                        vf = corr.get("variant_fixes")
+                        if vf and isinstance(vf, list):
+                            new_variants = []
+                            for vi, v in enumerate(vf):
+                                if not isinstance(v, dict):
+                                    continue
+                                lbl = (v.get("label") or "").strip()
+                                vp = 0
+                                try:
+                                    vp = int(round(float(v.get("price_cents", 0))))
+                                except (ValueError, TypeError):
+                                    pass
+                                if lbl or vp:
+                                    new_variants.append({
+                                        "label": lbl or f"Size {vi+1}",
+                                        "price_cents": vp,
+                                        "kind": v.get("kind", "size"),
+                                        "position": vi,
+                                    })
+                            if new_variants:
+                                target["_variants"] = new_variants
+                                if target.get("price_cents", 0) == 0:
+                                    target["price_cents"] = new_variants[0]["price_cents"]
+                        total_corrections += 1
+
+                    for mi in (result.get("missing_items") or []):
+                        if not isinstance(mi, dict):
+                            continue
+                        name = (mi.get("name") or "").strip()
+                        if not name:
+                            continue
+                        pc = 0
+                        try:
+                            pc = int(round(float(mi.get("price_cents", 0))))
+                        except (ValueError, TypeError):
+                            pass
+                        next_pos = max((it.get("position", 0) for it in items), default=0) + 1
+                        items.append({
+                            "name": name,
+                            "description": (mi.get("description") or "").strip() or None,
+                            "price_cents": pc,
+                            "category": cat_name,
+                            "position": next_pos,
+                            "confidence": 85,
+                        })
+                        _pos_to_item[next_pos] = items[-1]
+                        total_added += 1
+
+                    n_c = len(result.get("corrections") or [])
+                    n_m = len(result.get("missing_items") or [])
+                    if n_c or n_m:
+                        print(f"[Call2] '{cat_name}': {n_c} corrections, {n_m} missing")
+
+                extraction_strategy = "detect+assemble+vision"
+                if tracker:
+                    tracker.end_step(STEP_CALL2_VISION,
+                                     categories=len(_cat_groups),
+                                     corrections=total_corrections,
+                                     items_added=total_added)
+                print(f"[Call2] Done: {len(_cat_groups)} categories, "
+                      f"{total_corrections} corrections, {total_added} added")
+
+                vision_result = {
+                    "skipped": False, "confidence": 0.0,
+                    "model": "claude-sonnet-4-5-20250929",
+                    "changes_count": total_corrections,
+                    "changes": [], "gap_warnings": [],
+                    "notes": f"{total_corrections} corrections across {len(_cat_groups)} categories",
+                }
+
+            except Exception as _call2_err:
+                if tracker:
+                    tracker.fail_step(STEP_CALL2_VISION, str(_call2_err))
+                print(f"[Call2] Failed: {_call2_err}")
 
         # =====================================================================
         # SEMANTIC PIPELINE — Phase 8 quality checks on Claude-extracted items
@@ -2392,7 +2515,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                                 not_found=not_found,
                                 confidence=reconcile_result.get("confidence", 0),
                             )
-                        print(f"[Draft] Call 3 (Reconciliation): {len(flagged)} flagged → "
+                        print(f"[Draft] Call 3 (Reconciliation): {len(flagged)} flagged -> "
                               f"{confirmed} confirmed, {corrected} corrected, "
                               f"{not_found} not_found")
                     else:
@@ -2532,6 +2655,17 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                             except Exception as _coord_err:
                                 print(f"[Draft] Warning: coordinate storage failed: {_coord_err}")
 
+                        # Day 139.5: Store Call 2 gap warnings on draft
+                        if vision_result and vision_result.get("gap_warnings"):
+                            try:
+                                import json as _json
+                                drafts_store.save_gap_warnings(
+                                    draft_id, _json.dumps(vision_result["gap_warnings"])
+                                )
+                                print(f"[Draft] Stored {len(vision_result['gap_warnings'])} gap warnings")
+                            except Exception as _gw_err:
+                                print(f"[Draft] Warning: gap warning storage failed: {_gw_err}")
+
                 if draft_id and hasattr(drafts_store, "save_ocr_debug"):
                     payload = debug_payload if isinstance(debug_payload, dict) else {}
                     payload.setdefault("import_job_id", int(job_id))
@@ -2550,6 +2684,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                             "changes": vision_result.get("changes", []),
                             "notes": vision_result.get("notes"),
                             "item_count_before": len(vision_result.get("items", [])),
+                            "gap_warnings": vision_result.get("gap_warnings", []),
                         }
                     if semantic_result is not None:
                         payload["semantic_pipeline"] = {
@@ -6317,6 +6452,207 @@ def wizard_delete_item(draft_id: int, item_id: int):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/verify-category")
+@login_required
+def wizard_verify_category(draft_id: int):
+    """Visual diff verification for one category (AJAX).
+
+    Day 139.5v2: Crops the menu image to the category's region and asks Claude
+    to compare extracted items vs the original menu (zoomed in).
+    Returns corrections + missing items.
+    """
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip()
+    if not category:
+        return jsonify({"ok": False, "error": "Category required"}), 400
+
+    # Load items for this category
+    all_items = drafts_store.get_draft_items(draft_id, include_variants=True) or []
+    cat_items = [it for it in all_items if (it.get("category") or "").strip() == category]
+    if not cat_items:
+        return jsonify({"ok": False, "error": f"No items in '{category}'"}), 404
+
+    # Load coordinates
+    coordinates = {}
+    try:
+        raw_coords = drafts_store.get_draft_coordinates(draft_id)
+        for c in raw_coords:
+            coordinates[c["item_id"]] = {
+                "x_pct": c["x_pct"],
+                "y_pct": c["y_pct"],
+                "w_pct": c["w_pct"],
+                "h_pct": c["h_pct"],
+                "page": c["page"],
+            }
+    except Exception:
+        pass
+
+    # Find source image path
+    draft = drafts_store.get_draft(draft_id)
+    source_path = None
+
+    # Try source_file_path on draft (may be just a filename)
+    sfp = draft.get("source_file_path") if draft else None
+    if sfp:
+        # Could be absolute or just a filename
+        p = Path(sfp)
+        if p.exists():
+            source_path = str(p)
+        else:
+            # Try in UPLOAD_FOLDER
+            p2 = UPLOAD_FOLDER / sfp
+            if p2.exists():
+                source_path = str(p2)
+
+    # Fallback: try import job source_path or filename
+    if not source_path:
+        job_id = draft.get("source_job_id") if draft else None
+        if job_id:
+            try:
+                with db_connect() as conn:
+                    job = conn.execute(
+                        "SELECT source_path, filename FROM import_jobs WHERE id=?",
+                        (int(job_id),),
+                    ).fetchone()
+                    if job:
+                        if job["source_path"] and Path(job["source_path"]).exists():
+                            source_path = job["source_path"]
+                        elif job["filename"]:
+                            p3 = UPLOAD_FOLDER / job["filename"]
+                            if p3.exists():
+                                source_path = str(p3)
+            except Exception:
+                pass
+
+    if not source_path:
+        return jsonify({"ok": False, "error": "Source image not found"}), 404
+
+    # Run visual diff verification
+    try:
+        from storage.ai_vision_verify import verify_category_visual
+        result = verify_category_visual(
+            str(source_path), category, cat_items, coordinates,
+        )
+        if result.get("error"):
+            return jsonify({"ok": False, "error": result["error"]}), 500
+
+        # Apply corrections to the database
+        applied = []
+        corrections = result.get("corrections") or []
+        for corr in corrections:
+            if not isinstance(corr, dict):
+                continue
+            item_id = corr.get("item_id")
+            if not item_id:
+                continue
+            fixes = corr.get("fixes") or {}
+            reason = corr.get("reason", "")
+
+            # Apply field fixes
+            update_fields = {}
+            if "price_cents" in fixes:
+                try:
+                    update_fields["price_cents"] = int(round(float(fixes["price_cents"])))
+                except (ValueError, TypeError):
+                    pass
+            if "name" in fixes:
+                update_fields["name"] = str(fixes["name"]).strip()
+            if "description" in fixes:
+                update_fields["description"] = (str(fixes["description"]).strip()
+                                                 if fixes["description"] else None)
+
+            if update_fields:
+                try:
+                    with db_connect() as conn:
+                        sets = ", ".join(f"{k}=?" for k in update_fields)
+                        vals = list(update_fields.values()) + [_now_iso(), int(item_id), draft_id]
+                        conn.execute(
+                            f"UPDATE draft_items SET {sets}, updated_at=? "
+                            f"WHERE id=? AND draft_id=?",
+                            vals,
+                        )
+                        conn.commit()
+                    applied.append({
+                        "item_id": item_id,
+                        "fixes": update_fields,
+                        "reason": reason,
+                    })
+                except Exception as e:
+                    print(f"[VisualDiff] Failed to apply fix for item {item_id}: {e}")
+
+            # Apply variant fixes
+            variant_fixes = corr.get("variant_fixes")
+            if variant_fixes and isinstance(variant_fixes, list):
+                try:
+                    # Delete existing variants and re-insert
+                    drafts_store.delete_all_variants_for_item(item_id)
+                    for vi, vf in enumerate(variant_fixes):
+                        if not isinstance(vf, dict):
+                            continue
+                        lbl = (vf.get("label") or "").strip()
+                        vp = 0
+                        try:
+                            vp = int(round(float(vf.get("price_cents", 0))))
+                        except (ValueError, TypeError):
+                            pass
+                        if lbl or vp:
+                            drafts_store.insert_variants(item_id, [{
+                                "label": lbl or f"Size {vi + 1}",
+                                "price_cents": vp,
+                                "kind": vf.get("kind", "size"),
+                                "position": vi,
+                            }])
+                    applied.append({
+                        "item_id": item_id,
+                        "variant_fixes": len(variant_fixes),
+                        "reason": reason,
+                    })
+                except Exception as e:
+                    print(f"[VisualDiff] Failed to apply variant fix for item {item_id}: {e}")
+
+        # Add missing items
+        added_items = []
+        for mi in (result.get("missing_items") or []):
+            if not isinstance(mi, dict):
+                continue
+            name = (mi.get("name") or "").strip()
+            if not name:
+                continue
+            price_cents = 0
+            try:
+                price_cents = int(round(float(mi.get("price_cents", 0))))
+            except (ValueError, TypeError):
+                pass
+            try:
+                new_item = drafts_store.insert_draft_item(draft_id, {
+                    "name": name,
+                    "description": (mi.get("description") or "").strip() or None,
+                    "price_cents": price_cents,
+                    "category": category,
+                    "confidence": 85,
+                })
+                added_items.append({"name": name, "price_cents": price_cents})
+            except Exception as e:
+                print(f"[VisualDiff] Failed to add missing item '{name}': {e}")
+
+        return jsonify({
+            "ok": True,
+            "category": category,
+            "corrections_applied": len(applied),
+            "items_added": len(added_items),
+            "details": applied,
+            "added": added_items,
+            "notes": result.get("notes", ""),
+        })
+
+    except Exception as e:
+        print(f"[VisualDiff] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/variant/<int:variant_id>")

@@ -1132,6 +1132,13 @@
         <span></span>
         {% endif %}
 
+        {# AI Verify button — visual diff per category #}
+        <button type="button" class="btn" id="btn-ai-verify"
+                onclick="aiVerifyCategory('{{ current_category|e }}', {{ draft.id }})"
+                style="background:var(--teal,#2E5B5E);color:#fff;margin-right:8px;">
+          AI Verify
+        </button>
+
         {# Confirm / Next #}
         {% if not is_reviewed %}
         <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
@@ -2824,6 +2831,69 @@
     // Auto-highlight current category on page load
     setTimeout(highlightCurrentCategory, 100);
   })();
+  </script>
+
+  {# Day 139.5: AI Visual Diff verification per category #}
+  <script>
+  function aiVerifyCategory(category, draftId) {
+    const btn = document.getElementById('btn-ai-verify');
+    if (!btn) return;
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    btn.style.opacity = '0.6';
+
+    fetch(`/api/drafts/${draftId}/wizard/verify-category`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({category: category}),
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        const n = data.corrections_applied || 0;
+        const added = data.items_added || 0;
+        let msg = '';
+        if (n === 0 && added === 0) {
+          msg = 'AI Verify: Everything looks correct!';
+        } else {
+          const parts = [];
+          if (n > 0) parts.push(`${n} correction${n > 1 ? 's' : ''} applied`);
+          if (added > 0) parts.push(`${added} missing item${added > 1 ? 's' : ''} added`);
+          msg = 'AI Verify: ' + parts.join(', ') + '. Reloading...';
+        }
+        if (data.notes) msg += '\n\n' + data.notes;
+
+        // Show details of corrections
+        if (data.details && data.details.length > 0) {
+          msg += '\n\nCorrections:';
+          data.details.forEach(d => {
+            const fixes = d.fixes ? Object.entries(d.fixes).map(([k,v]) => {
+              if (k === 'price_cents') return `price: $${(v/100).toFixed(2)}`;
+              return `${k}: ${v}`;
+            }).join(', ') : '';
+            const reason = d.reason ? ` (${d.reason})` : '';
+            msg += `\n  - Item #${d.item_id}: ${fixes}${reason}`;
+          });
+        }
+
+        alert(msg);
+        if (n > 0 || added > 0) {
+          window.location.reload();
+        }
+      } else {
+        alert('AI Verify failed: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(err => {
+      alert('AI Verify error: ' + err.message);
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = origText;
+      btn.style.opacity = '1';
+    });
+  }
   </script>
   {% endif %}
 </div>
