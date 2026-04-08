@@ -1596,7 +1596,49 @@ def _save_draft_json(job_id: int, draft: dict) -> str:
     return str(abs_path.relative_to(ROOT)).replace("\\", "/")
 
 # --- OCR helpers: image/PDF → text, then text → draft -----------------
+def _ocr_via_google_vision(img_path: Path) -> str:
+    """OCR using Google Cloud Vision API (DOCUMENT_TEXT_DETECTION).
+
+    Returns full text extracted from the image. Falls back to empty string
+    on any error. Requires GOOGLE_CLOUD_API_KEY in environment.
+    """
+    try:
+        import requests as _requests
+        import base64 as _b64
+        key = os.environ.get("GOOGLE_CLOUD_API_KEY", "").strip()
+        if not key:
+            return ""
+        with open(str(img_path), "rb") as f:
+            img_data = _b64.b64encode(f.read()).decode()
+        resp = _requests.post(
+            f"https://vision.googleapis.com/v1/images:annotate?key={key}",
+            json={
+                "requests": [{
+                    "image": {"content": img_data},
+                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}]
+                }]
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        if "responses" in data and data["responses"]:
+            r = data["responses"][0]
+            if "error" not in r:
+                text = r.get("fullTextAnnotation", {}).get("text", "")
+                if text:
+                    print(f"[OCR] Google Vision: {len(text)} chars from {img_path.name}")
+                    return text
+    except Exception as e:
+        print(f"[OCR] Google Vision failed: {e}")
+    return ""
+
+
 def _ocr_image_to_text(img_path: Path) -> str:
+    # Day 140: Try Google Vision first, fall back to Tesseract
+    vision_text = _ocr_via_google_vision(img_path)
+    if vision_text:
+        return vision_text
+    print(f"[OCR] Falling back to Tesseract for {img_path.name}")
     try:
         from PIL import Image, ImageOps, ImageFilter
         img = Image.open(str(img_path)).convert("L")
@@ -1628,16 +1670,24 @@ def _pdf_to_text(pdf_path: Path) -> str:
         return ""
 
     buf = []
-    for pg in pages:
+    for i, pg in enumerate(pages):
         try:
-            img = pg.convert("L")
-            img = ImageOps.autocontrast(img)
-            img = img.filter(ImageFilter.SHARPEN)
-            txt = pytesseract.image_to_string(
-                img,
-                lang=TESSERACT_LANG,
-                config=TESSERACT_CONFIG
-            )
+            # Save page to temp file for Vision API
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                pg.save(tmp.name, "PNG")
+                txt = _ocr_via_google_vision(Path(tmp.name))
+                if not txt:
+                    img = pg.convert("L")
+                    img = ImageOps.autocontrast(img)
+                    img = img.filter(ImageFilter.SHARPEN)
+                    txt = pytesseract.image_to_string(
+                        img, lang=TESSERACT_LANG, config=TESSERACT_CONFIG
+                    )
+                try:
+                    os.unlink(tmp.name)
+                except OSError:
+                    pass
             if txt:
                 buf.append(txt)
         except Exception:
@@ -2257,8 +2307,6 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                         if tracker:
                             tracker.end_step(STEP_CALL1_EXTRACT, items=len(claude_items))
                         print(f"[Draft] Fallback extraction: {len(claude_items)} items")
-                        if _thinking_active and tracker:
-                            tracker.skip_step(STEP_CALL2_VISION, "extended_thinking")
                     else:
                         if tracker:
                             tracker.end_step(STEP_CALL1_EXTRACT, items=0)
@@ -2271,12 +2319,12 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
         #  No API key = empty draft for manual input.)
 
         # =====================================================================
-        # CALL 2: PER-CATEGORY VISUAL DIFF — Day 139.5
-        # One focused call per category: full menu image + category items.
-        # Same approach that works in the wizard AI Verify button.
-        # Uses Sonnet (fast + cheap) since each call is small and focused.
+        # CALL 2: PER-CATEGORY VISUAL DIFF — Day 140
+        # ALWAYS runs after Call 1, regardless of extraction strategy or
+        # thinking mode. Call 1's job is done — Call 2 independently
+        # verifies and corrects using the menu image + OCR text.
         # =====================================================================
-        if items and extraction_strategy == "detect+assemble":
+        if items:
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL2_VISION)
@@ -2303,12 +2351,14 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                     result = verify_category_visual(
                         str(saved_file_path), cat_name, _items_for_api, {},
                         model="claude-sonnet-4-5-20250929",
+                        ocr_text=clean_ocr_text,
                     )
 
                     if result.get("error"):
                         print(f"[Call2] '{cat_name}': error: {result['error']}")
                         continue
 
+                    _items_to_remove = set()
                     for corr in (result.get("corrections") or []):
                         if not isinstance(corr, dict):
                             continue
@@ -2316,6 +2366,13 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                         target = _pos_to_item.get(pos)
                         if not target:
                             continue
+
+                        # Call 2 can flag section headers for removal
+                        if corr.get("remove"):
+                            _items_to_remove.add(pos)
+                            total_corrections += 1
+                            continue
+
                         fixes = corr.get("fixes") or {}
                         for field, val in fixes.items():
                             if field == "price_cents":
@@ -2376,6 +2433,13 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                         _pos_to_item[next_pos] = items[-1]
                         total_added += 1
 
+                    # Remove items flagged as section headers (not orderable)
+                    if _items_to_remove:
+                        items = [it for it in items if it.get("position", 0) not in _items_to_remove]
+                        for rpos in _items_to_remove:
+                            _pos_to_item.pop(rpos, None)
+                        print(f"[Call2] '{cat_name}': removed {len(_items_to_remove)} non-items (section headers)")
+
                     n_c = len(result.get("corrections") or [])
                     n_m = len(result.get("missing_items") or [])
                     if n_c or n_m:
@@ -2432,18 +2496,12 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
         # =====================================================================
         # CALL 3: TARGETED RECONCILIATION — Sprint 11.2 (Day 102)
         # Reviews ONLY items flagged by semantic pipeline (3-10 items max).
-        # Day 102.6: Bypassed when extended thinking is active — Opus
-        # already self-verified during Call 1 thinking phase.
+        # Day 140: ALWAYS runs if there are flagged items. No more skipping
+        # for thinking mode — Call 1 is not a team player.
         # =====================================================================
         reconcile_result = None
         update_import_job(job_id, pipeline_stage="reconciling")
-        if _thinking_active and items:
-            # Extended thinking mode: skip Call 3
-            reconcile_result = {"skipped": True, "skip_reason": "extended_thinking"}
-            if tracker:
-                tracker.skip_step(STEP_CALL3_RECONCILE, "extended_thinking")
-            print("[Draft] Call 3 skipped (extended thinking self-verifies)")
-        elif items and semantic_result and semantic_result.get("items"):
+        if items and semantic_result and semantic_result.get("items"):
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL3_RECONCILE)

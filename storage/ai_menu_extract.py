@@ -270,7 +270,7 @@ def _validate_descriptions(items: List[Dict[str, Any]]) -> int:
 # ---------------------------------------------------------------------------
 # "thinking" = single Opus call with extended thinking (skips Calls 2 & 3)
 # "3call"    = full 3-call pipeline: Call 1 → Call 2 (vision) → Call 3 (reconcile)
-PIPELINE_MODE = "thinking"  # Day 103: explicit toggle for E2E validation
+PIPELINE_MODE = "thinking"  # Day 140: keep thinking for structural quality; Call 2 now runs regardless
 EXTENDED_THINKING = PIPELINE_MODE == "thinking"
 THINKING_MODEL = "claude-opus-4-6"  # Model used when PIPELINE_MODE == "thinking"
 
@@ -777,32 +777,57 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
 
 _DETECT_SYSTEM_PROMPT = """\
 You are extracting menu items from a restaurant menu image for POS system import.
-For each item you find, also record WHERE it appears on the image (bounding box).
 
-Each item = one product a customer can order in a POS system.
-Split compound items: "Beef or Chicken Empanadas" → two separate items.
-Each named topping (Pepperoni, Mushrooms, etc.) and each named sauce (Ranch, BBQ, etc.) \
-is a separate item — do not combine them into one "Each Topping Add" item.
-Sauce/flavor options listed within a section should also be extracted as individual items.
-When items are sold by quantity (6 Pcs, 10 Pcs, 20 Pcs), each quantity is its own item.
-Pay close attention to section headers — they often contain info that applies to every item below:
-- Shared pricing → apply as size variants to all items in that section.
-- Shared options (e.g., "White or Wheat") → add as size variants on each item.
-- Shared descriptions (e.g., "All sandwiches come with...") → include in each item's description.
-- Multiple price columns → capture each column as a size variant.
-Use Title Case for names even if the menu is printed in ALL CAPS.
+#1 RULE — THE OCR TEXT IS THE ABSOLUTE SOURCE OF TRUTH FOR ALL PRICES AND NAMES.
+The OCR text was produced by a high-accuracy document scanner. Every price in it is \
+correct. Your job is to use the image for STRUCTURE (what is a section header, which \
+items belong to which category, layout) and the OCR text for DATA (names, prices, \
+descriptions). When you output a price, it MUST match a price in the OCR text. \
+Do NOT change, round, smooth, or "correct" any price from the OCR text. \
+Do NOT substitute a neighbor's price for consistency. \
+If the OCR says an item is $11.99, you output $11.99 — even if every other item \
+in that section is $9.99. The OCR is right. You are not allowed to override it.
 
-MENU LAYOUT — CRITICAL FOR MULTI-COLUMN MENUS:
-Menus often have multiple columns. Each column has its OWN category headers that apply \
-only to items within that column. A "Burgers" header in the right column does NOT apply \
-to items in the left column. Look at which header each item sits UNDER within its OWN column.
+WHAT IS AN ITEM:
+Each item = one product a customer can order. Rules:
+- Split compound items: "Beef or Chicken Empanadas" → two items.
+- Each named topping and sauce is a separate item.
+- Quantity variants (6 Pcs, 10 Pcs) are separate items.
+- Section headers (bold/large/centered text like "GOURMET PIZZA") are NOT items.
+- Use Title Case for names even if menu is ALL CAPS.
 
-IMPORTANT: Descriptions shift easily — menus often print the description on the line below \
-the item name. Before assigning a description, verify it makes sense for that item. \
-If uncertain, set description to null — a missing description is better than a wrong one.
-Do not skip items — check every section of the menu for completeness.
+SECTION STRUCTURE (use the IMAGE to determine):
+- Each section has its own header and its own price columns. \
+Reset column understanding at each new section.
+- Some sections show shared prices once at top (in a banner or header row) \
+with items listed below having no individual prices — apply those shared \
+prices as size variants to every item in that section.
+- Multi-column menus: each column has its own headers. A header in the \
+right column does not apply to items in the left column.
+- Shared descriptions ("All sandwiches come with...") apply to every item below.
+- Choice lists (bread types, sauce options) go in description, not as size variants.
 
-OUTPUT FORMAT — return ONLY valid JSON:
+PRICES — READ EACH LINE:
+- Go through the OCR text AND the image LINE BY LINE. Each item has its own price(s) \
+on its own line — do not copy one item's price to its neighbors.
+- Items in the same section often have DIFFERENT prices (e.g., Double Burger $11.99 \
+while others are $9.99). Read each line individually.
+- DOT LEADERS: Menus use dots/periods (".......") to connect an item name on the LEFT \
+to its price(s) on the RIGHT of the same line. Example: \
+"DOUBLE BURGER Lettuce, tomato...........11.99.......15.99" means Double Burger \
+costs $11.99 (regular) and $15.99 (deluxe). The dots are just visual filler — \
+the prices at the end of a line ALWAYS belong to the item at the start of that line.
+- Description text on a line BELOW an item name is NOT a separate item. \
+Lines without prices that describe ingredients belong to the item above.
+- If a section header shows shared price columns, apply those to every item below.
+- $0 means the price is truly not printed (e.g., "Market Price").
+
+SIZE/VARIANT LABELS (use the OCR TEXT):
+- Copy column header text VERBATIM from the OCR. Do not paraphrase. \
+If OCR says "Mini" do not write "Med". If it says "Sml" keep "Sml".
+- Sub-labels under column headers (like slice counts) are not separate sizes.
+
+OUTPUT — return ONLY valid JSON:
 {
   "items": [
     {
@@ -812,39 +837,36 @@ OUTPUT FORMAT — return ONLY valid JSON:
       "category": "Pizza",
       "sizes": [
         {"label": "Small 10\\"", "price": 12.99},
-        {"label": "Medium 14\\"", "price": 16.99},
-        {"label": "Large 18\\"", "price": 21.99}
+        {"label": "Large 14\\"", "price": 16.99}
       ],
+      "raw_line": "MARGHERITA PIZZA Fresh mozzarella, basil ....... 12.99 ....... 16.99",
       "bbox": {"x_pct": 5, "y_pct": 16, "w_pct": 30, "h_pct": 4, "page": 1}
     }
   ]
 }
 
 ITEM FIELDS:
-- "name": exact full name as printed, Title Case
+- "name": exact name from OCR text, Title Case
 - "description": menu description if shown, null otherwise
-- "price": base price as float (use first size price if multi-size), 0 if not visible
-- "category": ONE of these exact values based on which section header the item falls under: \
-Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, Burgers, Wraps, Entrees, Seafood, \
-Pasta, Steaks, Wings, Sauces, Sides, Desserts, Beverages, Kids Menu, Breakfast, Calzones, \
-Subs, Platters, Other
-- "sizes": array of {label, price} for items with multiple price points. Empty array for single-price items.
-- "bbox": bounding box of where this item appears on the image:
-  * x_pct: left edge as % of image width (0-100)
-  * y_pct: top edge as % of image height (0-100)
-  * w_pct: width as % of image width
-  * h_pct: height as % of image height
-  * page: page number (1-based, default 1)
-
-Bounding boxes don't need to be pixel-perfect — approximate regions that would let a user \
-visually locate each item. Err slightly larger."""
+- "price": base price as float (first size price if multi-size), 0 if not printed
+- "category": ONE of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, \
+Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, \
+Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other
+- "sizes": array of {label, price} for multi-price items. Empty array if single price.
+- "raw_line": the EXACT text you read from the menu for this item, including prices. \
+Copy the line verbatim — this is used to verify your extraction is correct. \
+If the section uses shared header prices, quote the header line instead.
+- "bbox": approximate bounding box {x_pct, y_pct, w_pct, h_pct, page} as % of image. \
+Err slightly larger. page is 1-based."""
 
 _DETECT_USER_PROMPT = """\
-Extract every menu item from the menu image above, with bounding boxes.
+Extract every menu item. The OCR text below is from a high-accuracy scanner — \
+every price and name in it is CORRECT. Use it as-is for all prices and names. \
+Use the image ONLY for structure: sections, layout, what is a header vs item.
 
-The following OCR text was extracted from the same image and may help \
-disambiguate hard-to-read areas, but the image is the source of truth:
+DO NOT change any price from the OCR text. Copy prices exactly as they appear.
 
+OCR TEXT (absolute source of truth):
 ---
 {ocr_text}
 ---
@@ -880,6 +902,8 @@ def detect_menu_elements(
 
     This is the new Day 139 Call 1 — detection + classification + location.
     Structure assembly (parent/child grouping) is done in code, not here.
+    Day 140: Opus without thinking — better precision than thinking mode
+    (thinking lets Claude rationalize wrong prices for "consistency").
     """
     client = _get_client()
     if client is None:
@@ -1349,6 +1373,68 @@ def assemble_menu_structure(
     return result
 
 
+def _extract_prices_from_raw(raw_line: str) -> List[float]:
+    """Parse all dollar amounts from a raw menu line.
+
+    Handles formats like: "BURGER...9.00...13.00", "$9.99", "14.75 19.95"
+    Returns prices in order of appearance.
+    """
+    if not raw_line:
+        return []
+    # Match patterns: optional $, digits, dot, cents
+    import re
+    matches = re.findall(r'\$?\b(\d{1,3}\.\d{2})\b', raw_line)
+    return [float(m) for m in matches]
+
+
+def _verify_prices_against_raw(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Cross-check Claude's prices against the raw_line it quoted.
+
+    If raw_line contains prices that don't match Claude's output,
+    override with the raw_line prices. This catches consistency-smoothing.
+    """
+    raw_line = (item.get("raw_line") or "").strip()
+    if not raw_line:
+        return item
+
+    raw_prices = _extract_prices_from_raw(raw_line)
+    if not raw_prices:
+        return item
+
+    sizes = item.get("sizes") or []
+    claude_price = _to_float(item.get("price"))
+
+    if sizes:
+        # Multi-price item: compare variant prices against raw_line prices
+        claude_prices = [_to_float(s.get("price")) for s in sizes]
+        # If raw_line has same count of prices as sizes, use raw_line prices
+        if len(raw_prices) == len(sizes):
+            changed = False
+            for i, (rp, cp) in enumerate(zip(raw_prices, claude_prices)):
+                if abs(rp - cp) > 0.001:
+                    print(f"[RawLine] Price override: {item.get('name')} "
+                          f"size {i}: ${cp:.2f} -> ${rp:.2f} (raw: {raw_line[:80]})")
+                    sizes[i]["price"] = rp
+                    changed = True
+            if changed:
+                item["sizes"] = sizes
+                item["price"] = raw_prices[0]
+        elif len(raw_prices) >= 1 and len(sizes) == 0:
+            # Single price in raw but no sizes
+            if abs(raw_prices[0] - claude_price) > 0.001:
+                print(f"[RawLine] Price override: {item.get('name')} "
+                      f"${claude_price:.2f} -> ${raw_prices[0]:.2f}")
+                item["price"] = raw_prices[0]
+    else:
+        # Single-price item
+        if raw_prices and abs(raw_prices[0] - claude_price) > 0.001:
+            print(f"[RawLine] Price override: {item.get('name')} "
+                  f"${claude_price:.2f} -> ${raw_prices[0]:.2f}")
+            item["price"] = raw_prices[0]
+
+    return item
+
+
 def elements_to_draft_rows(
     items: List[Dict[str, Any]],
 ) -> tuple:
@@ -1356,6 +1442,8 @@ def elements_to_draft_rows(
 
     Day 139 v2: Trusts Claude's category/sizes assignments. Uses bounding
     boxes only for wizard highlighting, NOT for structure inference.
+    Day 140: raw_line price verification — cross-checks Claude's prices
+    against the text it quoted. Catches consistency-smoothing.
 
     Returns (draft_rows, coord_data) where:
     - draft_rows: list of dicts for upsert_draft_items()
@@ -1367,6 +1455,9 @@ def elements_to_draft_rows(
         name = (it.get("name") or "").strip()
         if not name:
             continue
+
+        # Day 140: verify prices against raw_line before processing
+        it = _verify_prices_against_raw(it)
 
         price = _to_float(it.get("price"))
         price_cents = int(round(price * 100))

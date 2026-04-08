@@ -1029,24 +1029,37 @@ def verify_draft_with_vision(
 # ---------------------------------------------------------------------------
 
 _VISUAL_DIFF_SYSTEM_PROMPT = """\
-You are auditing a restaurant menu extraction. You receive:
-1. A CROPPED section of the original menu image (zoomed in to one category)
-2. A list of items we extracted from that section
+You are auditing ONE CATEGORY of a restaurant menu extraction. You receive:
+1. The original menu image (full page)
+2. A list of items we extracted for ONE specific category/section
+3. Raw OCR text from the same menu for cross-checking prices
 
-Your job: carefully read every item and price in the menu image, then compare \
-against what was extracted. Report ONLY the differences.
+YOUR PROCESS — do this step by step:
+Step 1: Find this category's section on the menu image.
+Step 2: Read the section header — note any shared prices, column headers, or \
+shared descriptions (e.g., "All sandwiches come with..." or "Regular $10.00 / W/ Fries $14.00").
+Step 3: Go LINE BY LINE through every item in that section on the menu. \
+For EACH line, read the item name and price(s) directly from the image. \
+Use the OCR text to cross-check — dot-leader lines (NAME.....PRICE) have \
+the price at the END of the line belonging to the item at the START.
+Step 4: Compare what you read against our extracted list:
+  - Item in our list but price is WRONG? → correction with correct price
+  - Item in our list but name is WRONG? → correction with correct name
+  - Item on the menu but NOT in our list? → add to missing_items
+  - Item in our list but NOT on the menu in this section? → flag with "remove": true
+  - If section has shared header prices that weren't applied as variants → add variant_fixes
 
-Go line by line through the menu image. For each item you see:
-- Is it in our extracted list? If not, it's missing.
-- Is the name spelled correctly?
-- Is the price EXACTLY right? Read the price from the image very carefully.
-- Are variant/size prices correct? Check each column.
-- Is the description accurate?
+PRICE RULES:
+- Read each item's price INDIVIDUALLY from the menu. Do NOT assume items share prices.
+- If one item costs more than its neighbors, that is correct — keep the difference.
+- If the section shows shared prices in a header/banner (e.g., "Regular $10.00 / \
+W/ Fries $14.00"), every item in that section gets those as variants.
+- Use the OCR text to verify exact dollar amounts. Trust OCR digits over image when available.
+- NEVER invent a price. NEVER smooth prices for consistency.
 
-RULES:
-- Be PRECISE with prices. Read each digit carefully from the image.
-- If you can't read a price clearly, say so with "uncertain": true.
+OTHER RULES:
 - NEVER change categories — they are POS-normalized and intentional.
+- Section headers (bold/large/centered text) are NOT items — flag with "remove": true.
 - Only report items that have actual errors or are missing.
 - If everything looks correct, return empty corrections.
 - Output ONLY valid JSON — no markdown, no explanation.\
@@ -1056,6 +1069,7 @@ RULES:
 def _build_visual_diff_prompt(
     category: str,
     items: List[Dict[str, Any]],
+    ocr_text: Optional[str] = None,
 ) -> str:
     """Build prompt for per-category visual diff verification."""
     lines = []
@@ -1080,6 +1094,19 @@ def _build_visual_diff_prompt(
 
     items_text = "\n".join(lines)
 
+    ocr_block = ""
+    if ocr_text:
+        ocr_block = f"""
+The following OCR text was extracted from the same menu via Tesseract. \
+Use it to cross-check prices and spelling — it may have exact characters \
+that are hard to read in the image:
+
+---
+{ocr_text[:6000]}
+---
+
+"""
+
     return f"""\
 Category: {category} ({len(items)} items extracted)
 
@@ -1087,7 +1114,7 @@ Find the "{category}" section on the menu image above, then compare it \
 against what we extracted:
 
 {items_text}
-
+{ocr_block}
 Compare the image against our extraction and return ONLY corrections:
 {{
   "corrections": [
@@ -1210,6 +1237,7 @@ def verify_category_visual(
     coordinates: Dict[int, Dict[str, Any]],
     *,
     model: str = _DEFAULT_MODEL,
+    ocr_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Verify one category by visual diff: cropped menu image vs extracted items.
 
@@ -1250,7 +1278,7 @@ def verify_category_visual(
         },
         {
             "type": "text",
-            "text": _build_visual_diff_prompt(category, items),
+            "text": _build_visual_diff_prompt(category, items, ocr_text=ocr_text),
         },
     ]
 
