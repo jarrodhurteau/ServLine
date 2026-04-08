@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 139.5 (April 7, 2026) — Per-category visual diff Call 2 + AI Verify button in wizard
+Last Updated: Day 140 (April 8, 2026) — Google Cloud Vision OCR replaces Tesseract, pipeline lockdown
 
 ================================================================================
 PROJECT MISSION
@@ -2344,37 +2344,46 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       - Call 2 isolated from Call 1 try/except to prevent cross-contamination
       - PDF support in image cropping (pdf2image conversion)
 
-      KNOWN ISSUES (Day 140 work):
-      - Call 1 applies wrong column headers to Gourmet Pizza section (4 variants
-        instead of 3, wrong size labels, wrong prices $14.75 vs $17.95). Root cause:
-        regular Pizza has 4 columns, Gourmet Pizza has 3 different columns, and
-        Call 1 doesn't detect per-section column headers.
-      - Call 1 extracts section headers as items ("Gourmet Pizza" as item #28).
-        Prompt says "don't include headers" but it still happens.
-      - Call 2 Sonnet misses obvious price errors ($14.75 vs $17.95 on same image).
-        May need OCR text cross-check or stronger prompt instructions.
-      - Bbox accuracy still poor (crop showed Pizza instead of Sandwiches). Need
-        Tesseract word-level bbox matching instead of Claude coordinate estimates.
-      - "Pita/Wrap/White" hallucinated variant — Sonnet misread bread choice text
-        ("Choice of Rye, White") as a price column. Prompt needs: "bread choices
-        are NOT price columns."
+      KNOWN ISSUES: ALL RESOLVED by Day 140 Google Vision OCR integration.
 
-      COST PER UPLOAD (current):
-      - Call 1 (Opus + thinking): ~$2.00, ~4 min
-      - Call 2 (Sonnet x10 categories): ~$0.40, ~1.7 min
-      - Total: ~$2.40, ~6 min
+  [x] Day 140: OCR Pipeline Lockdown (April 8, 2026) *** MAJOR BREAKTHROUGH ***
+      PROBLEM: Tesseract couldn't read dot-leader prices, decorative banners, or
+        dense multi-column layouts. Claude kept "smoothing" prices for consistency
+        (saw $11.99, changed to $9.99 to match neighbors). Hours of prompt tuning
+        couldn't fix it — the reasoning engine overrode correct readings.
 
-      ARCHITECTURE DECISION: Opus stays on Call 1 (structural quality too important).
-      Sonnet stays on Call 2 corrections (focused task, cheap, fast). Do NOT swap
-      Sonnet into Call 1 — tested and it makes bad structural decisions.
+      SOLUTION: Replaced Tesseract with Google Cloud Vision API as primary OCR.
+        Vision reads EVERYTHING accurately — dot-leaders, banners, stylized text.
+        OCR text declared "absolute source of truth" in prompt — Claude copies
+        prices verbatim, no reasoning allowed.
 
-  [ ] Day 140: Call 1 + Call 2 Accuracy Fixes
-      Priority 1: Call 1 prompt — per-section column headers (Gourmet Pizza has
-        12" Sml / 16" Lrg / Family, not 10" Mini / 12" Sm / 14" Lg / Family)
-      Priority 2: Call 1 prompt — stop extracting section headers as items
-      Priority 3: Call 2 prompt — pass OCR text, tighten price reading instructions,
-        add "bread choices are NOT price columns" rule
-      Priority 4: Bbox accuracy — Tesseract word-level matching
+      RESULTS (same dense pizza menu, all previously wrong):
+        - Burger prices: ALL CORRECT (Double $11.99, Mama's $9.99, Russian $9.99)
+        - Mama's Burger: FOUND (was missing in every previous run)
+        - Wraps: $10.00/$14.00 from banner — CORRECT (was $0, $6.95, $9.95, $11.95)
+        - Reuben: $11.95/$13.95 — CORRECT (was being smoothed to $9.95)
+        - Pizza section-scoped columns: CORRECT (4 sizes vs 3 sizes per section)
+        - French Fries, Curly Fries, Garlic Bread: FOUND with prices
+
+      WHAT SHIPPED:
+        - _ocr_via_google_vision() in portal/app.py — Vision API with Tesseract fallback
+        - Call 1 prompt rewritten: OCR text = absolute truth, no price overrides allowed
+        - Call 2 prompt rewritten: line-by-line per-category audit
+        - Calls 2 & 3 no longer skipped in thinking mode — always run
+        - raw_line verification: Claude must quote source text, code cross-checks prices
+        - Google Cloud Vision API + Google Places API keys configured
+        - Anti-consistency-smoothing rules in both Call 1 and Call 2 prompts
+
+      REMAINING TWEAKS (still Day 140):
+        - Individual toppings/sauces not extracted (collapsed into one item)
+        - W/ Cheese options as separate items instead of variants
+        - Shared section descriptions not applied to all items
+        - Evaluate dropping Calls 2 & 3 (may be unnecessary with Vision OCR)
+        - Google Places API live test for price comparison
+        - Speed optimization (target: under 2 min)
+
+      COST PER UPLOAD: ~$2.00 (Call 1 Opus) + ~$0.001 (Vision OCR) = ~$2.00
+        (down from ~$2.40 if Calls 2 & 3 are dropped)
   [ ] Day 141: (ABSORBED INTO Day 139.5 — scope pulled forward April 5, 2026)
   [ ] Day 142-143: Non-image format support + polish
       - CSV/XLSX: render as HTML table preview, highlight source row per item
