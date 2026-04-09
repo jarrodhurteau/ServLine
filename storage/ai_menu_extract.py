@@ -270,9 +270,14 @@ def _validate_descriptions(items: List[Dict[str, Any]]) -> int:
 # ---------------------------------------------------------------------------
 # "thinking" = single Opus call with extended thinking (skips Calls 2 & 3)
 # "3call"    = full 3-call pipeline: Call 1 → Call 2 (vision) → Call 3 (reconcile)
-PIPELINE_MODE = "thinking"  # Day 140: keep thinking for structural quality; Call 2 now runs regardless
+PIPELINE_MODE = "thinking"  # Day 140: Opus + thinking required — Sonnet drops too many items
 EXTENDED_THINKING = PIPELINE_MODE == "thinking"
 THINKING_MODEL = "claude-opus-4-6"  # Model used when PIPELINE_MODE == "thinking"
+
+# Day 140: Pipeline speed optimization — skip redundant calls when Vision OCR
+# provides accurate text.  Set to True to bypass each call.
+SKIP_CALL2 = True   # Skip per-category visual verification (Call 2)
+SKIP_CALL3 = True   # Skip targeted reconciliation (Call 3)
 
 
 # ---------------------------------------------------------------------------
@@ -788,13 +793,52 @@ Do NOT substitute a neighbor's price for consistency. \
 If the OCR says an item is $11.99, you output $11.99 — even if every other item \
 in that section is $9.99. The OCR is right. You are not allowed to override it.
 
+THIS IS CRITICAL — PRICE ACCURACY IS THE ENTIRE POINT OF THIS SERVICE. \
+If you glaze over prices or generalize "all items in this section are $X.XX" \
+instead of reading each line individually, the output is USELESS and the \
+service fails. Real menus have outlier prices — one item in a group of 7 \
+will cost more or less than the rest. You MUST find those differences. \
+Read EVERY line in the OCR text as its own independent lookup. \
+Never assume. Never generalize. Never smooth.
+
 WHAT IS AN ITEM:
 Each item = one product a customer can order. Rules:
 - Split compound items: "Beef or Chicken Empanadas" → two items.
-- Each named topping and sauce is a separate item.
 - Quantity variants (6 Pcs, 10 Pcs) are separate items.
 - Section headers (bold/large/centered text like "GOURMET PIZZA") are NOT items.
 - Use Title Case for names even if menu is ALL CAPS.
+- Extract EVERY item. Missing even one is a failure. Go line by line.
+
+MODIFIERS, TOPPINGS, & SAUCES — USE "subcategory" FIELD:
+All of these are POS add-on options. Extract each as a separate item in the \
+SAME category they appear under on the menu. Set "subcategory" to group them. \
+Rules:
+- Named toppings (Pepperoni, Mushrooms, Bacon, etc.) → each is a separate \
+item with the add-on price. Do NOT collapse into "Each Topping Add". \
+Category = their parent section (e.g., "Pizza"), subcategory = "Toppings". \
+Example: "TOPPINGS Sm $1.50 Lg $2.00" with "Pepperoni, Mushrooms, Bacon" → \
+3 items, category "Pizza", subcategory "Toppings", each with sizes.
+- Sauce flavors (Hot, Mild, BBQ, Honey BBQ, etc.) → each a separate $0 item. \
+Category = parent section (e.g., "Wings"), subcategory = "Wing Sauces".
+- "Choice of Sauce: Red, White, Pesto..." → each a separate $0 item. \
+Category = parent section (e.g., "Pizza"), subcategory = "Sauce Options".
+- "Choice of Rye, White" → each a $0 item. Category = parent section, \
+subcategory = "Bread Options".
+- "Add Bacon $1 extra" → item at stated price. Category = parent section, \
+subcategory = "Add-Ons".
+
+"W/ CHEESE" AND ADD-ON VARIANTS:
+- When a base item has a "W/ Cheese" version at a higher price, these are \
+ONE item with a size variant, NOT two separate items. \
+Example: "French Fries $6.00 / French Fries W/ Cheese $8.95" → \
+one item "French Fries" with sizes [{label: "Regular", price: 6.00}, \
+{label: "W/ Cheese", price: 8.95}]. Same for Curly Fries, Garlic Bread, etc.
+
+CATEGORIES — USE THE MENU'S OWN SECTION HEADERS:
+- The "category" field MUST match the menu's printed section header. \
+If the menu says "APPETIZERS" and lists French Fries under it, the category \
+is "Appetizers" — do NOT reclassify items into "Sides" or other categories \
+that don't appear on the menu. Use the menu's own organization.
 
 SECTION STRUCTURE (use the IMAGE to determine):
 - Each section has its own header and its own price columns. \
@@ -804,14 +848,23 @@ with items listed below having no individual prices — apply those shared \
 prices as size variants to every item in that section.
 - Multi-column menus: each column has its own headers. A header in the \
 right column does not apply to items in the left column.
-- Shared descriptions ("All sandwiches come with...") apply to every item below.
-- Choice lists (bread types, sauce options) go in description, not as size variants.
+- Shared descriptions ("All sandwiches come with...", "All calzones stuffed with...") \
+apply to EVERY item in that section as part of each item's description.
+- "Choice of" lists are POS modifier options. Extract each choice as a \
+separate $0 item in the SAME category where it appears on the menu, with \
+"subcategory" set to a descriptive group (e.g., "Sauce Options", "Bread Options"). \
+Examples: "Choice of Sauce: Red, White, Pesto" under Pizza → 3 items in \
+category "Pizza", subcategory "Sauce Options", price $0.
 
-PRICES — READ EACH LINE:
-- Go through the OCR text AND the image LINE BY LINE. Each item has its own price(s) \
-on its own line — do not copy one item's price to its neighbors.
-- Items in the same section often have DIFFERENT prices (e.g., Double Burger $11.99 \
-while others are $9.99). Read each line individually.
+PRICES — READ EACH LINE INDEPENDENTLY (THIS IS YOUR CORE JOB):
+- Go through the OCR text LINE BY LINE. For EACH item, find its SPECIFIC line in \
+the OCR text and read the price(s) from THAT line. Do not batch-process sections. \
+Do not assume a section has uniform pricing. Treat every single line as if it \
+could have a completely different price than its neighbors — because it often does.
+- PRICE SMOOTHING IS THE #1 ERROR AND WILL BREAK THE OUTPUT. When you see a group \
+of items (like 7 melts), do NOT think "they're all $9.95." Go line by line: \
+find each item's name in the OCR text, read the digits after it. If one says \
+11.95 while the rest say 9.95, output 11.95. The OCR is always right.
 - DOT LEADERS: Menus use dots/periods (".......") to connect an item name on the LEFT \
 to its price(s) on the RIGHT of the same line. Example: \
 "DOUBLE BURGER Lettuce, tomato...........11.99.......15.99" means Double Burger \
@@ -840,7 +893,8 @@ OUTPUT — return ONLY valid JSON:
         {"label": "Large 14\\"", "price": 16.99}
       ],
       "raw_line": "MARGHERITA PIZZA Fresh mozzarella, basil ....... 12.99 ....... 16.99",
-      "bbox": {"x_pct": 5, "y_pct": 16, "w_pct": 30, "h_pct": 4, "page": 1}
+      "bbox": {"x_pct": 5, "y_pct": 16, "w_pct": 30, "h_pct": 4, "page": 1},
+      "subcategory": null
     }
   ]
 }
@@ -852,6 +906,9 @@ ITEM FIELDS:
 - "category": ONE of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, \
 Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, \
 Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other
+- "subcategory": for modifiers/add-ons/toppings/sauces, a descriptive group \
+name like "Toppings", "Sauce Options", "Bread Options", "Add-Ons", "Wing Sauces". \
+null for regular orderable items.
 - "sizes": array of {label, price} for multi-price items. Empty array if single price.
 - "raw_line": the EXACT text you read from the menu for this item, including prices. \
 Copy the line verbatim — this is used to verify your extraction is correct. \
@@ -860,11 +917,18 @@ If the section uses shared header prices, quote the header line instead.
 Err slightly larger. page is 1-based."""
 
 _DETECT_USER_PROMPT = """\
-Extract every menu item. The OCR text below is from a high-accuracy scanner — \
+Extract EVERY menu item — missing even one item is a failure. Go section by section, \
+line by line. The OCR text below is from a high-accuracy scanner — \
 every price and name in it is CORRECT. Use it as-is for all prices and names. \
 Use the image ONLY for structure: sections, layout, what is a header vs item.
 
 DO NOT change any price from the OCR text. Copy prices exactly as they appear.
+
+REMEMBER:
+- Each named topping and sauce → separate item (not collapsed into one)
+- "W/ Cheese" versions → size variant of the base item, not a separate item
+- Shared section descriptions → copy into every item in that section
+- Modifiers (sauces, bread choices, add-ons) → separate items in their PARENT category
 
 OCR TEXT (absolute source of truth):
 ---
@@ -1117,11 +1181,14 @@ def _normalize_detected_items(raw_items: List[Any]) -> List[Dict[str, Any]]:
             "page": max(1, int(raw_bbox.get("page", 1) or 1)),
         }
 
+        subcategory = (it.get("subcategory") or "").strip() or None
+
         result.append({
             "name": name,
             "description": description,
             "price": price,
             "category": category,
+            "subcategory": subcategory,
             "sizes": sizes,
             "bbox": bbox,
         })
@@ -1435,8 +1502,78 @@ def _verify_prices_against_raw(item: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+def _verify_prices_against_ocr(item: Dict[str, Any], ocr_lines: List[str]) -> Dict[str, Any]:
+    """Cross-check Claude's prices against the ACTUAL OCR text (not Claude's raw_line).
+
+    Finds the OCR line matching this item's name and compares prices.
+    This catches cases where Claude hallucinated both the price AND the raw_line.
+    """
+    name = (item.get("name") or "").strip()
+    if not name or not ocr_lines:
+        return item
+
+    # Skip $0 items (sauces, toppings with no standalone price) — they're
+    # intentionally priceless and would false-match random OCR lines.
+    claude_price = _to_float(item.get("price"))
+    sizes = item.get("sizes") or []
+    if claude_price == 0 and not sizes:
+        return item
+
+    # Find the OCR line that STARTS WITH this item's name (case-insensitive).
+    # "Contains" matching is too loose — "BBQ" matches "BBQ CHICKEN PIZZA".
+    name_lower = name.lower()
+    name_words = name_lower.split()
+    if not name_words or len(name_words[0]) < 4:
+        return item  # Skip short/generic names to avoid false matches
+
+    matching_line = None
+    for line in ocr_lines:
+        line_stripped = line.strip().lower()
+        # Line must START with the first word of the item name
+        if not line_stripped.startswith(name_words[0]):
+            continue
+        if not _extract_prices_from_raw(line):
+            continue
+        # Best case: first 2 words match. Fallback: first word starts the line
+        # (handles "Reuben Melt" matching OCR line "REUBEN Corned beef...")
+        if len(name_words) >= 2 and " ".join(name_words[:2]) in line_stripped:
+            matching_line = line
+            break
+        elif not matching_line:
+            # First-word-only match — keep looking for a better match
+            matching_line = line
+
+    if not matching_line:
+        return item
+
+    ocr_prices = _extract_prices_from_raw(matching_line)
+    if not ocr_prices:
+        return item
+
+    if sizes and len(ocr_prices) == len(sizes):
+        changed = False
+        for i, (op, s) in enumerate(zip(ocr_prices, sizes)):
+            cp = _to_float(s.get("price"))
+            if abs(op - cp) > 0.001:
+                print(f"[OCR-Verify] Price override: {name} "
+                      f"size {i}: ${cp:.2f} -> ${op:.2f} (OCR: {matching_line.strip()[:80]})")
+                sizes[i]["price"] = op
+                changed = True
+        if changed:
+            item["sizes"] = sizes
+            item["price"] = ocr_prices[0]
+    elif not sizes and ocr_prices:
+        if abs(ocr_prices[0] - claude_price) > 0.001:
+            print(f"[OCR-Verify] Price override: {name} "
+                  f"${claude_price:.2f} -> ${ocr_prices[0]:.2f} (OCR: {matching_line.strip()[:80]})")
+            item["price"] = ocr_prices[0]
+
+    return item
+
+
 def elements_to_draft_rows(
     items: List[Dict[str, Any]],
+    ocr_text: str = "",
 ) -> tuple:
     """Convert detected items to draft rows + coordinate data.
 
@@ -1444,11 +1581,14 @@ def elements_to_draft_rows(
     boxes only for wizard highlighting, NOT for structure inference.
     Day 140: raw_line price verification — cross-checks Claude's prices
     against the text it quoted. Catches consistency-smoothing.
+    Day 140: OCR text verification — second pass against actual OCR text
+    to catch cases where Claude hallucinated both price AND raw_line.
 
     Returns (draft_rows, coord_data) where:
     - draft_rows: list of dicts for upsert_draft_items()
     - coord_data: list of dicts keyed by 'position' for post-insert item_id linking
     """
+    ocr_lines = ocr_text.strip().splitlines() if ocr_text else []
     draft_rows = []
     coord_data = []
     for pos, it in enumerate(items, start=1):
@@ -1458,6 +1598,9 @@ def elements_to_draft_rows(
 
         # Day 140: verify prices against raw_line before processing
         it = _verify_prices_against_raw(it)
+        # Day 140: second pass — verify against actual OCR text
+        if ocr_lines:
+            it = _verify_prices_against_ocr(it, ocr_lines)
 
         price = _to_float(it.get("price"))
         price_cents = int(round(price * 100))
@@ -1486,6 +1629,7 @@ def elements_to_draft_rows(
             "description": it.get("description"),
             "price_cents": price_cents,
             "category": it.get("category") or "Other",
+            "subcategory": it.get("subcategory"),
             "position": pos,
             "confidence": 90,
         }

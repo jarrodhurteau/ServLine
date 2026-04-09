@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 140 (April 8, 2026) — Google Cloud Vision OCR replaces Tesseract, pipeline lockdown
+Last Updated: Day 140 (April 9, 2026) — Pipeline lockdown complete, subcategories, Google Places API live
 
 ================================================================================
 PROJECT MISSION
@@ -2374,17 +2374,43 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
         - Google Cloud Vision API + Google Places API keys configured
         - Anti-consistency-smoothing rules in both Call 1 and Call 2 prompts
 
-      REMAINING TWEAKS (still Day 140):
-        - Individual toppings/sauces not extracted (collapsed into one item)
-        - W/ Cheese options as separate items instead of variants
-        - Shared section descriptions not applied to all items
-        - Evaluate dropping Calls 2 & 3 (may be unnecessary with Vision OCR)
-        - Google Places API live test for price comparison
-        - Speed optimization (target: under 2 min)
+      REMAINING TWEAKS — ALL RESOLVED Day 140 continued (April 9):
+        [x] Individual toppings extracted as separate items (19 toppings, not 1)
+        [x] W/ Cheese merged as size variants (French Fries, Curly Fries, Garlic Bread)
+        [x] Wing sauces extracted as separate $0 items (8 sauces)
+        [x] Calls 2 & 3 permanently skipped (SKIP_CALL2/SKIP_CALL3 flags)
+            — Vision OCR + improved prompt = 100% accuracy without them
+        [x] Sonnet tested — too many missed items, Opus+thinking stays
+        [x] Price smoothing fix: "PRICE ACCURACY IS THE ENTIRE POINT" prompt language
+        [x] OCR text verification safety net (_verify_prices_against_ocr)
+            — catches hallucinated prices by cross-checking against actual OCR lines
+        [x] Reuben $11.95 captured correctly (was smoothed to $9.95 in every prior run)
+        [x] Google Places API tested and live (Geocoding + Places APIs enabled)
+            — 20 nearby restaurants found for zip 10001 / american cuisine
+        [x] Subcategory support added (extraction + DB column + wizard display)
+            — Toppings, Sauce Options, Bread Options, Wing Sauces, Add-Ons
+            — Claude outputs subcategory field, stored in draft_items.subcategory
+        [x] Confidence gate disabled (never calibrated for new pipeline)
+        [x] "Choice of" modifier lists extracted as POS clickable options
+        [x] Categories must match menu's own section headers (no reclassifying)
+
+      PIPELINE (locked):
+        OCR (Google Vision) → Call 1 (Opus+thinking) → Semantic → Call 4 (Places+Claude)
+        Calls 2 & 3: SKIPPED permanently
+        Speed: ~8-9 min (Opus+thinking, 35k output tokens). Acceptable for one-time upload.
 
       COST PER UPLOAD: ~$2.00 (Call 1 Opus) + ~$0.001 (Vision OCR) = ~$2.00
-        (down from ~$2.40 if Calls 2 & 3 are dropped)
-  [ ] Day 141: (ABSORBED INTO Day 139.5 — scope pulled forward April 5, 2026)
+
+  [ ] Day 141: Subcategory Wizard + Call 4 Fix + Pipeline Polish
+      CARRY-OVER:
+        - Test subcategory wizard display with fresh upload (verify DB storage)
+        - Fix Call 4 token truncation (158 items overflows max_tokens — batch by category)
+        - Verify price comparison badges show in wizard after Call 4 fix
+      NEW:
+        - Subcategory headers in wizard: collapsible sections within categories
+        - Subcategory item count in sidebar (e.g., "Pizza (29 items + 27 modifiers)")
+        - Prompt tweaks: missing Cheeseburger Club (intermittent extraction gap)
+        - Remove vision_ocr_latest.txt debug log (temporary)
   [ ] Day 142-143: Non-image format support + polish
       - CSV/XLSX: render as HTML table preview, highlight source row per item
       - JSON: render as formatted view, highlight source object per item

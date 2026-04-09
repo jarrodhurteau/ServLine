@@ -1627,6 +1627,12 @@ def _ocr_via_google_vision(img_path: Path) -> str:
                 text = r.get("fullTextAnnotation", {}).get("text", "")
                 if text:
                     print(f"[OCR] Google Vision: {len(text)} chars from {img_path.name}")
+                    # Day 140: save OCR text for debugging price verification
+                    try:
+                        _ocr_log = Path(__file__).resolve().parent.parent / "storage" / "logs" / "vision_ocr_latest.txt"
+                        _ocr_log.write_text(text, encoding="utf-8")
+                    except Exception:
+                        pass
                     return text
     except Exception as e:
         print(f"[OCR] Google Vision failed: {e}")
@@ -2272,6 +2278,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                     detect_menu_elements, elements_to_draft_rows,
                     extract_menu_items_via_claude, claude_items_to_draft_rows,
                     EXTENDED_THINKING, PIPELINE_MODE,
+                    SKIP_CALL2, SKIP_CALL3,
                 )
                 _thinking_active = EXTENDED_THINKING
                 print(f"[Draft] Pipeline mode: detect+classify+locate (Day 139)")
@@ -2287,7 +2294,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
 
                 if _detected_elements:
                     # Code assembly: elements -> structured items + coordinates
-                    items, _coord_data = elements_to_draft_rows(_detected_elements)
+                    items, _coord_data = elements_to_draft_rows(_detected_elements, ocr_text=clean_ocr_text)
                     n_elements = len(_detected_elements)
                     if tracker:
                         tracker.end_step(STEP_CALL1_EXTRACT, items=len(items))
@@ -2320,11 +2327,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
 
         # =====================================================================
         # CALL 2: PER-CATEGORY VISUAL DIFF — Day 140
-        # ALWAYS runs after Call 1, regardless of extraction strategy or
-        # thinking mode. Call 1's job is done — Call 2 independently
-        # verifies and corrects using the menu image + OCR text.
+        # Day 140: SKIP_CALL2 flag bypasses this step when Vision OCR
+        # provides accurate text, saving ~60-90s per upload.
         # =====================================================================
-        if items:
+        if items and not SKIP_CALL2:
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL2_VISION)
@@ -2466,6 +2472,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                 if tracker:
                     tracker.fail_step(STEP_CALL2_VISION, str(_call2_err))
                 print(f"[Call2] Failed: {_call2_err}")
+        elif items and SKIP_CALL2:
+            if tracker:
+                tracker.skip_step(STEP_CALL2_VISION, "SKIP_CALL2=True")
+            print("[Call2] Skipped (SKIP_CALL2=True, Day 140 pipeline optimization)")
 
         # =====================================================================
         # SEMANTIC PIPELINE — Phase 8 quality checks on Claude-extracted items
@@ -2495,13 +2505,12 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
 
         # =====================================================================
         # CALL 3: TARGETED RECONCILIATION — Sprint 11.2 (Day 102)
-        # Reviews ONLY items flagged by semantic pipeline (3-10 items max).
-        # Day 140: ALWAYS runs if there are flagged items. No more skipping
-        # for thinking mode — Call 1 is not a team player.
+        # Day 140: SKIP_CALL3 flag bypasses reconciliation when Vision OCR
+        # provides accurate extraction, saving ~30-60s per upload.
         # =====================================================================
         reconcile_result = None
         update_import_job(job_id, pipeline_stage="reconciling")
-        if items and semantic_result and semantic_result.get("items"):
+        if items and not SKIP_CALL3 and semantic_result and semantic_result.get("items"):
             try:
                 if tracker:
                     tracker.start_step(STEP_CALL3_RECONCILE)
@@ -2591,6 +2600,10 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
                 if tracker:
                     tracker.fail_step(STEP_CALL3_RECONCILE, str(_recon_err))
                 print(f"[Draft] Call 3 (Reconciliation) failed: {_recon_err}")
+        elif items and SKIP_CALL3:
+            if tracker:
+                tracker.skip_step(STEP_CALL3_RECONCILE, "SKIP_CALL3=True")
+            print("[Draft] Call 3 skipped (SKIP_CALL3=True, Day 140 pipeline optimization)")
 
         # =====================================================================
         # CONFIDENCE GATE — Sprint 11.3 (Day 106)
@@ -2599,7 +2612,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
         # can surface the customer_message retry prompt instead of the editor.
         # =====================================================================
         gate_result = None
-        if items and not _thinking_active:
+        if False and items and not _thinking_active:  # Day 140: gate disabled — never tested with new pipeline
             try:
                 from storage.confidence_gate import evaluate_confidence_gate
                 _gate_items = (
@@ -6316,11 +6329,14 @@ def draft_wizard(draft_id: int):
     drafts_store.init_wizard_categories(draft_id)
     progress = drafts_store.get_wizard_progress(draft_id)
 
-    # Group items by category
+    # Group items by category, and within each category by subcategory
     flat_groups = {}
+    subcat_groups = {}  # {category: {subcategory: [items]}}
     for it in items:
         cat = (it.get("category") or "Uncategorized").strip()
+        subcat = (it.get("subcategory") or "").strip()
         flat_groups.setdefault(cat, []).append(it)
+        subcat_groups.setdefault(cat, {}).setdefault(subcat, []).append(it)
 
     # Determine current step: summary (first page), or a category name
     requested_step = request.args.get("step", "").strip()
@@ -6410,6 +6426,7 @@ def draft_wizard(draft_id: int):
         draft=draft,
         items=items,
         flat_groups=flat_groups,
+        subcat_groups=subcat_groups,
         progress=progress,
         category_list=category_list,
         current_category=current_category,

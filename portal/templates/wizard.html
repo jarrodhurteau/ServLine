@@ -198,6 +198,28 @@
       color: var(--muted);
     }
 
+    /* ===== Subcategory Headers ===== */
+    .wiz-subcategory-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px 6px;
+      margin-top: 12px;
+      border-bottom: 2px solid var(--line);
+    }
+    .wiz-subcategory-header:first-child { margin-top: 0; }
+    .wiz-subcat-label {
+      font-size: .95rem;
+      font-weight: 600;
+      color: #2E5B5E;
+      letter-spacing: .02em;
+    }
+    body.theme-customer .wiz-subcat-label { color: #B85C38; }
+    .wiz-subcat-count {
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
     /* ===== Item Cards ===== */
     .wizard-items {
       display: flex;
@@ -978,15 +1000,29 @@
       </div>
       {% endif %}
 
-      <!-- Item Cards -->
+      <!-- Item Cards (grouped by subcategory) -->
       <div class="wizard-items">
-        {% for it in cat_items %}
+        {% set ns = namespace(item_num=0) %}
+        {% set cat_subcats = subcat_groups.get(current_category, {}) %}
+        {# Render main items (no subcategory) first, then subcategory groups #}
+        {% set main_items = cat_subcats.get('', []) %}
+        {% set subcat_names = cat_subcats.keys()|list|sort %}
+        {% for sc_name in subcat_names %}
+        {% set sc_items = cat_subcats[sc_name] %}
+        {% if sc_name %}
+        <div class="wiz-subcategory-header">
+          <div class="wiz-subcat-label">{{ sc_name }}</div>
+          <div class="wiz-subcat-count">{{ sc_items|length }} item{{ 's' if sc_items|length != 1 else '' }}</div>
+        </div>
+        {% endif %}
+        {% for it in sc_items %}
+        {% set ns.item_num = ns.item_num + 1 %}
         <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
           <!-- Display mode (click to edit) -->
           <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle'))wizEdit(this.parentElement)">
             <div class="wiz-item-header">
               <span class="wiz-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;&#8942;</span>
-              <span class="wiz-item-num">{{ loop.index }}.</span>
+              <span class="wiz-item-num">{{ ns.item_num }}.</span>
               <div class="wiz-item-name">{% if it.name %}{{ it.name|e }}{% else %}<span style="color:var(--muted); font-style:italic;">Item name</span>{% endif %}</div>
               {% if it.price_cents %}
               <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
@@ -1067,7 +1103,7 @@
           <div class="wiz-edit-form">
             <div class="wiz-item-header">
               <span class="wiz-drag-handle">&#8942;&#8942;</span>
-              <span class="wiz-item-num">{{ loop.index }}.</span>
+              <span class="wiz-item-num">{{ ns.item_num }}.</span>
               <input type="text" class="wiz-f-name" value="{{ it.name|e }}" placeholder="Item name" />
               <span style="font-weight:600; font-size:.95rem; color:var(--ink); flex-shrink:0; display:flex; align-items:baseline;">$<input type="text" class="wiz-f-price" value="{% if it.price_cents %}{{ '%.2f'|format(it.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" /></span>
             </div>
@@ -1114,6 +1150,7 @@
           </div>
         </div>
         {% endfor %}
+        {% endfor %}{# end subcat_names loop #}
       </div>
 
       <!-- Add Item button -->

@@ -568,11 +568,19 @@ def _normalize_item_for_db(raw: Any) -> Optional[Dict[str, Any]]:
     else:
         kitchen_name = str(kitchen_name_raw).strip() or None
 
+    # Subcategory (optional, nullable) — Day 140: modifier grouping
+    subcat_raw = raw.get("subcategory")
+    if subcat_raw is None:
+        subcategory: Optional[str] = None
+    else:
+        subcategory = str(subcat_raw).strip() or None
+
     return {
         "name": name,
         "description": description,
         "price_cents": price_cents,
         "category": category,
+        "subcategory": subcategory,
         "position": position,
         "confidence": confidence,
         "kitchen_name": kitchen_name,
@@ -1480,6 +1488,7 @@ def _insert_items_bulk(
             desc = norm["description"]
             price_cents = norm["price_cents"]
             category = norm["category"]
+            subcategory = norm["subcategory"]
             position = norm["position"]
             confidence = norm["confidence"]
             kitchen_name = norm["kitchen_name"]
@@ -1591,6 +1600,7 @@ def upsert_draft_items(
             desc = norm["description"]
             price_cents = norm["price_cents"]
             category = norm["category"]
+            subcategory = norm["subcategory"]
             position = norm["position"]
             confidence = norm["confidence"]
             kitchen_name = norm["kitchen_name"]
@@ -1605,6 +1615,7 @@ def upsert_draft_items(
                         description=?,
                         price_cents=?,
                         category=?,
+                        subcategory=?,
                         position=?,
                         confidence=?,
                         kitchen_name=?,
@@ -1616,6 +1627,7 @@ def upsert_draft_items(
                         desc,
                         price_cents,
                         category,
+                        subcategory,
                         position,
                         confidence,
                         kitchen_name,
@@ -1637,13 +1649,14 @@ def upsert_draft_items(
                             description,
                             price_cents,
                             category,
+                            subcategory,
                             position,
                             confidence,
                             kitchen_name,
                             created_at,
                             updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             int(draft_id),
@@ -1651,6 +1664,7 @@ def upsert_draft_items(
                             desc,
                             price_cents,
                             category,
+                            subcategory,
                             position,
                             confidence,
                             kitchen_name,
@@ -1669,13 +1683,14 @@ def upsert_draft_items(
                         description,
                         price_cents,
                         category,
+                        subcategory,
                         position,
                         confidence,
                         kitchen_name,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         int(draft_id),
@@ -1683,6 +1698,7 @@ def upsert_draft_items(
                         desc,
                         price_cents,
                         category,
+                        subcategory,
                         position,
                         confidence,
                         kitchen_name,
