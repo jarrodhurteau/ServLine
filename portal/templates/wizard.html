@@ -14,16 +14,69 @@
   <style>
     /* ===== Wizard Layout ===== */
     .wizard-container {
-      display: grid;
-      grid-template-columns: 280px 1fr 450px;
-      gap: 0;
+      display: flex;
+      flex-direction: row;
       width: 100%;
       min-height: calc(100vh - 200px);
     }
-    @media (max-width: 900px) {
-      .wizard-container { grid-template-columns: 1fr; }
-      .wizard-sidebar, .wizard-preview { position: static !important; max-height: none !important; }
+    .wizard-sidebar { width: 280px; flex-shrink: 0; }
+    .wizard-main { flex: 1; min-width: 320px; }
+    .wizard-preview {
+      width: 470px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 80px;
+      max-height: calc(100vh - 100px);
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
+    @media (max-width: 900px) {
+      .wizard-container { flex-direction: column; }
+      .wizard-sidebar, .wizard-preview {
+        width: 100% !important;
+        position: static !important;
+        max-height: none !important;
+      }
+      .col-resizer { display: none; }
+    }
+    /* Column resizer handles (between sidebar/main and main/preview) */
+    .col-resizer {
+      width: 6px;
+      flex-shrink: 0;
+      cursor: col-resize;
+      background: transparent;
+      transition: background .15s;
+      position: relative;
+      z-index: 10;
+    }
+    .col-resizer:hover, .col-resizer.dragging {
+      background: rgba(184, 92, 56, 0.25);
+    }
+    .col-resizer::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      height: 100%;
+      background: #8B4513;
+      opacity: .7;
+      border-radius: 1px;
+      transition: opacity .15s, background .15s, width .15s;
+    }
+    .col-resizer:hover::after, .col-resizer.dragging::after {
+      opacity: 1;
+      width: 3px;
+      background: #B85C38;
+    }
+    .col-resizer:hover::after, .col-resizer.dragging::after {
+      background: #B85C38;
+    }
+    body.col-resizing { cursor: col-resize !important; user-select: none; }
+    body.col-resizing * { cursor: col-resize !important; }
 
     /* ===== Progress Header ===== */
     .wizard-header {
@@ -799,7 +852,6 @@
 
     /* ===== Selected Panel (under preview) ===== */
     .wiz-selected-panel {
-      margin-top: 16px;
       padding: 14px;
       background: var(--card-bg, #fff);
       border-radius: 10px;
@@ -964,115 +1016,108 @@
     .wiz-edit-actions .btn-delete-variants { color: #dc3545; }
     .wiz-edit-actions .btn-delete-variants:hover { background: rgba(220,53,69,.08); }
 
-    /* ===== Original File Preview (right column) ===== */
-    .wizard-preview {
-      position: sticky;
-      top: 80px;
-      max-height: calc(100vh - 100px);
-      overflow: hidden;
-      padding: 0 16px;
-    }
-    .preview-thumb {
+    /* Menu viewer — sits in the right column, pan + zoom inside */
+    .menu-viewer {
+      position: relative;
+      display: flex;
+      flex-direction: column;
       width: 100%;
-      height: auto;
-      object-fit: contain;
-      border-radius: 10px;
+      height: calc(100vh - 140px);
+      min-height: 240px;
+      min-width: 280px;
+      max-width: 95vw;
+      max-height: 95vh;
+      background: var(--card, #fff);
       border: 2px solid var(--line);
-      cursor: pointer;
-      transition: border-color .15s, box-shadow .15s;
-      display: block;
-      max-height: calc(100vh - 140px);
-    }
-    .preview-thumb:hover {
-      border-color: #B85C38;
-      box-shadow: 0 4px 16px rgba(0,0,0,.15);
-    }
-    .preview-label {
-      font-size: .7rem;
-      color: var(--muted);
-      text-align: center;
-      margin-top: 4px;
-    }
-
-    /* Lightbox overlay */
-    .preview-lightbox {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,.85);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-      cursor: grab;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.08);
       overflow: hidden;
     }
-    .preview-lightbox.open { display: flex; }
-    .preview-lightbox.dragging { cursor: grabbing; }
-    .preview-lightbox img {
-      max-width: 90vw;
-      max-height: 90vh;
-      border-radius: 10px;
-      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    /* Custom bottom-left resize handle */
+    .menu-viewer-resize-bl {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 18px;
+      height: 18px;
+      cursor: nesw-resize;
+      z-index: 20;
+      background: linear-gradient(45deg, transparent 40%, #8B4513 40%, #8B4513 55%, transparent 55%, transparent 65%, #8B4513 65%, #8B4513 80%, transparent 80%);
+      border-bottom-left-radius: 10px;
+      opacity: .7;
+      transition: opacity .15s;
+    }
+    .menu-viewer-resize-bl:hover { opacity: 1; }
+    .menu-viewer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--nav-bg, #FAF4EC);
+      border-bottom: 1px solid var(--line);
+      user-select: none;
+      flex-shrink: 0;
+    }
+    .menu-viewer-title {
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .menu-viewer-controls {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .menu-viewer-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: .82rem;
+      font-weight: 600;
+      line-height: 1;
+      transition: all .12s;
+    }
+    .menu-viewer-btn:hover {
+      background: rgba(0,0,0,.06);
+      color: var(--ink);
+    }
+    .menu-viewer-btn.close { font-size: 1.1rem; }
+    .menu-viewer-body {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      background: #2a2a2a;
+      cursor: grab;
+    }
+    .menu-viewer-body.dragging { cursor: grabbing; }
+    .menu-viewer-body img {
+      position: absolute;
+      top: 0;
+      left: 0;
       transform-origin: 0 0;
-      transition: none;
       user-select: none;
       -webkit-user-drag: none;
+      max-width: none;
     }
-    .preview-lightbox .lb-close {
+    .menu-viewer-hint {
       position: absolute;
-      top: 16px;
-      right: 24px;
-      font-size: 2rem;
-      color: rgba(255,255,255,.7);
-      cursor: pointer;
-      z-index: 10000;
-      line-height: 1;
-      transition: color .15s;
-    }
-    .preview-lightbox .lb-close:hover { color: #fff; }
-    .preview-lightbox .lb-hint {
-      position: absolute;
-      bottom: 20px;
+      bottom: 8px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: .75rem;
-      color: rgba(255,255,255,.45);
+      font-size: .68rem;
+      color: rgba(255,255,255,.5);
       pointer-events: none;
+      background: rgba(0,0,0,.4);
+      padding: 3px 8px;
+      border-radius: 10px;
     }
 
-    /* Day 139: Item highlight overlays on preview */
-    .preview-highlight-container {
-      position: relative;
-      display: inline-block;
-    }
-    .item-highlight {
-      position: absolute;
-      border: 2px solid rgba(46, 91, 94, 0.7);
-      background: rgba(46, 91, 94, 0.15);
-      border-radius: 3px;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.2s ease;
-      z-index: 10001;
-    }
-    .item-highlight.active {
-      opacity: 1;
-      border-color: #B85C38;
-      background: rgba(184, 92, 56, 0.25);
-      box-shadow: 0 0 8px rgba(184, 92, 56, 0.4);
-    }
-    .item-highlight.category-active {
-      opacity: 1;
-    }
-    /* Sidebar thumbnail highlights */
-    .preview-thumb-wrap {
-      position: relative;
-      display: inline-block;
-      cursor: pointer;
-    }
-    .preview-thumb-wrap .item-highlight {
-      z-index: 2;
-    }
   </style>
 
   {% if wizard_step == "summary" %}
@@ -1218,6 +1263,8 @@
         </div>
       </div>
     </div>
+
+    <div class="col-resizer" data-resizer="left" title="Drag to resize"></div>
 
     <!-- ===== Main: Current Category Items ===== -->
     <div class="wizard-main">
@@ -1481,15 +1528,28 @@
       {% endif %}
     </div>
 
-    <!-- ===== Right Column: Original File Preview ===== -->
+    <div class="col-resizer" data-resizer="right" title="Drag to resize"></div>
+
+    <!-- ===== Right Column: Original Menu Viewer + Selected Panel ===== -->
     <div class="wizard-preview">
       {% if source_job_id %}
-      <div class="preview-thumb-wrap" onclick="document.getElementById('preview-lightbox').classList.add('open')">
-        <img class="preview-thumb" id="sidebar-preview-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}"
-             alt="Original menu" />
-        <div id="sidebar-highlights"></div>
+      <div id="menu-viewer" class="menu-viewer">
+        <div class="menu-viewer-header" id="menu-viewer-header">
+          <div class="menu-viewer-title">
+            <span style="font-size:.95rem;">&#128196;</span> Original Menu
+          </div>
+          <div class="menu-viewer-controls">
+            <button class="menu-viewer-btn" onclick="menuViewerZoom(-1)" title="Zoom out">&minus;</button>
+            <button class="menu-viewer-btn" onclick="menuViewerReset()" title="Fit to window">Fit</button>
+            <button class="menu-viewer-btn" onclick="menuViewerZoom(1)" title="Zoom in">+</button>
+          </div>
+        </div>
+        <div class="menu-viewer-body" id="menu-viewer-body">
+          <img id="menu-viewer-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" draggable="false" />
+          <div class="menu-viewer-hint">Scroll to zoom &middot; Drag to pan</div>
+        </div>
+        <div class="menu-viewer-resize-bl" id="menu-viewer-resize-bl" title="Drag to resize"></div>
       </div>
-      <div class="preview-label">Click to expand &middot; Hover items to highlight</div>
       {% endif %}
 
       <!-- Selected Items Panel -->
@@ -3111,256 +3171,228 @@
 
   </script>
 
-  {# Lightbox for original file preview #}
-  {% if source_job_id %}
-  <div id="preview-lightbox" class="preview-lightbox">
-    <span class="lb-close" onclick="lbClose()">&times;</span>
-    <div id="lb-img-container" class="preview-highlight-container">
-      <img id="lb-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" />
-      <div id="lb-highlights"></div>
-    </div>
-    <div class="lb-hint">Scroll to zoom &middot; Drag to pan &middot; Hover items to highlight</div>
-  </div>
+  {# Column resizers — drag the dividers to resize sidebar / main / preview columns #}
   <script>
   (function() {
-    const lb = document.getElementById('preview-lightbox');
-    const img = document.getElementById('lb-img');
-    if (!lb || !img) return;
+    const sidebar = document.querySelector('.wizard-sidebar');
+    const preview = document.querySelector('.wizard-preview');
+    const resizers = document.querySelectorAll('.col-resizer');
+    if (!resizers.length) return;
 
+    const STORAGE_KEY = 'wizardColumnSizes';
+
+    // Load saved sizes
+    try {
+      const s = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
+      if (s.sidebar && sidebar) sidebar.style.width = s.sidebar + 'px';
+      if (s.preview && preview) preview.style.width = s.preview + 'px';
+    } catch (e) {}
+
+    function saveSizes() {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        sidebar: sidebar ? sidebar.offsetWidth : null,
+        preview: preview ? preview.offsetWidth : null,
+      }));
+    }
+
+    resizers.forEach(resizer => {
+      let dragging = false;
+      let startX = 0;
+      let startWidth = 0;
+      const target = resizer.dataset.resizer === 'left' ? sidebar : preview;
+      const isLeft = resizer.dataset.resizer === 'left';
+
+      resizer.addEventListener('mousedown', e => {
+        if (!target) return;
+        dragging = true;
+        startX = e.clientX;
+        startWidth = target.offsetWidth;
+        resizer.classList.add('dragging');
+        document.body.classList.add('col-resizing');
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const dx = e.clientX - startX;
+        // Left resizer grows sidebar to the right; right resizer shrinks preview as user drags right
+        const newWidth = isLeft ? (startWidth + dx) : (startWidth - dx);
+        const min = 200, max = window.innerWidth - 400;
+        target.style.width = Math.max(min, Math.min(max, newWidth)) + 'px';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        resizer.classList.remove('dragging');
+        document.body.classList.remove('col-resizing');
+        saveSizes();
+      });
+    });
+  })();
+  </script>
+
+  {# Menu viewer: pan + zoom inside the right column. Click to expand to lightbox #}
+  {% if source_job_id %}
+  <script>
+  (function() {
+    const viewer = document.getElementById('menu-viewer');
+    const body = document.getElementById('menu-viewer-body');
+    const img = document.getElementById('menu-viewer-img');
+    if (!viewer || !img) return;
+
+    const STORAGE_KEY = 'menuViewerState';
     let scale = 1, panX = 0, panY = 0;
-    let isDragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
-    let dragMoved = false;
-    const MIN_SCALE = 1, MAX_SCALE = 8;
+    let userInteracted = false;
 
     function applyTransform() {
       img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     }
 
-    function resetView() {
-      scale = 1; panX = 0; panY = 0;
-      img.style.transformOrigin = 'center center';
-      img.style.transform = 'none';
+    function fitImage() {
+      if (!img.naturalWidth) return;
+      const bw = body.clientWidth, bh = body.clientHeight;
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      scale = Math.min(bw / iw, bh / ih) * 0.98;
+      panX = (bw - iw * scale) / 2;
+      panY = (bh - ih * scale) / 2;
+      applyTransform();
+      saveState();
     }
 
-    window.lbClose = function() {
-      lb.classList.remove('open');
-      resetView();
+    function loadState() {
+      try {
+        const s = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
+        if (s.scale) { scale = s.scale; userInteracted = true; }
+        if (s.panX !== undefined) panX = s.panX;
+        if (s.panY !== undefined) panY = s.panY;
+        applyTransform();
+      } catch (e) {}
+    }
+
+    function saveState() {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ scale, panX, panY }));
+    }
+
+    window.menuViewerReset = function() {
+      fitImage();
     };
 
-    // Open lightbox — already handled by thumbnail onclick adding 'open' class
+    // Refit when the column is resized
+    const resizeObs = new ResizeObserver(() => {
+      if (!userInteracted) fitImage();
+    });
+    resizeObs.observe(body);
 
-    // Close on Escape
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && lb.classList.contains('open')) lbClose();
+    // Custom bottom-left resize handle — resizes viewer + syncs right column width
+    const resizeHandle = document.getElementById('menu-viewer-resize-bl');
+    const previewCol = document.querySelector('.wizard-preview');
+    if (resizeHandle && previewCol) {
+      let rzDragging = false, rzStartX = 0, rzStartY = 0, rzStartW = 0, rzStartH = 0, rzStartColW = 0;
+
+      resizeHandle.addEventListener('mousedown', e => {
+        rzDragging = true;
+        rzStartX = e.clientX;
+        rzStartY = e.clientY;
+        rzStartW = viewer.offsetWidth;
+        rzStartH = viewer.offsetHeight;
+        rzStartColW = previewCol.offsetWidth;
+        userInteracted = true;
+        document.body.classList.add('col-resizing');
+        e.preventDefault();
+        e.stopPropagation();
+      });
+
+      document.addEventListener('mousemove', e => {
+        if (!rzDragging) return;
+        // Bottom-LEFT: dragging left grows width, dragging right shrinks
+        const dx = rzStartX - e.clientX;
+        const dy = e.clientY - rzStartY;
+        const newW = Math.max(280, Math.min(window.innerWidth - 400, rzStartW + dx));
+        const newH = Math.max(240, Math.min(window.innerHeight - 100, rzStartH + dy));
+        // Sync the right column width so the middle column adjusts
+        previewCol.style.width = (rzStartColW + dx) + 'px';
+        viewer.style.height = newH + 'px';
+        // Width follows the column (since viewer is 100% of the column)
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!rzDragging) return;
+        rzDragging = false;
+        document.body.classList.remove('col-resizing');
+        try {
+          const s = JSON.parse(sessionStorage.getItem('wizardColumnSizes') || '{}');
+          s.preview = previewCol.offsetWidth;
+          sessionStorage.setItem('wizardColumnSizes', JSON.stringify(s));
+        } catch (e) {}
+      });
+    }
+
+
+    window.menuViewerZoom = function(dir) {
+      userInteracted = true;
+      const oldScale = scale;
+      scale = Math.min(10, Math.max(0.1, scale * (dir > 0 ? 1.25 : 0.8)));
+      const bw = body.clientWidth, bh = body.clientHeight;
+      const cx = bw / 2, cy = bh / 2;
+      const ratio = scale / oldScale;
+      panX = cx - ratio * (cx - panX);
+      panY = cy - ratio * (cy - panY);
+      applyTransform();
+      saveState();
+    };
+
+    // Body drag to pan image
+    let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
+    body.addEventListener('mousedown', e => {
+      panning = true;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panOrigX = panX;
+      panOrigY = panY;
+      body.classList.add('dragging');
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!panning) return;
+      userInteracted = true;
+      panX = panOrigX + e.clientX - panStartX;
+      panY = panOrigY + e.clientY - panStartY;
+      applyTransform();
+    });
+    document.addEventListener('mouseup', () => {
+      if (panning) { panning = false; body.classList.remove('dragging'); saveState(); }
     });
 
-    // Scroll to zoom
-    lb.addEventListener('wheel', e => {
+    // Scroll to zoom (toward cursor)
+    body.addEventListener('wheel', e => {
       e.preventDefault();
-      const rect = img.getBoundingClientRect();
-      // Mouse position relative to image
+      userInteracted = true;
+      const rect = body.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-
       const oldScale = scale;
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * delta));
-
-      if (scale === MIN_SCALE) {
-        panX = 0; panY = 0;
-      } else {
-        // Zoom toward cursor
-        const ratio = scale / oldScale;
-        panX = e.clientX - ratio * (e.clientX - panX);
-        panY = e.clientY - ratio * (e.clientY - panY);
-      }
-
-      img.style.transformOrigin = '0 0';
+      scale = Math.min(10, Math.max(0.1, scale * delta));
+      const ratio = scale / oldScale;
+      panX = mx - ratio * (mx - panX);
+      panY = my - ratio * (my - panY);
       applyTransform();
+      saveState();
     }, { passive: false });
 
-    // Drag to pan
-    lb.addEventListener('mousedown', e => {
-      if (e.target.closest('.lb-close')) return;
-      isDragging = true;
-      dragMoved = false;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-      panStartX = panX;
-      panStartY = panY;
-      lb.classList.add('dragging');
-      e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', e => {
-      if (!isDragging) return;
-      const dx = e.clientX - dragStartX;
-      const dy = e.clientY - dragStartY;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
-      panX = panStartX + dx;
-      panY = panStartY + dy;
-      img.style.transformOrigin = '0 0';
-      applyTransform();
-    });
-
-    document.addEventListener('mouseup', () => {
-      if (!isDragging) return;
-      isDragging = false;
-      lb.classList.remove('dragging');
-      // If didn't drag and scale is 1, close on click
-      if (!dragMoved && scale <= 1) {
-        lbClose();
+    // On image load: fit to viewer if user hasn't interacted yet
+    function init() {
+      loadState();
+      if (!userInteracted) {
+        if (img.complete && img.naturalWidth) fitImage();
+        else img.onload = () => { if (!userInteracted) fitImage(); };
       }
-    });
-
-    // Double-click to reset zoom
-    lb.addEventListener('dblclick', e => {
-      if (e.target.closest('.lb-close')) return;
-      e.preventDefault();
-      if (scale > 1) {
-        resetView();
-      } else {
-        // Zoom in 3x toward click position
-        const rect = img.getBoundingClientRect();
-        scale = 3;
-        panX = e.clientX - 3 * (e.clientX - panX);
-        panY = e.clientY - 3 * (e.clientY - panY);
-        img.style.transformOrigin = '0 0';
-        applyTransform();
-      }
-    });
-
-    // Touch support for mobile
-    let lastTouchDist = 0;
-    lb.addEventListener('touchstart', e => {
-      if (e.touches.length === 1) {
-        isDragging = true;
-        dragMoved = false;
-        dragStartX = e.touches[0].clientX;
-        dragStartY = e.touches[0].clientY;
-        panStartX = panX;
-        panStartY = panY;
-      } else if (e.touches.length === 2) {
-        isDragging = false;
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        lastTouchDist = Math.sqrt(dx * dx + dy * dy);
-      }
-    }, { passive: true });
-
-    lb.addEventListener('touchmove', e => {
-      e.preventDefault();
-      if (e.touches.length === 1 && isDragging) {
-        const dx = e.touches[0].clientX - dragStartX;
-        const dy = e.touches[0].clientY - dragStartY;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
-        panX = panStartX + dx;
-        panY = panStartY + dy;
-        img.style.transformOrigin = '0 0';
-        applyTransform();
-      } else if (e.touches.length === 2) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (lastTouchDist > 0) {
-          const oldScale = scale;
-          scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * (dist / lastTouchDist)));
-          const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-          const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-          const ratio = scale / oldScale;
-          panX = cx - ratio * (cx - panX);
-          panY = cy - ratio * (cy - panY);
-          img.style.transformOrigin = '0 0';
-          applyTransform();
-        }
-        lastTouchDist = dist;
-      }
-    }, { passive: false });
-
-    lb.addEventListener('touchend', () => {
-      isDragging = false;
-      lastTouchDist = 0;
-      if (!dragMoved && scale <= 1) lbClose();
-    });
-  })();
-  </script>
-
-  {# Day 139: Item highlighting on preview #}
-  <script>
-  (function() {
-    const COORDS = {{ item_coordinates | tojson }};
-    if (!COORDS || Object.keys(COORDS).length === 0) return;
-
-    // Create highlight overlays for both sidebar and lightbox
-    function createHighlights(container) {
-      if (!container) return {};
-      const highlights = {};
-      for (const [itemId, bbox] of Object.entries(COORDS)) {
-        const div = document.createElement('div');
-        div.className = 'item-highlight';
-        div.dataset.itemId = itemId;
-        div.style.left = bbox.x_pct + '%';
-        div.style.top = bbox.y_pct + '%';
-        div.style.width = bbox.w_pct + '%';
-        div.style.height = bbox.h_pct + '%';
-        container.appendChild(div);
-        highlights[itemId] = div;
-      }
-      return highlights;
     }
-
-    const sidebarContainer = document.getElementById('sidebar-highlights');
-    const lbContainer = document.getElementById('lb-highlights');
-
-    const sidebarHL = createHighlights(sidebarContainer);
-    const lbHL = createHighlights(lbContainer);
-
-    // Highlight a single item on both preview and lightbox
-    window.highlightItem = function(itemId) {
-      document.querySelectorAll('.item-highlight.active').forEach(el => el.classList.remove('active'));
-      const id = String(itemId);
-      if (sidebarHL[id]) sidebarHL[id].classList.add('active');
-      if (lbHL[id]) lbHL[id].classList.add('active');
-    };
-
-    window.clearHighlights = function() {
-      document.querySelectorAll('.item-highlight.active').forEach(el => el.classList.remove('active'));
-    };
-
-    // Highlight all items currently visible in the wizard (current category)
-    window.highlightCurrentCategory = function() {
-      document.querySelectorAll('.item-highlight').forEach(el => el.classList.remove('category-active'));
-      document.querySelectorAll('.wiz-item[data-item-id]').forEach(card => {
-        const itemId = card.dataset.itemId;
-        if (itemId) {
-          if (sidebarHL[itemId]) sidebarHL[itemId].classList.add('category-active');
-          if (lbHL[itemId]) lbHL[itemId].classList.add('category-active');
-        }
-      });
-    };
-
-    window.clearCategoryHighlights = function() {
-      document.querySelectorAll('.item-highlight.category-active').forEach(el => el.classList.remove('category-active'));
-    };
-
-    // Wire up item card hover → highlight
-    document.addEventListener('mouseover', e => {
-      const card = e.target.closest('.wiz-item');
-      if (card && card.dataset.itemId) {
-        highlightItem(card.dataset.itemId);
-      }
-    });
-    document.addEventListener('mouseout', e => {
-      const card = e.target.closest('.wiz-item');
-      if (card) {
-        clearHighlights();
-      }
-    });
-
-    // Auto-highlight current category on page load
-    setTimeout(highlightCurrentCategory, 100);
+    init();
   })();
   </script>
+  {% endif %}
 
   {# Day 139.5: AI Visual Diff verification per category #}
   <script>
@@ -3424,7 +3456,6 @@
     });
   }
   </script>
-  {% endif %}
 </div>
 
 <!-- Confirm modal (reusable) -->
