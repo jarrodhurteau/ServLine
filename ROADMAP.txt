@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 140 (April 9, 2026) — Pipeline lockdown complete, subcategories, Google Places API live
+Last Updated: Day 141 (April 10, 2026) — Wizard UX overhaul + subcategory plumbing + 99%+ extraction accuracy
 
 ================================================================================
 PROJECT MISSION
@@ -2401,17 +2401,105 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
 
       COST PER UPLOAD: ~$2.00 (Call 1 Opus) + ~$0.001 (Vision OCR) = ~$2.00
 
-  [ ] Day 141: Subcategory Wizard + Call 4 Fix + Pipeline Polish
-      CARRY-OVER:
-        - Test subcategory wizard display with fresh upload (verify DB storage)
-        - Fix Call 4 token truncation (158 items overflows max_tokens — batch by category)
-        - Verify price comparison badges show in wizard after Call 4 fix
-      NEW:
-        - Subcategory headers in wizard: collapsible sections within categories
-        - Subcategory item count in sidebar (e.g., "Pizza (29 items + 27 modifiers)")
-        - Prompt tweaks: missing Cheeseburger Club (intermittent extraction gap)
-        - Remove vision_ocr_latest.txt debug log (temporary)
-  [ ] Day 142-143: Non-image format support + polish
+  [x] Day 141: Wizard UX Overhaul + Subcategory Plumbing + Pipeline Hardening
+      *** COMPLETE *** (April 10, 2026)
+
+      PIPELINE FIXES:
+        - Call 4 token truncation: batch by category (was failing on 158-item menus)
+        - Subcategory plumbing fix: 3 INSERT paths + LEFT JOIN SELECT all missing
+          subcategory column → data was extracted but silently dropped
+        - Position null bug: upsert_draft_items() was nulling positions on partial
+          updates → COALESCE in UPDATE preserves existing values
+        - OCR verification false-positive: first-word fallback was matching wrong
+          items (Chicken Bacon Nacho → Chicken Pesto's price) → tightened to
+          contiguous-prefix regex
+        - Cross-section topping inheritance: _INHERIT_TOPPINGS marker in prompt +
+          backend expansion with size-filtered variants (calzone toppings inherit
+          from pizza toppings, automatically filtered to calzone's 2 sizes)
+        - Wings preparation subcategory: prompt rule for Naked/Breaded etc.
+        - Category split: don't collapse "Club Sandwiches" / "Melt Sandwiches"
+          into generic "Sandwiches" — keep them as distinct sections
+        - Phantom item filter: drop "Each Topping Add" type pricing labels
+
+      WIZARD UX:
+        - Subcategories render as indented children in sidebar with own item views
+        - New Category popup splits main vs subcategory creation
+        - Drag-to-reparent subcategories across parent categories
+        - Move to Category supports subcategory targeting (with create-new)
+        - Apply/Delete All scoped to current subcategory (not entire category)
+        - Apply/Delete All always visible, auto-targets last-focused variant
+        - Select all link + per-category delete button with styled confirm modal
+        - Empty category/subcategory inline delete (× on hover)
+        - Deleted items keep position across page reloads
+        - Click checkbox on read item toggles it back to unread
+        - Replaced fragile bbox highlighting with floating menu viewer (pan + zoom)
+        - 3-column resizable layout with saddle-brown column dividers
+        - Bottom-left corner handle resizes viewer + right column together
+        - Red ! flag + sidebar count for items missing prices
+        - Modifier subcategories ($0 + no variants) correctly NOT flagged
+
+      ACCEPTED LIMITATIONS (require user audit):
+        - Smoothed prices on outliers in dense sections (e.g., Reuben at $11.95
+          when other melts are $9.95) — Claude smooths to section average and
+          there's no reliable signal to detect this without false positives
+        - Swapped prices on adjacent items (Potato Skins ↔ Jalapeno Poppers) —
+          Claude vision misreads orphaned column-aligned prices
+        - These error patterns are caught by the wizard audit workflow in seconds
+
+      RESULT: 99%+ price accuracy on 158-item menus, 100% categorization,
+      full subcategory + modifier support, audit-driven correctness model
+
+  [ ] Day 142: Ingredient List → Modifier Group Conversion (HIGH PRIORITY)
+      WHY: Real POS systems (Square, Toast, Clover) expect ingredient lists as
+      MODIFIER GROUPS, not description text. Right now we extract "All sandwiches
+      come with lettuce, tomato, bacon, French Fries and pickles" into the item's
+      description field. This means a customer asking "no pickles" forces the
+      cashier to type a manual modifier note — inconsistent kitchen tickets, no
+      analytics, no allergy tracking. To deliver on the "15-30 minute onboarding"
+      promise, we have to do this conversion ourselves, not push it to the user.
+
+      DETECTION (already working):
+        - Shared section descriptions like "All [section] come with X, Y, Z" are
+          already being detected and applied to every item in that section.
+        - Currently they land in the description field. We need to redirect them
+          into draft_modifier_groups instead.
+
+      WORK:
+        1. Detection regex: identify "comes with" / "includes" / "stuffed with"
+           / "topped with" / "served with" + comma list patterns. Distinguish
+           from prep notes ("served with sauce on the side") and existing
+           handled patterns (Bread Options, Wing Sauces, Preparation).
+        2. Splitter: break "lettuce, tomato, bacon, French Fries and pickles"
+           into individual ingredients. Handle "and"/"&", parentheticals,
+           "with side of X" suffixes.
+        3. Backend: create a draft_modifier_group with name "Includes" (or
+           "Comes With"), min_select=0, max_select=N, attach default-on $0
+           modifiers for each ingredient. Tables already exist from Phase 12.
+        4. Wizard rendering: show modifier group as expandable checkbox list
+           on each item card, similar to variant rows but with checkboxes.
+        5. Description field: cleared (or marked as "converted") when ingredient
+           list is converted to modifiers.
+        6. Test against the pizza/club sandwiches menu we've been using.
+
+      EDGE CASES:
+        - Apostrophes in ingredients ("chef's choice")
+        - "And/or" handling vs "and" comma list
+        - "With side of X" should attach X as a modifier, not be treated as
+          a separate phrase
+        - Some menus have "no substitutions" — flag, don't create modifiers
+        - When export hits a POS that doesn't support modifier groups, fall
+          back to description text (round-trip safe)
+
+      ROUGH ESTIMATE: ~4-6 hours focused work. NOT a full sprint.
+
+      WHY THIS MATTERS STRATEGICALLY:
+        - Without it, MenuShip is "we extract the menu but you finish the work"
+        - With it, MenuShip is genuinely POS-ready
+        - This is the difference between "a tool" and "a service"
+        - When talking to restaurant owners about Stripe + POS integration,
+          the answer to "but my POS uses modifiers" becomes "we handle that"
+
+  [ ] Day 143: Non-image format support + polish
       - CSV/XLSX: render as HTML table preview, highlight source row per item
       - JSON: render as formatted view, highlight source object per item
       - MUST WORK FOR ALL IMPORT FORMATS — universal "show me the original source" viewer

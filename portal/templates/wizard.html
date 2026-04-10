@@ -525,6 +525,43 @@
     }
     body.theme-customer .wiz-item:hover { border-color: rgba(184,92,56,.3); }
 
+    /* Needs-price flag (red !) on items with missing prices */
+    .wiz-needs-price-flag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #dc3545;
+      color: #fff;
+      font-size: .82rem;
+      font-weight: 900;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-right: 2px;
+      cursor: help;
+      box-shadow: 0 0 0 2px rgba(220,53,69,.25);
+    }
+    .wiz-item.needs-price {
+      border-left: 3px solid #dc3545;
+    }
+    /* Sidebar badge showing count of items needing price in this category */
+    .cat-needs-price-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: #dc3545;
+      color: #fff;
+      font-size: .65rem;
+      font-weight: 700;
+      margin-left: 4px;
+      flex-shrink: 0;
+    }
     .wiz-item.is-low {
       border-left: 3px solid #dc3545;
     }
@@ -1216,11 +1253,38 @@
     <!-- ===== Sidebar: Category List ===== -->
     <div class="wizard-sidebar">
       <div class="card" style="padding: 12px;">
+        {# Day 141: count items that need a price review.
+           Rules:
+           - Skip items in a subcategory that have $0 + no variants (intentional
+             POS modifiers like Sauce Options, Wing Sauces, Bread Options).
+           - Flag main-category items with $0 price AND no priced variants.
+           - Flag any item that has variants where some are priced and some
+             are $0 (mixed = something is missing). #}
+        {% macro needs_price(itm) -%}
+          {%- set vlist = itm.variants or [] -%}
+          {%- set has_priced_variant = namespace(found=false) -%}
+          {%- set has_zero_variant = namespace(found=false) -%}
+          {%- for v in vlist -%}
+            {%- if v.price_cents and v.price_cents > 0 -%}{%- set has_priced_variant.found = true -%}{%- endif -%}
+            {%- if not v.price_cents or v.price_cents == 0 -%}{%- set has_zero_variant.found = true -%}{%- endif -%}
+          {%- endfor -%}
+          {%- set is_modifier = itm.subcategory and not vlist -%}
+          {%- if is_modifier -%}
+            {# Intentional $0 POS modifier — never flag #}
+          {%- elif has_priced_variant.found and has_zero_variant.found -%}
+            1
+          {%- elif (not itm.price_cents or itm.price_cents == 0) and not has_priced_variant.found -%}
+            1
+          {%- endif -%}
+        {%- endmacro %}
         <ul class="cat-list" id="cat-list">
           {% for cat in progress.categories %}
           {% set is_active = cat.name == current_category %}
           {% set cat_subs = subcat_groups.get(cat.name, {}) %}
-          {% set main_count = cat_subs.get('', [])|length %}
+          {% set main_items = cat_subs.get('', []) %}
+          {% set main_count = main_items|length %}
+          {% set mnc = namespace(n=0) %}
+          {% for it in main_items %}{% if needs_price(it)|trim %}{% set mnc.n = mnc.n + 1 %}{% endif %}{% endfor %}
           {% set sub_names = [] %}
           {% for k in cat_subs.keys() if k %}{% if sub_names.append(k) %}{% endif %}{% endfor %}
           <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
@@ -1230,17 +1294,25 @@
             <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">{{ cat.name|e }}</span>
             <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
             <span class="cat-count">{{ main_count }}</span>
+            {% if mnc.n > 0 %}
+            <span class="cat-needs-price-count" title="{{ mnc.n }} item{{ 's' if mnc.n > 1 else '' }} need price review">{{ mnc.n }}!</span>
+            {% endif %}
             {% set total_in_cat = flat_groups.get(cat.name, [])|length %}
             {% if total_in_cat == 0 %}
             <span class="cat-delete" onclick="event.stopPropagation(); wizDeleteCategory('{{ cat.name|e }}')" title="Delete empty category">&times;</span>
             {% endif %}
           </li>
           {% for sc in sub_names|sort %}
+          {% set snc = namespace(n=0) %}
+          {% for it in cat_subs[sc] %}{% if needs_price(it)|trim %}{% set snc.n = snc.n + 1 %}{% endif %}{% endfor %}
           <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
             <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;">&#8942;</span>
             <span class="cat-sub-icon">&#9656;</span>
             <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">{{ sc|e }}</span>
             <span class="cat-count">{{ cat_subs[sc]|length }}</span>
+            {% if snc.n > 0 %}
+            <span class="cat-needs-price-count" title="{{ snc.n }} item{{ 's' if snc.n > 1 else '' }} need price review">{{ snc.n }}!</span>
+            {% endif %}
             {% if cat_subs[sc]|length == 0 %}
             <span class="cat-delete" onclick="event.stopPropagation(); wizDeleteSubcategory('{{ cat.name|e }}', '{{ sc|e }}')" title="Delete empty subcategory">&times;</span>
             {% endif %}
@@ -1338,15 +1410,36 @@
         {% set sc_items = _filtered_groups[sc_name] %}
         {% for it in sc_items %}
         {% set ns.item_num = ns.item_num + 1 %}
-        <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
+        {# Day 141: same flag logic as the sidebar macro — keep in sync.
+           Skip subcategory items with $0 + no variants (intentional modifiers). #}
+        {% set vlist_i = it.variants or [] %}
+        {% set hpv = namespace(found=false) %}
+        {% set hzv = namespace(found=false) %}
+        {% for v in vlist_i %}
+          {% if v.price_cents and v.price_cents > 0 %}{% set hpv.found = true %}{% endif %}
+          {% if not v.price_cents or v.price_cents == 0 %}{% set hzv.found = true %}{% endif %}
+        {% endfor %}
+        {% set is_modifier_i = it.subcategory and not vlist_i %}
+        {% set needs_price = false %}
+        {% if is_modifier_i %}
+          {# intentional modifier, no flag #}
+        {% elif hpv.found and hzv.found %}
+          {% set needs_price = true %}
+        {% elif (not it.price_cents or it.price_cents == 0) and not hpv.found %}
+          {% set needs_price = true %}
+        {% endif %}
+        <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}{% if needs_price %} needs-price{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
           <!-- Display mode (click to edit) -->
           <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle'))wizEdit(this.parentElement)">
             <div class="wiz-item-header">
               <span class="wiz-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;&#8942;</span>
               <span class="wiz-item-num">{{ ns.item_num }}.</span>
+              {% if needs_price %}<span class="wiz-needs-price-flag" title="This item is missing a price — please review">!</span>{% endif %}
               <div class="wiz-item-name">{% if it.name %}{{ it.name|e }}{% else %}<span style="color:var(--muted); font-style:italic;">Item name</span>{% endif %}</div>
               {% if it.price_cents %}
               <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
+              {% elif needs_price %}
+              <div class="wiz-item-price missing-price" style="color:#dc3545; font-size:.78rem; font-weight:600;">Needs price</div>
               {% endif %}
               <label class="wiz-select-box" onclick="event.stopPropagation()">
                 <input type="checkbox" class="wiz-select-check" onchange="wizUpdateSelection()" data-item-id="{{ it.id }}" />
@@ -1396,6 +1489,8 @@
                 <span class="wiz-variant-label">{{ v.label|e }}</span>
                 {% if v.price_cents %}
                 <span class="wiz-variant-price">${{ '%.2f'|format(v.price_cents / 100) }}</span>
+                {% else %}
+                <span class="wiz-variant-price missing-price">$0.00</span>
                 {% endif %}
               </div>
               {% endfor %}

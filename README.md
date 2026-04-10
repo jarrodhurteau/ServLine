@@ -1850,3 +1850,34 @@ ServLine now has:
   - `get_draft_items()` now includes `modifier_group_id` in each variant dict (zero breakage — 23 old test schemas updated)
   - Day 110 test suite: 42 cases, 100% pass rate
   - Cumulative: 2,195 passed (excl. Day 70 fixture errors, Day 99 timing flakes)
+
+- **Day 141 — Wizard UX Overhaul + Pipeline Hardening:** *** COMPLETE *** (April 10, 2026)
+  - **Result: 99%+ price accuracy on 158-item real menus, 100% categorization**
+  - Pipeline fixes:
+    - Call 4 token truncation: batch by category (was failing on large menus)
+    - Subcategory plumbing: 3 INSERT paths + LEFT JOIN SELECT all missing column → data was extracted but silently dropped
+    - Position-null bug: `upsert_draft_items()` was nulling positions on partial updates → COALESCE preserves existing values
+    - OCR verification false-positive: first-word fallback was matching wrong items → tightened to contiguous-prefix regex
+    - Cross-section topping inheritance: `_INHERIT_TOPPINGS` marker + backend expansion with size-filtered variants (calzone toppings inherit from pizza, filtered to calzone's size set)
+    - Wings preparation subcategory (Naked/Breaded etc.)
+    - Category split: `Club Sandwiches` / `Melt Sandwiches` no longer collapsed into generic `Sandwiches`
+    - Phantom item filter: drops "Each Topping Add" pricing labels
+  - Wizard UX overhaul:
+    - Subcategories render as indented children in sidebar with own item views
+    - New Category popup splits main vs subcategory creation
+    - Drag-to-reparent subcategories across parent categories
+    - Move to Category supports subcategory targeting (with create-new)
+    - Apply/Delete All scoped to current subcategory
+    - Apply/Delete All always visible, auto-targets last-focused variant
+    - Select-all link + per-category delete with styled confirm modal
+    - Empty category/subcategory inline delete (× on hover)
+    - Deleted items keep position across page reloads
+    - Click checkbox on read item toggles back to unread
+    - Replaced fragile bbox highlighting with floating menu viewer (pan + zoom)
+    - 3-column resizable layout with saddle-brown column dividers
+    - Bottom-left corner handle resizes viewer + right column together
+    - Red `!` flag + sidebar count for items missing prices
+    - Modifier subcategories ($0 + no variants) correctly NOT flagged
+  - Accepted limitations (caught by user audit, ~5 sec each):
+    - Smoothed prices on outliers in dense sections — Claude smooths to section average
+    - Swapped prices on adjacent items — Claude vision misreads orphaned column-aligned prices

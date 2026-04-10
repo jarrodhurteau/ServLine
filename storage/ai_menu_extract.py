@@ -166,13 +166,13 @@ VALID_CATEGORIES = frozenset([
 
 _CATEGORY_ALIASES: Dict[str, str] = {
     # Common menu section headings → canonical POS category
-    "club sandwiches": "Sandwiches",
-    "melt sandwiches": "Sandwiches",
-    "melts": "Sandwiches",
-    "clubs": "Sandwiches",
-    "hot sandwiches": "Sandwiches",
-    "cold sandwiches": "Sandwiches",
+    # NOTE: Do NOT collapse "Club Sandwiches" / "Melt Sandwiches" etc. into
+    # "Sandwiches" — those are distinct sections on real menus and should
+    # survive as separate categories (Clubs, Melts).
     "gourmet pizza": "Pizza",
+    "ny style pizza": "Pizza",
+    "ny style": "Pizza",
+    "new york style pizza": "Pizza",
     "specialty pizza": "Pizza",
     "brick oven pizza": "Pizza",
     "wraps city": "Wraps",
@@ -212,25 +212,26 @@ _CATEGORY_ALIASES: Dict[str, str] = {
 
 
 def _normalize_category(cat: str) -> str:
-    """Map a category string to the canonical whitelist value.
+    """Normalize a category string.
 
-    Handles raw section headings, common aliases, and fuzzy substring matches.
-    Always returns a valid category from VALID_CATEGORIES.
+    The VALID_CATEGORIES list is a set of common hints; we now pass through
+    any menu section header Claude gives us so distinct sections like
+    "Club Sandwiches" vs "Melt Sandwiches" vs "Sandwiches" stay separate.
+    Only falls back to "Other" when the input is genuinely empty.
     """
     if not cat:
         return "Other"
     cat = cat.strip()
+    if not cat:
+        return "Other"
     if cat in VALID_CATEGORIES:
         return cat
-    # Exact alias lookup (case-insensitive)
+    # Exact alias lookup (case-insensitive) — only the short list of known aliases
     lower = cat.lower()
     if lower in _CATEGORY_ALIASES:
         return _CATEGORY_ALIASES[lower]
-    # Substring match: check if any valid category appears in the string
-    for valid in VALID_CATEGORIES:
-        if valid.lower() in lower:
-            return valid
-    return "Other"
+    # Pass through in Title Case — let the menu's own organization win
+    return cat.title()
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +822,10 @@ item with the add-on price. Do NOT collapse into "Each Topping Add". \
 Category = their parent section (e.g., "Pizza"), subcategory = "Toppings". \
 Example: "TOPPINGS Sm $1.50 Lg $2.00" with "Pepperoni, Mushrooms, Bacon" → \
 3 items, category "Pizza", subcategory "Toppings", each with sizes.
+- Phrases like "Each Topping Add", "Each Add", "Per Topping", "Add-On Price" \
+are PRICING LABELS, not items. They tell you the price to apply to each \
+named topping in the list. NEVER extract these phrases as their own item. \
+Apply the prices from the label to each named topping below it.
 - Sauce flavors (Hot, Mild, BBQ, Honey BBQ, etc.) → each a separate $0 item. \
 Category = parent section (e.g., "Wings"), subcategory = "Wing Sauces".
 - "Choice of Sauce: Red, White, Pesto..." → each a separate $0 item. \
@@ -829,6 +834,15 @@ Category = parent section (e.g., "Pizza"), subcategory = "Sauce Options".
 subcategory = "Bread Options".
 - "Add Bacon $1 extra" → item at stated price. Category = parent section, \
 subcategory = "Add-Ons".
+- Preparation / cooking style / doneness choices near a section header → \
+each option becomes a separate $0 item. Category = parent section, \
+subcategory = "Preparation". This includes ANY "X or Y [or Z...]" cooking \
+choice the customer must make: cooking method (Grilled/Fried/Baked/ \
+Blackened/Smoked), texture (Naked/Breaded/Crispy/Battered), doneness \
+(Rare/Medium Rare/Medium/Well Done), temperature (Hot/Cold), \
+serving style (On the Rocks/Neat), etc. If the menu offers a choice and \
+charges nothing extra for it, it is a Preparation modifier. Do NOT bury \
+these in the description — they are POS modifiers customers must select.
 
 "W/ CHEESE" AND ADD-ON VARIANTS:
 - When a base item has a "W/ Cheese" version at a higher price, these are \
@@ -878,6 +892,37 @@ Lines without prices that describe ingredients belong to the item above.
 - If a section header shows shared price columns, apply those to every item below.
 - $0 means the price is truly not printed (e.g., "Market Price").
 
+WHEN YOU ARE NOT CONFIDENT ABOUT A PRICE — OUTPUT 0:
+This is CRITICAL. A missing price is easy for the user to spot and fix in \
+30 seconds. A wrong price that looks plausible can slip through review and \
+break a live menu. Your job is to be honest, not to fill every field.
+
+The image IS your primary source when the OCR text misses a price. You \
+can and SHOULD read prices directly from the menu image when the OCR line \
+is incomplete or missing. Only output 0 when BOTH of these are true at the \
+same time:
+  1. The OCR text does not contain a price you can attach to this item, AND
+  2. You cannot clearly READ the price in the menu image either.
+
+Rules:
+- If the OCR line for an item is missing the price but you can clearly SEE \
+the price in the image for that exact item, use the image price. \
+That is a confident extraction, not a guess.
+- If neither the OCR nor the image give you a confident price for an item \
+→ output price 0. Do NOT copy from neighbors. Do NOT smooth to section norm. \
+Do NOT invent a plausible value.
+- If the OCR has an orphaned price floating between items and the image \
+does NOT make it clear which item it belongs to → output 0 for the \
+ambiguous item(s) and let the user assign it.
+- If a section has uniform prices on most items but ONE item's price is \
+unclear or cut off in BOTH OCR and image → output 0 for that item.
+- If sizes are listed but only some sizes have visible prices (in OCR or \
+image) → output 0 for the missing-price sizes.
+- Outputting 0 triggers a red "needs review" flag in the user interface. \
+This is the preferred outcome when you genuinely cannot read the price. \
+Do not be afraid to output 0 — but do not use 0 as a lazy escape hatch \
+when the image clearly shows the price.
+
 SIZE/VARIANT LABELS (use the OCR TEXT):
 - Copy column header text VERBATIM from the OCR. Do not paraphrase. \
 If OCR says "Mini" do not write "Med". If it says "Sml" keep "Sml".
@@ -906,9 +951,16 @@ ITEM FIELDS:
 - "name": exact name from OCR text, Title Case
 - "description": menu description if shown, null otherwise
 - "price": base price as float (first size price if multi-size), 0 if not printed
-- "category": ONE of: Pizza, Toppings, Appetizers, Salads, Soups, Sandwiches, \
-Burgers, Wraps, Entrees, Seafood, Pasta, Steaks, Wings, Sauces, Sides, \
-Desserts, Beverages, Kids Menu, Breakfast, Calzones, Subs, Platters, Other
+- "category": USE THE MENU'S OWN SECTION HEADER verbatim (Title Case). \
+Each distinct printed section on the menu is a separate category. \
+If the menu has "CLUB SANDWICHES" and "MELT SANDWICHES" as two different \
+headers with their own items, return "Club Sandwiches" and "Melt Sandwiches" \
+as two distinct categories — do NOT collapse them into a generic "Sandwiches". \
+Same for "Gourmet Pizza" vs "Pizza", "Hot Subs" vs "Cold Subs", etc. \
+Common category names to recognize (use these when the menu matches): Pizza, \
+Appetizers, Salads, Soups, Sandwiches, Burgers, Wraps, Entrees, Seafood, Pasta, \
+Steaks, Wings, Sides, Desserts, Beverages, Kids Menu, Breakfast, Calzones, \
+Subs, Platters — but if the menu uses a more specific heading, keep it.
 - "subcategory": for modifiers/add-ons/toppings/sauces, a descriptive group \
 name like "Toppings", "Sauce Options", "Bread Options", "Add-Ons", "Wing Sauces". \
 null for regular orderable items.
@@ -917,7 +969,28 @@ null for regular orderable items.
 Copy the line verbatim — this is used to verify your extraction is correct. \
 If the section uses shared header prices, quote the header line instead.
 - "bbox": approximate bounding box {x_pct, y_pct, w_pct, h_pct, page} as % of image. \
-Err slightly larger. page is 1-based."""
+Err slightly larger. page is 1-based.
+
+CROSS-SECTION TOPPING INHERITANCE — when a section says "toppings same as X" \
+or "same as pizza" or similar copy-references:
+Do NOT re-list all the toppings. Instead emit ONE special marker item with \
+this exact shape:
+{
+  "name": "_INHERIT_TOPPINGS",
+  "category": "Calzones",
+  "subcategory": "Toppings",
+  "_inherits_from": {"category": "Pizza", "subcategory": "Toppings"},
+  "price": 0,
+  "sizes": [],
+  "raw_line": "Calzone toppings same as pizza"
+}
+Rules:
+- Use the EXACT name "_INHERIT_TOPPINGS" so the backend recognizes the marker.
+- Set "category" to the section that contains the cross-reference (e.g. Calzones).
+- Set "subcategory" to the name you'd use for the copied group (e.g. "Toppings").
+- Set "_inherits_from" to the source category + subcategory you're referencing.
+- Only emit ONE marker per cross-reference. The backend will copy the items \
+and filter their sizes to match the target section's available sizes."""
 
 _DETECT_USER_PROMPT = """\
 Extract EVERY menu item — missing even one item is a failure. Go section by section, \
@@ -1186,6 +1259,11 @@ def _normalize_detected_items(raw_items: List[Any]) -> List[Dict[str, Any]]:
 
         subcategory = (it.get("subcategory") or "").strip() or None
 
+        # Day 141: cross-section topping inheritance marker
+        inherits_from = it.get("_inherits_from")
+        if not isinstance(inherits_from, dict):
+            inherits_from = None
+
         result.append({
             "name": name,
             "description": description,
@@ -1194,6 +1272,7 @@ def _normalize_detected_items(raw_items: List[Any]) -> List[Dict[str, Any]]:
             "subcategory": subcategory,
             "sizes": sizes,
             "bbox": bbox,
+            "_inherits_from": inherits_from,
         })
     return result
 
@@ -1508,43 +1587,48 @@ def _verify_prices_against_raw(item: Dict[str, Any]) -> Dict[str, Any]:
 def _verify_prices_against_ocr(item: Dict[str, Any], ocr_lines: List[str]) -> Dict[str, Any]:
     """Cross-check Claude's prices against the ACTUAL OCR text (not Claude's raw_line).
 
-    Finds the OCR line matching this item's name and compares prices.
-    This catches cases where Claude hallucinated both the price AND the raw_line.
+    Only override if we find a HIGH-CONFIDENCE match: the OCR line must
+    start with the item's first word AND contain ALL of the item's name
+    words (after dropping trivial connectors). This avoids the Day 141 bug
+    where "Chicken Bacon Nacho" got "Chicken Pesto"'s price via a sloppy
+    first-word fallback.
     """
     name = (item.get("name") or "").strip()
     if not name or not ocr_lines:
         return item
 
-    # Skip $0 items (sauces, toppings with no standalone price) — they're
-    # intentionally priceless and would false-match random OCR lines.
+    # Skip $0 items (sauces, toppings with no standalone price)
     claude_price = _to_float(item.get("price"))
     sizes = item.get("sizes") or []
     if claude_price == 0 and not sizes:
         return item
 
-    # Find the OCR line that STARTS WITH this item's name (case-insensitive).
-    # "Contains" matching is too loose — "BBQ" matches "BBQ CHICKEN PIZZA".
     name_lower = name.lower()
-    name_words = name_lower.split()
+    # Drop parenthetical qualifiers like "(6)" before matching
+    name_clean = re.sub(r'\s*\([^)]*\)', '', name_lower).strip()
+    raw_words = name_clean.split()
+    skip_words = {"&", "and", "with", "w/", "the", "a", "an", "of"}
+    name_words = [w for w in raw_words if w not in skip_words and len(w) >= 2]
     if not name_words or len(name_words[0]) < 4:
-        return item  # Skip short/generic names to avoid false matches
+        return item  # First word must be specific enough
+
+    # Build a regex that matches the name words as a contiguous prefix at the
+    # start of the OCR line, allowing connectors (& / and / with) and
+    # whitespace between the words. This prevents matching e.g.
+    # "Steak & Cheese" against "STEAK COMBO Shaved Steak ... Cheese ..."
+    connector_re = r'(?:\s*(?:&|and|with|w/)?\s*)'
+    word_re = connector_re.join(re.escape(w) for w in name_words)
+    prefix_re = re.compile(r'^\s*' + word_re + r'\b', re.IGNORECASE)
 
     matching_line = None
     for line in ocr_lines:
-        line_stripped = line.strip().lower()
-        # Line must START with the first word of the item name
-        if not line_stripped.startswith(name_words[0]):
+        line_stripped = line.strip()
+        if not prefix_re.match(line_stripped):
             continue
         if not _extract_prices_from_raw(line):
             continue
-        # Best case: first 2 words match. Fallback: first word starts the line
-        # (handles "Reuben Melt" matching OCR line "REUBEN Corned beef...")
-        if len(name_words) >= 2 and " ".join(name_words[:2]) in line_stripped:
-            matching_line = line
-            break
-        elif not matching_line:
-            # First-word-only match — keep looking for a better match
-            matching_line = line
+        matching_line = line
+        break
 
     if not matching_line:
         return item
@@ -1574,6 +1658,91 @@ def _verify_prices_against_ocr(item: Dict[str, Any], ocr_lines: List[str]) -> Di
     return item
 
 
+def _detect_fabricated_prices(item: Dict[str, Any], ocr_text: str) -> Dict[str, Any]:
+    """Detect when Claude's raw_line is fabricated (prices not actually there).
+
+    Some menus have prices the OCR genuinely cannot read (column-aligned
+    digits orphaned from the item name). When Claude can't see them in the
+    image either, it "smooths" to the section average and writes a fake
+    raw_line that includes prices that aren't actually in the OCR for that
+    item.
+
+    Detection: find the OCR line(s) that contain the item name. If Claude
+    claims a price in raw_line but that price does NOT appear on any OCR
+    line near the item name (within 3 lines above or below), zero out the
+    item so the wizard flags it.
+    """
+    if not ocr_text:
+        return item
+    raw_line = (item.get("raw_line") or "").strip()
+    if not raw_line:
+        return item
+
+    raw_prices = _extract_prices_from_raw(raw_line)
+    if not raw_prices:
+        return item
+
+    name = (item.get("name") or "").strip()
+    if not name:
+        return item
+
+    # Find OCR line indices that contain the item's significant words
+    name_words = re.sub(r'[()]', ' ', name.lower()).split()
+    skip = {"&", "and", "with", "w/", "the", "a", "an", "of"}
+    sig_words = [w for w in name_words if w not in skip and len(w) >= 3]
+    if not sig_words:
+        return item
+
+    ocr_lines = ocr_text.splitlines()
+    matching_idxs = []
+    for i, line in enumerate(ocr_lines):
+        line_low = line.strip().lower()
+        # Match if the line contains the first 1-2 significant words consecutively
+        # OR if all sig words appear in the line
+        if (sig_words[0] in line_low and
+            (len(sig_words) == 1 or all(w in line_low for w in sig_words))):
+            matching_idxs.append(i)
+
+    if not matching_idxs:
+        return item
+
+    # Build the set of prices in a WIDE window around the item (±10 lines).
+    # Conservative on purpose — false positives on legit items are worse
+    # than false negatives on smoothed items (user catches in audit).
+    LOCAL_WINDOW = 10
+    local_prices = set()
+    for idx in matching_idxs:
+        start = max(0, idx - LOCAL_WINDOW)
+        end = min(len(ocr_lines), idx + LOCAL_WINDOW + 1)
+        for j in range(start, end):
+            for p in _extract_prices_from_raw(ocr_lines[j]):
+                local_prices.add(p)
+
+    # Only flag if EVERY raw_line price is missing from the local window.
+    # If Claude correctly read at least one price for the item, trust the rest.
+    if local_prices and any(p in local_prices for p in raw_prices):
+        return item
+
+    if not local_prices:
+        fabricated = list(raw_prices)
+    else:
+        fabricated = [p for p in raw_prices if p not in local_prices]
+
+    if not fabricated:
+        return item
+
+    print(f"[Fabrication] {name}: raw_line claims {raw_prices}, "
+          f"NONE found in OCR window around item. Zeroing for review.")
+
+    # Zero out the item + variants so the wizard flags it
+    item["price"] = 0
+    sizes = item.get("sizes") or []
+    for s in sizes:
+        if isinstance(s, dict):
+            s["price"] = 0
+    return item
+
+
 def elements_to_draft_rows(
     items: List[Dict[str, Any]],
     ocr_text: str = "",
@@ -1594,9 +1763,39 @@ def elements_to_draft_rows(
     ocr_lines = ocr_text.strip().splitlines() if ocr_text else []
     draft_rows = []
     coord_data = []
+    inheritance_markers: List[Dict[str, Any]] = []  # Day 141: cross-section topping inheritance
+    # Day 141: phrases that are pricing labels, NEVER items.
+    _PRICING_LABEL_NAMES = {
+        "each topping add", "each topping", "each add", "per topping",
+        "add-on price", "add on price", "per add", "topping add",
+        "additional toppings", "additional topping",
+    }
+
     for pos, it in enumerate(items, start=1):
         name = (it.get("name") or "").strip()
         if not name:
+            continue
+
+        # Day 141: drop phantom pricing-label "items"
+        if name.lower() in _PRICING_LABEL_NAMES:
+            log.info("Dropping pricing-label phantom item: %r", name)
+            continue
+
+        # Day 141: catch cross-section inheritance markers and skip them
+        if name == "_INHERIT_TOPPINGS" or it.get("_inherits_from"):
+            src = it.get("_inherits_from") or {}
+            if isinstance(src, dict) and src.get("category"):
+                inheritance_markers.append({
+                    "target_category": (it.get("category") or "").strip(),
+                    "target_subcategory": (it.get("subcategory") or "").strip() or None,
+                    "source_category": (src.get("category") or "").strip(),
+                    "source_subcategory": (src.get("subcategory") or "").strip() or None,
+                })
+                log.info(
+                    "Inheritance marker: %s/%s <- %s/%s",
+                    it.get("category"), it.get("subcategory"),
+                    src.get("category"), src.get("subcategory"),
+                )
             continue
 
         # Day 140: verify prices against raw_line before processing
@@ -1604,6 +1803,11 @@ def elements_to_draft_rows(
         # Day 140: second pass — verify against actual OCR text
         if ocr_lines:
             it = _verify_prices_against_ocr(it, ocr_lines)
+
+        # Day 141: fabrication detector was too aggressive on dense-OCR menus.
+        # Disabled until we have a more reliable signal.
+        # if ocr_text:
+        #     it = _detect_fabricated_prices(it, ocr_text)
 
         price = _to_float(it.get("price"))
         price_cents = int(round(price * 100))
@@ -1654,4 +1858,128 @@ def elements_to_draft_rows(
                 "element_type": "item",
             })
 
+    # Day 141: expand cross-section inheritance markers
+    if inheritance_markers:
+        draft_rows = _expand_inheritance(draft_rows, inheritance_markers)
+
     return draft_rows, coord_data
+
+
+def _normalize_size_label(label: str) -> str:
+    """Normalize a size label to a canonical form for matching across sections.
+
+    Examples: "Small", "Sm", "Sml", "S" all → "small"
+              "Large", "Lg", "L" → "large"
+              "10\" Mini" → "mini"
+              "12\" Sml 8 Slices" → "small"
+    """
+    if not label:
+        return ""
+    s = label.lower().strip()
+    # Strip qualifiers in the right order: word forms BEFORE bare digits
+    s = re.sub(r'\d+\s*slices?', ' ', s)        # "8 Slices"
+    s = re.sub(r'\d+\s*pcs?', ' ', s)           # "12 Pcs"
+    s = re.sub(r'\d+\s*x\s*\d+', ' ', s)        # "17x24"
+    s = re.sub(r'\d+(\.\d+)?["\'\u201d]?', ' ', s)  # remaining digits + inch marks
+    s = s.replace('size', ' ')                  # "Family Size" → "family"
+    s = re.sub(r'[^a-z]', '', s)                # keep only letters
+    # Canonicalize known synonyms
+    if s in {"sml", "sm", "s", "small"}:
+        return "small"
+    if s in {"lg", "l", "large", "lrg", "lge"}:
+        return "large"
+    if s in {"med", "m", "medium", "mid"}:
+        return "medium"
+    if s in {"mini", "min"}:
+        return "mini"
+    if s in {"family", "fam", "fs"}:
+        return "family"
+    return s
+
+
+def _expand_inheritance(
+    draft_rows: List[Dict[str, Any]],
+    markers: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Day 141: Copy items from a source category/subcategory into a target.
+
+    For each marker {target_category, target_subcategory, source_category,
+    source_subcategory}: find all rows matching the source, and add a copy
+    of each into the target with variants filtered to only those size labels
+    that exist on items already in the target category.
+    """
+    import copy as _copy
+
+    # Build a normalized-label set of sizes used by items in each target category
+    # so we can filter the copied variants to fit.
+    target_sizes_by_cat: Dict[str, set] = {}
+    for row in draft_rows:
+        cat = (row.get("category") or "").strip()
+        if not cat:
+            continue
+        for v in row.get("_variants", []) or []:
+            lbl = _normalize_size_label(v.get("label", ""))
+            if lbl:
+                target_sizes_by_cat.setdefault(cat, set()).add(lbl)
+
+    # Find the highest existing position so we can append new rows
+    max_pos = max((r.get("position", 0) for r in draft_rows), default=0)
+
+    new_rows: List[Dict[str, Any]] = []
+    for marker in markers:
+        tgt_cat = marker["target_category"]
+        tgt_sub = marker["target_subcategory"]
+        src_cat = marker["source_category"]
+        src_sub = marker["source_subcategory"]
+
+        # Find source items
+        source_items = [
+            r for r in draft_rows
+            if (r.get("category") or "").strip() == src_cat
+            and (r.get("subcategory") or None) == (src_sub or None)
+        ]
+        if not source_items:
+            log.warning(
+                "Inheritance: no source items found for %s/%s -> %s/%s",
+                src_cat, src_sub, tgt_cat, tgt_sub,
+            )
+            continue
+
+        # What sizes does the target category support?
+        target_sizes = target_sizes_by_cat.get(tgt_cat, set())
+
+        copied = 0
+        for src in source_items:
+            new_item = _copy.deepcopy(src)
+            new_item["category"] = tgt_cat
+            new_item["subcategory"] = tgt_sub
+            max_pos += 1
+            new_item["position"] = max_pos
+
+            # Filter variants to match target sizes (if we know them)
+            src_variants = new_item.get("_variants", []) or []
+            if target_sizes and src_variants:
+                kept = []
+                next_pos = 0
+                for v in src_variants:
+                    norm = _normalize_size_label(v.get("label", ""))
+                    if norm in target_sizes:
+                        nv = dict(v)
+                        nv["position"] = next_pos
+                        kept.append(nv)
+                        next_pos += 1
+                if kept:
+                    new_item["_variants"] = kept
+                    new_item["price_cents"] = kept[0]["price_cents"]
+                else:
+                    # No matching sizes — keep all variants as-is
+                    pass
+            new_rows.append(new_item)
+            copied += 1
+
+        log.info(
+            "Inheritance expanded: %s/%s -> %s/%s = %d items copied (target sizes: %s)",
+            src_cat, src_sub, tgt_cat, tgt_sub, copied, sorted(target_sizes) or "unknown",
+        )
+
+    return draft_rows + new_rows
