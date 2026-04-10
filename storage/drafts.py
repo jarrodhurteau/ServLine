@@ -1620,17 +1620,20 @@ def upsert_draft_items(
             effective_id: Optional[int] = None
 
             if has_int_id:
+                # Use COALESCE so partial updates (e.g. wizard item save with no
+                # position field) don't blow away existing values. Without this,
+                # editing any item nulls its position and sends it to the bottom.
                 cur.execute(
                     """
                     UPDATE draft_items
                     SET name=?,
                         description=?,
                         price_cents=?,
-                        category=?,
-                        subcategory=?,
-                        position=?,
-                        confidence=?,
-                        kitchen_name=?,
+                        category=COALESCE(?, category),
+                        subcategory=COALESCE(?, subcategory),
+                        position=COALESCE(?, position),
+                        confidence=COALESCE(?, confidence),
+                        kitchen_name=COALESCE(?, kitchen_name),
                         updated_at=?
                     WHERE id=? AND draft_id=?
                     """,
