@@ -757,11 +757,14 @@ def claude_items_to_draft_rows(items: List[Dict[str, Any]]) -> List[Dict[str, An
         raw_groups = it.get("modifier_groups") or []
         modifier_groups = _build_modifier_groups_from_claude(raw_groups)
 
+        subcategory = (it.get("subcategory") or "").strip() or None
+
         row: Dict[str, Any] = {
             "name": name,
             "description": it.get("description"),
             "price_cents": price_cents,
             "category": it.get("category") or "Other",
+            "subcategory": subcategory,
             "position": pos,
             "confidence": 90,  # Claude extractions are high-confidence
         }

@@ -435,6 +435,12 @@ def _ensure_schema() -> None:
                 "ALTER TABLE drafts ADD COLUMN gap_warnings TEXT;"
             )
 
+        # Day 140 — subcategory grouping for modifiers/toppings
+        if not _col_exists("draft_items", "subcategory"):
+            cur.execute(
+                "ALTER TABLE draft_items ADD COLUMN subcategory TEXT;"
+            )
+
         # Day 137 — wizard category review tracking
         cur.execute(
             """
@@ -805,6 +811,7 @@ def _get_draft_items_nested(draft_id: int) -> List[Dict[str, Any]]:
                 di.description,
                 di.price_cents,
                 di.category,
+                di.subcategory,
                 di.position,
                 di.confidence,
                 di.kitchen_name,
@@ -861,6 +868,7 @@ def _get_draft_items_nested(draft_id: int) -> List[Dict[str, Any]]:
                 "description": row["description"],
                 "price_cents": row["price_cents"],
                 "category": row["category"],
+                "subcategory": row["subcategory"],
                 "position": row["position"],
                 "confidence": row["confidence"],
                 "kitchen_name": row["kitchen_name"],
@@ -989,8 +997,10 @@ def get_draft_items(
                 "description": row["description"],
                 "price_cents": row["price_cents"],
                 "category": row["category"],
+                "subcategory": row["subcategory"],
                 "position": row["position"],
                 "confidence": row["confidence"],
+                "kitchen_name": row["kitchen_name"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "variants": [],
@@ -1501,13 +1511,14 @@ def _insert_items_bulk(
                     description,
                     price_cents,
                     category,
+                    subcategory,
                     position,
                     confidence,
                     kitchen_name,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(draft_id),
@@ -1515,6 +1526,7 @@ def _insert_items_bulk(
                     desc,
                     price_cents,
                     category,
+                    subcategory,
                     position,
                     confidence,
                     kitchen_name,

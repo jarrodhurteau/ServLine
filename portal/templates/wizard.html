@@ -161,8 +161,241 @@
       transition: background .15s;
       border-radius: 8px;
       margin-top: 4px;
+      position: relative;
     }
     .cat-new-btn:hover { background: rgba(40,167,69,.08); }
+
+    /* New-category popup menu */
+    .cat-new-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--card, #fff);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      padding: 6px 0;
+      min-width: 180px;
+      z-index: 100;
+    }
+    .cat-new-popup.open { display: block; }
+    .cat-new-popup-item {
+      padding: 9px 16px;
+      font-size: .82rem;
+      font-weight: 500;
+      cursor: pointer;
+      color: var(--ink, #2C2C2C);
+      transition: background .12s;
+    }
+    .cat-new-popup-item:hover { background: rgba(0,0,0,.05); }
+    .cat-new-popup-item .popup-hint {
+      display: block;
+      font-size: .72rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    /* Subcategory modal */
+    .subcat-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 200;
+      justify-content: center;
+      align-items: center;
+    }
+    .subcat-modal-overlay.open { display: flex; }
+    .subcat-modal {
+      background: var(--card, #fff);
+      border-radius: 14px;
+      padding: 28px 30px;
+      min-width: 340px;
+      max-width: 400px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    .subcat-modal h3 {
+      margin: 0 0 16px;
+      font-size: 1.05rem;
+      color: var(--ink);
+    }
+    .subcat-modal label {
+      display: block;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .subcat-modal input, .subcat-modal select {
+      width: 100%;
+      padding: 9px 12px;
+      font-size: .88rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 14px;
+      box-sizing: border-box;
+      background: var(--bg, #fff);
+      color: var(--ink);
+    }
+    .subcat-modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 6px;
+    }
+    .subcat-modal-actions button {
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      transition: all .15s;
+    }
+    .subcat-modal-actions .btn-cancel {
+      background: none;
+      color: var(--muted);
+    }
+    .subcat-modal-actions .btn-create {
+      background: #2E5B5E;
+      color: #fff;
+      border-color: #2E5B5E;
+    }
+    .subcat-modal-actions .btn-create:hover { opacity: .85; }
+
+    /* Sidebar subcategory rows */
+    .cat-subcat {
+      padding-left: 32px !important;
+      padding-top: 4px !important;
+      padding-bottom: 4px !important;
+      font-size: .8rem !important;
+      color: var(--muted);
+      opacity: .75;
+      border-left: 2px solid var(--line);
+      margin-left: 26px;
+      border-radius: 0 8px 8px 0 !important;
+    }
+    .cat-subcat:hover { opacity: 1; }
+    .cat-subcat.active {
+      opacity: 1;
+      font-weight: 600;
+      color: var(--ink);
+      border-left-color: #2E5B5E;
+    }
+    .cat-parent-of-active {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .cat-subcat .cat-count {
+      font-size: .68rem;
+    }
+    .cat-sub-indent {
+      width: 0;
+      flex-shrink: 0;
+    }
+    .cat-sub-icon {
+      font-size: .7rem;
+      color: var(--muted);
+      opacity: .6;
+      flex-shrink: 0;
+      margin-right: -4px;
+    }
+    .cat-delete {
+      font-size: .85rem;
+      color: #dc3545;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity .15s;
+      margin-left: 4px;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .cat-list li:hover .cat-delete { opacity: .6; }
+    .cat-delete:hover { opacity: 1 !important; }
+
+    /* Delete Category button in header */
+    .btn-delete-cat-header {
+      background: transparent;
+      color: #dc3545;
+      border: 1.5px solid rgba(220,53,69,.4);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: .78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      margin-left: 12px;
+    }
+    .btn-delete-cat-header:hover {
+      background: #dc3545;
+      color: #fff;
+      border-color: #dc3545;
+    }
+
+    /* In-app confirm modal */
+    .wiz-confirm-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 300;
+      justify-content: center;
+      align-items: center;
+    }
+    .wiz-confirm-overlay.open { display: flex; }
+    .wiz-confirm-modal {
+      background: var(--card, #fff);
+      border-radius: 14px;
+      padding: 28px 32px;
+      min-width: 360px;
+      max-width: 460px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.22);
+    }
+    .wiz-confirm-modal h3 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      color: var(--ink);
+    }
+    .wiz-confirm-modal p {
+      margin: 0 0 22px;
+      font-size: .9rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .wiz-confirm-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .wiz-confirm-actions button {
+      padding: 9px 20px;
+      border-radius: 8px;
+      font-size: .85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      transition: all .15s;
+    }
+    .btn-confirm-cancel {
+      background: none;
+      color: var(--muted);
+    }
+    .btn-confirm-cancel:hover { color: var(--ink); }
+    .btn-confirm-danger {
+      background: #dc3545;
+      color: #fff;
+      border-color: #dc3545;
+    }
+    .btn-confirm-danger:hover { background: #b62a38; }
+    .btn-confirm-primary {
+      background: #2E5B5E;
+      color: #fff;
+      border-color: #2E5B5E;
+    }
+    .btn-confirm-primary:hover { opacity: .88; }
 
     /* ===== Main Content ===== */
     .wizard-main {
@@ -941,44 +1174,88 @@
         <ul class="cat-list" id="cat-list">
           {% for cat in progress.categories %}
           {% set is_active = cat.name == current_category %}
-          <li class="{% if is_active %}active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
+          {% set cat_subs = subcat_groups.get(cat.name, {}) %}
+          {% set main_count = cat_subs.get('', [])|length %}
+          {% set sub_names = [] %}
+          {% for k in cat_subs.keys() if k %}{% if sub_names.append(k) %}{% endif %}{% endfor %}
+          <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
               data-cat-name="{{ cat.name|e }}" draggable="true">
             <span class="cat-drag" title="Drag to reorder">&#8942;</span>
             <span class="cat-check">{% if cat.reviewed %}&#10003;{% endif %}</span>
             <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">{{ cat.name|e }}</span>
             <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
-            {% set item_count = flat_groups.get(cat.name, [])|length %}
-            <span class="cat-count">{{ item_count }}</span>
+            <span class="cat-count">{{ main_count }}</span>
+            {% set total_in_cat = flat_groups.get(cat.name, [])|length %}
+            {% if total_in_cat == 0 %}
+            <span class="cat-delete" onclick="event.stopPropagation(); wizDeleteCategory('{{ cat.name|e }}')" title="Delete empty category">&times;</span>
+            {% endif %}
+          </li>
+          {% for sc in sub_names|sort %}
+          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
+            <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;">&#8942;</span>
+            <span class="cat-sub-icon">&#9656;</span>
+            <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">{{ sc|e }}</span>
+            <span class="cat-count">{{ cat_subs[sc]|length }}</span>
+            {% if cat_subs[sc]|length == 0 %}
+            <span class="cat-delete" onclick="event.stopPropagation(); wizDeleteSubcategory('{{ cat.name|e }}', '{{ sc|e }}')" title="Delete empty subcategory">&times;</span>
+            {% endif %}
           </li>
           {% endfor %}
+          {% endfor %}
         </ul>
-        <div class="cat-new-btn" onclick="wizNewCategory()">+ New Category</div>
+        <div class="cat-new-btn" onclick="wizToggleNewMenu(event)">
+          + New Category
+          <div class="cat-new-popup" id="cat-new-popup">
+            <div class="cat-new-popup-item" onclick="event.stopPropagation(); wizNewMainCategory()">
+              Main Category
+              <span class="popup-hint">Top-level menu section</span>
+            </div>
+            <div class="cat-new-popup-item" onclick="event.stopPropagation(); wizNewSubcategory()">
+              Subcategory
+              <span class="popup-hint">Modifier group under a category</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- ===== Main: Current Category Items ===== -->
     <div class="wizard-main">
       {% if current_category %}
-      {% set cat_items = flat_groups.get(current_category, []) %}
+      {% if current_subcategory %}
+        {% set cat_items = subcat_groups.get(current_category, {}).get(current_subcategory, []) %}
+      {% else %}
+        {% set cat_items = subcat_groups.get(current_category, {}).get('', []) %}
+      {% endif %}
 
       <div class="category-header">
         <div>
           <div class="category-name">
+            {% if current_subcategory %}
+            <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=current_category) }}" style="color:var(--muted); text-decoration:none; font-size:.85rem;">{{ current_category|e }}</a>
+            <span style="color:var(--muted); font-size:.85rem; margin:0 4px;">&#8250;</span>
+            <span id="cat-title-label">{{ current_subcategory|e }}</span>
+            {% else %}
             <span id="cat-title-label">{{ current_category|e }}</span>
             <span class="cat-title-edit" onclick="wizRenameCatTitle()" title="Rename category"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
+            {% endif %}
+            <button class="btn-delete-cat-header" onclick="wizDeleteCategoryWithItems()" title="Delete this {% if current_subcategory %}subcategory{% else %}category{% endif %} and all its items">Delete {% if current_subcategory %}Subcategory{% else %}Category{% endif %}</button>
           </div>
           <div class="category-stats">
             {{ cat_items|length }} item{{ 's' if cat_items|length != 1 else '' }}
             {% set total_price = cat_items|selectattr('price_cents')|map(attribute='price_cents')|sum %}
-            {% if total_price %}
+            {% if total_price and cat_items|length %}
             &middot; Avg price: ${{ '%.2f'|format(total_price / cat_items|length / 100) }}
             {% endif %}
           </div>
         </div>
 
         {% set cat_idx = category_list.index(current_category) if current_category in category_list else 0 %}
-        <div style="font-size:.85rem; color:var(--muted);">
-          Category {{ cat_idx + 1 }} of {{ category_list|length }}
+        <div style="font-size:.85rem; color:var(--muted); text-align:right;">
+          <div>Category {{ cat_idx + 1 }} of {{ category_list|length }}</div>
+          {% if cat_items|length > 0 %}
+          <a href="#" onclick="event.preventDefault(); wizToggleSelectAll()" id="wiz-select-all-link" style="color:#2E5B5E; text-decoration:none; font-weight:600; font-size:.82rem; display:inline-block; margin-top:6px;">Select all</a>
+          {% endif %}
         </div>
       </div>
 
@@ -1004,17 +1281,14 @@
       <div class="wizard-items">
         {% set ns = namespace(item_num=0) %}
         {% set cat_subcats = subcat_groups.get(current_category, {}) %}
-        {# Render main items (no subcategory) first, then subcategory groups #}
-        {% set main_items = cat_subcats.get('', []) %}
-        {% set subcat_names = cat_subcats.keys()|list|sort %}
-        {% for sc_name in subcat_names %}
-        {% set sc_items = cat_subcats[sc_name] %}
-        {% if sc_name %}
-        <div class="wiz-subcategory-header">
-          <div class="wiz-subcat-label">{{ sc_name }}</div>
-          <div class="wiz-subcat-count">{{ sc_items|length }} item{{ 's' if sc_items|length != 1 else '' }}</div>
-        </div>
+        {% if current_subcategory %}
+        {% set _filtered_groups = {current_subcategory: cat_subcats.get(current_subcategory, [])} %}
+        {% else %}
+        {% set _filtered_groups = {'': cat_subcats.get('', [])} %}
         {% endif %}
+        {% set subcat_names = _filtered_groups.keys()|list|sort %}
+        {% for sc_name in subcat_names %}
+        {% set sc_items = _filtered_groups[sc_name] %}
         {% for it in sc_items %}
         {% set ns.item_num = ns.item_num + 1 %}
         <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
@@ -1141,8 +1415,8 @@
 
             <div class="wiz-edit-actions">
               <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ Add Variant</button>
-              <button type="button" class="btn-apply-labels" onclick="wizApplyLabels(this)" style="display:none;" title="Apply or rename checked variants across all items in this category">&#x21BB; Apply to All</button>
-              <button type="button" class="btn-delete-variants" onclick="wizDeleteVariantsFromAll(this)" style="display:none;" title="Delete variants with checked labels from all items in this category">&times; Delete All</button>
+              <button type="button" class="btn-apply-labels" onmousedown="_applyInProgress=true" onclick="wizApplyLabels(this)" title="Apply or rename checked variants across all items in this category">&#x21BB; Apply to All</button>
+              <button type="button" class="btn-delete-variants" onmousedown="_applyInProgress=true" onclick="wizDeleteVariantsFromAll(this)" title="Delete variants with checked labels from all items in this category">&times; Delete All</button>
               <button type="button" class="btn-save" onclick="wizSave(this)" style="display:none;">save</button>
               <button type="button" class="btn-undo" onclick="wizUndo()" style="display:none;">undo</button>
               <button type="button" class="btn-delete" onclick="wizDelete(this)">Delete Card</button>
@@ -1226,13 +1500,15 @@
         <div id="wiz-move-dropdown" class="wiz-move-dropdown" style="display:none;">
           <select id="wiz-move-select">
             {% for cat in category_list %}
-            {% if cat != current_category %}
             <option value="{{ cat|e }}">{{ cat|e }}</option>
-            {% endif %}
             {% endfor %}
             <option value="__new__">+ Create New Category</option>
           </select>
-          <input type="text" id="wiz-new-cat-name" placeholder="New category name" style="display:none;" />
+          <select id="wiz-move-subcat" style="display:none;">
+            <option value="">Subcategory (none selected)</option>
+          </select>
+          <input type="text" id="wiz-new-cat-name" placeholder="New category name" style="display:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();wizSelMoveConfirm();}" />
+          <input type="text" id="wiz-new-subcat-name" placeholder="New subcategory name" style="display:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();wizSelMoveConfirm();}" />
           <button class="wiz-sel-btn wiz-sel-confirm" onclick="wizSelMoveConfirm()">Move</button>
         </div>
         <button class="wiz-sel-btn wiz-sel-delete" onclick="wizSelDelete()">Delete</button>
@@ -1462,7 +1738,10 @@
       card.classList.remove('editing');
     }
 
+    let _applyInProgress = false;
+
     async function wizSave(btn) {
+      if (_applyInProgress) return;
       const card = btn.closest('.wiz-item');
       const itemId = card.dataset.itemId;
       const draftId = card.dataset.draftId;
@@ -1580,6 +1859,7 @@
       actionsDiv.appendChild(moveBtn);
       card.appendChild(actionsDiv);
       wizRenumber();
+      wizSaveOrder();
     }
 
     // Allow Enter to save, Escape to cancel
@@ -1771,6 +2051,7 @@
 
     /* ===== Variant Inline Save ===== */
     async function wizSaveVariant(input) {
+      if (_applyInProgress) return;
       const row = input.closest('.wiz-variant-row');
       const variantId = row.dataset.variantId;
       const draftId = row.dataset.draftId;
@@ -1822,46 +2103,54 @@
     }
 
     /* ===== Apply Variant Labels — Checkbox Toggle ===== */
+    // Track which variant row was last focused for auto-select
+    let _lastFocusedVariantRow = null;
+    document.addEventListener('focusin', e => {
+      const row = e.target.closest('.wiz-variant-row');
+      if (row) _lastFocusedVariantRow = row;
+    });
+
     function wizToggleApplyBtn(checkbox) {
-      const card = checkbox.closest('.wiz-item');
-      const anyChecked = card.querySelector('.wiz-vf-check:checked');
-      const show = anyChecked ? '' : 'none';
-      const labelBtn = card.querySelector('.btn-apply-labels');
-      const delBtn = card.querySelector('.btn-delete-variants');
-      if (labelBtn) labelBtn.style.display = show;
-      if (delBtn) delBtn.style.display = show;
+      // Checkboxes still work for multi-select; buttons are always visible now
     }
 
-    /* ===== Apply Checked Variant Labels to All ===== */
+    function _getVariantTargets(card) {
+      const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+      const checkedRows = [...allRows].filter(r => r.querySelector('.wiz-vf-check:checked'));
+      let targetRows = checkedRows;
+      if (targetRows.length === 0 && _lastFocusedVariantRow && _lastFocusedVariantRow.closest('.wiz-item') === card) {
+        targetRows = [_lastFocusedVariantRow];
+      }
+      if (targetRows.length === 0 && allRows.length > 0) {
+        targetRows = [allRows[0]];
+      }
+      return targetRows.map(r => ({
+        pos: parseInt(r.dataset.varPos),
+        label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
+        origLabel: (r.dataset.origLabel || '').trim(),
+        origPrice: parseInt(r.dataset.origPrice || '0'),
+        variantId: r.dataset.variantId,
+        priceStr: (r.querySelector('.wiz-vf-price')?.value || '').trim()
+      }));
+    }
+
+    /* ===== Apply Variant Labels to All ===== */
     async function wizApplyLabels(btn) {
       const card = btn.closest('.wiz-item');
       const itemId = parseInt(card.dataset.itemId);
       const draftId = card.dataset.draftId;
       const category = '{{ current_category|e }}';
 
-      // Gather only the checked variant rows
-      const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
-      const checked = [];
-      allRows.forEach(r => {
-        if (r.querySelector('.wiz-vf-check:checked')) {
-          checked.push({
-            pos: parseInt(r.dataset.varPos),
-            label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
-            origLabel: (r.dataset.origLabel || '').trim(),
-            origPrice: parseInt(r.dataset.origPrice || '0'),
-            variantId: r.dataset.variantId,
-            priceStr: (r.querySelector('.wiz-vf-price')?.value || '').trim()
-          });
-        }
-      });
+      const checked = _getVariantTargets(card);
 
       if (checked.length === 0 || checked.every(c => !c.label)) {
-        wizToast('Check at least one variant with a label.');
+        wizToast('Edit a variant label first.');
         return;
       }
 
       btn.disabled = true;
       btn.textContent = 'Applying...';
+      _applyInProgress = true;
 
       try {
         // Save checked variants first so they're up-to-date in DB
@@ -1901,7 +2190,8 @@
         }
 
         const positions = checked.map(c => c.pos);
-        const reqBody = { source_item_id: itemId, category, positions };
+        const subcategory = {{ current_subcategory|tojson }};
+        const reqBody = { source_item_id: itemId, category, subcategory, positions };
         if (Object.keys(renames).length > 0) reqBody.renames = renames;
         if (Object.keys(priceUpdates).length > 0) reqBody.price_updates = priceUpdates;
 
@@ -2059,7 +2349,7 @@
           });
 
           // Update orig values on source card's rows + uncheck
-          allRows.forEach(r => {
+          card.querySelectorAll('.wiz-edit-form .wiz-variant-row').forEach(r => {
             const cb = r.querySelector('.wiz-vf-check');
             if (cb) cb.checked = false;
             const inp = r.querySelector('.wiz-vf-label');
@@ -2072,17 +2362,16 @@
               r.dataset.origPrice = pc;
             }
           });
-          btn.style.display = 'none';
-
-          card.querySelector('.btn-delete-variants').style.display = 'none';
           wizFlagMissingPrices(); wizFlagZeroEditPrices();
           updateUndoButtons();
         } else {
           wizToast(data.error || 'Apply failed');
         }
       } catch (e) {
-        wizToast('Network error');
+        console.error('Apply error:', e);
+        wizToast('Apply error: ' + (e.message || 'Network error'));
       } finally {
+        _applyInProgress = false;
         btn.disabled = false;
         btn.textContent = '\u21BB Apply to All';
       }
@@ -2096,32 +2385,23 @@
       const draftId = card.dataset.draftId;
       const category = '{{ current_category|e }}';
 
-      const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
-      const checked = [];
-      allRows.forEach(r => {
-        if (r.querySelector('.wiz-vf-check:checked')) {
-          checked.push({
-            label: (r.querySelector('.wiz-vf-label')?.value || '').trim(),
-            variantId: r.dataset.variantId
-          });
-        }
-      });
-
-      const labels = checked.map(c => c.label).filter(l => l);
+      const targets = _getVariantTargets(card);
+      const labels = targets.map(c => c.label).filter(l => l);
       if (labels.length === 0) {
-        wizToast('Check at least one variant with a label.');
+        wizToast('Edit or select a variant first.');
         return;
       }
 
       btn.disabled = true;
       btn.textContent = 'Deleting...';
+      _applyInProgress = true;
 
       try {
         const res = await fetch(`/api/drafts/${draftId}/wizard/delete_variants_by_label`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ source_item_id: itemId, category, labels })
+          body: JSON.stringify({ source_item_id: itemId, category, subcategory: {{ current_subcategory|tojson }}, labels })
         });
         const data = await res.json();
         if (data.ok) {
@@ -2157,21 +2437,18 @@
             }
           });
 
-          // Uncheck boxes, hide buttons
-          allRows.forEach(r => {
-            const cb = r.querySelector('.wiz-vf-check');
-            if (cb) cb.checked = false;
-          });
-          btn.style.display = 'none';
-          card.querySelector('.btn-apply-labels').style.display = 'none';
+          // Uncheck boxes
+          card.querySelectorAll('.wiz-edit-form .wiz-vf-check').forEach(cb => cb.checked = false);
 
           updateUndoButtons();
         } else {
           wizToast(data.error || 'Delete failed');
         }
       } catch (e) {
-        wizToast('Network error');
+        console.error('Delete error:', e);
+        wizToast('Delete error: ' + (e.message || 'Network error'));
       } finally {
+        _applyInProgress = false;
         btn.disabled = false;
         btn.textContent = '\u00D7 Delete All';
       }
@@ -2234,9 +2511,9 @@
 
       item.addEventListener('dragover', e => {
         e.preventDefault();
-        if (!dragItem || item === dragItem || item.classList.contains('deleted')) return;
+        if (!dragItem || item === dragItem) return;
         const container = item.parentElement;
-        const allItems = [...container.querySelectorAll('.wiz-item:not(.deleted)')];
+        const allItems = [...container.querySelectorAll('.wiz-item')];
         const dragIdx = allItems.indexOf(dragItem);
         const hoverIdx = allItems.indexOf(item);
         if (dragIdx < 0 || hoverIdx < 0) return;
@@ -2265,7 +2542,7 @@
     }
 
     async function wizSaveOrder() {
-      const items = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
+      const items = document.querySelectorAll('.wizard-items .wiz-item');
       const order = [...items].map(el => parseInt(el.dataset.itemId)).filter(id => !isNaN(id));
       const draftId = items[0]?.dataset.draftId;
       if (!draftId || !order.length) return;
@@ -2332,13 +2609,31 @@
         .filter(id => !isNaN(id));
     }
 
+    function wizToggleSelectAll() {
+      const all = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted) .wiz-select-check');
+      const anyUnchecked = [...all].some(cb => !cb.checked);
+      all.forEach(cb => { cb.checked = anyUnchecked; });
+      const link = document.getElementById('wiz-select-all-link');
+      if (link) link.textContent = anyUnchecked ? 'Deselect all' : 'Select all';
+      wizUpdateSelection();
+    }
+
     function wizUpdateSelection() {
+      // If a read item was just checked, unmark it as read and uncheck it
+      document.querySelectorAll('.wiz-item.is-read .wiz-select-check:checked').forEach(cb => {
+        const card = cb.closest('.wiz-item');
+        card.classList.remove('is-read');
+        cb.checked = false;
+      });
+      const readItems = [...document.querySelectorAll('.wiz-item.is-read')]
+        .map(c => parseInt(c.dataset.itemId));
+      sessionStorage.setItem('wizReadItems', JSON.stringify(readItems));
+
       const ids = wizGetSelectedIds();
       const panel = document.getElementById('wiz-selected-panel');
       const count = document.getElementById('wiz-selected-count');
       if (panel) panel.style.display = ids.length > 0 ? '' : 'none';
       if (count) count.textContent = ids.length;
-      // Hide move dropdown when selection changes
       const dd = document.getElementById('wiz-move-dropdown');
       if (dd) dd.style.display = 'none';
     }
@@ -2369,14 +2664,62 @@
 
     function wizSelMoveToggle() {
       const dd = document.getElementById('wiz-move-dropdown');
-      dd.style.display = dd.style.display === 'none' ? '' : 'none';
+      const show = dd.style.display === 'none';
+      dd.style.display = show ? '' : 'none';
+      if (show) {
+        const sel = document.getElementById('wiz-move-select');
+        if (sel) _populateMoveSubcats(sel.value);
+      }
     }
 
-    // Show/hide new category input when "Create New" is selected
-    document.getElementById('wiz-move-select')?.addEventListener('change', function() {
+    // Subcategory names per category for move dropdown
+    const _subcatNames = {
+      {% for cat_name in category_list %}
+      {{ cat_name|tojson }}: [{% for k in subcat_groups.get(cat_name, {}).keys() if k %}{{ k|tojson }},{% endfor %}],
+      {% endfor %}
+    };
+
+    function _populateMoveSubcats(catValue) {
       const newInput = document.getElementById('wiz-new-cat-name');
-      newInput.style.display = this.value === '__new__' ? '' : 'none';
-      if (this.value === '__new__') newInput.focus();
+      const subcatSelect = document.getElementById('wiz-move-subcat');
+      const newSubcatInput = document.getElementById('wiz-new-subcat-name');
+      newSubcatInput.style.display = 'none';
+      if (catValue === '__new__') {
+        newInput.style.display = '';
+        subcatSelect.style.display = 'none';
+        newInput.focus();
+        return;
+      }
+      newInput.style.display = 'none';
+      const subNames = (_subcatNames[catValue] || []).sort();
+      subcatSelect.innerHTML = '<option value="">Subcategory (none selected)</option>';
+      subNames.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        subcatSelect.appendChild(opt);
+      });
+      // Always show subcategory dropdown so user can create new subcategories
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new_subcat__';
+      newOpt.textContent = '+ Create New Subcategory';
+      subcatSelect.appendChild(newOpt);
+      subcatSelect.style.display = '';
+    }
+
+    document.getElementById('wiz-move-select')?.addEventListener('change', function() {
+      _populateMoveSubcats(this.value);
+    });
+
+    document.getElementById('wiz-move-subcat')?.addEventListener('change', function() {
+      const newSubcatInput = document.getElementById('wiz-new-subcat-name');
+      if (this.value === '__new_subcat__') {
+        newSubcatInput.style.display = '';
+        newSubcatInput.value = '';
+        newSubcatInput.focus();
+      } else {
+        newSubcatInput.style.display = 'none';
+      }
     });
 
     async function wizSelMoveConfirm() {
@@ -2388,25 +2731,34 @@
         target = document.getElementById('wiz-new-cat-name').value.trim();
         if (!target) { wizToast('Enter a category name'); return; }
       }
+      const subcatSelect = document.getElementById('wiz-move-subcat');
+      let targetSubcat = null;
+      if (subcatSelect.style.display !== 'none') {
+        if (subcatSelect.value === '__new_subcat__') {
+          targetSubcat = document.getElementById('wiz-new-subcat-name').value.trim();
+          if (!targetSubcat) { wizToast('Enter a subcategory name'); return; }
+        } else if (subcatSelect.value) {
+          targetSubcat = subcatSelect.value;
+        }
+      }
       const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
       try {
         const res = await fetch(`/api/drafts/${draftId}/wizard/bulk_move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ item_ids: ids, target_category: target })
+          body: JSON.stringify({ item_ids: ids, target_category: target, target_subcategory: targetSubcat })
         });
         const data = await res.json();
         if (data.ok) {
-          // Remove moved cards from current view
           ids.forEach(id => {
             const card = document.querySelector(`.wiz-item[data-item-id="${id}"]`);
             if (card) card.remove();
           });
           wizRenumber();
           wizUpdateSelection();
-          wizToast(`Moved ${ids.length} item${ids.length > 1 ? 's' : ''} to ${target}`);
-          // Reload after short delay to update sidebar counts
+          const dest = targetSubcat ? `${target} › ${targetSubcat}` : target;
+          wizToast(`Moved ${ids.length} item${ids.length > 1 ? 's' : ''} to ${dest}`);
           setTimeout(() => window.location.reload(), 1500);
         }
       } catch (e) { wizToast('Network error'); }
@@ -2524,12 +2876,26 @@
       });
     }
 
-    /* ===== New Category ===== */
-    async function wizNewCategory() {
+    /* ===== New Category Popup ===== */
+    function wizToggleNewMenu(e) {
+      e.stopPropagation();
+      const popup = document.getElementById('cat-new-popup');
+      popup.classList.toggle('open');
+      if (popup.classList.contains('open')) {
+        setTimeout(() => {
+          document.addEventListener('click', function _close() {
+            popup.classList.remove('open');
+            document.removeEventListener('click', _close);
+          }, { once: true });
+        }, 10);
+      }
+    }
+
+    async function wizNewMainCategory() {
+      document.getElementById('cat-new-popup').classList.remove('open');
       const name = prompt('New category name:');
       if (!name || !name.trim()) return;
       const draftId = '{{ draft.id }}';
-      // Create a placeholder item so the category exists, then move to it
       try {
         const res = await fetch(`/api/drafts/${draftId}/wizard/add_item`, {
           method: 'POST',
@@ -2546,11 +2912,116 @@
       } catch (e) { wizToast('Network error'); }
     }
 
+    function wizNewSubcategory() {
+      document.getElementById('cat-new-popup').classList.remove('open');
+      const modal = document.getElementById('subcat-modal');
+      const nameInput = document.getElementById('subcat-name');
+      nameInput.value = '';
+      modal.classList.add('open');
+      setTimeout(() => nameInput.focus(), 100);
+    }
+
+    async function wizCreateSubcategory() {
+      const parent = document.getElementById('subcat-parent').value;
+      const name = document.getElementById('subcat-name').value.trim();
+      if (!name) { wizToast('Enter a subcategory name'); return; }
+      const draftId = '{{ draft.id }}';
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/add_item`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ category: parent, subcategory: name })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          document.getElementById('subcat-modal').classList.remove('open');
+          window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}?category=${encodeURIComponent(parent)}&subcategory=${encodeURIComponent(name)}`;
+        } else {
+          wizToast(data.error || 'Failed to create subcategory');
+        }
+      } catch (e) { wizToast('Network error'); }
+    }
+
+    // In-app confirm modal (replaces confirm())
+    function wizConfirm(title, message, onConfirm, danger = true) {
+      const overlay = document.getElementById('wiz-confirm-modal');
+      document.getElementById('wiz-confirm-title').textContent = title;
+      document.getElementById('wiz-confirm-message').textContent = message;
+      const okBtn = document.getElementById('wiz-confirm-ok');
+      okBtn.className = danger ? 'btn-confirm-danger' : 'btn-confirm-primary';
+      okBtn.onclick = () => {
+        overlay.classList.remove('open');
+        onConfirm();
+      };
+      overlay.classList.add('open');
+    }
+
+    async function _doDeleteCategory(payload, label) {
+      const draftId = '{{ draft.id }}';
+      try {
+        const res = await fetch(`/api/drafts/${draftId}/wizard/delete_category`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.ok) {
+          wizToast(`Deleted "${label}"`);
+          setTimeout(() => window.location = `{{ url_for('draft_wizard', draft_id=draft.id) }}`, 500);
+        } else {
+          wizToast(data.error || 'Delete failed');
+        }
+      } catch (e) { wizToast('Network error'); }
+    }
+
+    function wizDeleteCategory(catName) {
+      wizConfirm(
+        'Delete Empty Category',
+        `Delete empty category "${catName}"?`,
+        () => _doDeleteCategory({ category: catName }, catName)
+      );
+    }
+
+    function wizDeleteSubcategory(catName, subcatName) {
+      wizConfirm(
+        'Delete Empty Subcategory',
+        `Delete empty subcategory "${subcatName}"?`,
+        () => _doDeleteCategory({ category: catName, subcategory: subcatName }, subcatName)
+      );
+    }
+
+    function wizDeleteCategoryWithItems() {
+      const catName = {{ current_category|tojson }};
+      const subcatName = {{ current_subcategory|tojson }};
+      const label = subcatName || catName;
+      const kind = subcatName ? 'subcategory' : 'category';
+      wizConfirm(
+        `Delete ${kind.charAt(0).toUpperCase() + kind.slice(1)}`,
+        `Deleting the ${kind} means deleting the ${kind} and all its contents. Are you sure you want to delete "${label}"?`,
+        () => _doDeleteCategory({
+          category: catName,
+          subcategory: subcatName,
+          force: true
+        }, label)
+      );
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const inp = document.getElementById('subcat-name');
+      if (inp) inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); wizCreateSubcategory(); }
+        if (e.key === 'Escape') { document.getElementById('subcat-modal').classList.remove('open'); }
+      });
+    });
+
     /* ===== Category Drag Reorder ===== */
     (function setupCatDrag() {
       const list = document.getElementById('cat-list');
       if (!list) return;
       let dragLi = null;
+      const draftId = '{{ draft.id }}';
 
       list.addEventListener('dragstart', e => {
         const li = e.target.closest('li');
@@ -2565,16 +3036,15 @@
         const li = e.target.closest('li');
         if (li) li.style.opacity = '';
         list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
-        dragLi = null;
-        // Save new order
-        const cats = [...list.querySelectorAll('li')].map(l => l.dataset.catName);
-        const draftId = '{{ draft.id }}';
+        if (!dragLi) return;
+        const cats = [...list.querySelectorAll('li:not(.cat-subcat)')].map(l => l.dataset.catName);
         fetch(`/drafts/${draftId}/reorder_categories`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
           body: JSON.stringify({ categories: cats })
         }).catch(() => {});
+        dragLi = null;
       });
 
       list.addEventListener('dragover', e => {
@@ -2593,16 +3063,38 @@
 
       list.addEventListener('drop', e => {
         e.preventDefault();
-        const li = e.target.closest('li');
-        if (li && dragLi && li !== dragLi) {
+        const dropLi = e.target.closest('li');
+        if (!dropLi || !dragLi || dropLi === dragLi) {
+          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+          return;
+        }
+        const isSubcatDrag = dragLi.classList.contains('cat-subcat');
+        const isMainDrop = !dropLi.classList.contains('cat-subcat');
+        if (isSubcatDrag && isMainDrop) {
+          const subcatName = dragLi.dataset.subcatName;
+          const oldParent = dragLi.dataset.catName;
+          const newParent = dropLi.dataset.catName;
+          if (oldParent !== newParent) {
+            fetch(`/api/drafts/${draftId}/wizard/move_subcategory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ subcategory: subcatName, old_category: oldParent, new_category: newParent })
+            }).then(r => r.json()).then(data => {
+              if (data.ok) {
+                wizToast(`Moved "${subcatName}" to ${newParent}`);
+                const base = `{{ url_for('draft_wizard', draft_id=draft.id) }}`;
+                setTimeout(() => { window.location = `${base}?category=${encodeURIComponent(newParent)}&subcategory=${encodeURIComponent(subcatName)}`; }, 1000);
+              } else { wizToast(data.error || 'Move failed'); }
+            }).catch(() => wizToast('Network error'));
+            dragLi = null;
+          }
+        } else {
           const items = [...list.querySelectorAll('li')];
           const dragIdx = items.indexOf(dragLi);
-          const dropIdx = items.indexOf(li);
-          if (dragIdx < dropIdx) {
-            li.insertAdjacentElement('afterend', dragLi);
-          } else {
-            li.insertAdjacentElement('beforebegin', dragLi);
-          }
+          const dropIdx = items.indexOf(dropLi);
+          if (dragIdx < dropIdx) { dropLi.insertAdjacentElement('afterend', dragLi); }
+          else { dropLi.insertAdjacentElement('beforebegin', dragLi); }
         }
         list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
       });
@@ -2934,4 +3426,36 @@
   </script>
   {% endif %}
 </div>
+
+<!-- Confirm modal (reusable) -->
+<div class="wiz-confirm-overlay" id="wiz-confirm-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="wiz-confirm-modal">
+    <h3 id="wiz-confirm-title">Confirm</h3>
+    <p id="wiz-confirm-message"></p>
+    <div class="wiz-confirm-actions">
+      <button class="btn-confirm-cancel" onclick="document.getElementById('wiz-confirm-modal').classList.remove('open')">Cancel</button>
+      <button id="wiz-confirm-ok" class="btn-confirm-danger">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Subcategory creation modal -->
+<div class="subcat-modal-overlay" id="subcat-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="subcat-modal">
+    <h3>Create Subcategory</h3>
+    <label for="subcat-parent">Parent Category</label>
+    <select id="subcat-parent">
+      {% for cat in progress.categories %}
+      <option value="{{ cat.name|e }}">{{ cat.name|e }}</option>
+      {% endfor %}
+    </select>
+    <label for="subcat-name">Subcategory Name</label>
+    <input type="text" id="subcat-name" placeholder="e.g. Toppings, Sauce Options, Add-Ons" autocomplete="off" />
+    <div class="subcat-modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('subcat-modal').classList.remove('open')">Cancel</button>
+      <button class="btn-create" onclick="wizCreateSubcategory()">Create</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}

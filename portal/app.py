@@ -6341,6 +6341,7 @@ def draft_wizard(draft_id: int):
     # Determine current step: summary (first page), or a category name
     requested_step = request.args.get("step", "").strip()
     requested_cat = request.args.get("category", "").strip()
+    requested_subcat = request.args.get("subcategory", "").strip() or None
     category_list = [c["name"] for c in progress["categories"]]
 
     # Apply saved category order if it exists
@@ -6430,6 +6431,7 @@ def draft_wizard(draft_id: int):
         progress=progress,
         category_list=category_list,
         current_category=current_category,
+        current_subcategory=requested_subcat,
         wizard_step=wizard_step,
         restaurant=restaurant,
         price_map=price_map,
@@ -6833,6 +6835,8 @@ def wizard_apply_variant_labels(draft_id: int):
     category = (data.get("category") or "").strip()
     if not source_item_id or not category:
         return jsonify({"ok": False, "error": "source_item_id and category required"}), 400
+    # Subcategory scoping: only apply to items in the same subcategory
+    req_subcat = data.get("subcategory")  # null/missing = main items only
 
     # Only apply specific positions (0-indexed). If omitted, apply all.
     positions = data.get("positions")
@@ -6841,7 +6845,9 @@ def wizard_apply_variant_labels(draft_id: int):
 
     try:
         items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
-        cat_items = [it for it in items if (it.get("category") or "").strip() == category]
+        cat_items = [it for it in items
+                     if (it.get("category") or "").strip() == category
+                     and (it.get("subcategory") or None) == (req_subcat or None)]
 
         # Get source item's variants (sorted by position)
         source = None
@@ -7027,6 +7033,7 @@ def wizard_delete_variants_by_label(draft_id: int):
     labels = data.get("labels") or []  # list of label strings to delete
     if not category or not labels:
         return jsonify({"ok": False, "error": "category and labels required"}), 400
+    req_subcat = data.get("subcategory")  # null/missing = main items only
 
     label_set = {l.strip().lower() for l in labels if l.strip()}
     if not label_set:
@@ -7034,7 +7041,9 @@ def wizard_delete_variants_by_label(draft_id: int):
 
     try:
         items = drafts_store.get_draft_items(draft_id, include_modifier_groups=False) or []
-        cat_items = [it for it in items if (it.get("category") or "").strip() == category]
+        cat_items = [it for it in items
+                     if (it.get("category") or "").strip() == category
+                     and (it.get("subcategory") or None) == (req_subcat or None)]
 
         deleted_variants = []  # for undo: [{variant_id, item_id, label, price_cents, kind, position}]
         updated_items = 0
@@ -7136,6 +7145,7 @@ def wizard_bulk_move(draft_id: int):
     data = request.get_json(silent=True) or {}
     item_ids = data.get("item_ids") or []
     target_category = (data.get("target_category") or "").strip()
+    target_subcategory = (data.get("target_subcategory") or "").strip() or None
     if not item_ids or not target_category:
         return jsonify({"ok": False, "error": "item_ids and target_category required"}), 400
 
@@ -7144,8 +7154,8 @@ def wizard_bulk_move(draft_id: int):
         with db_connect() as conn:
             for iid in item_ids:
                 conn.execute(
-                    "UPDATE draft_items SET category=?, updated_at=? WHERE id=? AND draft_id=?",
-                    (target_category, now, int(iid), draft_id),
+                    "UPDATE draft_items SET category=?, subcategory=?, updated_at=? WHERE id=? AND draft_id=?",
+                    (target_category, target_subcategory, now, int(iid), draft_id),
                 )
             conn.commit()
         # Re-initialize wizard categories to pick up the new category
@@ -7229,6 +7239,7 @@ def wizard_add_item(draft_id: int):
     category = (data.get("category") or "").strip()
     if not category:
         return jsonify({"ok": False, "error": "Category required"}), 400
+    subcategory = (data.get("subcategory") or "").strip() or None
 
     # Insert at the end of the category
     result = drafts_store.upsert_draft_items(draft_id, [{
@@ -7236,10 +7247,100 @@ def wizard_add_item(draft_id: int):
         "description": "",
         "price_cents": 0,
         "category": category,
+        "subcategory": subcategory,
     }])
 
     new_id = result.get("inserted_ids", [None])[0]
     return jsonify({"ok": True, "item_id": new_id})
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/move_subcategory")
+@login_required
+def wizard_move_subcategory(draft_id: int):
+    """Move all items in a subcategory to a different parent category."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    subcategory = (data.get("subcategory") or "").strip()
+    old_category = (data.get("old_category") or "").strip()
+    new_category = (data.get("new_category") or "").strip()
+    if not subcategory or not old_category or not new_category:
+        return jsonify({"ok": False, "error": "subcategory, old_category, and new_category required"}), 400
+
+    try:
+        now = _now_iso()
+        with db_connect() as conn:
+            result = conn.execute(
+                "UPDATE draft_items SET category=?, updated_at=? "
+                "WHERE draft_id=? AND category=? AND subcategory=?",
+                (new_category, now, draft_id, old_category, subcategory),
+            )
+            conn.commit()
+        drafts_store.init_wizard_categories(draft_id)
+        return jsonify({"ok": True, "moved": result.rowcount})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/drafts/<int:draft_id>/wizard/delete_category")
+@login_required
+def wizard_delete_category(draft_id: int):
+    """Delete an empty category or subcategory (removes any placeholder items)."""
+    _require_drafts_storage()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Expected JSON"}), 400
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "").strip()
+    subcategory = data.get("subcategory")
+    force = bool(data.get("force"))
+    if not category:
+        return jsonify({"ok": False, "error": "category required"}), 400
+
+    try:
+        with db_connect() as conn:
+            if subcategory:
+                if force:
+                    # Delete ALL items in this subcategory
+                    conn.execute(
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND subcategory=?",
+                        (draft_id, category, subcategory),
+                    )
+                else:
+                    # Only delete if empty or just placeholders
+                    conn.execute(
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND subcategory=? AND name='New Item' AND price_cents=0",
+                        (draft_id, category, subcategory),
+                    )
+                    remaining = conn.execute(
+                        "SELECT COUNT(*) FROM draft_items WHERE draft_id=? AND category=? AND subcategory=?",
+                        (draft_id, category, subcategory),
+                    ).fetchone()[0]
+                    if remaining > 0:
+                        return jsonify({"ok": False, "error": "Subcategory is not empty"}), 400
+            else:
+                if force:
+                    # Delete ALL items in this category (including all subcategories)
+                    conn.execute(
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=?",
+                        (draft_id, category),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND name='New Item' AND price_cents=0",
+                        (draft_id, category),
+                    )
+                    remaining = conn.execute(
+                        "SELECT COUNT(*) FROM draft_items WHERE draft_id=? AND category=?",
+                        (draft_id, category),
+                    ).fetchone()[0]
+                    if remaining > 0:
+                        return jsonify({"ok": False, "error": "Category is not empty"}), 400
+            conn.commit()
+        drafts_store.init_wizard_categories(draft_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # --- NEW: Draft status probe for polling ---

@@ -46,7 +46,8 @@ from .ai_menu_extract import _get_client
 # Constants
 # ---------------------------------------------------------------------------
 _DEFAULT_MODEL = "claude-sonnet-4-5"
-_MAX_TOKENS = 12_000   # Price intel can cover many items
+_MAX_TOKENS = 8_000    # Per-batch token limit (batched by category)
+_MAX_ITEMS_PER_BATCH = 40  # Split large categories into sub-batches
 
 # DB path (same as other storage modules)
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "servline.db"
@@ -286,6 +287,60 @@ def _call_claude(
 
 
 # ---------------------------------------------------------------------------
+# Batching: split items by category, sub-batch if too large
+# ---------------------------------------------------------------------------
+def _make_batches(items: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """Group items by category, then split any group that exceeds the batch limit."""
+    from collections import OrderedDict
+
+    by_cat: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+    for item in items:
+        cat = item.get("category") or "Uncategorized"
+        by_cat.setdefault(cat, []).append(item)
+
+    batches: List[List[Dict[str, Any]]] = []
+    for cat, cat_items in by_cat.items():
+        # Sub-batch large categories
+        for i in range(0, len(cat_items), _MAX_ITEMS_PER_BATCH):
+            batches.append(cat_items[i : i + _MAX_ITEMS_PER_BATCH])
+
+    # If total items fit in one batch, just send everything together
+    if len(items) <= _MAX_ITEMS_PER_BATCH:
+        return [items]
+
+    return batches
+
+
+def _merge_batch_results(
+    batch_results: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Merge multiple batch results into a single unified result."""
+    merged_assessments: List[Dict[str, Any]] = []
+    merged_cat_avgs: Dict[str, Any] = {}
+    market_context: Dict[str, Any] = {}
+    total_elapsed = 0.0
+    model_used = _DEFAULT_MODEL
+
+    for result in batch_results:
+        merged_assessments.extend(result.get("assessments", []))
+        merged_cat_avgs.update(result.get("category_averages", {}))
+        # Take the last non-empty market context
+        if result.get("market_context"):
+            market_context = result["market_context"]
+        total_elapsed += result.get("_elapsed", 0)
+        if result.get("_model"):
+            model_used = result["_model"]
+
+    return {
+        "assessments": merged_assessments,
+        "category_averages": merged_cat_avgs,
+        "market_context": market_context,
+        "_model": model_used,
+        "_elapsed": total_elapsed,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Result validation + normalization
 # ---------------------------------------------------------------------------
 def _normalize_assessment(raw: str) -> str:
@@ -485,22 +540,36 @@ def analyze_menu_prices(
     competitor_data = get_cached_comparisons(restaurant_id)
     market_summary = get_market_summary(restaurant_id)
 
-    # Build and send prompt
-    prompt = _build_prompt(
-        items, cuisine_type, zip_code, competitor_data, market_summary,
+    # Batch items by category to avoid token overflow on large menus
+    batches = _make_batches(items)
+    log.info(
+        "Price intel: %d items → %d batch(es) for draft %d",
+        len(items), len(batches), draft_id,
     )
 
-    raw = _call_claude(prompt, model=model)
-    if not raw:
+    batch_results: List[Dict[str, Any]] = []
+    for i, batch in enumerate(batches):
+        log.info("Price intel batch %d/%d: %d items", i + 1, len(batches), len(batch))
+        prompt = _build_prompt(
+            batch, cuisine_type, zip_code, competitor_data, market_summary,
+        )
+        raw = _call_claude(prompt, model=model)
+        if raw:
+            batch_results.append(raw)
+        else:
+            log.warning("Price intel batch %d/%d failed, skipping", i + 1, len(batches))
+
+    if not batch_results:
         return {
-            "error": "Claude API call failed",
+            "error": "All Claude API batches failed",
             "skipped": True,
             "assessments": [],
             "total_items": len(items),
         }
 
-    # Validate + normalize
-    validated = _validate_results(raw, items)
+    # Merge batches and validate
+    merged = _merge_batch_results(batch_results)
+    validated = _validate_results(merged, items)
 
     # Save to DB
     _save_results(
@@ -510,14 +579,14 @@ def analyze_menu_prices(
         cuisine_type=cuisine_type,
         zip_code=zip_code,
         competitor_count=market_summary.get("competitor_count", 0),
-        model=raw.get("_model", model),
+        model=merged.get("_model", model),
     )
 
     return {
         "assessments": validated["assessments"],
         "category_avgs": validated["category_avgs"],
         "market_context": validated["market_context"],
-        "model": raw.get("_model", model),
+        "model": merged.get("_model", model),
         "total_items": len(items),
         "items_assessed": sum(
             1 for a in validated["assessments"] if a["assessment"] != "unknown"
