@@ -2449,6 +2449,87 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       RESULT: 99%+ price accuracy on 158-item menus, 100% categorization,
       full subcategory + modifier support, audit-driven correctness model
 
+  [ ] Day 141.5: Editor Respec — Make the Main Editor the Wizard (HIGH PRIORITY)
+      WHY: The current full editor (/drafts/<id>/edit) is a dense spreadsheet-style
+      table with action buttons spilling everywhere — it looks and feels like a
+      POS-developer tool. The wizard, by contrast, is calm, focused, and
+      restaurant-owner-friendly. When customers walk through the polished wizard
+      and then land in the editor for follow-up edits, they hit a wall of
+      cognitive whiplash. This is exactly the "POS-developer poisoning" that
+      MenuShip is supposed to be free of — and it survived in our own product.
+
+      MUST happen BEFORE Day 142 (Square exporter rebuild). If the editor scares
+      customers away, the export quality doesn't matter — they never get there.
+
+      THE PLAN:
+        1. Fork the wizard template into a new editor template
+        2. Strip the per-category review flow (Confirm & Next button, banner,
+           progress bar). The editor is "wizard, but persistent and uncategorized."
+        3. Sidebar stays the same: categories + indented subcategories, click any
+           to view its items in the wizard's clean card layout
+        4. Same item cards, same drag-to-reorder, same Apply/Delete All scoping,
+           same red ! flag for missing prices, same subcategory grouping
+        5. The "Approve & Export to POS" button moves to a single prominent
+           location in the page header (top right)
+        6. Save status / autosave indicator in the header (no big "Save" button)
+        7. Hide power-user features behind progressive disclosure:
+           - Search bar: small, in the sidebar
+           - Bulk select: already exists from wizard ("Select all" link)
+           - Move to Category: already exists in wizard's selected-panel
+           - Duplicate per item: small icon button in item card "..." menu
+           - Variant Preset templates: small button, opens a popover
+           - Kitchen Names: hide behind "Advanced" toggle
+           - Table view: hide behind "View as table" toggle for the rare power user
+
+      RIGHT COLUMN — REPLACE MENU VIEWER WITH GOOGLE MAPS COMPETITOR VIEW:
+        1. Default view: Google Maps embed centered on the restaurant, showing
+           the cached Google Places competitors as pins (we already cache ~20
+           competitors per restaurant from the Day 134 work)
+        2. Click a pin → popup with: name, rating, distance, price tier ($-$$$$),
+           "View on Google Maps" link
+        3. Toggleable: a small "Map / Original Menu" toggle in the right column
+           header lets the user switch back to the menu image viewer when they
+           need to verify something they edited
+        4. Same column resizers, same responsive behavior, same fit/zoom logic
+        5. The map provides defensible price comparison transparency: when the
+           wizard shows "Underpriced" badges, the user can SEE the actual
+           restaurants Claude looked at. Builds trust in the entire pricing
+           intelligence feature.
+
+      WHY THE MAP IS WORTH THE EFFORT:
+        - Transforms abstract "regional avg: $19.50" into something tangible
+        - Defensible: when a restaurant owner pushes back on a price suggestion,
+          the answer becomes "click that pin — that's their menu"
+        - Marketing screenshot: "Look at your menu next to a live map of your
+          competitors" sells the product instantly
+        - The data already exists: Google Places cache from Day 134
+        - Fills the right column with something the editor needs that the wizard
+          didn't (the wizard had the menu viewer for source verification during
+          audit; the editor needs market context for ongoing edits)
+        - Purchase justification at the export paywall: tangible value beyond
+          extraction
+
+      EFFORT BREAKDOWN:
+        - Editor → wizard template fork: 2-3 hrs
+        - Map integration with Google Places data: 2-4 hrs
+        - Pin click popups: 1-2 hrs
+        - Right column toggle (map / original menu): 1 hr
+        - Polish + testing: 1-2 hrs
+        Total: 7-12 hours focused work
+
+      WHAT WE ARE NOT DOING ON DAY 141.5:
+        - Touching exporters (that's Day 142)
+        - Menu scraping or "click pin to see their menu inline" (Phase 2 stretch)
+        - Competitor filtering by cuisine type (Phase 2)
+        - Removing the menu image viewer entirely — keep as toggleable option
+        - Restructuring the internal data model
+
+      PHASE 2 (LATER, OPTIONAL):
+        - Click pin → fetch their menu image from Google Places photos API
+        - "Compare your prices" overlay highlighting outliers vs nearby competitors
+        - Filter pins by cuisine type
+        - Show only competitors with comparable items toggle
+
   [ ] Day 142: Ingredient List → Modifier Group Conversion (HIGH PRIORITY)
       WHY: Real POS systems (Square, Toast, Clover) expect ingredient lists as
       MODIFIER GROUPS, not description text. Right now we extract "All sandwiches
