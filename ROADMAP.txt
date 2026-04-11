@@ -2530,6 +2530,74 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
         - Filter pins by cuisine type
         - Show only competitors with comparable items toggle
 
+  [ ] Day 141.6: Multi-Restaurant Workflow + Wizard Confirmation (HIGH PRIORITY)
+      WHY: Day 141.5 fixes the editor's visual feel. Day 141.6 fixes the
+      data organization problem — multi-restaurant users currently have no
+      clean way to switch between menus, and there's no commitment step at
+      the end of the wizard to name menus and assign them properly.
+      Comes AFTER Day 141.5, BEFORE Day 142.
+
+      THE PLAN:
+
+      1. Restaurant/Menu Picker (VS Code File menu style)
+         - Trigger: clicking the menu title in the editor header opens the picker
+         - Behavior: overlay popover anchored to title, closes on outside click
+         - Layout: search box at top + list of restaurants (name + address +
+           phone) sorted by creation date (newest at top, oldest at bottom)
+         - Hover any restaurant → submenu slides out with that restaurant's
+           menus + "+ Upload New Menu" + "+ Copy Existing Menu" actions
+         - Always show submenu (consistency, even for single-menu restaurants)
+         - All restaurants shown regardless of menu count (empty restaurants
+           show "(no menu yet)" hint)
+         - Search box always visible — substring match on restaurant names
+         - Visual style: MenuShip light theme, not VS Code dark theme
+
+      2. Wizard Confirmation Screen
+         - After last category in wizard, BEFORE landing in editor
+         - Required: pick a restaurant + name the menu (both mandatory)
+         - Restaurant picker dropdown includes inline "Create new restaurant"
+           option that opens a small form without leaving the wizard
+         - Menu title has smart default ("Imported Apr 10") but is editable
+         - Cannot proceed without both fields — forces 5-second commitment
+           so menus get organized correctly
+
+      3. New Restaurant Flow with Menu Copy
+         - When user creates a new restaurant from anywhere, prompt:
+             [Upload a New Menu]   → wizard upload flow
+             [Copy Existing Menu]  → pick a source menu from another restaurant
+             [Skip for Now]        → restaurant created empty
+         - Copy creates a completely INDEPENDENT draft (decided 2026-04-10)
+         - Editing one does NOT affect the other — locations almost always
+           drift in pricing/items over time, linked menus would be a footgun
+
+      4. Schema Migration
+         - Add `address` (TEXT) and `phone` (TEXT) to restaurants table
+         - Both nullable, additive migration
+         - Old restaurants fall back gracefully (display whatever they have,
+           even if just zip code)
+
+      5. Dashboard Polish
+         - Group menus by restaurant on dashboard
+         - Sort menus within each restaurant by last edited (most recent first)
+
+      OUT OF SCOPE FOR 141.6 (defer further):
+        - Tags / labels on items
+        - Version history viewer (storage exists from Phase 10, not surfaced)
+        - Print preview / QR code for mobile preview
+        - Menu archive / soft delete
+        - Linked/synced menus across restaurants
+        - Search inside the picker for menus (only restaurants get search)
+
+      EFFORT BREAKDOWN:
+        - Schema migration + restaurant management updates: 1-2 hrs
+        - Restaurant/menu picker overlay UI: 4-6 hrs
+        - Picker wired to navigation + URL routing: 1-2 hrs
+        - Wizard confirmation screen: 2-3 hrs
+        - New restaurant flow with copy menu option: 2-3 hrs
+        - Dashboard grouping update: 1-2 hrs
+        - Polish + testing: 1-2 hrs
+        Total: 12-20 hrs focused work
+
   [ ] Day 142: Ingredient List → Modifier Group Conversion (HIGH PRIORITY)
       WHY: Real POS systems (Square, Toast, Clover) expect ingredient lists as
       MODIFIER GROUPS, not description text. Right now we extract "All sandwiches
