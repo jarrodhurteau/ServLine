@@ -459,6 +459,51 @@ def _ensure_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_cat_reviews_draft "
             "ON draft_category_reviews(draft_id)"
         )
+        # Day 141: add subcategory column for tracking subcategory review state
+        if not _col_exists("draft_category_reviews", "subcategory"):
+            cur.execute(
+                "ALTER TABLE draft_category_reviews ADD COLUMN subcategory TEXT;"
+            )
+        # The original table has UNIQUE(draft_id, category) which blocks
+        # multiple subcategory rows under the same parent. Rebuild the table
+        # without that constraint, replacing it with a 3-column unique index.
+        # Detect by checking sqlite_master for the old constraint signature.
+        old_def = cur.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='draft_category_reviews'"
+        ).fetchone()
+        if old_def and "UNIQUE(draft_id, category)" in (old_def[0] or ""):
+            cur.execute("ALTER TABLE draft_category_reviews RENAME TO _old_draft_category_reviews;")
+            cur.execute(
+                """
+                CREATE TABLE draft_category_reviews (
+                  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                  draft_id    INTEGER NOT NULL,
+                  category    TEXT NOT NULL,
+                  subcategory TEXT,
+                  reviewed    INTEGER NOT NULL DEFAULT 0,
+                  reviewed_at TEXT,
+                  FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO draft_category_reviews
+                  (id, draft_id, category, subcategory, reviewed, reviewed_at)
+                SELECT id, draft_id, category, subcategory, reviewed, reviewed_at
+                FROM _old_draft_category_reviews
+                """
+            )
+            cur.execute("DROP TABLE _old_draft_category_reviews;")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cat_reviews_draft "
+                "ON draft_category_reviews(draft_id)"
+            )
+        # Always ensure the 3-column unique index exists
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_reviews_unique_full "
+            "ON draft_category_reviews(draft_id, category, COALESCE(subcategory, ''))"
+        )
 
         # Day 137 — track whether wizard has been completed for a draft
         if not _col_exists("drafts", "wizard_completed"):
@@ -3482,50 +3527,123 @@ def migrate_draft_modifier_groups(draft_id: int) -> Dict[str, int]:
 
 def init_wizard_categories(draft_id: int) -> List[str]:
     """
-    Initialize category review rows for all categories in the draft.
+    Initialize category and subcategory review rows for all sections in the draft.
     Returns the list of category names in position order.
-    Idempotent — only inserts categories not yet tracked.
+    Idempotent — only inserts pairs not yet tracked.
+
+    Day 141: now tracks (category, subcategory) pairs so subcategories get
+    their own confirmed checkboxes in the wizard sidebar.
+
+    Insertion order: main categories appear in the order their items are first
+    seen, then each main category is immediately followed by its own
+    subcategories (in the order their items are first seen). This ensures
+    "Confirm & Next" walks Pizza → Pizza/Toppings → Pizza/Sauce → Calzones →
+    Calzones/Toppings → Appetizers → ... rather than walking all main
+    categories first, then all subcategories.
     """
     items = get_draft_items(draft_id) or []
-    categories = []
-    seen = set()
+
+    # First pass: collect main category order + subcategory order per category
+    cat_order: List[str] = []
+    seen_cats: set = set()
+    sub_order_by_cat: Dict[str, List[str]] = {}
+    seen_subs: set = set()
     for it in items:
         cat = (it.get("category") or "Uncategorized").strip()
-        if cat not in seen:
-            seen.add(cat)
-            categories.append(cat)
+        sub = (it.get("subcategory") or "").strip() or None
+        if cat not in seen_cats:
+            seen_cats.add(cat)
+            cat_order.append(cat)
+            sub_order_by_cat[cat] = []
+        if sub and (cat, sub) not in seen_subs:
+            seen_subs.add((cat, sub))
+            sub_order_by_cat[cat].append(sub)
 
-    now = datetime.utcnow().isoformat()
+    # Build the interleaved (cat, sub) sequence: main → its subs → next main → ...
+    pairs: List[tuple] = []
+    for cat in cat_order:
+        pairs.append((cat, None))
+        for sub in sub_order_by_cat[cat]:
+            pairs.append((cat, sub))
+
     with db_connect() as conn:
-        for cat in categories:
+        for cat, sub in pairs:
             conn.execute(
                 """INSERT OR IGNORE INTO draft_category_reviews
-                   (draft_id, category, reviewed, reviewed_at)
-                   VALUES (?, ?, 0, NULL)""",
-                (draft_id, cat),
+                   (draft_id, category, subcategory, reviewed, reviewed_at)
+                   VALUES (?, ?, ?, 0, NULL)""",
+                (draft_id, cat, sub),
             )
         conn.commit()
-    return categories
+    return cat_order
 
 
 def get_wizard_progress(draft_id: int) -> Dict[str, Any]:
     """
     Get wizard review progress for a draft.
-    Returns {categories: [{name, reviewed, reviewed_at}], total, reviewed_count, complete}.
+    Returns {categories: [{name, reviewed, reviewed_at, subcategory}], total, reviewed_count, complete}.
+
+    Day 141: includes subcategory rows interleaved in logical order:
+    main category → its subcategories → next main category → its subcategories → ...
+    Order is computed from the current draft items so it always matches the
+    sidebar layout, even when subcategory rows were inserted late (e.g. via
+    cross-section topping inheritance).
     """
+    # Pull the reviewed-state map first
     with db_connect() as conn:
         rows = conn.execute(
-            """SELECT category, reviewed, reviewed_at
+            """SELECT category, subcategory, reviewed, reviewed_at
                FROM draft_category_reviews
-               WHERE draft_id = ?
-               ORDER BY id""",
+               WHERE draft_id = ?""",
             (draft_id,),
         ).fetchall()
 
-    cats = [
-        {"name": r["category"], "reviewed": bool(r["reviewed"]), "reviewed_at": r["reviewed_at"]}
-        for r in rows
-    ]
+    review_map: Dict[tuple, Dict[str, Any]] = {}
+    for r in rows:
+        sub = r["subcategory"] if "subcategory" in r.keys() else None
+        review_map[(r["category"], sub)] = {
+            "reviewed": bool(r["reviewed"]),
+            "reviewed_at": r["reviewed_at"],
+        }
+
+    # Walk current items to derive the logical order
+    items = get_draft_items(draft_id) or []
+    cat_order: List[str] = []
+    seen_cats: set = set()
+    sub_order_by_cat: Dict[str, List[str]] = {}
+    seen_subs: set = set()
+    for it in items:
+        cat = (it.get("category") or "Uncategorized").strip()
+        sub = (it.get("subcategory") or "").strip() or None
+        if cat not in seen_cats:
+            seen_cats.add(cat)
+            cat_order.append(cat)
+            sub_order_by_cat[cat] = []
+        if sub and (cat, sub) not in seen_subs:
+            seen_subs.add((cat, sub))
+            sub_order_by_cat[cat].append(sub)
+
+    # Build interleaved category list in logical order
+    cats: List[Dict[str, Any]] = []
+    for cat_name in cat_order:
+        # Main category row
+        rec = review_map.get((cat_name, None), {"reviewed": False, "reviewed_at": None})
+        cats.append({
+            "name": cat_name,
+            "subcategory": None,
+            "reviewed": rec["reviewed"],
+            "reviewed_at": rec["reviewed_at"],
+        })
+        # Subcategory rows for this main category
+        for sub_name in sub_order_by_cat[cat_name]:
+            rec = review_map.get((cat_name, sub_name), {"reviewed": False, "reviewed_at": None})
+            cats.append({
+                "name": cat_name,
+                "subcategory": sub_name,
+                "reviewed": rec["reviewed"],
+                "reviewed_at": rec["reviewed_at"],
+            })
+
     total = len(cats)
     reviewed_count = sum(1 for c in cats if c["reviewed"])
     return {
@@ -3536,29 +3654,52 @@ def get_wizard_progress(draft_id: int) -> Dict[str, Any]:
     }
 
 
-def mark_category_reviewed(draft_id: int, category: str) -> bool:
-    """Mark a single category as reviewed. Returns True if updated."""
+def mark_category_reviewed(
+    draft_id: int, category: str, subcategory: Optional[str] = None
+) -> bool:
+    """Mark a single category (or subcategory) as reviewed. Returns True if updated.
+
+    Day 141: optional subcategory parameter — None matches the main category row.
+    """
     now = datetime.utcnow().isoformat()
     with db_connect() as conn:
-        cur = conn.execute(
-            """UPDATE draft_category_reviews
-               SET reviewed = 1, reviewed_at = ?
-               WHERE draft_id = ? AND category = ?""",
-            (now, draft_id, category),
-        )
+        if subcategory:
+            cur = conn.execute(
+                """UPDATE draft_category_reviews
+                   SET reviewed = 1, reviewed_at = ?
+                   WHERE draft_id = ? AND category = ? AND subcategory = ?""",
+                (now, draft_id, category, subcategory),
+            )
+        else:
+            cur = conn.execute(
+                """UPDATE draft_category_reviews
+                   SET reviewed = 1, reviewed_at = ?
+                   WHERE draft_id = ? AND category = ? AND subcategory IS NULL""",
+                (now, draft_id, category),
+            )
         conn.commit()
     return cur.rowcount > 0
 
 
-def unmark_category_reviewed(draft_id: int, category: str) -> bool:
-    """Unmark a category (allow re-review). Returns True if updated."""
+def unmark_category_reviewed(
+    draft_id: int, category: str, subcategory: Optional[str] = None
+) -> bool:
+    """Unmark a category (or subcategory) to allow re-review."""
     with db_connect() as conn:
-        cur = conn.execute(
-            """UPDATE draft_category_reviews
-               SET reviewed = 0, reviewed_at = NULL
-               WHERE draft_id = ? AND category = ?""",
-            (draft_id, category),
-        )
+        if subcategory:
+            cur = conn.execute(
+                """UPDATE draft_category_reviews
+                   SET reviewed = 0, reviewed_at = NULL
+                   WHERE draft_id = ? AND category = ? AND subcategory = ?""",
+                (draft_id, category, subcategory),
+            )
+        else:
+            cur = conn.execute(
+                """UPDATE draft_category_reviews
+                   SET reviewed = 0, reviewed_at = NULL
+                   WHERE draft_id = ? AND category = ? AND subcategory IS NULL""",
+                (draft_id, category),
+            )
         conn.commit()
     return cur.rowcount > 0
 

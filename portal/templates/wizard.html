@@ -218,6 +218,78 @@
     }
     .cat-new-btn:hover { background: rgba(40,167,69,.08); }
 
+    /* Complete Review button (Day 141) — locked until all categories confirmed */
+    .cat-complete-wrap {
+      position: relative;
+      margin-top: 12px;
+    }
+    .cat-complete-btn {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: none;
+      font-size: .88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .15s;
+      background: #2E5B5E;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(46,91,94,.2);
+    }
+    .cat-complete-btn:hover {
+      background: #254749;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(46,91,94,.3);
+    }
+    .cat-complete-btn.locked {
+      background: rgba(0,0,0,.08);
+      color: var(--muted);
+      cursor: not-allowed;
+      box-shadow: none;
+      border: 1px dashed rgba(0,0,0,.18);
+    }
+    .cat-complete-btn.locked:hover {
+      background: rgba(0,0,0,.08);
+      transform: none;
+      box-shadow: none;
+    }
+    .cat-complete-progress {
+      text-align: center;
+      font-size: .72rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    /* Tooltip shown over the locked button on hover */
+    .cat-complete-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #B85C38;
+      color: #fff;
+      padding: 9px 14px;
+      border-radius: 8px;
+      font-size: .78rem;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
+      pointer-events: none;
+      z-index: 50;
+    }
+    .cat-complete-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: #B85C38;
+    }
+    .cat-complete-wrap:hover .cat-complete-tooltip {
+      display: block;
+    }
+
     /* New-category popup menu */
     .cat-new-popup {
       display: none;
@@ -668,14 +740,16 @@
     .wiz-variant-row input:not([type="checkbox"]):focus { border-bottom: 1px dashed rgba(184,92,56,.5) !important; }
     .wiz-variant-row input.wiz-vf-label { font-weight: 500; font-size: .82rem; color: var(--muted); flex: 1; min-width: 0; }
     .wiz-variant-row input.wiz-vf-price { font-weight: 600; font-size: .82rem; color: var(--ink); text-align: right; width: 60px; }
-    .wiz-variant-row input.wiz-vf-price.price-zero { color: #dc3545; }
+    .wiz-variant-row input.wiz-vf-price.price-zero { color: #dc3545; opacity: .6; transition: opacity .15s; }
+    .wiz-item.editing:hover .wiz-variant-row input.wiz-vf-price.price-zero { opacity: 1; }
+    .wiz-variant-row input.wiz-vf-price.price-zero:focus { opacity: 1; }
     .wiz-variant-row input.wiz-vf-price.price-zero::placeholder { color: #dc3545; opacity: .6; }
     .wiz-vf-delete {
       border: none !important; background: none !important; outline: none !important;
       color: #dc3545; font-size: 1rem; cursor: pointer; padding: 0 4px !important;
-      opacity: .3; transition: opacity .15s; flex-shrink: 0;
+      opacity: .6; transition: opacity .15s; flex-shrink: 0;
     }
-    .wiz-variant-row:hover .wiz-vf-delete { opacity: .8; }
+    .wiz-item.editing:hover .wiz-vf-delete { opacity: 1; }
     .wiz-vf-delete:hover { opacity: 1 !important; }
     .wiz-variant-price.missing-price { color: #dc3545 !important; }
     .wiz-variant-price.missing-price::after { content: ' (missing)'; font-size: .7rem; font-weight: 400; }
@@ -821,12 +895,26 @@
     .wiz-edit-actions .btn-save:hover { background: rgba(184,92,56,.08); }
     .wiz-edit-actions .btn-add-variant { color: #28a745; }
     .wiz-edit-actions .btn-add-variant:hover { background: rgba(46,91,94,.08); }
-    .wiz-edit-actions .btn-undo { color: #E8A317; font-size: .78rem; }
+    .wiz-edit-actions { position: relative; }
+    .wiz-edit-actions .btn-undo {
+      color: #E8A317;
+      font-size: .82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
     .wiz-edit-actions .btn-undo:hover { color: #CC8F0E; background: rgba(232,163,23,.08); }
-    .wiz-edit-actions .btn-undo.visible { margin-left: auto; }
-    .wiz-edit-actions .btn-undo.visible + .btn-delete { margin-left: 8px; }
+    .wiz-edit-actions .btn-undo.visible {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      padding: 4px 14px;
+    }
     .wiz-edit-actions .btn-delete { margin-left: auto; color: #dc3545; }
     .wiz-edit-actions .btn-delete:hover { background: rgba(220,53,69,.08); }
+    .wiz-edit-actions .btn-delete-variant-single { color: #dc3545; }
+    .wiz-edit-actions .btn-delete-variant-single:hover { background: rgba(220,53,69,.08); }
     .wiz-save-ok {
       color: #16a34a; font-size: .72rem;
       font-weight: 600; margin-left: 4px;
@@ -1263,30 +1351,42 @@
         {% macro needs_price(itm) -%}
           {%- set vlist = itm.variants or [] -%}
           {%- set has_priced_variant = namespace(found=false) -%}
-          {%- set has_zero_variant = namespace(found=false) -%}
+          {%- set has_labeled_zero = namespace(found=false) -%}
           {%- for v in vlist -%}
             {%- if v.price_cents and v.price_cents > 0 -%}{%- set has_priced_variant.found = true -%}{%- endif -%}
-            {%- if not v.price_cents or v.price_cents == 0 -%}{%- set has_zero_variant.found = true -%}{%- endif -%}
+            {%- if v.label and (not v.price_cents or v.price_cents == 0) -%}{%- set has_labeled_zero.found = true -%}{%- endif -%}
           {%- endfor -%}
           {%- set is_modifier = itm.subcategory and not vlist -%}
           {%- if is_modifier -%}
             {# Intentional $0 POS modifier — never flag #}
-          {%- elif has_priced_variant.found and has_zero_variant.found -%}
+          {%- elif has_labeled_zero.found -%}
             1
           {%- elif (not itm.price_cents or itm.price_cents == 0) and not has_priced_variant.found -%}
             1
           {%- endif -%}
         {%- endmacro %}
+        {# Day 141: build lookup of (category, subcategory) → reviewed #}
+        {% set sub_reviewed = {} %}
+        {% for c in progress.categories %}
+          {% if c.subcategory %}{% if sub_reviewed.update({(c.name + '||' + c.subcategory): c.reviewed}) %}{% endif %}{% endif %}
+        {% endfor %}
         <ul class="cat-list" id="cat-list">
           {% for cat in progress.categories %}
+          {# Only iterate over MAIN-category rows; subcategories are rendered nested below #}
+          {% if not cat.subcategory %}
           {% set is_active = cat.name == current_category %}
           {% set cat_subs = subcat_groups.get(cat.name, {}) %}
           {% set main_items = cat_subs.get('', []) %}
           {% set main_count = main_items|length %}
           {% set mnc = namespace(n=0) %}
           {% for it in main_items %}{% if needs_price(it)|trim %}{% set mnc.n = mnc.n + 1 %}{% endif %}{% endfor %}
+          {# Day 141: subcategory order matches progress order (logical, not alphabetical) #}
           {% set sub_names = [] %}
-          {% for k in cat_subs.keys() if k %}{% if sub_names.append(k) %}{% endif %}{% endfor %}
+          {% for pc in progress.categories %}
+            {% if pc.name == cat.name and pc.subcategory %}
+              {% if sub_names.append(pc.subcategory) %}{% endif %}
+            {% endif %}
+          {% endfor %}
           <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
               data-cat-name="{{ cat.name|e }}" draggable="true">
             <span class="cat-drag" title="Drag to reorder">&#8942;</span>
@@ -1302,11 +1402,13 @@
             <span class="cat-delete" onclick="event.stopPropagation(); wizDeleteCategory('{{ cat.name|e }}')" title="Delete empty category">&times;</span>
             {% endif %}
           </li>
-          {% for sc in sub_names|sort %}
+          {% for sc in sub_names %}
           {% set snc = namespace(n=0) %}
           {% for it in cat_subs[sc] %}{% if needs_price(it)|trim %}{% set snc.n = snc.n + 1 %}{% endif %}{% endfor %}
-          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
+          {% set sub_is_reviewed = sub_reviewed.get(cat.name + '||' + sc, false) %}
+          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}{% if sub_is_reviewed %} reviewed{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
             <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;">&#8942;</span>
+            <span class="cat-check">{% if sub_is_reviewed %}&#10003;{% endif %}</span>
             <span class="cat-sub-icon">&#9656;</span>
             <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">{{ sc|e }}</span>
             <span class="cat-count">{{ cat_subs[sc]|length }}</span>
@@ -1318,6 +1420,7 @@
             {% endif %}
           </li>
           {% endfor %}
+          {% endif %}
           {% endfor %}
         </ul>
         <div class="cat-new-btn" onclick="wizToggleNewMenu(event)">
@@ -1331,6 +1434,25 @@
               Subcategory
               <span class="popup-hint">Modifier group under a category</span>
             </div>
+          </div>
+        </div>
+
+        {# Day 141: Complete Review button — always visible, locked until every category confirmed #}
+        {% set all_reviewed = progress.complete %}
+        <div class="cat-complete-wrap">
+          {% if not all_reviewed %}
+          <div class="cat-complete-tooltip">
+            Confirm all {{ progress.total }} categories first &mdash;
+            {{ progress.total - progress.reviewed_count }} remaining
+          </div>
+          {% endif %}
+          <form method="POST" action="{{ url_for('wizard_complete_review', draft_id=draft.id) }}">
+            <button type="submit" class="cat-complete-btn{% if not all_reviewed %} locked{% endif %}">
+              {% if all_reviewed %}&#10003; Complete Review{% else %}&#128274; Complete Review{% endif %}
+            </button>
+          </form>
+          <div class="cat-complete-progress">
+            {{ progress.reviewed_count }} of {{ progress.total }} reviewed
           </div>
         </div>
       </div>
@@ -1378,19 +1500,20 @@
         </div>
       </div>
 
-      {# Show banner if already reviewed #}
+      {# Show banner if the current category OR subcategory has been reviewed #}
       {% set is_reviewed = false %}
       {% for c in progress.categories %}
-        {% if c.name == current_category and c.reviewed %}
+        {% if c.name == current_category and (c.subcategory or None) == (current_subcategory or None) and c.reviewed %}
           {% set is_reviewed = true %}
         {% endif %}
       {% endfor %}
 
       {% if is_reviewed %}
       <div class="reviewed-banner">
-        &#10003; This category has been reviewed
+        &#10003; This {% if current_subcategory %}subcategory{% else %}category{% endif %} has been reviewed
         <form method="POST" action="{{ url_for('wizard_unconfirm_category', draft_id=draft.id) }}" style="margin-left:auto;">
           <input type="hidden" name="category" value="{{ current_category|e }}" />
+          {% if current_subcategory %}<input type="hidden" name="subcategory" value="{{ current_subcategory|e }}" />{% endif %}
           <button type="submit" class="btn-skip" style="background:none; border:none; cursor:pointer; color:var(--muted); font-size:.82rem;">Undo</button>
         </form>
       </div>
@@ -1411,19 +1534,20 @@
         {% for it in sc_items %}
         {% set ns.item_num = ns.item_num + 1 %}
         {# Day 141: same flag logic as the sidebar macro — keep in sync.
-           Skip subcategory items with $0 + no variants (intentional modifiers). #}
+           Skip subcategory items with $0 + no variants (intentional modifiers).
+           Flag any labeled variant missing a price regardless of main item price. #}
         {% set vlist_i = it.variants or [] %}
         {% set hpv = namespace(found=false) %}
-        {% set hzv = namespace(found=false) %}
+        {% set hlz = namespace(found=false) %}
         {% for v in vlist_i %}
           {% if v.price_cents and v.price_cents > 0 %}{% set hpv.found = true %}{% endif %}
-          {% if not v.price_cents or v.price_cents == 0 %}{% set hzv.found = true %}{% endif %}
+          {% if v.label and (not v.price_cents or v.price_cents == 0) %}{% set hlz.found = true %}{% endif %}
         {% endfor %}
         {% set is_modifier_i = it.subcategory and not vlist_i %}
         {% set needs_price = false %}
         {% if is_modifier_i %}
           {# intentional modifier, no flag #}
-        {% elif hpv.found and hzv.found %}
+        {% elif hlz.found %}
           {% set needs_price = true %}
         {% elif (not it.price_cents or it.price_cents == 0) and not hpv.found %}
           {% set needs_price = true %}
@@ -1533,7 +1657,7 @@
                 <input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />
                 <input type="text" class="wiz-vf-label" value="{{ v.label|e }}" placeholder="Label" onblur="wizSaveVariant(this)" />
                 <span style="font-weight:600; font-size:.82rem; color:var(--ink); display:flex; align-items:baseline;">$<input type="text" class="wiz-vf-price" value="{% if v.price_cents %}{{ '%.2f'|format(v.price_cents / 100) }}{% endif %}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" oninput="wizFlagZeroEditPrices()" /></span>
-                <button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>
+                <button type="button" class="wiz-vf-delete" onclick="wizClearVariantPrice(this)" title="Clear price">&times;</button>
               </div>
               {% endfor %}
             </div>
@@ -1557,10 +1681,11 @@
 
             <div class="wiz-edit-actions">
               <button type="button" class="btn-add-variant" onclick="wizAddVariant(this)">+ Add Variant</button>
-              <button type="button" class="btn-apply-labels" onmousedown="_applyInProgress=true" onclick="wizApplyLabels(this)" title="Apply or rename checked variants across all items in this category">&#x21BB; Apply to All</button>
-              <button type="button" class="btn-delete-variants" onmousedown="_applyInProgress=true" onclick="wizDeleteVariantsFromAll(this)" title="Delete variants with checked labels from all items in this category">&times; Delete All</button>
+              <button type="button" class="btn-delete-variant-single" onmousedown="_applyInProgress=true" onclick="wizDeleteSelectedVariant(this)" title="Delete the selected variant" style="display:none;">&times; Delete Variant</button>
+              <button type="button" class="btn-apply-labels" onmousedown="_applyInProgress=true" onclick="wizApplyLabels(this)" title="Apply or rename checked variants across all items in this category" style="display:none;">&#x21BB; Apply to All</button>
+              <button type="button" class="btn-delete-variants" onmousedown="_applyInProgress=true" onclick="wizDeleteVariantsFromAll(this)" title="Delete variants with checked labels from all items in this category" style="display:none;">&times; Delete All</button>
               <button type="button" class="btn-save" onclick="wizSave(this)" style="display:none;">save</button>
-              <button type="button" class="btn-undo" onclick="wizUndo()" style="display:none;">undo</button>
+              <button type="button" class="btn-undo" onclick="wizUndo(this)" style="display:none;">undo</button>
               <button type="button" class="btn-delete" onclick="wizDelete(this)">Delete Card</button>
             </div>
           </div>
@@ -1568,6 +1693,13 @@
         {% endfor %}
         {% endfor %}{# end subcat_names loop #}
       </div>
+
+      {# Day 141: bottom Select all link — mirrors the one in the header #}
+      {% if cat_items|length > 0 %}
+      <div style="text-align:right; margin-top:8px;">
+        <a href="#" onclick="event.preventDefault(); wizToggleSelectAll()" id="wiz-select-all-link-bottom" style="color:#2E5B5E; text-decoration:none; font-weight:600; font-size:.82rem;">Select all</a>
+      </div>
+      {% endif %}
 
       <!-- Add Item button -->
       <div class="wiz-add-item" onclick="wizAddItem(this)" data-draft-id="{{ draft.id }}" data-category="{{ current_category|e }}">
@@ -1585,32 +1717,36 @@
         <span></span>
         {% endif %}
 
-        {# AI Verify button — visual diff per category #}
-        <button type="button" class="btn" id="btn-ai-verify"
-                onclick="aiVerifyCategory('{{ current_category|e }}', {{ draft.id }})"
-                style="background:var(--teal,#2E5B5E);color:#fff;margin-right:8px;">
-          AI Verify
-        </button>
+        {# Confirm / Next — find the next unreviewed entry after current #}
+        {% set next_entry = namespace(cat=None, sub=None, found=false, passed_current=false) %}
+        {% for c in progress.categories %}
+          {% if next_entry.passed_current and not c.reviewed and not next_entry.found %}
+            {% set next_entry.cat = c.name %}
+            {% set next_entry.sub = c.subcategory %}
+            {% set next_entry.found = true %}
+          {% endif %}
+          {% if c.name == current_category and (c.subcategory or None) == (current_subcategory or None) %}
+            {% set next_entry.passed_current = true %}
+          {% endif %}
+        {% endfor %}
 
-        {# Confirm / Next #}
+        {# Day 141: Confirm & Next always goes forward.
+           The escape hatch is the "Complete Review" button in the sidebar,
+           which is locked until every category is confirmed. #}
         {% if not is_reviewed %}
         <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
           <input type="hidden" name="category" value="{{ current_category|e }}" />
+          {% if current_subcategory %}<input type="hidden" name="subcategory" value="{{ current_subcategory|e }}" />{% endif %}
           <button type="submit" class="btn btn-confirm">
-            Confirm &amp; {% if cat_idx < category_list|length - 1 %}Next{% else %}Finish{% endif %} &rarr;
+            Confirm &amp; Next &rarr;
           </button>
         </form>
         {% else %}
-          {% if cat_idx < category_list|length - 1 %}
-          <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=category_list[cat_idx + 1]) }}" class="btn btn-confirm">
-            Next &rarr; {{ category_list[cat_idx + 1]|e }}
+          {% if next_entry.found %}
+          {% set next_label = next_entry.sub if next_entry.sub else next_entry.cat %}
+          <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=next_entry.cat, subcategory=next_entry.sub) if next_entry.sub else url_for('draft_wizard', draft_id=draft.id, category=next_entry.cat) }}" class="btn btn-confirm">
+            Next &rarr; {{ next_label|e }}
           </a>
-          {% else %}
-          {# All done — go to editor #}
-          <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
-            <input type="hidden" name="category" value="{{ current_category|e }}" />
-            <button type="submit" class="btn btn-confirm">Open Full Editor &rarr;</button>
-          </form>
           {% endif %}
         {% endif %}
       </div>
@@ -1628,19 +1764,23 @@
     <!-- ===== Right Column: Original Menu Viewer + Selected Panel ===== -->
     <div class="wizard-preview">
       {% if source_job_id %}
-      <div id="menu-viewer" class="menu-viewer">
+      <div id="menu-viewer" class="menu-viewer" data-job-id="{{ source_job_id }}">
         <div class="menu-viewer-header" id="menu-viewer-header">
           <div class="menu-viewer-title">
             <span style="font-size:.95rem;">&#128196;</span> Original Menu
           </div>
           <div class="menu-viewer-controls">
+            <button class="menu-viewer-btn mv-page-btn" id="menu-viewer-prev" onclick="menuViewerPrevPage()" title="Previous page" style="display:none;">&larr;</button>
+            <span class="menu-viewer-page-label" id="menu-viewer-page-label" style="display:none; font-size:.72rem; color:var(--muted); padding:0 6px;">1 / 1</span>
+            <button class="menu-viewer-btn mv-page-btn" id="menu-viewer-next" onclick="menuViewerNextPage()" title="Next page" style="display:none;">&rarr;</button>
+            <span style="display:inline-block; width:8px;"></span>
             <button class="menu-viewer-btn" onclick="menuViewerZoom(-1)" title="Zoom out">&minus;</button>
             <button class="menu-viewer-btn" onclick="menuViewerReset()" title="Fit to window">Fit</button>
             <button class="menu-viewer-btn" onclick="menuViewerZoom(1)" title="Zoom in">+</button>
           </div>
         </div>
         <div class="menu-viewer-body" id="menu-viewer-body">
-          <img id="menu-viewer-img" src="{{ url_for('imports_preview_image', job_id=source_job_id) }}" alt="Original menu" draggable="false" />
+          <img id="menu-viewer-img" src="{{ url_for('imports_preview_image_page', job_id=source_job_id, page=0) }}" alt="Original menu" draggable="false" />
           <div class="menu-viewer-hint">Scroll to zoom &middot; Drag to pan</div>
         </div>
         <div class="menu-viewer-resize-bl" id="menu-viewer-resize-bl" title="Drag to resize"></div>
@@ -1714,12 +1854,38 @@
       });
     }
 
-    /* ===== Undo Stack ===== */
-    const undoStack = [];
+    /* ===== Undo Stacks (per-card) =====
+       Day 141: previously one global undoStack was shared across all cards so
+       clicking Undo on card B would undo an action from card A. Now each card
+       keeps its own stack keyed by item_id. The Undo button on a card only
+       reflects and acts on that card's history. */
+    const undoStacks = {};  // { item_id: [action, ...] }
+
+    function _pushUndo(itemId, action) {
+      if (itemId == null) return;
+      const key = String(itemId);
+      if (!undoStacks[key]) undoStacks[key] = [];
+      undoStacks[key].push(action);
+      updateUndoButtons();
+    }
+
+    function _peekUndo(itemId) {
+      const stack = undoStacks[String(itemId)];
+      return stack && stack.length ? stack[stack.length - 1] : null;
+    }
+
+    function _popUndo(itemId) {
+      const stack = undoStacks[String(itemId)];
+      if (!stack || stack.length === 0) return null;
+      return stack.pop();
+    }
 
     function updateUndoButtons() {
       document.querySelectorAll('.wiz-item .btn-undo').forEach(btn => {
-        if (undoStack.length > 0) {
+        const card = btn.closest('.wiz-item');
+        const itemId = card?.dataset.itemId;
+        const hasUndo = itemId && undoStacks[String(itemId)] && undoStacks[String(itemId)].length > 0;
+        if (hasUndo) {
           btn.style.display = '';
           btn.classList.add('visible');
         } else {
@@ -1729,9 +1895,12 @@
       });
     }
 
-    async function wizUndo() {
-      if (undoStack.length === 0) return;
-      const action = undoStack.pop();
+    async function wizUndo(btn) {
+      const srcCard = btn?.closest('.wiz-item');
+      const srcItemId = srcCard?.dataset.itemId;
+      if (!srcItemId) return;
+      const action = _popUndo(srcItemId);
+      if (!action) return;
 
       if (action.type === 'delete') {
         // Un-hide the card, remove from pending deletes
@@ -1794,17 +1963,80 @@
       }
 
       if (action.type === 'delete_variants') {
-        // Batch re-create deleted variants, then reload
+        // Day 141: in-place restore so the editor view stays open
         const draftId = action.draftId;
+        const variants = action.deletedVariants || [];
+        if (!variants.length) { updateUndoButtons(); return; }
+        let newIds = [];
         try {
-          await fetch(`/api/drafts/${draftId}/wizard/batch_create_variants`, {
+          const res = await fetch(`/api/drafts/${draftId}/wizard/batch_create_variants`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ variants: action.deletedVariants || [] })
+            body: JSON.stringify({ variants })
           });
-        } catch (e) { /* silent */ }
-        window.location.reload();
+          const data = await res.json();
+          newIds = data.variant_ids || [];
+        } catch (e) { wizToast('Network error'); return; }
+
+        // Rebuild DOM rows (edit + display) for each restored variant
+        variants.forEach((v, i) => {
+          const newVariantId = newIds[i];
+          if (!newVariantId) return;
+          const card = document.querySelector(`.wiz-item[data-item-id="${v.item_id}"]`);
+          if (!card) return;
+
+          // --- Edit form row ---
+          let variantsDiv = card.querySelector('.wiz-edit-form .wiz-variants');
+          if (!variantsDiv) {
+            variantsDiv = document.createElement('div');
+            variantsDiv.className = 'wiz-variants';
+            const hint = document.createElement('div');
+            hint.className = 'wiz-variants-hint';
+            hint.textContent = 'Enter full price per variant, not adjustments';
+            variantsDiv.appendChild(hint);
+            const actions = card.querySelector('.wiz-edit-actions');
+            if (actions) actions.insertAdjacentElement('beforebegin', variantsDiv);
+          }
+          const editRow = document.createElement('div');
+          editRow.className = 'wiz-variant-row';
+          editRow.dataset.variantId = newVariantId;
+          editRow.dataset.draftId = draftId;
+          editRow.dataset.varPos = v.position || 0;
+          editRow.dataset.origLabel = v.label || '';
+          editRow.dataset.origPrice = v.price_cents || 0;
+          const priceDisplay = v.price_cents > 0 ? (v.price_cents / 100).toFixed(2) : '';
+          editRow.innerHTML =
+            `<input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />` +
+            `<input type="text" class="wiz-vf-label" value="${(v.label || '').replace(/"/g, '&quot;')}" placeholder="Label" onblur="wizSaveVariant(this)" />` +
+            `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="${priceDisplay}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" oninput="wizFlagZeroEditPrices()" /></span>` +
+            `<button type="button" class="wiz-vf-delete" onclick="wizClearVariantPrice(this)" title="Clear price">&times;</button>`;
+          variantsDiv.appendChild(editRow);
+
+          // --- Display-mode row ---
+          let displayDiv = card.querySelector('.wiz-display .wiz-variants');
+          if (!displayDiv) {
+            displayDiv = document.createElement('div');
+            displayDiv.className = 'wiz-variants';
+            const display = card.querySelector('.wiz-display');
+            if (display) display.appendChild(displayDiv);
+          }
+          const dRow = document.createElement('div');
+          dRow.className = 'wiz-variant-row';
+          dRow.dataset.variantId = newVariantId;
+          const lblHtml = `<span class="wiz-variant-label">${(v.label || '').replace(/</g, '&lt;')}</span>`;
+          const priceHtml = v.price_cents > 0
+            ? `<span class="wiz-variant-price">$${(v.price_cents / 100).toFixed(2)}</span>`
+            : `<span class="wiz-variant-price missing-price">$0.00</span>`;
+          dRow.innerHTML = lblHtml + priceHtml;
+          displayDiv.appendChild(dRow);
+
+          // Update needs-price flag + variant badge for this card
+          wizRecomputeNeedsPrice(card);
+          wizRefreshVariantBadge(card);
+        });
+
+        updateUndoButtons();
         return;
       }
 
@@ -1884,6 +2116,9 @@
       });
       card.classList.add('editing');
       wizFlagZeroEditPrices();
+      // Day 141: reset apply-button state when opening a card fresh
+      _lastFocusedVariantRow = null;
+      wizRefreshApplyButtons(card);
       const nameInput = card.querySelector('.wiz-f-name');
       if (nameInput) { nameInput.focus(); }
     }
@@ -1891,9 +2126,178 @@
     function wizCancel(btn) {
       const card = btn.closest('.wiz-item');
       card.classList.remove('editing');
+      _lastFocusedVariantRow = null;
     }
 
     let _applyInProgress = false;
+
+    /* ===== Recompute "needs price" flag for a card ===== */
+    /* Mirrors the Jinja macro in the sidebar — keep in sync.
+       Skips items that are intentional POS modifiers ($0 + no variants
+       in a subcategory). Otherwise flags items where:
+         - main price is 0 AND no variants have a price
+         - OR variants are mixed (some priced, some not) */
+    function wizRecomputeNeedsPrice(card) {
+      if (!card) return;
+
+      // Read main item price — prefer the edit form (source of truth after edits)
+      // and fall back to the display element only if there's no edit form.
+      let mainPriceCents = 0;
+      const priceInp = card.querySelector('.wiz-f-price');
+      if (priceInp) {
+        const raw = (priceInp.value || '').trim();
+        if (raw) {
+          const v = parseFloat(raw.replace(/[$,]/g, ''));
+          if (!isNaN(v)) mainPriceCents = Math.round(v * 100);
+        }
+        // If the edit input exists and is empty, mainPriceCents stays 0 — the
+        // user explicitly cleared it.
+      } else {
+        const priceText = card.querySelector('.wiz-display .wiz-item-price');
+        if (priceText && priceText.textContent) {
+          const m = priceText.textContent.match(/[\d.]+/);
+          if (m) mainPriceCents = Math.round(parseFloat(m[0]) * 100);
+        }
+      }
+
+      // Walk variant rows in the EDIT form (source of truth after edits)
+      const variantRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+      let hasPricedVariant = false;
+      let hasLabeledZeroVariant = false;  // labeled variant with no price = always a problem
+      let variantCount = 0;
+      variantRows.forEach(r => {
+        variantCount++;
+        const lblInp = r.querySelector('.wiz-vf-label');
+        const prInp = r.querySelector('.wiz-vf-price');
+        const label = (lblInp?.value || '').trim();
+        const priceStr = (prInp?.value || '').trim();
+        // Skip totally empty rows (no label and no price) — they don't count
+        if (!label && !priceStr) return;
+        let cents = 0;
+        if (priceStr) {
+          const v = parseFloat(priceStr.replace(/[$,]/g, ''));
+          if (!isNaN(v)) cents = Math.round(v * 100);
+        }
+        if (cents > 0) hasPricedVariant = true;
+        if (label && cents === 0) hasLabeledZeroVariant = true;
+      });
+
+      // Detect if this item lives in a subcategory ("Pizza › Toppings")
+      const breadcrumb = document.querySelector('.category-name a');
+      const isSubcategoryView = !!breadcrumb;
+
+      // Intentional modifier: subcategory item with $0 + no variants
+      const isModifier = isSubcategoryView && mainPriceCents === 0 && variantCount === 0;
+
+      let needsPrice = false;
+      if (isModifier) {
+        needsPrice = false;
+      } else if (hasLabeledZeroVariant) {
+        // ANY labeled variant missing a price is a problem, regardless of main price
+        needsPrice = true;
+      } else if (mainPriceCents === 0 && !hasPricedVariant) {
+        needsPrice = true;
+      }
+
+      card.classList.toggle('needs-price', needsPrice);
+
+      // Update the red ! flag in the header
+      const header = card.querySelector('.wiz-display .wiz-item-header');
+      if (header) {
+        let flag = header.querySelector('.wiz-needs-price-flag');
+        if (needsPrice && !flag) {
+          flag = document.createElement('span');
+          flag.className = 'wiz-needs-price-flag';
+          flag.title = 'This item is missing a price — please review';
+          flag.textContent = '!';
+          // Insert after the item number
+          const numEl = header.querySelector('.wiz-item-num');
+          if (numEl) numEl.insertAdjacentElement('afterend', flag);
+          else header.insertBefore(flag, header.firstChild);
+        } else if (!needsPrice && flag) {
+          flag.remove();
+        }
+      }
+
+      // Update the "Needs price" red text in the price area
+      const priceEl = card.querySelector('.wiz-display .wiz-item-price');
+      if (priceEl) {
+        const isNeedsPriceText = priceEl.classList.contains('missing-price');
+        if (needsPrice && mainPriceCents === 0 && !isNeedsPriceText) {
+          priceEl.classList.add('missing-price');
+          priceEl.style.color = '#dc3545';
+          priceEl.style.fontSize = '.78rem';
+          priceEl.style.fontWeight = '600';
+          priceEl.textContent = 'Needs price';
+        } else if (!needsPrice && isNeedsPriceText) {
+          priceEl.classList.remove('missing-price');
+          priceEl.style.color = '';
+          priceEl.style.fontSize = '';
+          priceEl.style.fontWeight = '';
+          if (mainPriceCents > 0) {
+            priceEl.textContent = '$' + (mainPriceCents / 100).toFixed(2);
+          } else {
+            priceEl.textContent = '';
+          }
+        }
+      }
+
+      // Update the sidebar badge for the current category/subcategory
+      wizUpdateSidebarFlags();
+    }
+
+    /* ===== Recompute sidebar needs-price badges from current DOM ===== */
+    /* Counts items currently on screen with .needs-price class. The current
+       category/subcategory's badge is the only one we can update accurately
+       (other categories aren't loaded into the DOM). */
+    function wizUpdateSidebarFlags() {
+      // Count flagged items in the visible items area
+      const flaggedCount = document.querySelectorAll('.wizard-items .wiz-item.needs-price').length;
+
+      // Determine which sidebar entry corresponds to the current view
+      const breadcrumb = document.querySelector('.category-name a');
+      const isSubcategoryView = !!breadcrumb;
+      const titleEl = document.getElementById('cat-title-label');
+      const currentName = titleEl ? titleEl.textContent.trim() : '';
+
+      // Find the matching sidebar <li>
+      let targetLi = null;
+      if (isSubcategoryView) {
+        // Subcategory: match by data-subcat-name (and parent data-cat-name if available)
+        const parentCat = breadcrumb.textContent.trim();
+        document.querySelectorAll('.cat-list li.cat-subcat').forEach(li => {
+          if (li.dataset.subcatName === currentName && li.dataset.catName === parentCat) {
+            targetLi = li;
+          }
+        });
+      } else {
+        // Main category: match by data-cat-name on a non-subcat li
+        document.querySelectorAll('.cat-list li:not(.cat-subcat)').forEach(li => {
+          if (li.dataset.catName === currentName) {
+            targetLi = li;
+          }
+        });
+      }
+
+      if (!targetLi) return;
+
+      // Update or remove the badge
+      let badge = targetLi.querySelector('.cat-needs-price-count');
+      if (flaggedCount > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'cat-needs-price-count';
+          // Insert after the cat-count span
+          const countEl = targetLi.querySelector('.cat-count');
+          if (countEl) countEl.insertAdjacentElement('afterend', badge);
+          else targetLi.appendChild(badge);
+        }
+        badge.textContent = flaggedCount + '!';
+        badge.title = flaggedCount + ' item' + (flaggedCount > 1 ? 's' : '') + ' need price review';
+      } else if (badge) {
+        badge.remove();
+      }
+    }
 
     async function wizSave(btn) {
       if (_applyInProgress) return;
@@ -1934,6 +2338,11 @@
         const priceEl = display.querySelector('.wiz-item-price');
         if (priceCents > 0) {
           if (priceEl) {
+            // Clear any "Needs price" styling that may have been applied
+            priceEl.classList.remove('missing-price');
+            priceEl.style.color = '';
+            priceEl.style.fontSize = '';
+            priceEl.style.fontWeight = '';
             priceEl.textContent = '$' + (priceCents / 100).toFixed(2);
           } else {
             const newPrice = document.createElement('div');
@@ -1941,6 +2350,14 @@
             newPrice.textContent = '$' + (priceCents / 100).toFixed(2);
             display.querySelector('.wiz-item-header').appendChild(newPrice);
           }
+        } else if (priceEl) {
+          // Day 141: price was cleared — wipe the stale text. The recompute
+          // function will replace it with "Needs price" text if appropriate.
+          priceEl.classList.remove('missing-price');
+          priceEl.style.color = '';
+          priceEl.style.fontSize = '';
+          priceEl.style.fontWeight = '';
+          priceEl.textContent = '';
         }
         const descEl = display.querySelector('.wiz-item-desc');
         if (desc) {
@@ -1955,6 +2372,9 @@
 
         // Clean up empty variants and flag missing prices before closing
         await wizCleanupVariants(card);
+
+        // Day 141: recompute the needs-price flag now that the card data has changed
+        wizRecomputeNeedsPrice(card);
 
         card.classList.remove('editing');
 
@@ -2053,6 +2473,7 @@
     async function wizCleanupVariants(card) {
       const draftId = card.dataset.draftId;
       const editRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
+      let anyDeleted = false;
 
       for (const row of editRows) {
         const variantId = row.dataset.variantId;
@@ -2070,10 +2491,14 @@
             row.remove();
             const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
             if (displayRow) displayRow.remove();
+            anyDeleted = true;
           } catch (e) { /* silent */ }
           continue;
         }
       }
+
+      // Day 141: if any empty variants were removed, refresh the badge count
+      if (anyDeleted) wizRefreshVariantBadge(card);
 
       // Flag missing prices/labels on display view
       const displayRows = card.querySelectorAll('.wiz-display .wiz-variant-row');
@@ -2155,7 +2580,7 @@
           row.innerHTML = `<input type="checkbox" class="wiz-vf-check" title="Select to apply this variant to all" onchange="wizToggleApplyBtn(this)" />`
             + `<input type="text" class="wiz-vf-label" value="" placeholder="New Variant" onblur="wizSaveVariant(this)" />`
             + `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>`
-            + `<button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>`;
+            + `<button type="button" class="wiz-vf-delete" onclick="wizClearVariantPrice(this)" title="Clear price">&times;</button>`;
           variantsDiv.appendChild(row);
 
           // Also add to display view
@@ -2171,12 +2596,63 @@
           dRow.innerHTML = `<span class="wiz-variant-label">New Variant</span>`;
           displayDiv.appendChild(dRow);
 
+          // Day 141: new variant — recount the badge
+          wizRefreshVariantBadge(card);
+
           // Focus the new label
           row.querySelector('.wiz-vf-label').focus();
         } else {
           wizToast(data.error || 'Failed to add variant');
         }
       } catch (e) { wizToast('Network error'); }
+    }
+
+    /* Day 141: Clear the price on a variant row (does NOT delete the variant).
+       Repurposes the per-row red X so it reads visually as "clear this field."
+       Use the edit-actions "Delete Variant" button to actually delete. */
+    async function wizClearVariantPrice(btn) {
+      const row = btn.closest('.wiz-variant-row');
+      if (!row) return;
+      const variantId = row.dataset.variantId;
+      const draftId = row.dataset.draftId;
+      const card = row.closest('.wiz-item');
+      const priceInp = row.querySelector('.wiz-vf-price');
+      const label = (row.querySelector('.wiz-vf-label')?.value || '').trim();
+      if (!priceInp) return;
+
+      // Clear the input value
+      priceInp.value = '';
+      priceInp.classList.add('price-zero');
+
+      // Persist the zero price to the server
+      if (variantId && draftId) {
+        try {
+          await fetch(`/api/drafts/${draftId}/wizard/variant/${variantId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ label, price_cents: 0 })
+          });
+        } catch (e) { /* silent */ }
+      }
+
+      // Update the display-mode variant row
+      if (card) {
+        const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
+        if (displayRow) {
+          let prEl = displayRow.querySelector('.wiz-variant-price');
+          if (prEl) {
+            prEl.textContent = '$0.00';
+            prEl.classList.add('missing-price');
+          } else {
+            prEl = document.createElement('span');
+            prEl.className = 'wiz-variant-price missing-price';
+            prEl.textContent = '$0.00';
+            displayRow.appendChild(prEl);
+          }
+        }
+        wizRecomputeNeedsPrice(card);
+      }
     }
 
     async function wizDeleteVariant(btn) {
@@ -2198,6 +2674,9 @@
           // Remove from display view
           const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
           if (displayRow) displayRow.remove();
+          // Day 141: variant gone — recompute the needs-price flag and badge
+          wizRecomputeNeedsPrice(card);
+          wizRefreshVariantBadge(card);
         } else {
           wizToast(data.error || 'Delete failed');
         }
@@ -2254,20 +2733,194 @@
             }
           }
         });
+        // Day 141: variant changed, recompute the needs-price flag
+        wizRecomputeNeedsPrice(card);
       } catch (e) { /* silent */ }
     }
+
+    /* ===== Day 141: Recount the "X variants" badge on the display view =====
+       Call after any variant add/delete so the badge stays in sync without
+       needing a page reload. Counts actual variant rows in the edit form. */
+    function wizRefreshVariantBadge(card) {
+      if (!card) return;
+      const count = card.querySelectorAll('.wiz-edit-form .wiz-variant-row').length;
+      const meta = card.querySelector('.wiz-display .wiz-item-meta');
+      if (!meta) return;
+      let badge = meta.querySelector('.wiz-badge-variant');
+      if (count > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'wiz-badge wiz-badge-variant';
+          meta.prepend(badge);
+        }
+        badge.textContent = count + ' variant' + (count !== 1 ? 's' : '');
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+
+    /* ===== Day 141: Live decimal formatter for all price fields =====
+       As the user types digits, treat the input as cents and format to D.CC
+       in realtime. Works on both the main item price (.wiz-f-price) and
+       variant prices (.wiz-vf-price). Delegated so dynamically added variant
+       rows pick it up automatically. */
+    document.addEventListener('input', e => {
+      const inp = e.target;
+      if (!inp.classList || (!inp.classList.contains('wiz-f-price') && !inp.classList.contains('wiz-vf-price'))) {
+        return;
+      }
+      // Strip everything that isn't a digit
+      const digits = (inp.value || '').replace(/\D/g, '');
+      if (!digits) {
+        inp.value = '';
+        return;
+      }
+      // Trim leading zeros but keep at least 3 digits so we always have cents
+      const padded = digits.length < 3 ? digits.padStart(3, '0') : digits;
+      const dollars = padded.slice(0, -2).replace(/^0+(?=\d)/, '') || '0';
+      const cents = padded.slice(-2);
+      inp.value = `${dollars}.${cents}`;
+    });
 
     /* ===== Apply Variant Labels — Checkbox Toggle ===== */
     // Track which variant row was last focused for auto-select
     let _lastFocusedVariantRow = null;
     document.addEventListener('focusin', e => {
       const row = e.target.closest('.wiz-variant-row');
-      if (row) _lastFocusedVariantRow = row;
+      if (row) {
+        _lastFocusedVariantRow = row;
+        const card = row.closest('.wiz-item');
+        if (card) wizRefreshApplyButtons(card);
+      }
     });
 
-    function wizToggleApplyBtn(checkbox) {
-      // Checkboxes still work for multi-select; buttons are always visible now
+    /* Show/hide Apply to All + Delete All + Delete Variant buttons on a card
+       based on whether any variant checkbox is checked OR a variant row is
+       focused/being edited. */
+    function wizRefreshApplyButtons(card) {
+      if (!card) return;
+      const anyChecked = card.querySelector('.wiz-edit-form .wiz-vf-check:checked');
+      const focusedRow = _lastFocusedVariantRow && _lastFocusedVariantRow.closest('.wiz-item') === card
+        ? _lastFocusedVariantRow : null;
+      const activeFocus = focusedRow && (
+        focusedRow.contains(document.activeElement) ||
+        (focusedRow.querySelector('.wiz-vf-label')?.value || '').trim() ||
+        (focusedRow.querySelector('.wiz-vf-price')?.value || '').trim()
+      );
+      const show = anyChecked || activeFocus;
+      const labelBtn = card.querySelector('.btn-apply-labels');
+      const delBtn = card.querySelector('.btn-delete-variants');
+      const delOne = card.querySelector('.btn-delete-variant-single');
+      if (labelBtn) labelBtn.style.display = show ? '' : 'none';
+      if (delBtn) delBtn.style.display = show ? '' : 'none';
+      if (delOne) delOne.style.display = show ? '' : 'none';
     }
+
+    /* Delete the currently selected/focused variant on a card. Mirrors the
+       per-row X button but lives in the edit actions footer for discoverability. */
+    async function wizDeleteSelectedVariant(btn) {
+      const card = btn.closest('.wiz-item');
+      if (!card) return;
+      const itemId = parseInt(card.dataset.itemId);
+      const draftId = card.dataset.draftId;
+      // Prefer checked variants; fall back to the last focused variant row
+      const checked = [...card.querySelectorAll('.wiz-edit-form .wiz-vf-check:checked')]
+        .map(cb => cb.closest('.wiz-variant-row'));
+      let targets = checked;
+      if (targets.length === 0 && _lastFocusedVariantRow && _lastFocusedVariantRow.closest('.wiz-item') === card) {
+        targets = [_lastFocusedVariantRow];
+      }
+      if (targets.length === 0) {
+        wizToast('Select a variant to delete first.');
+        return;
+      }
+
+      // Day 141: capture variant data BEFORE deletion so we can undo it.
+      // Matches the shape expected by /wizard/batch_create_variants.
+      const deletedSnapshots = targets.map((row, i) => {
+        const label = (row.querySelector('.wiz-vf-label')?.value || '').trim();
+        const priceStr = (row.querySelector('.wiz-vf-price')?.value || '').trim();
+        let priceCents = 0;
+        if (priceStr) {
+          const p = parseFloat(priceStr.replace(/[$,]/g, ''));
+          if (!isNaN(p)) priceCents = Math.round(p * 100);
+        }
+        return {
+          item_id: itemId,
+          label,
+          price_cents: priceCents,
+          kind: 'size',
+          position: parseInt(row.dataset.varPos || i),
+        };
+      });
+
+      // Delete each one using the same endpoint as the per-row X
+      for (const row of targets) {
+        const variantId = row.dataset.variantId;
+        if (!variantId || !draftId) continue;
+        try {
+          await fetch(`/api/drafts/${draftId}/wizard/variant/${variantId}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin'
+          });
+          row.remove();
+          const displayRow = card.querySelector(`.wiz-display .wiz-variant-row[data-variant-id="${variantId}"]`);
+          if (displayRow) displayRow.remove();
+        } catch (e) { wizToast('Network error'); }
+      }
+
+      // Day 141: push onto this card's undo stack
+      if (deletedSnapshots.length > 0) {
+        _pushUndo(itemId, {
+          type: 'delete_variants',
+          draftId,
+          deletedVariants: deletedSnapshots,
+        });
+      }
+
+      _applyInProgress = false;
+      _lastFocusedVariantRow = null;
+      wizRecomputeNeedsPrice(card);
+      wizRefreshVariantBadge(card);
+      wizRefreshApplyButtons(card);
+    }
+
+    function wizToggleApplyBtn(checkbox) {
+      const card = checkbox.closest('.wiz-item');
+      wizRefreshApplyButtons(card);
+    }
+
+    // Hide the buttons again when focus leaves a variant row without any checkboxes checked
+    document.addEventListener('focusout', e => {
+      const row = e.target.closest('.wiz-variant-row');
+      if (!row) return;
+      const card = row.closest('.wiz-item');
+      // Delay slightly so click handlers (Apply/Delete) can fire first
+      setTimeout(() => {
+        if (!card) return;
+        const active = document.activeElement;
+        // Keep buttons visible if focus moved to another variant row,
+        // or to the Apply/Delete buttons themselves, in the same card.
+        if (active) {
+          const newRow = active.closest('.wiz-variant-row');
+          if (newRow && newRow.closest('.wiz-item') === card) {
+            _lastFocusedVariantRow = newRow;
+            wizRefreshApplyButtons(card);
+            return;
+          }
+          if (active.classList.contains('btn-apply-labels') ||
+              active.classList.contains('btn-delete-variants') ||
+              active.classList.contains('btn-delete-variant-single')) {
+            return;  // don't hide while user is clicking the button
+          }
+        }
+        if (!card.querySelector('.wiz-edit-form .wiz-vf-check:checked')) {
+          _lastFocusedVariantRow = null;
+        }
+        wizRefreshApplyButtons(card);
+      }, 150);
+    });
 
     function _getVariantTargets(card) {
       const allRows = card.querySelectorAll('.wiz-edit-form .wiz-variant-row');
@@ -2367,8 +3020,9 @@
             price_cents: c.origPrice
           })).filter(e => e.variant_id);
 
-          // Push undo entry
-          undoStack.push({
+          // Push undo entry onto the source card's stack (the card the user
+          // clicked Apply to All from)
+          _pushUndo(itemId, {
             type: 'apply',
             draftId,
             oldLabels: [...(data.old_labels || []), ...sourceOld],
@@ -2482,7 +3136,7 @@
                 eRow.innerHTML = `<input type="checkbox" class="wiz-vf-check" onchange="wizToggleApplyBtn(this)" />`
                   + `<input type="text" class="wiz-vf-label" value="${cv.label}" placeholder="Label" onblur="wizSaveVariant(this)" />`
                   + `<span style="font-weight:600;font-size:.82rem;color:var(--ink);display:flex;align-items:baseline;">$<input type="text" class="wiz-vf-price" value="${cvPriceVal}" placeholder="0.00" inputmode="decimal" onblur="wizSaveVariant(this)" /></span>`
-                  + `<button type="button" class="wiz-vf-delete" onclick="wizDeleteVariant(this)" title="Delete variant">&times;</button>`;
+                  + `<button type="button" class="wiz-vf-delete" onclick="wizClearVariantPrice(this)" title="Clear price">&times;</button>`;
                 editDiv.appendChild(eRow);
               }
 
@@ -2529,6 +3183,13 @@
         _applyInProgress = false;
         btn.disabled = false;
         btn.textContent = '\u21BB Apply to All';
+        // Uncheck any checked variants and hide the buttons — operation done
+        const card = btn.closest('.wiz-item');
+        if (card) {
+          card.querySelectorAll('.wiz-edit-form .wiz-vf-check:checked').forEach(cb => cb.checked = false);
+          _lastFocusedVariantRow = null;
+          wizRefreshApplyButtons(card);
+        }
       }
     }
 
@@ -2560,9 +3221,9 @@
         });
         const data = await res.json();
         if (data.ok) {
-          // Push undo entry with deleted variant data for restoration
+          // Push undo entry onto the source card's stack
           const labelList = labels.join(', ');
-          undoStack.push({
+          _pushUndo(itemId, {
             type: 'delete_variants',
             draftId,
             deletedVariants: data.deleted_variants || [],
@@ -2606,6 +3267,13 @@
         _applyInProgress = false;
         btn.disabled = false;
         btn.textContent = '\u00D7 Delete All';
+        // Uncheck any checked variants and hide the buttons — operation done
+        const card = btn.closest('.wiz-item');
+        if (card) {
+          card.querySelectorAll('.wiz-edit-form .wiz-vf-check:checked').forEach(cb => cb.checked = false);
+          _lastFocusedVariantRow = null;
+          wizRefreshApplyButtons(card);
+        }
       }
     }
 
@@ -2764,12 +3432,37 @@
         .filter(id => !isNaN(id));
     }
 
+    function wizRefreshSelectAllLabel() {
+      const all = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted) .wiz-select-check');
+      if (all.length === 0) return;
+      const anyUnchecked = [...all].some(cb => !cb.checked);
+      const newLabel = anyUnchecked ? 'Select all' : 'Deselect all';
+      const top = document.getElementById('wiz-select-all-link');
+      const bot = document.getElementById('wiz-select-all-link-bottom');
+      if (top) top.textContent = newLabel;
+      if (bot) bot.textContent = newLabel;
+    }
+
     function wizToggleSelectAll() {
       const all = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted) .wiz-select-check');
       const anyUnchecked = [...all].some(cb => !cb.checked);
-      all.forEach(cb => { cb.checked = anyUnchecked; });
-      const link = document.getElementById('wiz-select-all-link');
-      if (link) link.textContent = anyUnchecked ? 'Deselect all' : 'Select all';
+      // If any are unchecked, select all (and un-mark-as-read so selection sticks).
+      // Otherwise deselect all.
+      all.forEach(cb => {
+        cb.checked = anyUnchecked;
+        if (anyUnchecked) {
+          // Clear read state on the card so wizUpdateSelection doesn't auto-uncheck it
+          const card = cb.closest('.wiz-item');
+          if (card) card.classList.remove('is-read');
+        }
+      });
+      // Persist cleared read state
+      if (anyUnchecked) {
+        const readItems = [...document.querySelectorAll('.wiz-item.is-read')]
+          .map(c => parseInt(c.dataset.itemId));
+        sessionStorage.setItem('wizReadItems', JSON.stringify(readItems));
+      }
+      wizRefreshSelectAllLabel();
       wizUpdateSelection();
     }
 
@@ -2791,6 +3484,8 @@
       if (count) count.textContent = ids.length;
       const dd = document.getElementById('wiz-move-dropdown');
       if (dd) dd.style.display = 'none';
+      // Day 141: keep Select all / Deselect all label in sync with current state
+      wizRefreshSelectAllLabel();
     }
 
     async function wizSelDelete() {
@@ -3337,8 +4032,11 @@
     if (!viewer || !img) return;
 
     const STORAGE_KEY = 'menuViewerState';
+    const jobId = viewer.dataset.jobId;
     let scale = 1, panX = 0, panY = 0;
     let userInteracted = false;
+    let currentPage = 0;
+    let pageCount = 1;
 
     function applyTransform() {
       img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
@@ -3476,6 +4174,56 @@
       saveState();
     }, { passive: false });
 
+    // Day 141: multi-page support — fetch page count and show nav if needed
+    function updatePageControls() {
+      const prev = document.getElementById('menu-viewer-prev');
+      const next = document.getElementById('menu-viewer-next');
+      const label = document.getElementById('menu-viewer-page-label');
+      if (pageCount <= 1) {
+        if (prev) prev.style.display = 'none';
+        if (next) next.style.display = 'none';
+        if (label) label.style.display = 'none';
+        return;
+      }
+      if (prev) {
+        prev.style.display = '';
+        prev.disabled = (currentPage === 0);
+        prev.style.opacity = (currentPage === 0) ? '.35' : '';
+        prev.style.cursor = (currentPage === 0) ? 'not-allowed' : '';
+      }
+      if (next) {
+        next.style.display = '';
+        next.disabled = (currentPage === pageCount - 1);
+        next.style.opacity = (currentPage === pageCount - 1) ? '.35' : '';
+        next.style.cursor = (currentPage === pageCount - 1) ? 'not-allowed' : '';
+      }
+      if (label) {
+        label.style.display = '';
+        label.textContent = (currentPage + 1) + ' / ' + pageCount;
+      }
+    }
+
+    function loadPage(pageIdx) {
+      if (pageIdx < 0 || pageIdx >= pageCount) return;
+      currentPage = pageIdx;
+      // Swap the image source. Use a URL the Flask endpoint can serve.
+      img.src = `/imports/${jobId}/preview/${pageIdx}.jpg`;
+      // Reset pan/zoom and refit once the new image loads
+      userInteracted = false;
+      img.onload = () => {
+        fitImage();
+        userInteracted = true;
+      };
+      updatePageControls();
+    }
+
+    window.menuViewerPrevPage = function() {
+      if (currentPage > 0) loadPage(currentPage - 1);
+    };
+    window.menuViewerNextPage = function() {
+      if (currentPage < pageCount - 1) loadPage(currentPage + 1);
+    };
+
     // On image load: fit to viewer if user hasn't interacted yet
     function init() {
       loadState();
@@ -3483,74 +4231,24 @@
         if (img.complete && img.naturalWidth) fitImage();
         else img.onload = () => { if (!userInteracted) fitImage(); };
       }
+      // Fetch page count
+      if (jobId) {
+        fetch(`/imports/${jobId}/pages.json`, { credentials: 'same-origin' })
+          .then(r => r.json())
+          .then(data => {
+            if (data && data.ok && data.page_count) {
+              pageCount = data.page_count;
+              updatePageControls();
+            }
+          })
+          .catch(() => {});
+      }
     }
     init();
   })();
   </script>
   {% endif %}
 
-  {# Day 139.5: AI Visual Diff verification per category #}
-  <script>
-  function aiVerifyCategory(category, draftId) {
-    const btn = document.getElementById('btn-ai-verify');
-    if (!btn) return;
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Verifying...';
-    btn.style.opacity = '0.6';
-
-    fetch(`/api/drafts/${draftId}/wizard/verify-category`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({category: category}),
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        const n = data.corrections_applied || 0;
-        const added = data.items_added || 0;
-        let msg = '';
-        if (n === 0 && added === 0) {
-          msg = 'AI Verify: Everything looks correct!';
-        } else {
-          const parts = [];
-          if (n > 0) parts.push(`${n} correction${n > 1 ? 's' : ''} applied`);
-          if (added > 0) parts.push(`${added} missing item${added > 1 ? 's' : ''} added`);
-          msg = 'AI Verify: ' + parts.join(', ') + '. Reloading...';
-        }
-        if (data.notes) msg += '\n\n' + data.notes;
-
-        // Show details of corrections
-        if (data.details && data.details.length > 0) {
-          msg += '\n\nCorrections:';
-          data.details.forEach(d => {
-            const fixes = d.fixes ? Object.entries(d.fixes).map(([k,v]) => {
-              if (k === 'price_cents') return `price: $${(v/100).toFixed(2)}`;
-              return `${k}: ${v}`;
-            }).join(', ') : '';
-            const reason = d.reason ? ` (${d.reason})` : '';
-            msg += `\n  - Item #${d.item_id}: ${fixes}${reason}`;
-          });
-        }
-
-        alert(msg);
-        if (n > 0 || added > 0) {
-          window.location.reload();
-        }
-      } else {
-        alert('AI Verify failed: ' + (data.error || 'Unknown error'));
-      }
-    })
-    .catch(err => {
-      alert('AI Verify error: ' + err.message);
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.textContent = origText;
-      btn.style.opacity = '1';
-    });
-  }
-  </script>
 </div>
 
 <!-- Confirm modal (reusable) -->

@@ -198,7 +198,7 @@ except Exception:
 # Day 136: ensure pipeline_stage column exists on import_jobs
 # Day 139: use sqlite3 directly since db_connect isn't defined yet at import time
 def _ensure_import_jobs_columns():
-    """Add pipeline_stage column to import_jobs if missing (idempotent)."""
+    """Add missing columns to import_jobs (idempotent)."""
     try:
         import sqlite3 as _sq
         from pathlib import Path as _P
@@ -212,6 +212,11 @@ def _ensure_import_jobs_columns():
                 conn.execute("ALTER TABLE import_jobs ADD COLUMN pipeline_stage TEXT")
                 conn.commit()
                 print("[APP] Added pipeline_stage column to import_jobs")
+            # Day 141: store extra page filenames (JSON array) for multi-page menus
+            if "extra_filenames" not in cols:
+                conn.execute("ALTER TABLE import_jobs ADD COLUMN extra_filenames TEXT")
+                conn.commit()
+                print("[APP] Added extra_filenames column to import_jobs")
         finally:
             conn.close()
     except Exception as _e:
@@ -1420,6 +1425,95 @@ def imports_preview_image(job_id: int):
             return send_file(str(src), mimetype="image/jpeg")
         abort(404)
     return send_file(str(p), mimetype="image/jpeg")
+
+
+def _get_import_pages(job_id: int) -> list:
+    """Day 141: return all image file paths for a multi-page upload.
+
+    Returns a list of (page_index, Path) tuples, page_index is 0-based.
+    Page 0 is the primary file; pages 1+ come from extra_filenames.
+    For single-page PDFs, also rasterizes subsequent PDF pages on demand.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        return []
+
+    pages: list = []
+    primary_name = row["filename"] or ""
+    primary = (UPLOAD_FOLDER / primary_name).resolve()
+    if primary.exists():
+        pages.append(primary)
+
+    # Add any extra pages from multi-file upload
+    try:
+        extra_json = row["extra_filenames"] if "extra_filenames" in row.keys() else None
+    except Exception:
+        extra_json = None
+    if extra_json:
+        import json as _json
+        try:
+            for name in _json.loads(extra_json):
+                path = (UPLOAD_FOLDER / name).resolve()
+                if path.exists():
+                    pages.append(path)
+        except Exception:
+            pass
+
+    return pages
+
+
+@app.get("/imports/<int:job_id>/pages.json")
+@login_required
+def imports_pages_info(job_id: int):
+    """Day 141: return JSON metadata about how many pages this import has."""
+    pages = _get_import_pages(job_id)
+    return jsonify({"ok": True, "job_id": job_id, "page_count": len(pages)})
+
+
+@app.get("/imports/<int:job_id>/preview/<int:page>.jpg")
+@login_required
+def imports_preview_image_page(job_id: int, page: int):
+    """Day 141: serve a specific page (0-indexed) for multi-page menu uploads.
+
+    Page 0 reuses the existing _ensure_work_image path (the rotatable primary).
+    Pages 1+ are served as-is from the extra_filenames list, rasterized if PDF.
+    """
+    row = get_import_job(job_id)
+    if not row:
+        abort(404)
+
+    pages = _get_import_pages(job_id)
+    if not pages or page < 0 or page >= len(pages):
+        abort(404)
+
+    # Page 0 = the primary working image (rotatable, already handled)
+    if page == 0:
+        src = pages[0]
+        p = _ensure_work_image(job_id, src) or _get_work_image_if_any(job_id)
+        if not p or not p.exists():
+            if src.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                return send_file(str(src), mimetype="image/jpeg")
+            abort(404)
+        return send_file(str(p), mimetype="image/jpeg")
+
+    # Extra pages: serve image files directly, rasterize PDFs on the fly
+    src = pages[page]
+    if src.suffix.lower() in (".jpg", ".jpeg", ".png"):
+        return send_file(str(src), mimetype="image/jpeg")
+    if src.suffix.lower() == ".pdf":
+        try:
+            from pdf2image import convert_from_path
+            from io import BytesIO
+            imgs = convert_from_path(str(src), dpi=200, poppler_path=POPPLER_PATH)
+            if not imgs:
+                abort(404)
+            buf = BytesIO()
+            imgs[0].save(buf, format="JPEG", quality=85)
+            buf.seek(0)
+            return send_file(buf, mimetype="image/jpeg")
+        except Exception:
+            abort(500)
+    abort(404)
 
 @app.route("/imports/<int:job_id>/rotate", methods=["POST", "GET"])
 @login_required
@@ -2903,6 +2997,21 @@ def import_menu():
 
         restaurant_id = _resolve_restaurant_id_from_request()
         job_id = create_import_job(filename=primary_name, restaurant_id=restaurant_id)
+
+        # Day 141: persist extra page filenames so the wizard menu viewer can
+        # cycle through all pages later.
+        if len(saved_paths) > 1:
+            import json as _json
+            extra_names = [p.name for p in saved_paths[1:]]
+            try:
+                with db_connect() as _c:
+                    _c.execute(
+                        "UPDATE import_jobs SET extra_filenames=? WHERE id=?",
+                        (_json.dumps(extra_names), job_id),
+                    )
+                    _c.commit()
+            except Exception as _e:
+                print(f"[APP] failed to save extra_filenames: {_e}")
 
         # Pass all file paths for multi-page processing
         if len(saved_paths) == 1:
@@ -6342,7 +6451,15 @@ def draft_wizard(draft_id: int):
     requested_step = request.args.get("step", "").strip()
     requested_cat = request.args.get("category", "").strip()
     requested_subcat = request.args.get("subcategory", "").strip() or None
-    category_list = [c["name"] for c in progress["categories"]]
+    # Day 141: progress.categories now includes subcategory rows too.
+    # category_list should remain a flat de-duplicated list of MAIN categories
+    # only, in the order they were first seen.
+    category_list = []
+    _seen_cats = set()
+    for c in progress["categories"]:
+        if not c.get("subcategory") and c["name"] not in _seen_cats:
+            _seen_cats.add(c["name"])
+            category_list.append(c["name"])
 
     # Apply saved category order if it exists
     try:
@@ -6444,43 +6561,114 @@ def draft_wizard(draft_id: int):
 @app.post("/drafts/<int:draft_id>/wizard/confirm")
 @login_required
 def wizard_confirm_category(draft_id: int):
-    """Mark a category as reviewed and advance to next."""
+    """Mark a category (or subcategory) as reviewed and advance to next.
+
+    Day 141: subcategory-aware. The next view in line might be a subcategory
+    of the just-confirmed category, not the next main category.
+    """
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id)
     if not draft:
         abort(404)
 
     category = (request.form.get("category") or "").strip()
+    subcategory = (request.form.get("subcategory") or "").strip() or None
     if not category:
         flash("No category specified.", "error")
         return redirect(url_for("draft_wizard", draft_id=draft_id))
 
-    drafts_store.mark_category_reviewed(draft_id, category)
+    drafts_store.mark_category_reviewed(draft_id, category, subcategory)
     progress = drafts_store.get_wizard_progress(draft_id)
 
-    # If all reviewed, mark wizard complete and go to editor
+    # Day 141: Confirm & Next NEVER leaves the wizard. Only the
+    # "Complete Review" button in the sidebar can send the user to the editor.
+    # If the user just confirmed the last unreviewed entry, stay put on the
+    # current category so they can click Complete Review.
+    if progress["complete"]:
+        kwargs = {"draft_id": draft_id, "category": category}
+        if subcategory:
+            kwargs["subcategory"] = subcategory
+        return redirect(url_for("draft_wizard", **kwargs))
+
+    # Day 141: advance FORWARD only — find the next unreviewed entry that
+    # comes AFTER the one we just confirmed. If nothing forward is unreviewed,
+    # fall back to the first unreviewed at the top of the list (so the user
+    # eventually finishes everything they skipped).
+    cats = progress["categories"]
+    current_idx = -1
+    for i, c in enumerate(cats):
+        if c["name"] == category and (c.get("subcategory") or None) == (subcategory or None):
+            current_idx = i
+            break
+
+    next_entry = None
+    # Search forward from the position right after the current entry
+    if current_idx >= 0:
+        for c in cats[current_idx + 1 :]:
+            if not c["reviewed"]:
+                next_entry = c
+                break
+
+    # No forward entry → fall back to the first unreviewed anywhere
+    if next_entry is None:
+        for c in cats:
+            if not c["reviewed"]:
+                next_entry = c
+                break
+
+    if next_entry is not None:
+        kwargs = {"draft_id": draft_id, "category": next_entry["name"]}
+        if next_entry.get("subcategory"):
+            kwargs["subcategory"] = next_entry["subcategory"]
+        return redirect(url_for("draft_wizard", **kwargs))
+
+    return redirect(url_for("draft_wizard", draft_id=draft_id))
+
+
+@app.post("/drafts/<int:draft_id>/wizard/complete_review")
+@login_required
+def wizard_complete_review(draft_id: int):
+    """Day 141: 'Complete Review' button — only allowed if every category and
+    subcategory has been confirmed. If anything is unreviewed, flash an error
+    and bounce the user to the first unreviewed entry. The user has to walk
+    through every step to actually finish.
+    """
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+
+    progress = drafts_store.get_wizard_progress(draft_id)
+
     if progress["complete"]:
         drafts_store.mark_wizard_completed(draft_id)
         flash("All categories reviewed! Welcome to the full editor.", "success")
         return redirect(url_for("draft_editor", draft_id=draft_id))
 
-    # Advance to next unreviewed category
+    # Not done — bounce to first unreviewed
+    flash("Every category must be confirmed before completing review.", "error")
     for c in progress["categories"]:
         if not c["reviewed"]:
-            return redirect(url_for("draft_wizard", draft_id=draft_id, category=c["name"]))
-
+            kwargs = {"draft_id": draft_id, "category": c["name"]}
+            if c.get("subcategory"):
+                kwargs["subcategory"] = c["subcategory"]
+            return redirect(url_for("draft_wizard", **kwargs))
     return redirect(url_for("draft_wizard", draft_id=draft_id))
 
 
 @app.post("/drafts/<int:draft_id>/wizard/unconfirm")
 @login_required
 def wizard_unconfirm_category(draft_id: int):
-    """Unmark a category to allow re-review."""
+    """Unmark a category (or subcategory) to allow re-review."""
     _require_drafts_storage()
     category = (request.form.get("category") or "").strip()
+    subcategory = (request.form.get("subcategory") or "").strip() or None
     if category:
-        drafts_store.unmark_category_reviewed(draft_id, category)
-    return redirect(url_for("draft_wizard", draft_id=draft_id, category=category))
+        drafts_store.unmark_category_reviewed(draft_id, category, subcategory)
+    kwargs = {"draft_id": draft_id, "category": category}
+    if subcategory:
+        kwargs["subcategory"] = subcategory
+    return redirect(url_for("draft_wizard", **kwargs))
 
 
 @app.get("/api/drafts/<int:draft_id>/wizard/progress")
@@ -7110,29 +7298,35 @@ def wizard_batch_undo(draft_id: int):
 @app.post("/api/drafts/<int:draft_id>/wizard/batch_create_variants")
 @login_required
 def wizard_batch_create_variants(draft_id: int):
-    """Batch create variants: insert multiple variants across items in one call."""
+    """Batch create variants: insert multiple variants across items in one call.
+
+    Day 141: returns the new variant IDs (in the same order as the input list)
+    so clients can update the DOM in-place without a full page reload.
+    """
     _require_drafts_storage()
     if not request.is_json:
         return jsonify({"ok": False, "error": "Expected JSON"}), 400
     data = request.get_json(silent=True) or {}
     variants = data.get("variants") or []  # [{item_id, label, price_cents, kind, position}]
 
+    new_ids = []
     try:
         now = _now_iso()
         with db_connect() as conn:
             for v in variants:
-                conn.execute(
+                cur = conn.execute(
                     """INSERT INTO draft_item_variants
                        (item_id, label, price_cents, kind, position, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (int(v["item_id"]), v.get("label", ""), int(v.get("price_cents", 0)),
                      v.get("kind", "size"), int(v.get("position", 0)), now, now),
                 )
+                new_ids.append(cur.lastrowid)
             conn.commit()
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    return jsonify({"ok": True, "created": len(variants)})
+    return jsonify({"ok": True, "created": len(variants), "variant_ids": new_ids})
 
 
 @app.post("/api/drafts/<int:draft_id>/wizard/bulk_move")
