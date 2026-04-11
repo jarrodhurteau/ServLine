@@ -1933,7 +1933,10 @@
 
         // Update DOM: remove created variants
         for (const vid of deleteIds) {
-          document.querySelectorAll(`.wiz-variant-row[data-variant-id="${vid}"]`).forEach(el => el.remove());
+          document.querySelectorAll(`.wiz-variant-row[data-variant-id="${vid}"]`).forEach(el => {
+            if (_lastFocusedVariantRow === el) _lastFocusedVariantRow = null;
+            el.remove();
+          });
         }
         // Update DOM: restore old labels + prices
         for (const entry of (action.oldLabels || [])) {
@@ -1950,14 +1953,10 @@
             if (prInp) prInp.value = entry.price_cents > 0 ? (entry.price_cents / 100).toFixed(2) : '';
           });
         }
-        // Update variant badges
-        document.querySelectorAll('.wiz-item').forEach(c => {
-          const badge = c.querySelector('.wiz-display .wiz-badge-variant');
-          const count = c.querySelectorAll('.wiz-display .wiz-variant-row').length;
-          if (badge) {
-            if (count > 0) badge.textContent = count + ' variant' + (count !== 1 ? 's' : '');
-            else badge.remove();
-          }
+        // Day 141: recount variant badge + needs-price flag on every card
+        document.querySelectorAll('.wizard-items .wiz-item').forEach(c => {
+          wizRefreshVariantBadge(c);
+          wizRecomputeNeedsPrice(c);
         });
         wizFlagMissingPrices(); wizFlagZeroEditPrices();
       }
@@ -2002,7 +2001,10 @@
           editRow.className = 'wiz-variant-row';
           editRow.dataset.variantId = newVariantId;
           editRow.dataset.draftId = draftId;
-          editRow.dataset.varPos = v.position || 0;
+          // Day 141: varPos is an index-within-the-card (0-based), NOT the DB
+          // position value. Compute it from the current row count to match
+          // how the Jinja template renders variants via loop.index0.
+          editRow.dataset.varPos = card.querySelectorAll('.wiz-edit-form .wiz-variant-row').length;
           editRow.dataset.origLabel = v.label || '';
           editRow.dataset.origPrice = v.price_cents || 0;
           const priceDisplay = v.price_cents > 0 ? (v.price_cents / 100).toFixed(2) : '';
@@ -3013,12 +3015,23 @@
         if (data.ok) {
           const labelList = checked.map(c => c.label).filter(l => l).join(', ');
 
-          // Build source card undo entries (so undo reverts the source card too)
-          const sourceOld = checked.map(c => ({
-            variant_id: parseInt(c.variantId),
-            old_label: c.origLabel,
-            price_cents: c.origPrice
-          })).filter(e => e.variant_id);
+          // Build source card undo entries. Day 141: variants the user JUST
+          // created on the source card should be LEFT ALONE on undo — the
+          // user wanted that variant, they just didn't want it propagated to
+          // other items. Renames / price edits DO get restored.
+          const sourceOld = [];
+          checked.forEach(c => {
+            const vid = parseInt(c.variantId);
+            if (!vid) return;
+            // Skip brand new source variants — undo only reverts the "apply to all"
+            // part for those, leaving the source variant intact.
+            if (!c.origLabel) return;
+            sourceOld.push({
+              variant_id: vid,
+              old_label: c.origLabel,
+              price_cents: c.origPrice,
+            });
+          });
 
           // Push undo entry onto the source card's stack (the card the user
           // clicked Apply to All from)
