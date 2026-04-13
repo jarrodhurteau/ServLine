@@ -3075,7 +3075,10 @@ def create_restaurant():
     """Create a new restaurant. Auto-links to the logged-in customer user."""
     name = (request.form.get("name") or "").strip()
     redirect_to = request.form.get("_redirect") or None
+    want_json = redirect_to == "__json__"
     if not name:
+        if want_json:
+            return jsonify({"error": "Restaurant name is required."}), 400
         flash("Restaurant name is required.", "error")
         return redirect(redirect_to or url_for("restaurants_page"))
     phone = (request.form.get("phone") or "").strip() or None
@@ -3106,9 +3109,15 @@ def create_restaurant():
             if not u.get("restaurant_id"):
                 session["user"] = {**u, "restaurant_id": rest_id}
 
+        if want_json:
+            return jsonify({"id": rest_id, "name": name})
         flash(f'Restaurant "{name}" created.', "success")
     except Exception as e:
+        if want_json:
+            return jsonify({"error": str(e)}), 500
         flash(f"Failed to create restaurant: {e}", "error")
+    if want_json:
+        return jsonify({"error": "Unknown error"}), 500
     return redirect(redirect_to or url_for("restaurants_page"))
 
 @app.get("/restaurants/<int:rest_id>/menus")
@@ -3128,7 +3137,94 @@ def menus_page(rest_id):
                 "SELECT * FROM menus WHERE restaurant_id=? AND active=1 ORDER BY id", (rest_id,),
             ).fetchall()]
     valid_types = sorted(menus_store.VALID_MENU_TYPES) if menus_store else []
-    return _safe_render("menus.html", restaurant=rest, menus=menu_list, valid_types=valid_types)
+    # Day 141.6: Also show drafts linked to this restaurant
+    draft_list = []
+    try:
+        import json as _json
+        with db_connect() as conn:
+            draft_list = [dict(r) for r in conn.execute(
+                "SELECT id, title, status, source, wizard_completed, updated_at FROM drafts WHERE restaurant_id=? ORDER BY updated_at DESC",
+                (rest_id,),
+            ).fetchall()]
+        # Pre-fetch export history and wizard review counts for all drafts
+        draft_ids = [d["id"] for d in draft_list]
+        export_map = {}  # draft_id -> latest export format
+        review_started = set()  # draft_ids that have wizard reviews
+        if draft_ids:
+            with db_connect() as conn:
+                placeholders = ",".join("?" * len(draft_ids))
+                # Latest export per draft
+                for row in conn.execute(
+                    f"SELECT draft_id, format, exported_at FROM draft_export_history WHERE draft_id IN ({placeholders}) ORDER BY exported_at DESC",
+                    draft_ids,
+                ).fetchall():
+                    if row["draft_id"] not in export_map:
+                        export_map[row["draft_id"]] = row["format"]
+                # Which drafts have wizard reviews started
+                for row in conn.execute(
+                    f"SELECT DISTINCT draft_id FROM draft_category_reviews WHERE draft_id IN ({placeholders})",
+                    draft_ids,
+                ).fetchall():
+                    review_started.add(row["draft_id"])
+
+        # Pre-fetch item counts per draft
+        item_count_map = {}
+        if draft_ids:
+            with db_connect() as conn:
+                for row in conn.execute(
+                    f"SELECT draft_id, COUNT(*) as cnt FROM draft_items WHERE draft_id IN ({placeholders}) GROUP BY draft_id",
+                    draft_ids,
+                ).fetchall():
+                    item_count_map[row["draft_id"]] = row["cnt"]
+
+        for d in draft_list:
+            d["item_count"] = item_count_map.get(d["id"], 0)
+            # Derive import method from source JSON
+            src = {}
+            try:
+                src = _json.loads(d.get("source") or "{}")
+            except Exception:
+                pass
+            st = src.get("source_type") or src.get("type") or ""
+            if "csv" in st:
+                d["import_method"] = "CSV"
+            elif "xlsx" in st or "excel" in st:
+                d["import_method"] = "Excel"
+            elif "json" in st and "structured" in st:
+                d["import_method"] = "JSON"
+            elif st == "upload" or "ocr" in str(src.get("ocr_engine", "")):
+                d["import_method"] = "Photo"
+            else:
+                d["import_method"] = "Manual"
+            # Derive display status (priority order)
+            did = d["id"]
+            if did in export_map:
+                fmt = export_map[did]
+                fmt_names = {
+                    "csv": "CSV", "csv_flat": "CSV", "csv_variants": "CSV",
+                    "json": "JSON", "xlsx": "Excel", "xlsx_by_category": "Excel",
+                    "square_csv": "Square", "toast_csv": "Toast",
+                    "clover_csv": "Clover", "pos_json": "POS JSON",
+                }
+                export_name = fmt_names.get(fmt, fmt.replace("_", " ").title() if fmt else "File")
+                d["display_status"] = f"Exported to {export_name}"
+                d["status_class"] = "exported"
+            elif d.get("status") == "saved":
+                d["display_status"] = "Saved"
+                d["status_class"] = "saved"
+            elif d.get("wizard_completed"):
+                d["display_status"] = "In Editor"
+                d["status_class"] = "in-editor"
+            elif did in review_started:
+                d["display_status"] = "In Review"
+                d["status_class"] = "in-review"
+            else:
+                d["display_status"] = "Draft"
+                d["status_class"] = "draft"
+            del d["source"]  # don't send raw JSON to template
+    except Exception:
+        pass
+    return _safe_render("menus.html", restaurant=rest, menus=menu_list, drafts=draft_list, valid_types=valid_types)
 
 @app.post("/restaurants/<int:rest_id>/menus")
 @login_required
@@ -4829,9 +4925,9 @@ def import_csv():
             # Keep the message short; detailed surfacing can be added in the template later.
             flash("Some CSV rows could not be imported. Check your CSV headers and formats.", "warning")
 
-        # Prefer jumping straight into the draft editor if we have a draft id
+        # Day 141.6: All imports go through the wizard for review
         if draft_id:
-            return redirect(url_for("draft_editor", draft_id=draft_id))
+            return redirect(url_for("draft_wizard", draft_id=draft_id))
 
         # Fallback: show the structured job detail
         return redirect(url_for("imports_detail", job_id=job_id))
@@ -4950,9 +5046,9 @@ def import_xlsx():
                 "warning",
             )
 
-        # Prefer jumping straight into the draft editor if we have a draft id
+        # Day 141.6: All imports go through the wizard for review
         if draft_id:
-            return redirect(url_for("draft_editor", draft_id=draft_id))
+            return redirect(url_for("draft_wizard", draft_id=draft_id))
 
         # Fallback: show the structured job detail
         return redirect(url_for("imports_detail", job_id=job_id))
@@ -5068,9 +5164,9 @@ def import_json():
         if errors:
             flash("Some JSON rows could not be imported. Check your JSON structure and field names.", "warning")
 
-        # Prefer jumping straight into the draft editor if we have a draft id
+        # Day 141.6: All imports go through the wizard for review
         if draft_id:
-            return redirect(url_for("draft_editor", draft_id=draft_id))
+            return redirect(url_for("draft_wizard", draft_id=draft_id))
 
         # Fallback: show the structured job detail
         return redirect(url_for("imports_detail", job_id=job_id))
@@ -5755,7 +5851,7 @@ def import_structured_draft():
                 "draft_id": draft_id,
                 "summary": summary,
                 "errors": errors,
-                "redirect_url": url_for("draft_editor", draft_id=draft_id),
+                "redirect_url": url_for("draft_wizard", draft_id=draft_id),
             }
         ), 200
 
@@ -6467,11 +6563,53 @@ def draft_editor(draft_id: int):
         except Exception:
             pass
 
+    # Day 141.6: User restaurants + their drafts for the menu picker overlay
+    user_restaurants = []
+    u = session.get("user") or {}
+    uid = u.get("user_id")
+    if uid and users_store:
+        try:
+            user_restaurants = users_store.get_user_restaurants(uid)
+            for ur in user_restaurants:
+                full = users_store.get_restaurant(ur["restaurant_id"])
+                if full:
+                    ur["address"] = full.get("address") or ""
+                    ur["phone"] = full.get("phone") or ""
+                    ur["city"] = full.get("city") or ""
+                    ur["state"] = full.get("state") or ""
+                # Get drafts for this restaurant
+                try:
+                    with db_connect() as conn:
+                        ur["drafts"] = [
+                            dict(r)
+                            for r in conn.execute(
+                                "SELECT id, title, updated_at FROM drafts WHERE restaurant_id = ? ORDER BY updated_at DESC",
+                                (ur["restaurant_id"],),
+                            ).fetchall()
+                        ]
+                except Exception:
+                    ur["drafts"] = []
+        except Exception:
+            pass
+
     # Google Maps API key (for JS embed)
     google_maps_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip() or None
 
     # Source job for original menu viewer
     source_job_id = draft.get("source_job_id")
+
+    # Day 141.6: Detect structured imports (CSV/XLSX/JSON) to show file content
+    # instead of trying to render as image
+    source_is_structured = False
+    source_file_path = None
+    try:
+        import json as _json
+        src = _json.loads(draft.get("source") or "{}")
+        if src.get("source_type", "").startswith("structured_"):
+            source_is_structured = True
+            source_file_path = src.get("meta", {}).get("csv_path") or src.get("meta", {}).get("file_path")
+    except Exception:
+        pass
 
     # Bounding box coordinates
     item_coordinates = {}
@@ -6517,7 +6655,9 @@ def draft_editor(draft_id: int):
         competitors=competitors,
         google_maps_key=google_maps_key,
         source_job_id=source_job_id,
+        source_is_structured=source_is_structured,
         item_coordinates=item_coordinates,
+        user_restaurants=user_restaurants,
     )
 
 
@@ -6599,10 +6739,12 @@ def draft_wizard(draft_id: int):
         pass
 
     # Default: summary page on first visit, otherwise first unreviewed
-    wizard_step = "summary"  # "summary" or a category name
+    wizard_step = "summary"  # "summary", "confirmation", or a category name
     current_category = None
 
-    if requested_cat and requested_cat in category_list:
+    if requested_step == "confirmation":
+        wizard_step = "confirmation"
+    elif requested_cat and requested_cat in category_list:
         wizard_step = "category"
         current_category = requested_cat
     elif requested_step == "summary" or (not requested_step and not requested_cat):
@@ -6647,8 +6789,41 @@ def draft_wizard(draft_id: int):
         except Exception:
             pass
 
+    # Day 141.6: Load user's restaurants for confirmation screen
+    user_restaurants = []
+    if wizard_step == "confirmation":
+        u = session.get("user") or {}
+        uid = u.get("user_id")
+        if uid and users_store:
+            try:
+                user_restaurants = users_store.get_user_restaurants(uid)
+                # Enrich with address/phone for display
+                for ur in user_restaurants:
+                    try:
+                        full = users_store.get_restaurant(ur["restaurant_id"])
+                        if full:
+                            ur["address"] = full.get("address") or ""
+                            ur["phone"] = full.get("phone") or ""
+                            ur["city"] = full.get("city") or ""
+                            ur["state"] = full.get("state") or ""
+                            ur["zip_code"] = full.get("zip_code") or ""
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
     # Source job id for original file preview
     source_job_id = draft.get("source_job_id")
+
+    # Day 141.6: Detect structured imports for file table view
+    source_is_structured = False
+    try:
+        import json as _json
+        src = _json.loads(draft.get("source") or "{}")
+        if src.get("source_type", "").startswith("structured_"):
+            source_is_structured = True
+    except Exception:
+        pass
 
     # Day 139: Load bounding box coordinates for item highlighting
     item_coordinates = {}
@@ -6681,7 +6856,9 @@ def draft_wizard(draft_id: int):
         price_map=price_map,
         price_intel=price_intel,
         source_job_id=source_job_id,
+        source_is_structured=source_is_structured,
         item_coordinates=item_coordinates,
+        user_restaurants=user_restaurants,
     )
 
 
@@ -6759,6 +6936,10 @@ def wizard_complete_review(draft_id: int):
     subcategory has been confirmed. If anything is unreviewed, flash an error
     and bounce the user to the first unreviewed entry. The user has to walk
     through every step to actually finish.
+
+    Day 141.6: Instead of going straight to the editor, redirect to the
+    wizard confirmation screen where the user names the menu and picks a
+    restaurant.
     """
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id)
@@ -6769,8 +6950,8 @@ def wizard_complete_review(draft_id: int):
 
     if progress["complete"]:
         drafts_store.mark_wizard_completed(draft_id)
-        flash("All categories reviewed! Welcome to the full editor.", "success")
-        return redirect(url_for("draft_editor", draft_id=draft_id))
+        # Day 141.6: go to confirmation screen instead of editor
+        return redirect(url_for("draft_wizard", draft_id=draft_id, step="confirmation"))
 
     # Not done — bounce to first unreviewed
     flash("Every category must be confirmed before completing review.", "error")
@@ -6781,6 +6962,164 @@ def wizard_complete_review(draft_id: int):
                 kwargs["subcategory"] = c["subcategory"]
             return redirect(url_for("draft_wizard", **kwargs))
     return redirect(url_for("draft_wizard", draft_id=draft_id))
+
+
+@app.post("/drafts/<int:draft_id>/wizard/finalize")
+@login_required
+def wizard_finalize(draft_id: int):
+    """Day 141.6: Confirmation screen submit — assign restaurant + menu title,
+    then land in the editor."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+
+    menu_title = (request.form.get("menu_title") or "").strip()
+    restaurant_id = request.form.get("restaurant_id") or None
+
+    if not menu_title:
+        from datetime import datetime
+        menu_title = f"Imported {datetime.utcnow().strftime('%b %d')}"
+
+    # Save title
+    drafts_store.save_draft_metadata(draft_id, title=menu_title)
+
+    # Assign restaurant if provided
+    if restaurant_id:
+        try:
+            rid = int(restaurant_id)
+            drafts_store.save_draft_metadata(draft_id, restaurant_id=rid)
+        except (ValueError, TypeError):
+            pass
+
+    flash("All categories reviewed! Welcome to the full editor.", "success")
+    return redirect(url_for("draft_editor", draft_id=draft_id))
+
+
+@app.get("/drafts/<int:draft_id>/source_file")
+@login_required
+def draft_source_file(draft_id: int):
+    """Day 141.6: Serve original structured import file content as JSON rows
+    for the Original Menu viewer table."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+    try:
+        import json as _json, csv as _csv
+        src = _json.loads(draft.get("source") or "{}")
+        meta = src.get("meta", {})
+        # Try raw_rows from summary first (already parsed)
+        summary = meta.get("summary", {})
+        raw_rows = summary.get("raw_rows") or summary.get("sample_rows")
+        if raw_rows:
+            return jsonify({"rows": raw_rows, "filename": meta.get("filename", "")})
+        # Fallback: read the file from disk
+        fpath = meta.get("csv_path") or meta.get("file_path")
+        if fpath:
+            from pathlib import Path
+            p = Path(fpath)
+            if p.exists() and p.suffix.lower() == ".csv":
+                with open(p, "r", encoding="utf-8-sig") as f:
+                    reader = _csv.DictReader(f)
+                    rows = [dict(r) for r in reader]
+                return jsonify({"rows": rows, "filename": meta.get("filename", p.name)})
+    except Exception:
+        pass
+    return jsonify({"rows": [], "filename": ""})
+
+
+def _cleanup_empty_drafts(user_id: int, exclude_draft_id: int = 0):
+    """Day 141.6: Auto-delete empty drafts (0 items).
+    Called on navigation to avoid accumulating abandoned drafts."""
+    if not drafts_store:
+        return
+    try:
+        with db_connect() as conn:
+            # Delete any draft with 0 items (regardless of status)
+            empty_drafts = conn.execute(
+                """SELECT d.id FROM drafts d
+                   LEFT JOIN draft_items di ON di.draft_id = d.id
+                   WHERE d.id != ?
+                   GROUP BY d.id
+                   HAVING COUNT(di.id) = 0""",
+                (exclude_draft_id,),
+            ).fetchall()
+            for row in empty_drafts:
+                try:
+                    drafts_store.delete_draft(row["id"])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+@app.post("/drafts/<int:draft_id>/cleanup_if_empty")
+@login_required
+def draft_cleanup_if_empty(draft_id: int):
+    """Day 141.6: Called via beacon when leaving an empty draft editor."""
+    _require_drafts_storage()
+    try:
+        with db_connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM draft_items WHERE draft_id = ?", (draft_id,)
+            ).fetchone()[0]
+        if count == 0:
+            drafts_store.delete_draft(draft_id)
+            return jsonify({"deleted": True}), 200
+    except Exception:
+        pass
+    return jsonify({"deleted": False}), 200
+
+
+@app.post("/drafts/<int:draft_id>/delete")
+@login_required
+def delete_draft_route(draft_id: int):
+    """Day 141.6: Hard-delete a draft."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+    # Determine redirect target
+    rest_id = draft.get("restaurant_id")
+    try:
+        drafts_store.delete_draft(draft_id)
+        flash("Draft deleted.", "success")
+    except Exception as e:
+        flash(f"Failed to delete draft: {e}", "error")
+    if rest_id:
+        return redirect(url_for("menus_page", rest_id=rest_id))
+    return redirect(url_for("dashboard"))
+
+
+@app.post("/drafts/<int:source_draft_id>/copy_to_restaurant")
+@login_required
+def copy_draft_to_restaurant(source_draft_id: int):
+    """Day 141.6: Clone a draft and assign the clone to a different restaurant."""
+    _require_drafts_storage()
+    target_restaurant_id = request.form.get("restaurant_id")
+    if not target_restaurant_id:
+        flash("Please choose a target restaurant.", "error")
+        return redirect(url_for("draft_editor", draft_id=source_draft_id))
+    try:
+        target_restaurant_id = int(target_restaurant_id)
+    except (ValueError, TypeError):
+        flash("Invalid restaurant.", "error")
+        return redirect(url_for("draft_editor", draft_id=source_draft_id))
+
+    if not hasattr(drafts_store, "clone_draft"):
+        flash("Clone not supported.", "error")
+        return redirect(url_for("draft_editor", draft_id=source_draft_id))
+
+    try:
+        clone = drafts_store.clone_draft(source_draft_id)
+        new_id = int(clone.get("id") or clone.get("draft_id"))
+        drafts_store.save_draft_metadata(new_id, restaurant_id=target_restaurant_id)
+        flash(f"Menu copied to restaurant.", "success")
+        return redirect(url_for("draft_editor", draft_id=new_id))
+    except Exception as e:
+        flash(f"Copy failed: {e}", "error")
+        return redirect(url_for("draft_editor", draft_id=source_draft_id))
 
 
 @app.post("/drafts/<int:draft_id>/wizard/unconfirm")
@@ -7845,6 +8184,11 @@ def draft_save(draft_id: int):
                     if "modifiers" in grp:
                         drafts_store.upsert_group_modifiers(gid, grp["modifiers"] or [])
                     mg_synced += 1
+        # Day 141.6: Mark draft as saved
+        try:
+            drafts_store.save_draft_metadata(draft_id, status="saved")
+        except Exception:
+            pass
         saved = {
             "ok": True,
             "saved_at": _now_iso(),

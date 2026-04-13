@@ -2454,6 +2454,8 @@ def _flat_items_from_structured_items(
         subcat = (raw.get("subcategory") or "").strip() or None
         cat = (raw.get("category") or "").strip() or None
         category = subcat or cat
+        if category:
+            category = category.title()  # "pizza" → "Pizza"
 
         price_cents_raw = raw.get("price_cents")
         try:
@@ -3713,3 +3715,37 @@ def mark_wizard_completed(draft_id: int) -> None:
             (now, draft_id),
         )
         conn.commit()
+
+
+def delete_draft(draft_id: int) -> bool:
+    """Hard-delete a draft and all its related data (items, variants, reviews, etc.)."""
+    with db_connect() as conn:
+        # Delete related rows first (child tables)
+        for table in (
+            "draft_item_variants",
+            "draft_item_modifier_groups",
+            "draft_item_modifiers",
+            "draft_category_reviews",
+            "draft_export_history",
+            "draft_item_coordinates",
+        ):
+            try:
+                conn.execute(f"DELETE FROM {table} WHERE draft_id = ?", (draft_id,))
+            except Exception:
+                # Table may not exist — skip
+                try:
+                    # Variants are FK on draft_items, not draft_id directly
+                    if table == "draft_item_variants":
+                        conn.execute(
+                            "DELETE FROM draft_item_variants WHERE item_id IN "
+                            "(SELECT id FROM draft_items WHERE draft_id = ?)",
+                            (draft_id,),
+                        )
+                except Exception:
+                    pass
+        # Delete items
+        conn.execute("DELETE FROM draft_items WHERE draft_id = ?", (draft_id,))
+        # Delete the draft itself
+        n = conn.execute("DELETE FROM drafts WHERE id = ?", (draft_id,)).rowcount
+        conn.commit()
+    return n > 0

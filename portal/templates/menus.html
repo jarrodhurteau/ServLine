@@ -9,54 +9,49 @@
   <section class="card">
     <h1 class="text-xl font-semibold mb-4">Menus — {{ restaurant.name }}</h1>
 
-    {% if menus %}
+    {% if drafts %}
       <table class="table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Description</th>
-            <th class="text-right">Versions</th>
-            <th class="text-right">ID</th>
+            <th>Title</th>
+            <th>Restaurant</th>
+            <th>Items</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Last Updated</th>
             <th class="text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {% for m in menus %}
-            <tr>
-              <td>
-                <a href="/menus/{{ m.id }}/detail" class="underline hover:text-brand-500">{{ m.name }}</a>
-                {% if m.season %}
-                  <span class="schedule-badge season-{{ m.season }}">{{ m.season|title }}</span>
-                {% endif %}
-                {% if m.active_days or m.active_start_time %}
-                  <span class="schedule-badge" title="Scheduled">&#128337;</span>
-                {% endif %}
-              </td>
-              <td class="text-muted">{{ (m.menu_type or '')|replace('_',' ')|title }}</td>
-              <td class="text-muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                {{ m.description or '' }}
-              </td>
-              <td class="text-right text-muted">{{ m.version_count|default(0) }}</td>
-              <td class="text-right text-muted">#{{ m.id }}</td>
-              <td class="text-right" style="white-space:nowrap;">
-                <a href="{{ url_for('menu_edit_redirect', menu_id=m.id) }}" class="btn btn-sm btn-ghost">Edit</a>
-                <form action="{{ url_for('delete_menu_route', menu_id=m.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Delete menu &quot;{{ m.name|e }}&quot;?');">
-                  <button class="btn btn-sm btn-danger">Delete</button>
-                </form>
-              </td>
-            </tr>
+          {% for d in drafts %}
+          <tr>
+            <td>
+              <a href="{{ url_for('draft_editor', draft_id=d.id) }}" class="underline hover:text-brand-500">{{ d.title or ('Draft #' ~ d.id) }}</a>
+            </td>
+            <td>
+              <div style="font-size:.85rem; color:var(--ink);">{{ restaurant.name }}</div>
+              <div style="font-size:.75rem; color:var(--muted);">{{ restaurant.address or '' }}{% if restaurant.city %}, {{ restaurant.city }}{% endif %}{% if restaurant.state %} {{ restaurant.state }}{% endif %}</div>
+            </td>
+            <td class="text-muted">{{ d.item_count }}</td>
+            <td><span class="draft-source-badge draft-source-{{ d.import_method|lower }}">{{ d.import_method }}</span></td>
+            <td><span class="draft-status-badge draft-status-{{ d.status_class }}">{{ d.display_status }}</span></td>
+            <td class="text-muted">{{ d.updated_at[:16] if d.updated_at and d.updated_at|length > 16 else (d.updated_at or '') }}</td>
+            <td class="text-right" style="white-space:nowrap;">
+              <a href="{{ url_for('draft_editor', draft_id=d.id) }}" class="btn btn-sm btn-primary">Edit</a>
+              <button class="btn btn-sm btn-danger" onclick="openDeleteModal('{{ url_for('delete_draft_route', draft_id=d.id) }}', '{{ (d.title or 'Untitled')|e }}')">Delete</button>
+            </td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="muted">No menus found for this restaurant.</p>
+      <p class="muted">No menus yet. Upload one to get started.</p>
     {% endif %}
 
     <div class="mt-4 flex gap-2">
       <a href="/restaurants" class="btn btn-ghost">Back to Restaurants</a>
       <a href="{{ url_for('menu_health_page', rest_id=restaurant.id) }}" class="btn btn-ghost">Menu Health</a>
-      <button class="btn btn-primary" onclick="document.getElementById('create-form').style.display='block'">Add Menu</button>
+      <a href="{{ url_for('import_upload') }}" class="btn btn-primary">Add Menu</a>
     </div>
   </section>
 
@@ -117,6 +112,25 @@
   </section>
 
   <style>
+    .draft-source-badge {
+      font-size:.72rem; font-weight:600; padding:2px 8px; border-radius:10px;
+      display:inline-block;
+    }
+    .draft-source-photo { background:#fef3c7; color:#92400e; }
+    .draft-source-csv { background:#dbeafe; color:#1e40af; }
+    .draft-source-excel { background:#dcfce7; color:#166534; }
+    .draft-source-json { background:#f3e8ff; color:#7c3aed; }
+    .draft-source-manual { background:#f1f5f9; color:#475569; }
+    .draft-status-badge {
+      font-size:.72rem; font-weight:600; padding:2px 8px; border-radius:10px;
+      display:inline-block; white-space:nowrap;
+    }
+    .draft-status-draft { background:#f1f5f9; color:#475569; }
+    .draft-status-in-review { background:#fef3c7; color:#92400e; }
+    .draft-status-in-editor { background:#dbeafe; color:#1e40af; }
+    .draft-status-saved { background:#e0e7ff; color:#4338ca; }
+    .draft-status-exported { background:#dcfce7; color:#166534; }
+    .btn-danger { color: #fff !important; }
     .schedule-badge { font-size:.7rem; padding:1px 5px; border-radius:3px; background:#e0f2fe; color:#0369a1; margin-left:4px; vertical-align:middle; }
     .season-spring { background:#dcfce7; color:#166534; }
     .season-summer { background:#fef3c7; color:#92400e; }
@@ -124,7 +138,32 @@
     .season-winter { background:#dbeafe; color:#1e40af; }
   </style>
 
+  <!-- Themed Delete Confirmation Modal -->
+  <div id="delete-modal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.4); align-items:center; justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+    <div style="background:#FAF4EC; border-radius:12px; padding:28px; max-width:400px; width:90%; box-shadow:0 12px 40px rgba(0,0,0,.2); text-align:center;">
+      <div style="font-size:1.8rem; margin-bottom:8px;">&#9888;</div>
+      <h3 style="margin:0 0 8px; font-size:1.1rem; color:#2C2C2C;">Delete this item?</h3>
+      <p id="delete-modal-msg" style="font-size:.88rem; color:#6b6b6b; margin:0 0 20px;"></p>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button onclick="document.getElementById('delete-modal').style.display='none'" style="padding:10px 24px; border:1.5px solid #d5c4a1; border-radius:8px; background:#fff; color:#2C2C2C; cursor:pointer; font-size:.9rem; font-weight:500;">Cancel</button>
+        <button id="delete-modal-confirm" style="padding:10px 24px; border:none; border-radius:8px; background:#dc3545; color:#fff; cursor:pointer; font-size:.9rem; font-weight:600;">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    function openDeleteModal(action, name) {
+      document.getElementById('delete-modal-msg').textContent = '"' + name + '" will be permanently deleted. This cannot be undone.';
+      document.getElementById('delete-modal-confirm').onclick = function() {
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = action;
+        document.body.appendChild(form);
+        form.submit();
+      };
+      document.getElementById('delete-modal').style.display = 'flex';
+    }
+
     function openEditModal(menuId, name, menuType, description) {
       document.getElementById('edit-form').style.display = 'block';
       document.getElementById('edit-form-inner').action = '/menus/' + menuId + '/update';

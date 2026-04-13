@@ -2,10 +2,11 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-13 — Day 141.5 complete: editor respec (wizard-style card layout),
-              competitor price comparison pipeline, Call 4 overhaul with real competitor
-              menu data. Day 141.7 added (Apify integration for reliable competitor menus,
-              gated behind paid tiers).
+Last Updated: 2026-04-13 — Day 141.6 in progress: multi-restaurant workflow,
+              wizard confirmation screen, menu details modal, menus page overhaul,
+              category case normalization, CSV/file original viewer, draft status
+              tracking, restaurant edit, inline title edit, themed modals (no browser
+              dialogs), all imports routed through wizard.
 
 ================================================================================
 PROJECT MISSION

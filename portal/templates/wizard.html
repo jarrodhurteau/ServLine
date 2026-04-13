@@ -1320,6 +1320,175 @@
     </div>
   </div>
 
+  {% elif wizard_step == "confirmation" %}
+  <!-- ===================================================================
+       CONFIRMATION SCREEN (Day 141.6)
+       After all categories reviewed, user names the menu + picks restaurant
+       =================================================================== -->
+  <div class="wizard-header">
+    <div class="wizard-title">Almost Done!</div>
+    <div class="wizard-subtitle">
+      Name your menu and assign it to a restaurant before entering the editor.
+    </div>
+  </div>
+
+  <div style="max-width:520px; margin:0 auto; padding:0 16px 40px;">
+    <form method="POST" action="{{ url_for('wizard_finalize', draft_id=draft.id) }}" id="wizard-finalize-form">
+      <!-- Menu Title -->
+      <div class="card" style="padding:24px; margin-bottom:20px;">
+        <label for="wiz-menu-title" style="font-weight:700; font-size:.95rem; color:var(--ink); display:block; margin-bottom:8px;">Menu Title</label>
+        <input type="text" id="wiz-menu-title" name="menu_title"
+               value="{{ draft.title or '' }}"
+               placeholder="e.g. Lunch Menu, Dinner Menu"
+               style="width:100%; padding:12px 14px; border:2px solid #d5c4a1; border-radius:8px; font-size:1rem; background:#fff; color:var(--ink); outline:none; transition:border-color .2s;"
+               onfocus="this.style.borderColor='#B85C38'" onblur="this.style.borderColor='#d5c4a1'"
+               required />
+        <div style="font-size:.78rem; color:var(--muted); margin-top:6px;">
+          This is how the menu appears in your dashboard and restaurant picker.
+        </div>
+      </div>
+
+      <!-- Restaurant Picker -->
+      <div class="card" style="padding:24px; margin-bottom:20px;">
+        <label for="wiz-restaurant-select" style="font-weight:700; font-size:.95rem; color:var(--ink); display:block; margin-bottom:8px;">Restaurant</label>
+        {% if user_restaurants|length > 0 %}
+        <select id="wiz-restaurant-select" name="restaurant_id"
+                style="width:100%; padding:12px 14px; border:2px solid #d5c4a1; border-radius:8px; font-size:1rem; background:#fff; color:var(--ink); outline:none; cursor:pointer; appearance:auto;"
+                onchange="wizConfirmRestaurantChanged(this)" required>
+          <option value="" disabled {% if not draft.restaurant_id %}selected{% endif %}>Choose a restaurant...</option>
+          {% for r in user_restaurants %}
+          <option value="{{ r.restaurant_id }}" {% if draft.restaurant_id == r.restaurant_id %}selected{% endif %}>
+            {{ r.restaurant_name|e }}{% if r.address %} &mdash; {{ r.address|e }}{% endif %}
+          </option>
+          {% endfor %}
+          <option value="__new__">+ Create New Restaurant</option>
+        </select>
+        {% else %}
+        <input type="hidden" name="restaurant_id" id="wiz-restaurant-hidden" value="" />
+        <div style="color:var(--muted); font-size:.9rem; margin-bottom:12px;">No restaurants yet. Create one below.</div>
+        {% endif %}
+
+        <!-- Inline new restaurant form (hidden by default) -->
+        <div id="wiz-new-restaurant-form" style="display:none; margin-top:16px; padding:16px; border:2px dashed #d5c4a1; border-radius:8px; background:#faf7f2;">
+          <div style="font-weight:600; font-size:.9rem; color:var(--ink); margin-bottom:12px;">New Restaurant</div>
+          <div style="display:grid; gap:10px;">
+            <input type="text" id="wiz-new-rest-name" placeholder="Restaurant name *" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-address" placeholder="Street address" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
+              <input type="text" id="wiz-new-rest-city" placeholder="City" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              <input type="text" id="wiz-new-rest-state" placeholder="State" maxlength="2" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem; text-transform:uppercase;" />
+              <input type="text" id="wiz-new-rest-zip" placeholder="Zip" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            </div>
+            <input type="text" id="wiz-new-rest-phone" placeholder="Phone" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-cuisine" placeholder="Cuisine type (e.g. Italian, Mexican)" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button type="button" onclick="wizCancelNewRestaurant()" style="padding:8px 16px; border:1.5px solid #d5c4a1; border-radius:6px; background:#fff; color:var(--ink); cursor:pointer; font-size:.85rem;">Cancel</button>
+              <button type="button" onclick="wizCreateNewRestaurant()" style="padding:8px 16px; border:none; border-radius:6px; background:#B85C38; color:#fff; cursor:pointer; font-weight:600; font-size:.85rem;">Create</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div class="card" style="padding:20px; margin-bottom:24px; background:#f0ebe3;">
+        <div style="font-size:.85rem; color:var(--muted);">
+          <strong>{{ items|length }}</strong> item{{ 's' if items|length != 1 else '' }} across
+          <strong>{{ category_list|length }}</strong> categor{{ 'ies' if category_list|length != 1 else 'y' }}
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div style="text-align:center;">
+        <button type="submit" id="wiz-finalize-btn"
+                style="padding:14px 48px; font-size:1.05rem; font-weight:700; border:none; border-radius:10px; background:#B85C38; color:#fff; cursor:pointer; transition:opacity .2s; display:inline-flex; align-items:center; gap:8px;">
+          Open in Editor &rarr;
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+  function wizConfirmRestaurantChanged(sel) {
+    const newForm = document.getElementById('wiz-new-restaurant-form');
+    if (sel.value === '__new__') {
+      newForm.style.display = 'block';
+      document.getElementById('wiz-new-rest-name').focus();
+    } else {
+      newForm.style.display = 'none';
+    }
+  }
+
+  function wizCancelNewRestaurant() {
+    document.getElementById('wiz-new-restaurant-form').style.display = 'none';
+    const sel = document.getElementById('wiz-restaurant-select');
+    if (sel) {
+      // Reset to previously selected or first option
+      sel.value = sel.querySelector('option[selected]')?.value || '';
+    }
+  }
+
+  function wizCreateNewRestaurant() {
+    const name = document.getElementById('wiz-new-rest-name').value.trim();
+    if (!name) {
+      document.getElementById('wiz-new-rest-name').style.borderColor = '#dc3545';
+      document.getElementById('wiz-new-rest-name').focus();
+      return;
+    }
+    const body = new URLSearchParams();
+    body.append('name', name);
+    const addr = document.getElementById('wiz-new-rest-address').value.trim();
+    const city = document.getElementById('wiz-new-rest-city').value.trim();
+    const state = document.getElementById('wiz-new-rest-state').value.trim();
+    const zip = document.getElementById('wiz-new-rest-zip').value.trim();
+    const phone = document.getElementById('wiz-new-rest-phone').value.trim();
+    const cuisine = document.getElementById('wiz-new-rest-cuisine').value.trim();
+    if (addr) body.append('address', addr);
+    if (city) body.append('city', city);
+    if (state) body.append('state', state);
+    if (zip) body.append('zip_code', zip);
+    if (phone) body.append('phone', phone);
+    if (cuisine) body.append('cuisine_type', cuisine);
+    body.append('_redirect', '__json__');
+
+    fetch('{{ url_for("create_restaurant") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.id) {
+        // Add new option to select and choose it
+        const sel = document.getElementById('wiz-restaurant-select');
+        if (sel) {
+          const opt = document.createElement('option');
+          opt.value = data.id;
+          opt.textContent = name + (addr ? ' \u2014 ' + addr : '');
+          // Insert before the "+ Create New" option
+          const createOpt = sel.querySelector('option[value="__new__"]');
+          sel.insertBefore(opt, createOpt);
+          sel.value = data.id;
+        } else {
+          // No select (was zero restaurants) — set hidden input
+          const hidden = document.getElementById('wiz-restaurant-hidden');
+          if (hidden) hidden.value = data.id;
+        }
+        document.getElementById('wiz-new-restaurant-form').style.display = 'none';
+      } else {
+        alert(data.error || 'Failed to create restaurant');
+      }
+    })
+    .catch(() => alert('Failed to create restaurant. Please try again.'));
+  }
+
+  // Show new restaurant form immediately if no restaurants exist
+  {% if not user_restaurants|length %}
+  document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('wiz-new-restaurant-form').style.display = 'block';
+  });
+  {% endif %}
+  </script>
+
   {% else %}
   <!-- ===================================================================
        CATEGORY REVIEW PAGE
@@ -1761,9 +1930,46 @@
 
     <div class="col-resizer" data-resizer="right" title="Drag to resize"></div>
 
-    <!-- ===== Right Column: Original Menu Viewer + Selected Panel ===== -->
+    <!-- ===== Right Column: Original Menu/File Viewer + Selected Panel ===== -->
     <div class="wizard-preview">
-      {% if source_job_id %}
+      {% if source_is_structured %}
+      <!-- Day 141.6: Structured import — show file as table -->
+      <div style="display:flex; flex-direction:column; height:100%; background:transparent;">
+        <div style="padding:8px 12px; font-size:.88rem; font-weight:700; color:var(--ink); display:flex; align-items:center; gap:6px;">
+          <span style="font-size:.95rem;">&#128196;</span> Original File
+        </div>
+        <div style="flex:1; overflow:auto; padding:0;">
+          <div style="padding:4px 12px 6px; font-size:.75rem; color:var(--muted); font-weight:600;" id="wiz-source-file-name"></div>
+          <table id="wiz-source-file-table" style="width:100%; border-collapse:collapse; font-size:.78rem;">
+            <thead id="wiz-source-file-thead" style="position:sticky; top:0; background:var(--bg,#faf4ec); z-index:1;"></thead>
+            <tbody id="wiz-source-file-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <script>
+      (function() {
+        fetch('{{ url_for("draft_source_file", draft_id=draft.id) }}')
+          .then(r => r.json())
+          .then(data => {
+            if (!data.rows || !data.rows.length) return;
+            document.getElementById('wiz-source-file-name').textContent = data.filename || 'Uploaded file';
+            const cols = Object.keys(data.rows[0]);
+            document.getElementById('wiz-source-file-thead').innerHTML = '<tr>' + cols.map(c =>
+              '<th style="text-align:left; padding:6px 8px; border-bottom:2px solid #d5c4a1; font-weight:700; color:var(--ink); white-space:nowrap; font-size:.75rem; background:#EFE2D3;">' +
+              c.replace(/</g,'&lt;') + '</th>'
+            ).join('') + '</tr>';
+            document.getElementById('wiz-source-file-tbody').innerHTML = data.rows.map((row, i) =>
+              '<tr style="background:' + (i % 2 ? '#EFE2D3' : '#F5EBD9') + ';">' +
+              cols.map(c =>
+                '<td style="padding:5px 8px; border-bottom:1px solid #d5c4a1; color:var(--ink); font-size:.75rem;">' +
+                (String(row[c] ?? '').replace(/</g,'&lt;')) + '</td>'
+              ).join('') + '</tr>'
+            ).join('');
+          });
+      })();
+      </script>
+      {% elif source_job_id %}
+      <!-- Image-based upload — show image viewer -->
       <div id="menu-viewer" class="menu-viewer" data-job-id="{{ source_job_id }}">
         <div class="menu-viewer-header" id="menu-viewer-header">
           <div class="menu-viewer-title">

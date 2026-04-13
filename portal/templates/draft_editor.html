@@ -294,10 +294,11 @@
     .cat-new-popup {
       display: none;
       position: absolute;
-      bottom: 100%;
+      top: 100%;
       left: 50%;
       transform: translateX(-50%);
-      background: var(--card, #fff);
+      margin-top: 4px;
+      background: #FAF4EC;
       border: 1px solid var(--line);
       border-radius: 10px;
       box-shadow: 0 4px 16px rgba(0,0,0,.12);
@@ -1259,6 +1260,7 @@
       align-items: center;
       gap: 6px;
       min-width: 0;
+      position: relative; /* anchor for picker overlay */
     }
     .editor-breadcrumb {
       color: var(--muted);
@@ -1273,10 +1275,43 @@
       font-weight: 700;
       color: var(--ink);
       white-space: nowrap;
+      max-width: 400px;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 300px;
     }
+
+    /* ===== Menu Details Modal (Day 141.6) ===== */
+    .menu-details-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,.5);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .menu-details-modal {
+      background: #FAF4EC; border-radius: 14px; padding: 32px;
+      max-width: 460px; width: 92%;
+      box-shadow: 0 16px 48px rgba(0,0,0,.2);
+    }
+    .menu-details-modal h2 { margin: 0 0 4px; font-size: 1.2rem; color: #2C2C2C; }
+    .menu-details-modal .md-sub { font-size: .82rem; color: #888; margin-bottom: 20px; }
+    .menu-details-modal label { display: block; font-size: .82rem; font-weight: 600; color: #2C2C2C; margin-bottom: 4px; }
+    .menu-details-modal .md-field { margin-bottom: 14px; }
+    .menu-details-modal input,
+    .menu-details-modal select {
+      width: 100%; padding: 10px 12px;
+      border: 1.5px solid #d5c4a1; border-radius: 8px;
+      font-size: .9rem; background: #fff; color: #2C2C2C; outline: none;
+    }
+    .menu-details-modal input:focus,
+    .menu-details-modal select:focus { border-color: #B85C38; }
+    .menu-details-modal .md-submit {
+      width: 100%; padding: 12px; margin-top: 8px;
+      border: none; border-radius: 10px;
+      background: #B85C38; color: #fff;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+      transition: opacity .2s;
+    }
+    .menu-details-modal .md-submit:hover { opacity: .9; }
+    .menu-details-modal .md-submit:disabled { opacity: .5; cursor: not-allowed; }
     .editor-header-center { flex: 1; display: flex; justify-content: center; min-width: 180px; }
     .editor-search-wrap {
       display: flex;
@@ -1637,9 +1672,13 @@
   <div class="editor-header">
     <div class="editor-header-row">
       <div class="editor-header-left">
-        <a href="{{ url_for('dashboard') }}" class="editor-breadcrumb">Dashboard</a>
-        <span class="editor-breadcrumb-sep">/</span>
         <span class="editor-menu-title" id="editor-menu-title">{{ draft.title or 'Untitled Menu' }}</span>
+        <span class="editor-title-edit" onclick="editMenuTitle()" title="Edit menu name" style="cursor:pointer; opacity:.5; transition:opacity .15s; margin-left:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+        </span>
+        {% if restaurant %}
+        <span style="font-size:.78rem; color:var(--muted); margin-left:4px;">— {{ restaurant.name|e }}</span>
+        {% endif %}
       </div>
       <div class="editor-header-center">
         <div class="editor-search-wrap">
@@ -2078,10 +2117,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
           Local Market
         </button>
-        {% if source_job_id %}
+        {% if source_job_id or source_is_structured %}
         <button class="preview-toggle-btn" id="preview-menu-btn" onclick="editorTogglePreview('menu')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Original Menu
+          Original {% if source_is_structured %}File{% else %}Menu{% endif %}
         </button>
         {% endif %}
       </div>
@@ -2142,9 +2181,48 @@
         {% endif %}
       </div>
 
-      <!-- Original menu viewer (hidden by default, toggled) -->
-      {% if source_job_id %}
+      <!-- Original menu/file viewer (hidden by default, toggled) -->
+      {% if source_job_id or source_is_structured %}
       <div id="preview-menu-panel" class="preview-panel" style="display:none;">
+        {% if source_is_structured %}
+        <!-- Day 141.6: Structured import — show file as table -->
+        <div style="height:100%; display:flex; flex-direction:column; overflow:hidden; background:transparent;">
+          <div style="padding:8px 14px; font-size:.82rem; color:var(--muted); flex-shrink:0;">
+            <span id="source-file-name" style="font-weight:600;"></span>
+          </div>
+          <div id="source-file-table-wrap" style="flex:1; overflow:auto; padding:0;">
+            <table id="source-file-table" style="width:100%; border-collapse:collapse; font-size:.8rem;">
+              <thead id="source-file-thead" style="position:sticky; top:0; background:var(--bg,#faf4ec); z-index:1;"></thead>
+              <tbody id="source-file-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <script>
+        (function() {
+          fetch('{{ url_for("draft_source_file", draft_id=draft.id) }}')
+            .then(r => r.json())
+            .then(data => {
+              if (!data.rows || !data.rows.length) return;
+              document.getElementById('source-file-name').textContent = data.filename || 'Uploaded file';
+              const cols = Object.keys(data.rows[0]);
+              const thead = document.getElementById('source-file-thead');
+              thead.innerHTML = '<tr>' + cols.map(c =>
+                '<th style="text-align:left; padding:8px 10px; border-bottom:2px solid #d5c4a1; font-weight:700; color:var(--ink); white-space:nowrap; background:#EFE2D3;">' +
+                c.replace(/</g,'&lt;') + '</th>'
+              ).join('') + '</tr>';
+              const tbody = document.getElementById('source-file-tbody');
+              tbody.innerHTML = data.rows.map((row, i) =>
+                '<tr style="background:' + (i % 2 ? '#EFE2D3' : '#F5EBD9') + ';">' +
+                cols.map(c =>
+                  '<td style="padding:7px 10px; border-bottom:1px solid #d5c4a1; color:var(--ink);">' +
+                  (String(row[c] ?? '').replace(/</g,'&lt;')) + '</td>'
+                ).join('') + '</tr>'
+              ).join('');
+            });
+        })();
+        </script>
+        {% elif source_job_id %}
+        <!-- Image-based upload — show image viewer -->
         <div id="menu-viewer" class="menu-viewer" data-job-id="{{ source_job_id }}">
           <div class="menu-viewer-header" id="menu-viewer-header">
             <div class="menu-viewer-controls">
@@ -2162,6 +2240,7 @@
             <div class="menu-viewer-hint">Scroll to zoom &middot; Drag to pan</div>
           </div>
         </div>
+        {% endif %}
       </div>
       {% endif %}
 
@@ -2191,6 +2270,36 @@
 
   <div class="wiz-toast" id="wiz-toast"></div>
   <script>
+    /* ===== Day 141.6: Edit menu title inline ===== */
+    function editMenuTitle() {
+      const titleEl = document.getElementById('editor-menu-title');
+      const current = titleEl.textContent.trim();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = current;
+      var bgColor = getComputedStyle(titleEl.parentElement).backgroundColor;
+      if (!bgColor || bgColor === 'rgba(0, 0, 0, 0)' || bgColor === 'transparent') bgColor = getComputedStyle(document.body).backgroundColor;
+      input.style.cssText = 'font-size:1.15rem; font-weight:700; color:#2C2C2C; border:none; padding:0; margin:0; outline:none; -webkit-appearance:none; width:260px; caret-color:#B85C38; background-color:' + bgColor + ';';
+      titleEl.textContent = '';
+      titleEl.appendChild(input);
+      input.focus();
+      function save() {
+        const val = input.value.trim() || current;
+        titleEl.textContent = val;
+        fetch('/drafts/{{ draft.id }}/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: val, items: [] })
+        });
+        wizToast('Title updated');
+      }
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = current; input.blur(); }
+      });
+    }
+
     function wizToast(msg) {
       const t = document.getElementById('wiz-toast');
       t.textContent = msg;
@@ -4127,9 +4236,24 @@
       }
     }
 
+    function wizPrompt(title, defaultVal) {
+      return new Promise(resolve => {
+        window._promptResolve = resolve;
+        document.getElementById('wiz-prompt-title').textContent = title;
+        const input = document.getElementById('wiz-prompt-input');
+        input.value = defaultVal || '';
+        document.getElementById('wiz-prompt-modal').classList.add('open');
+        setTimeout(() => input.focus(), 50);
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); document.getElementById('wiz-prompt-modal').classList.remove('open'); resolve(input.value); }
+          if (e.key === 'Escape') { document.getElementById('wiz-prompt-modal').classList.remove('open'); resolve(null); }
+        };
+      });
+    }
+
     async function wizNewMainCategory() {
       document.getElementById('cat-new-popup').classList.remove('open');
-      const name = prompt('New category name:');
+      const name = await wizPrompt('New category name:');
       if (!name || !name.trim()) return;
       const draftId = '{{ draft.id }}';
       try {
@@ -4649,6 +4773,18 @@
   </div>
 </div>
 
+<!-- Themed prompt modal (replaces prompt()) -->
+<div class="wiz-confirm-overlay" id="wiz-prompt-modal" onclick="if(event.target===this){this.classList.remove('open');window._promptResolve&&window._promptResolve(null)}">
+  <div class="wiz-confirm-modal">
+    <h3 id="wiz-prompt-title">Enter value</h3>
+    <input type="text" id="wiz-prompt-input" style="width:100%; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:8px; font-size:.9rem; background:#FAF4EC; color:#2C2C2C; outline:none; margin-bottom:16px;" />
+    <div class="wiz-confirm-actions">
+      <button class="btn-confirm-cancel" onclick="document.getElementById('wiz-prompt-modal').classList.remove('open'); window._promptResolve && window._promptResolve(null)">Cancel</button>
+      <button class="btn-confirm-primary" style="background:#B85C38; color:#fff; border:none; padding:8px 20px; border-radius:8px; font-weight:600; cursor:pointer;" onclick="document.getElementById('wiz-prompt-modal').classList.remove('open'); window._promptResolve && window._promptResolve(document.getElementById('wiz-prompt-input').value)">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- Subcategory creation modal -->
 <div class="subcat-modal-overlay" id="subcat-modal" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="subcat-modal">
@@ -4712,6 +4848,12 @@
           await new Promise(r => setTimeout(r, 100));
         }
       }
+      // Day 141.6: Bulk save to update draft status
+      await fetch('/drafts/{{ draft.id }}/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [] })
+      });
       btn.textContent = 'Saved!';
       btn.classList.add('saved');
       document.getElementById('editor-last-saved').textContent = 'Last saved just now';
@@ -5104,6 +5246,181 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeComparison();
   });
+
+  // Day 141.6: Empty draft cleanup handled by explicit delete only — no auto-delete
+</script>
+
+<!-- Day 141.6: Copy Menu Modal -->
+<!-- Day 141.6: Forced Menu Details Modal -->
+{% if not restaurant or not draft.title or draft.title.startswith('New Menu') or draft.title.startswith('Imported') or draft.title.startswith('Structured Import') %}
+<div class="menu-details-overlay" id="menu-details-modal">
+  <div class="menu-details-modal">
+    <h2>Menu Details</h2>
+    <p class="md-sub">Tell us about this menu before you start editing.</p>
+
+    <div class="md-field">
+      <label for="md-restaurant">Restaurant *</label>
+      <select id="md-restaurant">
+        <option value="" disabled {% if not draft.restaurant_id %}selected{% endif %}>Select a restaurant...</option>
+        {% for r in user_restaurants %}
+        <option value="{{ r.restaurant_id }}" {% if draft.restaurant_id == r.restaurant_id %}selected{% endif %}>
+          {{ r.restaurant_name|e }}{% if r.address %} — {{ r.address|e }}{% endif %}
+        </option>
+        {% endfor %}
+        <option value="__new__">+ Create New Restaurant</option>
+      </select>
+    </div>
+
+    <!-- Inline new restaurant (hidden) -->
+    <div id="md-new-rest-fields" style="display:none; padding:12px; border:1.5px dashed #d5c4a1; border-radius:8px; margin-bottom:14px; background:#f5f0e8;">
+      <div class="md-field"><label>Restaurant Name *</label><input type="text" id="md-new-rest-name" placeholder="e.g. Mario's Pizza" /></div>
+      <div class="md-field"><label>Address</label><input type="text" id="md-new-rest-address" placeholder="123 Main St" /></div>
+      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
+        <div class="md-field"><label>City</label><input type="text" id="md-new-rest-city" /></div>
+        <div class="md-field"><label>State</label><input type="text" id="md-new-rest-state" maxlength="2" style="text-transform:uppercase;" /></div>
+        <div class="md-field"><label>Zip</label><input type="text" id="md-new-rest-zip" /></div>
+      </div>
+    </div>
+
+    <div class="md-field">
+      <label for="md-cuisine">Cuisine Type *</label>
+      <select id="md-cuisine">
+        <option value="" disabled selected>Select cuisine...</option>
+        <option value="pizza">Pizza</option>
+        <option value="italian">Italian</option>
+        <option value="mexican">Mexican</option>
+        <option value="chinese">Chinese</option>
+        <option value="japanese">Japanese</option>
+        <option value="thai">Thai</option>
+        <option value="indian">Indian</option>
+        <option value="american">American</option>
+        <option value="mediterranean">Mediterranean</option>
+        <option value="seafood">Seafood</option>
+        <option value="bbq">BBQ</option>
+        <option value="deli">Deli / Sandwich</option>
+        <option value="bakery">Bakery / Cafe</option>
+        <option value="bar">Bar / Pub</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+
+    <div class="md-field">
+      <label for="md-menu-name">Menu Name *</label>
+      <input type="text" id="md-menu-name" placeholder="e.g. Lunch Menu, Dinner Menu, Full Menu" value="{{ draft.title if draft.title and not draft.title.startswith('New Menu') and not draft.title.startswith('Imported') and not draft.title.startswith('Structured Import') else '' }}" />
+    </div>
+
+    <button class="md-submit" id="md-submit-btn" onclick="submitMenuDetails()">Continue to Editor</button>
+  </div>
+</div>
+<script>
+(function() {
+  const restSelect = document.getElementById('md-restaurant');
+  const newFields = document.getElementById('md-new-rest-fields');
+  restSelect.addEventListener('change', function() {
+    newFields.style.display = this.value === '__new__' ? 'block' : 'none';
+  });
+
+  window.submitMenuDetails = async function() {
+    const btn = document.getElementById('md-submit-btn');
+    const restVal = restSelect.value;
+    const cuisine = document.getElementById('md-cuisine').value;
+    const menuName = document.getElementById('md-menu-name').value.trim();
+
+    if (!menuName) { document.getElementById('md-menu-name').style.borderColor = '#dc3545'; document.getElementById('md-menu-name').focus(); return; }
+    if (!cuisine) { document.getElementById('md-cuisine').style.borderColor = '#dc3545'; document.getElementById('md-cuisine').focus(); return; }
+    if (!restVal) { restSelect.style.borderColor = '#dc3545'; restSelect.focus(); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    let restaurantId = restVal;
+
+    // Create new restaurant if needed
+    if (restVal === '__new__') {
+      const newName = document.getElementById('md-new-rest-name').value.trim();
+      if (!newName) { document.getElementById('md-new-rest-name').style.borderColor = '#dc3545'; document.getElementById('md-new-rest-name').focus(); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
+      const body = new URLSearchParams();
+      body.append('name', newName);
+      body.append('address', document.getElementById('md-new-rest-address').value.trim());
+      body.append('city', document.getElementById('md-new-rest-city').value.trim());
+      body.append('state', document.getElementById('md-new-rest-state').value.trim());
+      body.append('zip_code', document.getElementById('md-new-rest-zip').value.trim());
+      body.append('cuisine_type', cuisine);
+      body.append('_redirect', '__json__');
+      try {
+        const resp = await fetch('{{ url_for("create_restaurant") }}', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+        const data = await resp.json();
+        if (!data.id) { wizToast(data.error || 'Failed to create restaurant'); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
+        restaurantId = data.id;
+      } catch(e) { wizToast('Failed to create restaurant'); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
+    }
+
+    // Save menu title + restaurant assignment
+    await fetch('/drafts/{{ draft.id }}/assign_restaurant', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'restaurant_id=' + restaurantId });
+    await fetch('/drafts/{{ draft.id }}/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: menuName, items: [] }) });
+
+    // Update the page title
+    document.getElementById('editor-menu-title').textContent = menuName;
+
+    // Close modal
+    window._menuDetailsCompleted = true;
+    document.getElementById('menu-details-modal').remove();
+  };
+})();
+</script>
+{% endif %}
+
+<div id="copy-menu-modal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.4); align-items:center; justify-content:center;"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--card-bg,#fff); border-radius:12px; padding:28px; max-width:440px; width:90%; box-shadow:0 12px 40px rgba(0,0,0,.2);">
+    <h3 style="margin:0 0 6px; font-size:1.1rem; color:var(--ink);">Copy Existing Menu</h3>
+    <p id="copy-menu-target-label" style="font-size:.82rem; color:var(--muted); margin:0 0 16px;">to <strong></strong></p>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:.85rem; font-weight:600; color:var(--ink); display:block; margin-bottom:6px;">Select a menu to copy:</label>
+      <select id="copy-menu-source" style="width:100%; padding:10px 12px; border:1.5px solid var(--line,#d5c4a1); border-radius:8px; font-size:.9rem; background:#fff; color:var(--ink);">
+        <option value="" disabled selected>Choose a menu...</option>
+        {% for r in user_restaurants %}
+          {% for d in r.drafts %}
+          <option value="{{ d.id }}">{{ r.restaurant_name|e }} &mdash; {{ d.title or ('Draft #' ~ d.id) }}</option>
+          {% endfor %}
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" id="copy-menu-target-rest" value="" />
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button onclick="document.getElementById('copy-menu-modal').style.display='none'" style="padding:8px 18px; border:1.5px solid var(--line,#d5c4a1); border-radius:8px; background:#fff; color:var(--ink); cursor:pointer;">Cancel</button>
+      <button onclick="executeCopyMenu()" style="padding:8px 18px; border:none; border-radius:8px; background:#B85C38; color:#fff; cursor:pointer; font-weight:600;">Copy</button>
+    </div>
+  </div>
+</div>
+<script>
+function openCopyMenuModal(restaurantId, restaurantName) {
+  document.getElementById('copy-menu-target-rest').value = restaurantId;
+  document.querySelector('#copy-menu-target-label strong').textContent = restaurantName;
+  document.getElementById('copy-menu-source').value = '';
+  document.getElementById('copy-menu-modal').style.display = 'flex';
+  // Close the picker
+  const overlay = document.getElementById('menu-picker-overlay');
+  if (overlay) overlay.classList.remove('open');
+  document.getElementById('editor-menu-title')?.classList.remove('picker-open');
+}
+function executeCopyMenu() {
+  const sourceId = document.getElementById('copy-menu-source').value;
+  const targetRestId = document.getElementById('copy-menu-target-rest').value;
+  if (!sourceId) { wizToast('Please select a menu to copy.'); return; }
+
+  // Submit via form POST
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/drafts/' + sourceId + '/copy_to_restaurant';
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'restaurant_id';
+  input.value = targetRestId;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+}
 </script>
 
 {% endblock %}

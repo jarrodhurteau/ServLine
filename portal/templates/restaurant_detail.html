@@ -334,10 +334,21 @@
         + field('Zip Code', zip);
 
       detailActions.innerHTML =
-        '<a href="/import?for_restaurant=' + id + '&rest_name=' + encodeURIComponent(name) + '&rest_addr=' + encodeURIComponent(fullAddr) + '" class="btn-detail btn-upload">Add Menu</a>'
+        '<button class="btn-detail btn-menus" onclick="toggleEditMode(' + id + ')">Edit Info</button>'
+        + '<a href="/import?for_restaurant=' + id + '&rest_name=' + encodeURIComponent(name) + '&rest_addr=' + encodeURIComponent(fullAddr) + '" class="btn-detail btn-upload">Add Menu</a>'
         + '<a href="/restaurants/' + id + '/menus" class="btn-detail btn-menus">View Menus</a>'
         + '<button class="btn-detail btn-intel" id="scanMarketBtn" onclick="scanMarket(' + id + ', this)">Scan Market</button>'
         + '<button class="btn-detail btn-del" onclick="deleteRestaurant(' + id + ', this)">Delete Restaurant</button>';
+
+      // Store current values for edit mode
+      detailPanel.dataset.editId = id;
+      detailPanel.dataset.editName = name;
+      detailPanel.dataset.editCuisine = cuisine;
+      detailPanel.dataset.editAddr = addr;
+      detailPanel.dataset.editAddr2 = addr2;
+      detailPanel.dataset.editCity = city;
+      detailPanel.dataset.editState = state;
+      detailPanel.dataset.editZip = zip;
 
       // Load cached price intel
       loadIntel(id);
@@ -564,6 +575,84 @@
       });
     });
   })();
+
+  function editField(label, name, value, type) {
+    type = type || 'text';
+    var maxlen = name === 'state' ? ' maxlength="2" style="text-transform:uppercase;"' : '';
+    return '<div class="detail-field"><label>' + label + '</label>'
+      + '<input type="' + type + '" name="' + name + '" value="' + (value || '').replace(/"/g, '&quot;') + '"'
+      + ' style="width:100%; padding:6px 10px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.88rem; color:#2C2C2C; background:#fff;"'
+      + maxlen + ' /></div>';
+  }
+
+  function toggleEditMode(restId) {
+    var dp = document.getElementById('detailPanel');
+    var di = document.getElementById('detailInfo');
+    var da = document.getElementById('detailActions');
+
+    di.innerHTML =
+      editField('Restaurant Name', 'name', dp.dataset.editName)
+      + editField('Cuisine Type', 'cuisine_type', dp.dataset.editCuisine)
+      + editField('Address', 'address', dp.dataset.editAddr)
+      + editField('Apt / Suite', 'address_line2', dp.dataset.editAddr2)
+      + editField('City', 'city', dp.dataset.editCity)
+      + editField('State', 'state', dp.dataset.editState)
+      + editField('Zip Code', 'zip_code', dp.dataset.editZip);
+
+    da.innerHTML =
+      '<button class="btn-detail btn-upload" style="background:#B85C38; color:#fff !important;" onclick="saveRestaurant(' + restId + ')">Save Changes</button>'
+      + '<button class="btn-detail btn-menus" onclick="cancelEdit(' + restId + ')">Cancel</button>';
+  }
+
+  function cancelEdit(restId) {
+    // Re-click the tile to refresh detail view
+    var tile = document.querySelector('.rest-tile[data-rest-id="' + restId + '"]');
+    if (tile) { tile.classList.remove('selected'); tile.click(); }
+  }
+
+  function saveRestaurant(restId) {
+    var di = document.getElementById('detailInfo');
+    var inputs = di.querySelectorAll('input');
+    var body = new URLSearchParams();
+    inputs.forEach(function(inp) { body.append(inp.name, inp.value); });
+
+    fetch('/restaurants/' + restId + '/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    }).then(function(r) {
+      if (r.ok || r.redirected) {
+        // Update the tile data attributes with new values
+        var tile = document.querySelector('.rest-tile[data-rest-id="' + restId + '"]');
+        if (tile) {
+          var name = body.get('name') || tile.dataset.name;
+          var addr = body.get('address') || '';
+          var city = body.get('city') || '';
+          var state = body.get('state') || '';
+          var zip = body.get('zip_code') || '';
+          var cuisine = body.get('cuisine_type') || '';
+          tile.dataset.name = name;
+          tile.dataset.address = addr;
+          tile.dataset.address2 = body.get('address_line2') || '';
+          tile.dataset.city = city;
+          tile.dataset.state = state;
+          tile.dataset.zip = zip;
+          tile.dataset.cuisine = cuisine;
+          // Update tile display
+          var tn = tile.querySelector('.tile-name');
+          if (tn) tn.textContent = name;
+          var ta = tile.querySelector('.tile-addr');
+          if (ta) ta.innerHTML = (addr ? addr : '') + (city ? (addr ? ', ' : '') + city + (state ? ', ' + state.toUpperCase() : '') + (zip ? ' ' + zip : '') : '');
+          var tc = tile.querySelector('.tile-cuisine');
+          if (tc) { if (cuisine) { tc.textContent = cuisine.charAt(0).toUpperCase() + cuisine.slice(1); tc.style.display = ''; } else { tc.style.display = 'none'; } }
+        }
+        // Refresh detail panel
+        cancelEdit(restId);
+        // Flash success
+        if (tile) { tile.classList.add('flash'); setTimeout(function(){ tile.classList.remove('flash'); }, 800); }
+      }
+    });
+  }
   </script>
 
 {% endblock %}

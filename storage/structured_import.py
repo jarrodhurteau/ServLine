@@ -179,7 +179,11 @@ def parse_csv_menu(text: str) -> Tuple[List[Dict[str, Any]], List[str]]:
 
         description = (raw_item.get("description") or "").strip()
         category = (raw_item.get("category") or "").strip() or None
+        if category:
+            category = category.title()  # "pizza" → "Pizza", "PIZZA" → "Pizza"
         subcategory = (raw_item.get("subcategory") or "").strip() or None
+        if subcategory:
+            subcategory = subcategory.title()
 
         price_cents: Optional[int] = None
         if "price_cents" in raw_item and raw_item.get("price_cents") not in (None, ""):
