@@ -94,10 +94,16 @@ def _ensure_schema() -> None:
                 regional_avg    INTEGER,
                 reasoning       TEXT,
                 confidence      REAL DEFAULT 0.0,
+                price_sources   TEXT,
                 created_at      TEXT NOT NULL,
                 FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
             )
         """)
+        # Migration: add price_sources if missing
+        try:
+            conn.execute("ALTER TABLE price_intelligence_results ADD COLUMN price_sources TEXT")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS price_intelligence_summary (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +140,158 @@ _ensure_schema()
 
 
 # ---------------------------------------------------------------------------
+# Competitor Menu Fetching (Day 141.5 overhaul)
+# ---------------------------------------------------------------------------
+
+# Common category synonyms for matching
+_CATEGORY_SYNONYMS = {
+    "entrees": {"mains", "main courses", "dinner", "lunch"},
+    "appetizers": {"starters", "apps", "small plates", "shareables"},
+    "salads": {"greens"},
+    "sandwiches": {"subs", "heroes", "hoagies", "hot sandwiches"},
+    "burgers": {"hamburgers"},
+    "pizza": {"pizzas", "pies"},
+    "wraps": {"burritos", "rolls"},
+    "desserts": {"sweets"},
+    "beverages": {"drinks", "cocktails", "beer", "wine"},
+    "soups": {"soup"},
+    "sides": {"side dishes", "side orders"},
+    "breakfast": {"brunch", "morning"},
+    "pasta": {"pastas", "italian"},
+    "seafood": {"fish"},
+    "wings": {"chicken wings", "wing"},
+    "calzones": {"stromboli"},
+}
+
+# Build reverse lookup: "mains" -> "entrees", etc.
+_CAT_NORMALIZE = {}
+for canonical, synonyms in _CATEGORY_SYNONYMS.items():
+    _CAT_NORMALIZE[canonical] = canonical
+    for syn in synonyms:
+        _CAT_NORMALIZE[syn] = canonical
+
+
+def _normalize_category(cat: str) -> str:
+    """Normalize a category name for matching."""
+    c = cat.lower().strip()
+    # Strip common suffixes
+    for suffix in [" menu", " items", " options", " specials", " platters"]:
+        if c.endswith(suffix):
+            c = c[:-len(suffix)].strip()
+    return _CAT_NORMALIZE.get(c, c)
+
+
+def _categories_overlap(our_cats: set, their_cats: set) -> set:
+    """Find overlapping categories between two sets (normalized)."""
+    our_norm = {_normalize_category(c) for c in our_cats}
+    their_norm = {_normalize_category(c) for c in their_cats}
+    return our_norm & their_norm
+
+
+def _fetch_competitor_menus(
+    competitor_data: List[Dict[str, Any]],
+    items: List[Dict[str, Any]],
+    max_competitors: int = 5,
+    max_fresh_searches: int = 3,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch real menu data for the top same-tier competitors.
+    Checks cache first, web-searches if miss. Filters out competitors
+    with no category overlap.
+
+    Returns list of:
+        {
+            "place_name": str,
+            "place_id": str,
+            "price_label": str,
+            "rating": float,
+            "categories": [str],
+            "matching_categories": [str],
+            "items": [{name, price_cents, category}, ...],
+            "source": "scraped" | "web_search" | "not_found",
+        }
+    """
+    from storage.price_intel import scrape_competitor_menu
+
+    # Extract our categories
+    our_cats = set()
+    for it in items:
+        cat = (it.get("category") or "").strip()
+        if cat:
+            our_cats.add(cat)
+
+    # Compute our tier
+    priced = [it["price_cents"] for it in items if it.get("price_cents") and it["price_cents"] > 0]
+    our_avg = sum(priced) / len(priced) if priced else 0
+    our_tier = 1 if our_avg < 1000 else (2 if our_avg < 2000 else (3 if our_avg < 3500 else 4))
+
+    # Sort by tier similarity, then by rating
+    def _sort_key(c):
+        tier_dist = abs((c.get("price_level") or 2) - our_tier)
+        rating = -(c.get("rating") or 0)
+        return (tier_dist, rating)
+
+    sorted_comps = sorted(competitor_data, key=_sort_key)
+
+    results = []
+    fresh_count = 0
+
+    for comp in sorted_comps[:max_competitors]:
+        place_id = comp.get("place_id")
+        place_name = comp.get("place_name", "Unknown")
+        if not place_id:
+            continue
+
+        # Fetch menu (cache or fresh)
+        menu_data = None
+        try:
+            menu_data = scrape_competitor_menu(
+                place_id, place_name,
+                force_refresh=False,
+            )
+        except Exception as e:
+            log.warning("Failed to fetch menu for %s: %s", place_name, e)
+
+        if menu_data and menu_data.get("source") == "not_found" and not menu_data.get("from_cache"):
+            fresh_count += 1
+        elif menu_data and not menu_data.get("from_cache"):
+            fresh_count += 1
+
+        if fresh_count >= max_fresh_searches and not (menu_data and menu_data.get("from_cache")):
+            log.info("Hit max fresh searches (%d), skipping remaining", max_fresh_searches)
+            break
+
+        their_items = menu_data.get("items", []) if menu_data else []
+        their_cats = {it.get("category", "Other") for it in their_items}
+        overlap = _categories_overlap(our_cats, their_cats)
+
+        # Keep competitors even without exact category overlap —
+        # Claude will match individual items. Only skip if debugging shows
+        # a need to filter (e.g., completely different cuisine).
+        if their_items and not overlap:
+            log.info("No exact category overlap for %s, but keeping (items may still match)", place_name)
+
+        results.append({
+            "place_name": place_name,
+            "place_id": place_id,
+            "price_label": comp.get("price_label", "N/A"),
+            "rating": comp.get("rating"),
+            "categories": list(their_cats),
+            "matching_categories": list(overlap),
+            "items": their_items,
+            "source": menu_data.get("source", "not_found") if menu_data else "not_found",
+        })
+
+    log.info(
+        "Fetched %d competitor menus (%d with items, %d fresh searches)",
+        len(results),
+        sum(1 for r in results if r["items"]),
+        fresh_count,
+    )
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Prompt construction
 # ---------------------------------------------------------------------------
 def _build_prompt(
@@ -142,61 +300,110 @@ def _build_prompt(
     zip_code: str,
     competitor_data: List[Dict[str, Any]],
     market_summary: Dict[str, Any],
+    competitor_menus: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Build the Claude Call 4 prompt with menu items + market context."""
+    """Build the Claude Call 4 prompt with menu items + real competitor prices."""
 
-    # Format items for the prompt
+    # Format our items
     items_text = []
     for item in items:
         price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
         cat = item.get("category") or "Uncategorized"
-        items_text.append(f"- {item['name']} | {cat} | {price_str}")
+        sub = item.get("subcategory") or ""
+        cat_label = f"{cat} > {sub}" if sub else cat
+        items_text.append(f"- {item['name']} | {cat_label} | {price_str}")
     items_block = "\n".join(items_text)
-
-    # Format competitor context
-    comp_lines = []
-    for c in competitor_data[:10]:  # Top 10 competitors
-        rating_str = f"★{c['rating']}" if c.get("rating") else "no rating"
-        price_str = c.get("price_label") or "N/A"
-        comp_lines.append(f"- {c['place_name']} ({price_str}, {rating_str})")
-    comp_block = "\n".join(comp_lines) if comp_lines else "No competitor data available."
 
     # Market summary
     market_lines = []
     if market_summary.get("has_data"):
-        market_lines.append(
-            f"Competitors found: {market_summary.get('competitor_count', 0)}"
-        )
+        market_lines.append(f"Competitors found: {market_summary.get('competitor_count', 0)}")
         if market_summary.get("avg_rating"):
             market_lines.append(f"Average rating: {market_summary['avg_rating']}")
         dist = market_summary.get("price_distribution", {})
         if dist:
-            market_lines.append(
-                "Price tier distribution: " +
-                ", ".join(f"{k}: {v}" for k, v in dist.items())
-            )
+            market_lines.append("Price tier distribution: " + ", ".join(f"{k}: {v}" for k, v in dist.items()))
     market_block = "\n".join(market_lines) if market_lines else "No market summary available."
 
-    return f"""\
+    # Format real competitor menus (the key improvement)
+    real_menu_block = ""
+    no_menu_block = ""
+    menus_with_data = []
+    menus_without_data = []
+
+    if competitor_menus:
+        for cm in competitor_menus:
+            if cm.get("items"):
+                menus_with_data.append(cm)
+            else:
+                menus_without_data.append(cm)
+
+    if menus_with_data:
+        menu_sections = []
+        for cm in menus_with_data:
+            lines = [f"\n{cm['place_name']} ({cm.get('price_label', 'N/A')}, ★{cm.get('rating', 'N/A')}):"]
+            # Group items by matching categories, cap at 50 items per competitor
+            by_cat: Dict[str, List] = {}
+            for it in cm["items"][:50]:
+                cat = it.get("category", "Other")
+                by_cat.setdefault(cat, []).append(it)
+            for cat, cat_items in by_cat.items():
+                lines.append(f"  {cat}:")
+                for it in cat_items:
+                    if it.get("price_cents") and it["price_cents"] > 0:
+                        lines.append(f"    - {it['name']}: ${it['price_cents'] / 100:.2f}")
+            menu_sections.append("\n".join(lines))
+        real_menu_block = "\n".join(menu_sections)
+
+    if menus_without_data:
+        no_menu_lines = []
+        for cm in menus_without_data:
+            no_menu_lines.append(f"- {cm['place_name']} ({cm.get('price_label', 'N/A')}, ★{cm.get('rating', 'N/A')}) — menu not available")
+        no_menu_block = "\n".join(no_menu_lines)
+
+    # Build the full prompt
+    has_real_data = bool(menus_with_data)
+
+    prompt = f"""\
 You are a restaurant pricing analyst. Analyze each menu item's price against
 the local market for a {cuisine_type} restaurant in zip code {zip_code}.
 
 LOCAL MARKET CONTEXT:
 {market_block}
 
-NEARBY COMPETITORS:
-{comp_block}
-
 MENU ITEMS TO ANALYZE:
 {items_block}
+"""
 
-For each item, assess whether its price is appropriate for this market.
-Consider:
-1. The cuisine type and local market tier ($ vs $$ vs $$$ area)
-2. What similar items typically cost at comparable restaurants
-3. Category norms (appetizers, entrees, desserts, drinks have different ranges)
-4. Items with no price should be marked "unknown"
+    if has_real_data:
+        prompt += f"""
+COMPETITOR MENUS WITH REAL PRICES:
+Below are ACTUAL menu items and prices from nearby competitors, verified from
+their online ordering platforms. Use these as your PRIMARY reference.
+{real_menu_block}
+"""
+        if no_menu_block:
+            prompt += f"""
+COMPETITORS WITHOUT MENU DATA:
+{no_menu_block}
+"""
+        prompt += """
+INSTRUCTIONS:
+For each of our items, compare against the REAL competitor prices above.
+- Match each item against the closest equivalent at each competitor.
+- Base your suggested_low, suggested_high, and regional_avg on the REAL prices you see.
+- Include "price_sources" — which specific competitor items you used for comparison.
+- If no competitor has a matching item, base your assessment on category averages
+  from the competitor menus and set confidence to 0.4-0.6.
+- Do NOT guess or estimate competitor prices — use only what's provided above.
+"""
+    else:
+        prompt += """
+NOTE: No real competitor menu data was available. Provide your best market-based
+estimates but set confidence to 0.3-0.5 for all assessments.
+"""
 
+    prompt += f"""
 Return a JSON object with this exact structure:
 {{
   "assessments": [
@@ -206,8 +413,11 @@ Return a JSON object with this exact structure:
       "suggested_low": cents (integer, low end of suggested range),
       "suggested_high": cents (integer, high end of suggested range),
       "regional_avg": cents (integer, estimated regional average for this type of item),
-      "reasoning": "brief explanation (1 sentence)",
-      "confidence": 0.0-1.0 (how confident you are in this assessment)
+      "reasoning": "brief explanation referencing specific competitor prices when available",
+      "confidence": 0.0-1.0,
+      "price_sources": [
+        {{"competitor": "Restaurant Name", "item": "Their Item Name", "price_cents": 1499}}
+      ]
     }}
   ],
   "category_averages": {{
@@ -225,12 +435,15 @@ Return a JSON object with this exact structure:
   }}
 }}
 
-IMPORTANT:
+RULES:
 - Return ONLY valid JSON, no markdown fencing.
 - Every item from the input must appear in assessments (same order).
 - All prices in cents (e.g., $12.99 = 1299).
-- If an item has no price (0 cents), set assessment to "unknown" and suggested range based on market.
+- If an item has no price (0 cents), set assessment to "unknown".
+- "price_sources" should list the real competitor items you compared against (empty array if none).
 - Be practical: a $2 difference on a $15 entree is "fair", not "overpriced"."""
+
+    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +595,7 @@ def _validate_results(
             "regional_avg": int(a["regional_avg"]) if a.get("regional_avg") else None,
             "reasoning": (a.get("reasoning") or "")[:500],
             "confidence": min(1.0, max(0.0, float(a.get("confidence", 0)))),
+            "price_sources": a.get("price_sources", []),
         })
 
     category_avgs = data.get("category_averages", {})
@@ -431,15 +645,17 @@ def _save_results(
                 """INSERT INTO price_intelligence_results
                    (draft_id, restaurant_id, item_id, item_name, item_category,
                     current_price, assessment, suggested_low, suggested_high,
-                    regional_avg, reasoning, confidence, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    regional_avg, reasoning, confidence, price_sources, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     draft_id, restaurant_id, a.get("item_id"),
                     a["item_name"], a.get("item_category"),
                     a.get("current_price", 0), a["assessment"],
                     a.get("suggested_low"), a.get("suggested_high"),
                     a.get("regional_avg"), a.get("reasoning"),
-                    a.get("confidence", 0.0), now,
+                    a.get("confidence", 0.0),
+                    json.dumps(a.get("price_sources", [])),
+                    now,
                 ),
             )
 
@@ -540,11 +756,23 @@ def analyze_menu_prices(
     competitor_data = get_cached_comparisons(restaurant_id)
     market_summary = get_market_summary(restaurant_id)
 
+    # NEW: Fetch real competitor menus (web search, cached)
+    competitor_menus = []
+    if competitor_data:
+        log.info("Price intel: fetching real competitor menus for draft %d...", draft_id)
+        competitor_menus = _fetch_competitor_menus(
+            competitor_data=competitor_data,
+            items=items,
+            max_competitors=5,
+            max_fresh_searches=5,
+        )
+
     # Batch items by category to avoid token overflow on large menus
     batches = _make_batches(items)
     log.info(
-        "Price intel: %d items → %d batch(es) for draft %d",
+        "Price intel: %d items → %d batch(es) for draft %d (%d competitor menus with data)",
         len(items), len(batches), draft_id,
+        sum(1 for m in competitor_menus if m.get("items")),
     )
 
     batch_results: List[Dict[str, Any]] = []
@@ -552,6 +780,7 @@ def analyze_menu_prices(
         log.info("Price intel batch %d/%d: %d items", i + 1, len(batches), len(batch))
         prompt = _build_prompt(
             batch, cuisine_type, zip_code, competitor_data, market_summary,
+            competitor_menus=competitor_menus,
         )
         raw = _call_claude(prompt, model=model)
         if raw:
@@ -670,3 +899,495 @@ def clear_price_intelligence(draft_id: int) -> int:
         )
         conn.commit()
     return r1
+
+
+# ---------------------------------------------------------------------------
+# Competitor side-by-side comparison (Day 141.5)
+# ---------------------------------------------------------------------------
+
+_COMPARE_MODEL = "claude-sonnet-4-5"
+_COMPARE_MAX_TOKENS = 6_000
+
+
+def _ensure_comparison_schema() -> None:
+    """Create the competitor_comparisons cache table."""
+    with _db_connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS competitor_comparisons (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                draft_id        INTEGER NOT NULL,
+                restaurant_id   INTEGER NOT NULL,
+                competitor_name TEXT NOT NULL,
+                competitor_data TEXT NOT NULL,
+                comparisons     TEXT NOT NULL,
+                model_used      TEXT,
+                created_at      TEXT NOT NULL,
+                UNIQUE(draft_id, competitor_name)
+            )
+        """)
+        conn.commit()
+
+
+_ensure_comparison_schema()
+
+
+def _build_comparison_prompt(
+    our_items: List[Dict[str, Any]],
+    competitor: Dict[str, Any],
+    cuisine_type: str,
+    zip_code: str,
+) -> str:
+    """Build a prompt asking Claude to estimate competitor prices for our items."""
+    items_block = []
+    for item in our_items:
+        price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
+        cat = item.get("category") or "Uncategorized"
+        sub = item.get("subcategory") or ""
+        cat_label = f"{cat} > {sub}" if sub else cat
+        items_block.append(f"- {item['name']} | {cat_label} | {price_str}")
+    items_text = "\n".join(items_block)
+
+    comp_name = competitor.get("place_name", "Unknown")
+    comp_rating = competitor.get("rating", "N/A")
+    comp_price = competitor.get("price_label", "N/A")
+    comp_addr = competitor.get("place_address", "")
+    comp_reviews = competitor.get("user_ratings", 0)
+
+    return f"""\
+You are a restaurant pricing analyst doing a direct price comparison.
+
+OUR RESTAURANT: A {cuisine_type} restaurant in zip code {zip_code}.
+
+COMPETITOR: {comp_name}
+- Address: {comp_addr}
+- Rating: {comp_rating} ({comp_reviews} reviews)
+- Price tier: {comp_price}
+
+OUR MENU ITEMS:
+{items_text}
+
+For each of our menu items, estimate what a SIMILAR item would cost at {comp_name},
+based on their price tier ({comp_price}), location, and typical pricing for restaurants
+at that level. Also suggest what the closest matching menu item name would be at that restaurant.
+
+Return a JSON object:
+{{
+  "competitor_name": "{comp_name}",
+  "competitor_tier": "{comp_price}",
+  "comparisons": [
+    {{
+      "our_item": "exact item name from our list",
+      "our_price_cents": integer (our current price in cents, 0 if none),
+      "their_estimated_cents": integer (estimated price at competitor in cents),
+      "their_item_name": "what this item might be called there",
+      "difference_cents": integer (their price - our price, positive = theirs is more),
+      "verdict": "cheaper|similar|pricier" (how OUR price compares — cheaper means we charge less)
+    }}
+  ]
+}}
+
+RULES:
+- Return ONLY valid JSON, no markdown fencing.
+- Every item from our list must appear in comparisons.
+- All prices in cents (e.g., $12.99 = 1299).
+- Items with no price on our side: set our_price_cents to 0, still estimate theirs.
+- "similar" means within 15% of each other.
+- Be realistic: a $ restaurant will price lower than a $$$$ one.
+- Only compare like-for-like: a main dish vs a main dish, an appetizer vs an appetizer.
+  Never compare a topping/add-on against a full dish.
+- Pay close attention to the category shown after the | pipe. Items in categories like
+  "Pizza", "Wraps", "Burgers" are full entrees. Items in subcategories like "Toppings"
+  should be compared against toppings at comparable restaurants, not standalone dishes.
+- Base your estimates on what a {comp_price} restaurant in this area would actually charge."""
+
+
+def _build_real_comparison_prompt(
+    our_items: List[Dict[str, Any]],
+    their_items: List[Dict[str, Any]],
+    comp_name: str,
+    competitor: Dict[str, Any],
+) -> str:
+    """Build a prompt for matching our items against their REAL scraped menu."""
+    our_block = []
+    for item in our_items:
+        price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
+        cat = item.get("category") or "Uncategorized"
+        sub = item.get("subcategory") or ""
+        cat_label = f"{cat} > {sub}" if sub else cat
+        our_block.append(f"- {item['name']} | {cat_label} | {price_str}")
+    our_text = "\n".join(our_block)
+
+    their_block = []
+    for item in their_items:
+        price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
+        cat = item.get("category") or "Other"
+        their_block.append(f"- {item['name']} | {cat} | {price_str}")
+    their_text = "\n".join(their_block)
+
+    comp_price = competitor.get("price_label", "N/A")
+    comp_rating = competitor.get("rating", "N/A")
+
+    return f"""\
+You are a restaurant pricing analyst. Compare two real restaurant menus side by side.
+
+OUR MENU ITEMS:
+{our_text}
+
+{comp_name.upper()}'S ACTUAL MENU ({comp_price}, ★{comp_rating}):
+{their_text}
+
+For each of OUR items, find the closest matching item on {comp_name}'s menu.
+Use their REAL price — do not estimate.
+
+Return a JSON object:
+{{
+  "comparisons": [
+    {{
+      "our_item": "exact item name from our list",
+      "our_price_cents": integer (our price in cents),
+      "their_estimated_cents": integer (their REAL price in cents from their menu),
+      "their_item_name": "the actual matching item name from their menu",
+      "difference_cents": integer (their price - our price),
+      "verdict": "cheaper|similar|pricier",
+      "match_quality": "exact|close|approximate|no_match"
+    }}
+  ]
+}}
+
+RULES:
+- Return ONLY valid JSON, no markdown fencing.
+- Every one of our items must appear in comparisons.
+- Use REAL prices from their menu — this is not an estimate.
+- "match_quality" indicates how close the match is:
+  - "exact": same item name (e.g., Tuna Wrap → Tuna Wrap)
+  - "close": very similar item (e.g., Grilled Chicken Wrap → Chicken Wrap)
+  - "no_match": no comparable item on their menu
+- IMPORTANT: prefer "no_match" over bad matches. Do NOT match different items just
+  because they're in the same category. "Buffalo Chicken Wrap" should only match
+  "Buffalo Chicken Wrap" or "Spicy Chicken Wrap" — NOT a generic "Gyro Wrap."
+  Each of their items can only be used as a match ONCE — don't reuse the same
+  competitor item for multiple of our items.
+- "similar" verdict means prices within 15% of each other.
+- "cheaper" means OUR price is lower. "pricier" means OUR price is higher.
+- If no_match, set verdict to "no_match" and difference_cents to 0.
+- Only compare like-for-like: wraps vs wraps, burgers vs burgers, pizza vs pizza.
+  Never match a topping/modifier against a full dish or side."""
+
+
+def compare_with_competitor(
+    draft_id: int,
+    restaurant_id: int,
+    competitor: Dict[str, Any],
+    *,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    """
+    Compare our menu prices against a competitor. Tries real scraped data first,
+    falls back to Claude estimates if their menu isn't publicly available.
+    Results are cached per (draft_id, competitor_name).
+    """
+    comp_name = competitor.get("place_name", "Unknown")
+    place_id = competitor.get("place_id") or ""
+
+    # Check cache first
+    if not force_refresh:
+        cached = get_competitor_comparison(draft_id, comp_name)
+        if cached:
+            return cached
+
+    # Get our items
+    from storage.drafts import get_draft_items
+    from storage.users import get_restaurant
+
+    items = get_draft_items(draft_id, include_modifier_groups=False) or []
+    if not items:
+        return {"error": "No items in draft", "comparisons": []}
+
+    rest = get_restaurant(restaurant_id)
+    cuisine_type = (rest.get("cuisine_type") or "restaurant") if rest else "restaurant"
+    zip_code = (rest.get("zip_code") or "") if rest else ""
+
+    # Filter to main menu items — exclude toppings, modifiers, add-ons
+    MODIFIER_SUBCATS = {"toppings", "sauce options", "wing sauces", "bread options",
+                        "add-ons", "extras", "sides", "dressings", "preparation"}
+    priced_items = []
+    for it in items:
+        if not it.get("price_cents") or it["price_cents"] <= 0:
+            continue
+        sub = (it.get("subcategory") or "").strip().lower()
+        # Skip items in modifier subcategories
+        if sub and sub in MODIFIER_SUBCATS:
+            continue
+        # Skip very cheap items that are clearly toppings/modifiers (< $3 with a subcategory)
+        if sub and it["price_cents"] < 300:
+            continue
+        priced_items.append(it)
+    if not priced_items:
+        return {"error": "No main menu items to compare", "comparisons": []}
+    if len(priced_items) > 50:
+        priced_items = priced_items[:50]
+
+    # --- Step 1: Try to get REAL menu data ---
+    real_menu = None
+    data_source = "estimated"
+    if place_id:
+        try:
+            from storage.price_intel import scrape_competitor_menu
+            real_menu = scrape_competitor_menu(place_id, comp_name)
+            if real_menu and real_menu.get("items"):
+                data_source = "scraped"
+                log.info("Got %d real menu items for %s", len(real_menu["items"]), comp_name)
+        except Exception as e:
+            log.warning("Menu scraping failed for %s: %s", comp_name, e)
+
+    # --- Step 2: Build comparison ---
+    client = _get_client()
+    if not client:
+        return {"error": "Anthropic client not available", "comparisons": []}
+
+    if data_source == "scraped" and real_menu and real_menu.get("items"):
+        # Real data path: ask Claude to match our items against their actual menu
+        prompt = _build_real_comparison_prompt(
+            priced_items, real_menu["items"], comp_name, competitor
+        )
+    else:
+        # Estimate path: ask Claude to estimate prices
+        prompt = _build_comparison_prompt(priced_items, competitor, cuisine_type, zip_code)
+
+    try:
+        response = client.messages.create(
+            model=_COMPARE_MODEL,
+            max_tokens=_COMPARE_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+    except Exception as e:
+        log.error("Competitor comparison failed: %s", e)
+        return {"error": str(e), "comparisons": []}
+
+    comparisons = data.get("comparisons", [])
+    menu_url = real_menu.get("menu_url") if real_menu else None
+
+    # Cache the result (include data_source in competitor_data)
+    cache_data = dict(competitor)
+    cache_data["_data_source"] = data_source
+    cache_data["_menu_url"] = menu_url
+    cache_data["_their_item_count"] = len(real_menu["items"]) if real_menu and real_menu.get("items") else 0
+    try:
+        with _db_connect() as conn:
+            conn.execute(
+                """INSERT INTO competitor_comparisons
+                   (draft_id, restaurant_id, competitor_name, competitor_data,
+                    comparisons, model_used, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(draft_id, competitor_name)
+                   DO UPDATE SET
+                       competitor_data = excluded.competitor_data,
+                       comparisons = excluded.comparisons,
+                       model_used = excluded.model_used,
+                       created_at = excluded.created_at""",
+                (
+                    draft_id, restaurant_id, comp_name,
+                    json.dumps(cache_data),
+                    json.dumps(comparisons),
+                    _COMPARE_MODEL,
+                    _now(),
+                ),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Failed to cache comparison: %s", e)
+
+    return {
+        "competitor_name": comp_name,
+        "competitor_tier": competitor.get("price_label", "N/A"),
+        "competitor_rating": competitor.get("rating"),
+        "comparisons": comparisons,
+        "data_source": data_source,
+        "menu_url": menu_url,
+        "from_cache": False,
+    }
+
+
+def get_competitor_comparison(
+    draft_id: int,
+    competitor_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Retrieve cached competitor comparison."""
+    try:
+        with _db_connect() as conn:
+            row = conn.execute(
+                """SELECT competitor_name, competitor_data, comparisons, model_used, created_at
+                   FROM competitor_comparisons
+                   WHERE draft_id = ? AND competitor_name = ?""",
+                (draft_id, competitor_name),
+            ).fetchone()
+        if not row:
+            return None
+        comp_data = json.loads(row["competitor_data"])
+        comparisons = json.loads(row["comparisons"])
+        return {
+            "competitor_name": row["competitor_name"],
+            "competitor_tier": comp_data.get("price_label", "N/A"),
+            "competitor_rating": comp_data.get("rating"),
+            "comparisons": comparisons,
+            "data_source": comp_data.get("_data_source", "estimated"),
+            "menu_url": comp_data.get("_menu_url"),
+            "from_cache": True,
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Cache-based comparison (no Claude call — instant, free)
+# ---------------------------------------------------------------------------
+
+def get_cached_competitor_menu_comparison(
+    draft_id: int,
+    restaurant_id: int,
+    competitor_name: str,
+    competitor: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Build a side-by-side comparison from cached competitor menu data.
+    No Claude call — uses Python-based item matching. Instant and free.
+    Returns None if no cached menu exists for this competitor.
+    """
+    from difflib import SequenceMatcher
+    from storage.drafts import get_draft_items
+    from storage.price_intel import _get_cached_menu
+
+    place_id = competitor.get("place_id")
+    if not place_id:
+        return None
+
+    # Get cached competitor menu
+    cached = _get_cached_menu(place_id)
+    if not cached or not cached.get("items"):
+        return None
+
+    their_items = cached["items"]
+    # Filter to items with real prices
+    their_items = [it for it in their_items if it.get("price_cents") and it["price_cents"] > 0]
+    if not their_items:
+        return None
+
+    # Get our items
+    our_items = get_draft_items(draft_id, include_modifier_groups=False) or []
+    # Filter to main menu items (same filter as compare_with_competitor)
+    MODIFIER_SUBCATS = {"toppings", "sauce options", "wing sauces", "bread options",
+                        "add-ons", "extras", "sides", "dressings", "preparation"}
+    our_priced = []
+    for it in our_items:
+        if not it.get("price_cents") or it["price_cents"] <= 0:
+            continue
+        sub = (it.get("subcategory") or "").strip().lower()
+        if sub and sub in MODIFIER_SUBCATS:
+            continue
+        if sub and it["price_cents"] < 300:
+            continue
+        our_priced.append(it)
+
+    if not our_priced:
+        return None
+
+    # Match items by category + name similarity
+    comparisons = _match_items(our_priced, their_items)
+
+    # Count verdicts
+    cheaper = sum(1 for c in comparisons if c["verdict"] == "cheaper")
+    similar = sum(1 for c in comparisons if c["verdict"] == "similar")
+    pricier = sum(1 for c in comparisons if c["verdict"] == "pricier")
+
+    return {
+        "competitor_name": competitor_name,
+        "competitor_tier": competitor.get("price_label", "N/A"),
+        "competitor_rating": competitor.get("rating"),
+        "comparisons": comparisons,
+        "data_source": "scraped",
+        "menu_url": cached.get("menu_url"),
+        "from_cache": True,
+    }
+
+
+def _match_items(
+    our_items: List[Dict[str, Any]],
+    their_items: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Match our menu items against theirs using category + name similarity."""
+    from difflib import SequenceMatcher
+
+    used_theirs: set = set()
+    comparisons = []
+
+    for our in our_items:
+        our_name = (our.get("name") or "").lower().strip()
+        our_cat = _normalize_category(our.get("category") or "")
+        our_price = our.get("price_cents", 0)
+
+        best_match = None
+        best_score = 0.0
+        best_idx = -1
+
+        for i, their in enumerate(their_items):
+            if i in used_theirs:
+                continue
+            their_name = (their.get("name") or "").lower().strip()
+            their_cat = _normalize_category(their.get("category") or "")
+
+            # Category bonus: matching categories get a boost
+            cat_match = (our_cat == their_cat) if our_cat and their_cat else False
+
+            # Name similarity
+            score = SequenceMatcher(None, our_name, their_name).ratio()
+            if cat_match:
+                score += 0.2  # boost for same category
+
+            if score > best_score:
+                best_score = score
+                best_match = their
+                best_idx = i
+
+        # Threshold: need at least 0.45 similarity to match
+        if best_match and best_score >= 0.45 and best_idx >= 0:
+            used_theirs.add(best_idx)
+            their_price = best_match.get("price_cents", 0)
+            diff = their_price - our_price
+            # Verdict
+            if their_price == 0 or our_price == 0:
+                verdict = "no_match"
+            elif abs(diff) < our_price * 0.15:
+                verdict = "similar"
+            elif diff > 0:
+                verdict = "cheaper"  # we're cheaper
+            else:
+                verdict = "pricier"  # we're pricier
+
+            quality = "exact" if best_score > 0.85 else "close" if best_score > 0.6 else "approximate"
+
+            comparisons.append({
+                "our_item": our.get("name", ""),
+                "our_price_cents": our_price,
+                "their_estimated_cents": their_price,
+                "their_item_name": best_match.get("name", ""),
+                "difference_cents": diff,
+                "verdict": verdict,
+                "match_quality": quality,
+            })
+        else:
+            comparisons.append({
+                "our_item": our.get("name", ""),
+                "our_price_cents": our_price,
+                "their_estimated_cents": 0,
+                "their_item_name": "",
+                "difference_cents": 0,
+                "verdict": "no_match",
+                "match_quality": "no_match",
+            })
+
+    return comparisons

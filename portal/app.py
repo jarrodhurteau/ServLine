@@ -4353,6 +4353,70 @@ def api_price_intel(rest_id):
 
 
 # -------------------------------------------------------------------
+# Competitor Comparison — Day 141.5
+# -------------------------------------------------------------------
+@app.post("/api/drafts/<int:draft_id>/compare_competitor")
+@login_required
+def api_compare_competitor(draft_id):
+    """Run a side-by-side price comparison against a specific competitor."""
+    if not ai_price_intel:
+        return jsonify({"error": "Price intelligence not available"}), 503
+
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "Draft not found"}), 404
+
+    rest_id = draft.get("restaurant_id")
+    if not rest_id:
+        return jsonify({"error": "No restaurant assigned to this draft"}), 400
+
+    data = request.get_json(silent=True) or {}
+    competitor_name = (data.get("competitor_name") or "").strip()
+    if not competitor_name:
+        return jsonify({"error": "competitor_name is required"}), 400
+
+    # Look up the competitor from cached Google Places data
+    try:
+        from storage.price_intel import get_cached_comparisons
+        comps = get_cached_comparisons(rest_id)
+    except Exception:
+        comps = []
+
+    competitor = None
+    for c in comps:
+        if c.get("place_name") == competitor_name:
+            competitor = c
+            break
+
+    if not competitor:
+        return jsonify({"error": f"Competitor '{competitor_name}' not found in cache"}), 404
+
+    try:
+        # Try cache-read first (instant, free — uses cached competitor menus)
+        cached = ai_price_intel.get_cached_competitor_menu_comparison(
+            draft_id=draft_id,
+            restaurant_id=rest_id,
+            competitor_name=competitor_name,
+            competitor=competitor,
+        )
+        if cached:
+            return jsonify(cached)
+
+        # Fall back to Claude call if no cached menu
+        result = ai_price_intel.compare_with_competitor(
+            draft_id=draft_id,
+            restaurant_id=rest_id,
+            competitor=competitor,
+        )
+        if result.get("error"):
+            return jsonify(result), 500
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------------------------------------------
 # Price Intelligence — Claude Call 4 (Day 135)
 # -------------------------------------------------------------------
 @app.post("/drafts/<int:draft_id>/price_intelligence")
@@ -6293,7 +6357,7 @@ def _compute_editor_stats(items: list) -> dict:
 @app.get("/drafts/<int:draft_id>/edit")
 @login_required
 def draft_editor(draft_id: int):
-    """Render the Draft Editor UI."""
+    """Render the Draft Editor UI (Day 141.5: wizard-style card layout)."""
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id)
     if not draft:
@@ -6301,96 +6365,159 @@ def draft_editor(draft_id: int):
 
     items = drafts_store.get_draft_items(draft_id, include_modifier_groups=True) or []
 
-    # ---- NEW: compute per-item quality + low-confidence flag ----
-    low_conf_items = []
+    # Position backfill (same as wizard route)
+    needs_backfill = [it for it in items if it.get("position") is None]
+    if needs_backfill:
+        max_pos = max((it.get("position") or 0) for it in items) if items else 0
+        try:
+            with db_connect() as conn:
+                for it in needs_backfill:
+                    max_pos += 1
+                    conn.execute(
+                        "UPDATE draft_items SET position=?, updated_at=? WHERE id=? AND draft_id=?",
+                        (max_pos, _now_iso(), it["id"], draft_id),
+                    )
+                    it["position"] = max_pos
+                conn.commit()
+        except Exception:
+            pass
+
+    # Compute per-item quality
     for it in items:
         try:
             score, is_low = _compute_item_quality(it)
         except Exception:
-            # Extremely defensive: if anything blows up, fall back to neutral score.
             score, is_low = 70, False
         it["quality"] = score
         it["low_confidence"] = bool(is_low)
-        if is_low:
-            low_conf_items.append(it)
 
-    categories = sorted({
-        (it.get("category") or "").strip()
-        for it in items
-        if (it.get("category") or "").strip()
-    })
+    # Initialize wizard category tracking (reuse wizard infra for sidebar)
+    drafts_store.init_wizard_categories(draft_id)
+    progress = drafts_store.get_wizard_progress(draft_id)
 
-    with db_connect() as conn:
-        restaurants = conn.execute(
-            "SELECT id, name FROM restaurants WHERE active=1 ORDER BY name"
-        ).fetchall()
-
-    # ---- NEW: Phase 4 pt.8 structured grouping ----
-    category_tree = {}
+    # Group items by category + subcategory
     flat_groups = {}
-
+    subcat_groups = {}
     for it in items:
         cat = (it.get("category") or "Uncategorized").strip()
-        sub = (it.get("subcategory") or "").strip()  # may be empty if not inferred
-
-        # fallback: no subcategories → treat everything as "" group
-        if cat not in category_tree:
-            category_tree[cat] = {}
-
-        if not sub:
-            sub = ""  # root-level bucket for this category
-
-        category_tree[cat].setdefault(sub, []).append(it)
-
-        # also populate flat (non-nested) grouping
+        subcat = (it.get("subcategory") or "").strip()
         flat_groups.setdefault(cat, []).append(it)
-    # Day 83: last export info
-    last_export = None
+        subcat_groups.setdefault(cat, {}).setdefault(subcat, []).append(it)
+
+    # Build category list (main categories only, in progress order)
+    category_list = []
+    _seen_cats = set()
+    for c in progress["categories"]:
+        if not c.get("subcategory") and c["name"] not in _seen_cats:
+            _seen_cats.add(c["name"])
+            category_list.append(c["name"])
+
+    # Apply saved category order
     try:
-        history = drafts_store.get_export_history(draft_id)
-        if history:
-            last_export = history[0]
+        saved_order = drafts_store.get_category_order(draft_id)
+        if saved_order:
+            order_map = {name: i for i, name in enumerate(saved_order)}
+            category_list.sort(key=lambda c: order_map.get(c, 9999))
+            progress["categories"].sort(key=lambda c: order_map.get(c["name"], 9999))
     except Exception:
         pass
 
-    # Day 87: menus for draft-to-menu assignment
-    draft_menus = []
-    if menus_store and draft.get("restaurant_id"):
+    # Determine current category (default to first)
+    requested_cat = request.args.get("category", "").strip()
+    requested_subcat = request.args.get("subcategory", "").strip() or None
+    # None = "All Items" view; only set a category if explicitly requested
+    current_category = None
+    if requested_cat and requested_cat in category_list:
+        current_category = requested_cat
+
+    # Price intelligence
+    price_intel = None
+    try:
+        from storage.ai_price_intel import get_price_intelligence
+        price_intel = get_price_intelligence(draft_id)
+    except Exception:
+        pass
+
+    price_map = {}
+    if price_intel and price_intel.get("assessments"):
+        for a in price_intel["assessments"]:
+            if a.get("item_id"):
+                price_map[a["item_id"]] = a
+
+    # Restaurant info
+    restaurant = None
+    if draft.get("restaurant_id"):
         try:
-            draft_menus = menus_store.list_menus(draft["restaurant_id"])
+            with db_connect() as conn:
+                restaurant = conn.execute(
+                    "SELECT id, name, cuisine_type, zip_code FROM restaurants WHERE id = ?",
+                    (draft["restaurant_id"],),
+                ).fetchone()
+                if restaurant:
+                    restaurant = dict(restaurant)
         except Exception:
             pass
 
-    # Day 116: saved category display order
-    category_order = []
+    # Competitors from Google Places cache (use module-level price_intel import)
+    competitors = []
+    if draft.get("restaurant_id"):
+        try:
+            from storage.price_intel import get_cached_comparisons
+            competitors = get_cached_comparisons(draft["restaurant_id"])
+        except Exception:
+            pass
+
+    # Google Maps API key (for JS embed)
+    google_maps_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip() or None
+
+    # Source job for original menu viewer
+    source_job_id = draft.get("source_job_id")
+
+    # Bounding box coordinates
+    item_coordinates = {}
     try:
-        category_order = drafts_store.get_category_order(draft_id)
+        if drafts_store and hasattr(drafts_store, "get_draft_coordinates"):
+            raw_coords = drafts_store.get_draft_coordinates(draft_id)
+            for c in raw_coords:
+                item_coordinates[c["item_id"]] = {
+                    "x_pct": c["x_pct"], "y_pct": c["y_pct"],
+                    "w_pct": c["w_pct"], "h_pct": c["h_pct"],
+                    "page": c["page"],
+                }
     except Exception:
         pass
 
-    # Day 122: editor stats
-    editor_stats = _compute_editor_stats(items)
+    # Build display_groups: the items to render in the main area
+    display_groups = {}
+    if not current_category:
+        # "All Items" view — group by category (and subcategory)
+        for cat in category_list:
+            for sc, sc_items in subcat_groups.get(cat, {}).items():
+                key = f"{cat} > {sc}" if sc else cat
+                display_groups[key] = sc_items
+    elif requested_subcat:
+        display_groups[requested_subcat] = subcat_groups.get(current_category, {}).get(requested_subcat, [])
+    else:
+        display_groups[""] = subcat_groups.get(current_category, {}).get("", [])
 
     return _safe_render(
         "draft_editor.html",
         draft=draft,
         items=items,
-        categories=categories,
-        restaurants=restaurants,
-        low_conf_items=low_conf_items,
-        quality_threshold=QUALITY_LOW_THRESHOLD,
-        last_export=last_export,
-        draft_menus=draft_menus,
-
-        # NEW pt.8 context
-        category_tree=category_tree,
         flat_groups=flat_groups,
-
-        # Day 116: category nav order
-        category_order=category_order,
-
-        # Day 122: stats bar
-        editor_stats=editor_stats,
+        subcat_groups=subcat_groups,
+        display_groups=display_groups,
+        progress=progress,
+        category_list=category_list,
+        current_category=current_category,
+        current_subcategory=requested_subcat,
+        restaurant=restaurant,
+        price_map=price_map,
+        price_intel=price_intel,
+        competitors=competitors,
+        google_maps_key=google_maps_key,
+        source_job_id=source_job_id,
+        item_coordinates=item_coordinates,
     )
 
 

@@ -2,7 +2,10 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: Day 141 (April 10, 2026) — Wizard UX overhaul + subcategory plumbing + 99%+ extraction accuracy
+Last Updated: 2026-04-13 — Day 141.5 complete: editor respec (wizard-style card layout),
+              competitor price comparison pipeline, Call 4 overhaul with real competitor
+              menu data. Day 141.7 added (Apify integration for reliable competitor menus,
+              gated behind paid tiers).
 
 ================================================================================
 PROJECT MISSION
@@ -2245,8 +2248,8 @@ Sprint 13.2 — Price Comparison Intelligence (Days 133-136)
   Sprint 13.2 COMPLETE (Days 133-136): Google Places API, Claude Call 4
   price intelligence, pipeline integration, animated loading screen.
 
-Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
-......................................................
+Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
+........................................................
   CONTEXT: The wizard IS the $50 experience. When someone pays for AI parse,
   THIS is what they get — not just a dump into the raw editor. Must ship
   before Stripe goes live. Price intelligence (Sprint 13.2) feeds into
@@ -2449,86 +2452,52 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
       RESULT: 99%+ price accuracy on 158-item menus, 100% categorization,
       full subcategory + modifier support, audit-driven correctness model
 
-  [ ] Day 141.5: Editor Respec — Make the Main Editor the Wizard (HIGH PRIORITY)
-      WHY: The current full editor (/drafts/<id>/edit) is a dense spreadsheet-style
-      table with action buttons spilling everywhere — it looks and feels like a
-      POS-developer tool. The wizard, by contrast, is calm, focused, and
-      restaurant-owner-friendly. When customers walk through the polished wizard
-      and then land in the editor for follow-up edits, they hit a wall of
-      cognitive whiplash. This is exactly the "POS-developer poisoning" that
-      MenuShip is supposed to be free of — and it survived in our own product.
+  [x] Day 141.5: Editor Respec + Competitor Price Comparison Pipeline
+      *** COMPLETE *** (April 13, 2026)
 
-      MUST happen BEFORE Day 142 (Square exporter rebuild). If the editor scares
-      customers away, the export quality doesn't matter — they never get there.
+      EDITOR RESPEC:
+        - Forked wizard.html into new draft_editor.html — card-based layout
+          replaces the old spreadsheet-style table editor
+        - New header: Dashboard breadcrumb, search box, Export File dropdown,
+          Export to POS dropdown (Square live, Toast/Clover/Lightspeed/
+          TouchBistro "coming soon"), Save button with Ctrl+S shortcut
+        - "All Items" view: sidebar shows all categories + total count,
+          main area renders every item grouped by category with section headers
+        - Per-category view: click any category in sidebar to filter
+        - Search: client-side instant filter with "X Items found" counter
+        - Right column: "Local Market" / "Original Menu" toggle tabs
 
-      THE PLAN:
-        1. Fork the wizard template into a new editor template
-        2. Strip the per-category review flow (Confirm & Next button, banner,
-           progress bar). The editor is "wizard, but persistent and uncategorized."
-        3. Sidebar stays the same: categories + indented subcategories, click any
-           to view its items in the wizard's clean card layout
-        4. Same item cards, same drag-to-reorder, same Apply/Delete All scoping,
-           same red ! flag for missing prices, same subcategory grouping
-        5. The "Approve & Export to POS" button moves to a single prominent
-           location in the page header (top right)
-        6. Save status / autosave indicator in the header (no big "Save" button)
-        7. Hide power-user features behind progressive disclosure:
-           - Search bar: small, in the sidebar
-           - Bulk select: already exists from wizard ("Select all" link)
-           - Move to Category: already exists in wizard's selected-panel
-           - Duplicate per item: small icon button in item card "..." menu
-           - Variant Preset templates: small button, opens a popover
-           - Kitchen Names: hide behind "Advanced" toggle
-           - Table view: hide behind "View as table" toggle for the rare power user
+      COMPETITOR PRICE INTELLIGENCE:
+        - Nearby Restaurants panel in right column (from Google Places cache)
+        - Tier-matching: "Similar" green badge on same-tier competitors
+        - Click competitor → side-by-side comparison modal
+        - Real vs estimated data badges ("Real Menu Data" / "Market Estimates")
+        - "Search menu on Google" link per competitor
+        - Competitor menu scraping via Claude web search (finds delivery
+          platform menus on DoorDash/Grubhub/UberEats)
+        - Menus cached in competitor_menus table with 7-day TTL
 
-      RIGHT COLUMN — REPLACE MENU VIEWER WITH GOOGLE MAPS COMPETITOR VIEW:
-        1. Default view: Google Maps embed centered on the restaurant, showing
-           the cached Google Places competitors as pins (we already cache ~20
-           competitors per restaurant from the Day 134 work)
-        2. Click a pin → popup with: name, rating, distance, price tier ($-$$$$),
-           "View on Google Maps" link
-        3. Toggleable: a small "Map / Original Menu" toggle in the right column
-           header lets the user switch back to the menu image viewer when they
-           need to verify something they edited
-        4. Same column resizers, same responsive behavior, same fit/zoom logic
-        5. The map provides defensible price comparison transparency: when the
-           wizard shows "Underpriced" badges, the user can SEE the actual
-           restaurants Claude looked at. Builds trust in the entire pricing
-           intelligence feature.
+      CALL 4 OVERHAUL (price intelligence pipeline):
+        - New _fetch_competitor_menus() fetches real menus for top 5 same-tier
+          competitors before Call 4 runs (cache-first, web search if miss)
+        - _build_prompt() now includes REAL competitor prices in the prompt,
+          grouped by matching categories, with instructions to use them as
+          primary reference instead of guessing
+        - price_sources audit trail: each assessment records which competitor
+          items backed the pricing decision
+        - Category synonym matching for cross-restaurant category overlap
+        - Comparison modal reads from cache (instant, free) — no Claude call
 
-      WHY THE MAP IS WORTH THE EFFORT:
-        - Transforms abstract "regional avg: $19.50" into something tangible
-        - Defensible: when a restaurant owner pushes back on a price suggestion,
-          the answer becomes "click that pin — that's their menu"
-        - Marketing screenshot: "Look at your menu next to a live map of your
-          competitors" sells the product instantly
-        - The data already exists: Google Places cache from Day 134
-        - Fills the right column with something the editor needs that the wizard
-          didn't (the wizard had the menu viewer for source verification during
-          audit; the editor needs market context for ongoing edits)
-        - Purchase justification at the export paywall: tangible value beyond
-          extraction
+      PRICING DECISION (April 13):
+        - Competitor price intelligence gated behind paid tiers
+        - Free: no competitor data
+        - $50 one-time: full competitor intel on first upload (the "no-brainer")
+        - $80/month: unlimited competitor comparisons
+        - See Day 141.7 for Apify integration plan
 
-      EFFORT BREAKDOWN:
-        - Editor → wizard template fork: 2-3 hrs
-        - Map integration with Google Places data: 2-4 hrs
-        - Pin click popups: 1-2 hrs
-        - Right column toggle (map / original menu): 1 hr
-        - Polish + testing: 1-2 hrs
-        Total: 7-12 hours focused work
-
-      WHAT WE ARE NOT DOING ON DAY 141.5:
-        - Touching exporters (that's Day 142)
-        - Menu scraping or "click pin to see their menu inline" (Phase 2 stretch)
-        - Competitor filtering by cuisine type (Phase 2)
-        - Removing the menu image viewer entirely — keep as toggleable option
-        - Restructuring the internal data model
-
-      PHASE 2 (LATER, OPTIONAL):
-        - Click pin → fetch their menu image from Google Places photos API
-        - "Compare your prices" overlay highlighting outliers vs nearby competitors
-        - Filter pins by cuisine type
-        - Show only competitors with comparable items toggle
+      KNOWN LIMITATION: Claude web search gets partial menu data (~15-40 items
+      vs full menus of 80-200). Day 141.7 replaces this with Apify delivery
+      platform scrapers for 100% reliable data.
 
   [ ] Day 141.6: Multi-Restaurant Workflow + Wizard Confirmation (HIGH PRIORITY)
       WHY: Day 141.5 fixes the editor's visual feel. Day 141.6 fixes the
@@ -2598,78 +2567,199 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-143)
         - Polish + testing: 1-2 hrs
         Total: 12-20 hrs focused work
 
-  [ ] Day 142: Ingredient List → Modifier Group Conversion (HIGH PRIORITY)
-      WHY: Real POS systems (Square, Toast, Clover) expect ingredient lists as
-      MODIFIER GROUPS, not description text. Right now we extract "All sandwiches
-      come with lettuce, tomato, bacon, French Fries and pickles" into the item's
-      description field. This means a customer asking "no pickles" forces the
-      cashier to type a manual modifier note — inconsistent kitchen tickets, no
-      analytics, no allergy tracking. To deliver on the "15-30 minute onboarding"
-      promise, we have to do this conversion ourselves, not push it to the user.
+  [ ] Day 141.7: Apify Integration for Real Competitor Price Intelligence
+      WHY: Day 141.5 built the competitor comparison pipeline but Claude web
+      search only gets partial menu data (~15-40 items). Apify has dedicated
+      DoorDash/Grubhub/UberEats scrapers that return COMPLETE menus with real
+      prices — 100% reliable. This is the missing piece that makes competitor
+      price intelligence a premium feature worth paying for.
 
-      DETECTION (already working):
-        - Shared section descriptions like "All [section] come with X, Y, Z" are
-          already being detected and applied to every item in that section.
-        - Currently they land in the description field. We need to redirect them
-          into draft_modifier_groups instead.
+      THE PLAN:
+        1. Sign up for Apify (self-serve, pay-as-you-go, $0.01/menu item)
+        2. Replace _claude_web_search_menu() with Apify API calls
+           - Try DoorDash scraper first (best coverage)
+           - Fall back to Grubhub, then UberEats
+           - Same competitor_menus cache table, 7-day TTL
+        3. Gate behind tier check:
+           - Free: no competitor data, comparison modal shows "Upgrade" prompt
+           - $50 one-time: full intel on first upload (bundled with free export)
+           - $80/month: unlimited competitor comparisons + refreshes
 
-      WORK:
-        1. Detection regex: identify "comes with" / "includes" / "stuffed with"
-           / "topped with" / "served with" + comma list patterns. Distinguish
-           from prep notes ("served with sauce on the side") and existing
-           handled patterns (Bread Options, Wing Sauces, Preparation).
-        2. Splitter: break "lettuce, tomato, bacon, French Fries and pickles"
-           into individual ingredients. Handle "and"/"&", parentheticals,
-           "with side of X" suffixes.
-        3. Backend: create a draft_modifier_group with name "Includes" (or
-           "Comes With"), min_select=0, max_select=N, attach default-on $0
-           modifiers for each ingredient. Tables already exist from Phase 12.
-        4. Wizard rendering: show modifier group as expandable checkbox list
-           on each item card, similar to variant rows but with checkboxes.
-        5. Description field: cleared (or marked as "converted") when ingredient
-           list is converted to modifiers.
-        6. Test against the pizza/club sandwiches menu we've been using.
+      COST:
+        - ~$0.80-1.50 per competitor menu (~80-150 items × $0.01)
+        - 3-5 competitors per area = ~$4-8 first time, cached 7 days
+        - $50 customer: spend ~$8-15 → $35-42 margin
+        - $80/month customer: ~$8-15 first month, cached → $65-72/month
 
-      EDGE CASES:
-        - Apostrophes in ingredients ("chef's choice")
-        - "And/or" handling vs "and" comma list
-        - "With side of X" should attach X as a modifier, not be treated as
-          a separate phrase
-        - Some menus have "no substitutions" — flag, don't create modifiers
-        - When export hits a POS that doesn't support modifier groups, fall
-          back to description text (round-trip safe)
+      EFFORT: ~4-6 hrs focused work
 
-      ROUGH ESTIMATE: ~4-6 hours focused work. NOT a full sprint.
+================================================================================
+Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
+================================================================================
 
-      WHY THIS MATTERS STRATEGICALLY:
-        - Without it, MenuShip is "we extract the menu but you finish the work"
-        - With it, MenuShip is genuinely POS-ready
-        - This is the difference between "a tool" and "a service"
-        - When talking to restaurant owners about Stripe + POS integration,
-          the answer to "but my POS uses modifiers" becomes "we handle that"
+  STATUS: Kickoff of the exporter-first strategy locked in 2026-04-11. Goal:
+  five POS exporters at "bulletproof" — meaning 15-20 varied real menus
+  importing into each POS sandbox with ZERO errors. ONE POS at a time. See
+  project_exporter_first_strategy.md and project_pre_launch_exporter_qa.md.
 
-  [ ] Day 143: Non-image format support + polish
-      - CSV/XLSX: render as HTML table preview, highlight source row per item
-      - JSON: render as formatted view, highlight source object per item
-      - MUST WORK FOR ALL IMPORT FORMATS — universal "show me the original source" viewer
-      - Edge cases, prompt tuning, testing
-  [ ] Category-level price intelligence display
-      - Price comparison badges per item (underpriced/fair/overpriced)
-      - Suggested price ranges from Claude Call 4
-  [ ] Quick-fix actions: merge duplicates, bulk re-categorize
-  [ ] Suggested modifier group templates per category ("Apply Size to all?")
-  [ ] Review summary + handoff
-      - Summary screen: X items across Y categories, Z modifier groups
-      - Stats: high/medium/low confidence breakdown
-      - "Go to Full Editor" button lands in editor with everything pre-loaded
-      - "Export Now" shortcut for users who trust the AI result
-  [ ] First POS export flow
-      - After wizard completion: prominent "Export to Square/Toast" CTA
-      - First export included in $50 (no additional charge)
-      - Format selection: Square CSV, Toast CSV, Generic POS JSON
-      - Download or direct push (when POS OAuth ships later)
+  IMPORTANT: Each "day" in this sprint is a workflow unit, NOT a calendar
+  day. Realistically each Day 142-146 spans 1-2 weeks of calendar time
+  (extraction fixes, exporter rewrite, test menu library, sandbox iteration
+  loop until errors hit zero across the corpus). The day-numbering is just
+  the workflow shorthand the user prefers — "ready for the next day" works
+  whether the day took 8 hours or 8 days.
 
-Sprint 13.4 — Stripe Payment Gate (Days 144-148)
+  WHY THIS COMES FIRST:
+  - Without bulletproof exporters, the POS partner pitch can't land — a
+    demo that fails at the import step is worse than no demo
+  - The exporters are the load-bearing piece for the entire B2B motion
+  - Per feedback_internal_model_is_the_product.md, exporters absorb POS
+    quirks; the internal model stays generic. This sprint is where that
+    promise gets cashed
+  - Building any POS-pro UI before exporters work would be presentation
+    ahead of substance (project_dual_view_architecture.md is PAUSED)
+
+  ============================================================
+  Day 142 — Square Exporter
+  ============================================================
+
+  [ ] Step 1: Internal model fix — toppings as section-wide modifier groups
+      THIS IS THE UNBLOCKER. The 2026-04-10 Square test export produced
+      104/157 row errors specifically because duplicate "Pepperoni" rows
+      collide on Square's global-name-ID rule. That collision goes away
+      once toppings stop being phantom items and become a single modifier
+      group attached to every item in the section.
+
+      Full plan: project_day142_modifier_conversion.md. Highlights:
+        - Update Claude prompt to recognize "Build Your Own" sections
+        - Treat base item (CHEESE row) as the build-your-own item
+        - Recognize topping lists as modifier groups, not orderable items
+        - Output _modifier_groups: [{name, options, applies_to_all_in_section}]
+        - Backend: use existing draft_modifier_groups + modifier_group_id
+        - Wizard sidebar: "Toppings" labeled as modifier group, applies to N items
+        - Wizard item card: expandable modifier group section under variants
+
+      Also pulls in the original Day 142 ingredient-list conversion work
+      ("comes with X, Y, Z" → modifier group with $0 default-on options).
+      Both halves of the modifier model fix land here.
+
+  [ ] Step 2: Move Square CSV logic into storage/exporters/square.py
+      Currently lives in portal/app.py:4428-5350 mixed in with 11 other
+      export endpoints. Move into a dedicated module per the structure
+      proposed in project_exporter_first_strategy.md:
+        - SquareExporter(ExporterBase) with field schema as Python dict
+        - transform(internal_items) -> square_rows
+        - validate(internal_items) -> [warnings] (pre-flight check)
+        - Round-trip confidence score per export
+
+  [ ] Step 3: Build the test menu library
+      Collect 5-10 varied real menus (different cuisines, sizes, layouts,
+      complexity). Stash actual files in a versioned folder, not just
+      memory references. This becomes the regression corpus.
+
+  [ ] Step 4: QA loop — error reports ARE the test suite
+      Run each menu: extract → wizard → final draft → export to Square CSV
+      → import to Square sandbox → collect every error → categorize:
+        - Exporter bug → fix the exporter
+        - Internal model gap → add fields + extraction prompt updates
+        - POS quirk to absorb → special-case in exporter
+      Re-run, compare error counts, repeat until all 10 import with 0 errors.
+      Add 5-10 more varied menus, re-test, fix new edge cases.
+
+  [ ] BULLETPROOF GATE: 15-20 varied real menus import into Square sandbox
+      with ZERO errors. Only when this gate is hit does Square count as done.
+      Don't move to Day 143 before this gate passes.
+
+  ============================================================
+  Day 143 — Toast Exporter
+  ============================================================
+
+  [ ] Apply for Toast Developer Program access (do this EARLY during Day 142
+      — approval can take weeks)
+  [ ] storage/exporters/toast.py with Toast Configuration API field schema
+      (nested: Menu > MenuGroup > MenuItem > MenuOptionGroup > MenuItem)
+  [ ] transform() + validate() following the same pattern as Square
+  [ ] Toast supports nested modifiers and per-modifier pricing strategies —
+      richer than Square. Take advantage where the internal model has the data.
+  [ ] QA loop in Toast sandbox until 15-20 menus import with 0 errors
+  [ ] BULLETPROOF GATE before moving on
+
+  ============================================================
+  Day 144 — Clover Exporter
+  ============================================================
+
+  [ ] Clover Developer account + sandbox setup
+  [ ] storage/exporters/clover.py with Clover REST API field schema
+  [ ] transform() + validate() following the same pattern
+  [ ] Clover modifier groups are simpler than Toast, closer to Square
+  [ ] QA loop in Clover sandbox until 15-20 menus import with 0 errors
+  [ ] BULLETPROOF GATE before moving on
+
+  ============================================================
+  Day 145 — Lightspeed Exporter
+  ============================================================
+
+  [ ] Lightspeed Developer account (Restaurant K-Series target, NOT Retail)
+  [ ] storage/exporters/lightspeed.py with Lightspeed Restaurant API schema
+      ("Option Sets" / "Options" instead of "Modifier Groups" — same idea,
+      different naming)
+  [ ] transform() + validate() following the same pattern
+  [ ] QA loop in Lightspeed sandbox until 15-20 menus import with 0 errors
+  [ ] BULLETPROOF GATE before moving on
+
+  ============================================================
+  Day 146 — TouchBistro Exporter
+  ============================================================
+
+  [ ] TouchBistro Partner / Developer access (apply early)
+  [ ] storage/exporters/touchbistro.py with TouchBistro API field schema
+  [ ] transform() + validate() following the same pattern
+  [ ] iPad-native POS, popular with independents and small chains
+  [ ] QA loop until 15-20 menus import with 0 errors
+  [ ] BULLETPROOF GATE — sprint complete when this passes
+
+  NOTE: TouchBistro chosen as #5 over Aloha/NCR despite Aloha's larger raw
+  install base, because Aloha's integration story is gated/legacy and not
+  realistic for an early-stage push. Revisit Aloha post-launch if a partner
+  asks for it.
+
+  ============================================================
+  Day 147 — POS Pro View Evaluation
+  ============================================================
+
+  ONLY after all five exporters are bulletproof:
+
+  [ ] Analyze what the five POS schemas have in common and where they diverge
+  [ ] Use that evidence to decide whether to build a POS-pro-oriented UI:
+      - Option A: lightweight rename pass (subcategories → modifier groups +
+        attach-to-all-items-in-category) discussed 2026-04-11
+      - Option B: full forked POS pro view per the original (paused) plan
+      - Option C: nothing — strong exporters + a well-designed wizard cover
+        both audiences without a UI fork
+  [ ] Validate the decision with at least one POS-pro contact before building
+  [ ] Update project_dual_view_architecture.md with the chosen direction
+
+  See project_dual_view_architecture.md (PAUSED) for the original dual-view
+  plan and project_exporter_first_strategy.md for why this analysis comes
+  AFTER exporters, not before.
+
+  ============================================================
+  WORK MOVED OUT OF THIS SLOT (resumes after Sprint 13.3.5 completes)
+  ============================================================
+
+  These items were originally planned for Days 143+ but are paused until
+  the exporter sprint finishes. Sequence and scope unchanged, just shifted:
+
+  [ ] Non-image format support (CSV/XLSX/JSON viewer with source-row highlight)
+  [ ] Category-level price intelligence display (badges, suggested ranges)
+  [ ] Quick-fix actions (merge duplicates, bulk re-categorize)
+  [ ] Suggested modifier group templates per category
+  [ ] Review summary + handoff screen
+  [ ] First POS export flow — note: largely redundant once Sprint 13.3.5
+      is done. The "Export to POS" CTA in the wizard hands off to the now-
+      bulletproof exporters directly. Roll into the wizard polish work.
+
+Sprint 13.4 — Stripe Payment Gate (Days 148-152)
 ..................................................
   [ ] Stripe Checkout integration
       - $50 AI parse — one-time payment per menu
@@ -2694,7 +2784,7 @@ Sprint 13.4 — Stripe Payment Gate (Days 144-148)
       - Seasonal menu change or major overhaul → new $50 payment
       - Existing saved menus remain editable/exportable forever
 
-Sprint 13.5 — POS Partner Integration & B2B Go-To-Market (Days 149-154)
+Sprint 13.5 — POS Partner Integration & B2B Go-To-Market (Days 153-158)
 .......................................................................
 
   GO-TO-MARKET STRATEGY:
@@ -2768,8 +2858,15 @@ Sprint 13.5 — POS Partner Integration & B2B Go-To-Market (Days 149-154)
       - Request queuing for high-volume partners
       - Usage logging for renegotiation data (the receipts)
 
-Sprint 13.6 — POS OAuth & Live Push (Days 155-167)
+Sprint 13.6 — POS OAuth & Live Push (Days 159-171)
 ...................................................
+  CROSS-REFERENCE: The data mappers planned in this sprint (Square / Toast /
+  Clover JSON-to-API schemas) will already EXIST as storage/exporters/*.py
+  modules from Sprint 13.3.5. This sprint should REUSE those transform()
+  functions and just wrap them in OAuth + API push instead of CSV download.
+  Don't duplicate the schema work. Lightspeed and TouchBistro OAuth come
+  for free since their exporters were also built in Sprint 13.3.5.
+
   CONTEXT: The $10 POS export should push directly into the restaurant's POS
   account — not just download a file. This is what makes $10 feel effortless.
   "Click Export → it's in your Square account." Ship this before launch.
@@ -2814,7 +2911,7 @@ Sprint 13.6 — POS OAuth & Live Push (Days 155-167)
       - Push confirmation screen: "X items, Y modifiers sent to Square ✓"
       - Push history: when, what, how many items, success/failure
 
-Sprint 13.7 — QR Code Digital Menus (Days 168-174)
+Sprint 13.7 — QR Code Digital Menus (Days 172-178)
 ...................................................
   CONTEXT: You already have clean, structured menu data. Generating a hosted
   digital menu with a QR code is trivial on top of that — and it's a killer
@@ -2887,7 +2984,7 @@ Sprint 13.7 — QR Code Digital Menus (Days 168-174)
       - Multiple sizes: small (table sticker), medium (tent card), large (poster)
       - Instructions page: "How to use your QR code menu"
 
-Phase 14 — Menu Intelligence Features (Days 175-194)
+Phase 14 — Menu Intelligence Features (Days 179-198)
 ------------------------------------------------------
   CONTEXT: These features are the competitive moat. Any engineer can build
   OCR + AI verification. What they can't replicate is a system that truly
