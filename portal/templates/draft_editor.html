@@ -2585,7 +2585,7 @@
         const card = document.querySelector(`.wiz-item[data-item-id="${newItemId}"]`);
         if (card) {
           const nameInput = card.querySelector('.wiz-f-name');
-          if (nameInput && nameInput.value === 'New Item') nameInput.value = '';
+          if (nameInput) nameInput.focus();
           wizEdit(card);
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }

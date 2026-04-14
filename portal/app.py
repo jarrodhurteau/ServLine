@@ -7903,7 +7903,7 @@ def wizard_add_item(draft_id: int):
 
     # Insert at the end of the category
     result = drafts_store.upsert_draft_items(draft_id, [{
-        "name": "New Item",
+        "name": "",
         "description": "",
         "price_cents": 0,
         "category": category,
@@ -7969,7 +7969,7 @@ def wizard_delete_category(draft_id: int):
                 else:
                     # Only delete if empty or just placeholders
                     conn.execute(
-                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND subcategory=? AND name='New Item' AND price_cents=0",
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND subcategory=? AND (name='' OR name='New Item') AND price_cents=0",
                         (draft_id, category, subcategory),
                     )
                     remaining = conn.execute(
@@ -7987,7 +7987,7 @@ def wizard_delete_category(draft_id: int):
                     )
                 else:
                     conn.execute(
-                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND name='New Item' AND price_cents=0",
+                        "DELETE FROM draft_items WHERE draft_id=? AND category=? AND (name='' OR name='New Item') AND price_cents=0",
                         (draft_id, category),
                     )
                     remaining = conn.execute(

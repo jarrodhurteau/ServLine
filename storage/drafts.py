@@ -562,11 +562,9 @@ def _normalize_item_for_db(raw: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
 
-    # Name (required)
+    # Name (allow empty for placeholder items in editor)
     name_raw = raw.get("name")
     name = str(name_raw).strip() if name_raw is not None else ""
-    if not name:
-        return None  # Finalize / editor will silently drop nameless rows
 
     # Description (optional, always string)
     desc_raw = raw.get("description")
