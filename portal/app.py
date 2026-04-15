@@ -2890,51 +2890,11 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
             print(f"[Draft] ERROR creating draft items: {_draft_err}")
             import traceback; traceback.print_exc()
 
-        # =====================================================================
-        # CALL 4: PRICE INTELLIGENCE — Sprint 13.2 (Day 136)
-        # Runs after draft items are persisted (needs draft_id to read from DB).
-        # Non-blocking: if it fails, the import still succeeds.
-        # =====================================================================
-        _gate_passed = (gate_result is None or gate_result.passed)
-        if items and _gate_passed and draft_id:
-            update_import_job(job_id, pipeline_stage="analyzing_prices")
-            try:
-                from storage.pipeline_metrics import STEP_CALL4_PRICE
-                if tracker:
-                    tracker.start_step(STEP_CALL4_PRICE)
-                _job_row = get_import_job(job_id)
-                _rest_id = _job_row["restaurant_id"] if _job_row else None
-                if _rest_id and ai_price_intel:
-                    price_intel_result = ai_price_intel.analyze_menu_prices(
-                        draft_id=int(draft_id),
-                        restaurant_id=int(_rest_id),
-                    )
-                    if price_intel_result and not price_intel_result.get("error"):
-                        assessed = price_intel_result.get("items_assessed", 0)
-                        total = price_intel_result.get("total_items", 0)
-                        if tracker:
-                            tracker.end_step(STEP_CALL4_PRICE, items_assessed=assessed, total=total)
-                        print(f"[Draft] Call 4 (Price Intel): {assessed}/{total} items assessed")
-                    elif price_intel_result and price_intel_result.get("error"):
-                        if tracker:
-                            tracker.fail_step(STEP_CALL4_PRICE, price_intel_result["error"])
-                        print(f"[Draft] Call 4 error: {price_intel_result['error']}")
-                    else:
-                        if tracker:
-                            tracker.skip_step(STEP_CALL4_PRICE, "empty_result")
-                else:
-                    skip_reason = "no_restaurant" if not _rest_id else "ai_price_intel_unavailable"
-                    if tracker:
-                        tracker.skip_step(STEP_CALL4_PRICE, skip_reason)
-                    print(f"[Draft] Call 4 skipped ({skip_reason})")
-            except Exception as _price_err:
-                if tracker:
-                    try:
-                        from storage.pipeline_metrics import STEP_CALL4_PRICE as _s4
-                        tracker.fail_step(_s4, str(_price_err))
-                    except Exception:
-                        pass
-                print(f"[Draft] Call 4 (Price Intel) failed: {_price_err}")
+        # Day 141.8: Call 4 (Price Intelligence) moved OUT of the import
+        # pipeline. It now runs on-demand after the restaurant-details
+        # confirmation screen, gated by tier. Keeps upload fast and lets
+        # users verify their own restaurant info before we scrape
+        # competitor prices for comparison.
 
         # Mark done AFTER items are in DB so auto-redirect shows populated editor
         if gate_result is not None and not gate_result.passed:
@@ -6770,20 +6730,8 @@ def draft_wizard(draft_id: int):
         if current_category is None and category_list:
             current_category = category_list[-1]
 
-    # Price intelligence (if available)
-    price_intel = None
-    try:
-        from storage.ai_price_intel import get_price_intelligence
-        price_intel = get_price_intelligence(draft_id)
-    except Exception:
-        pass
-
-    # Build per-item price assessment lookup
-    price_map = {}
-    if price_intel and price_intel.get("assessments"):
-        for a in price_intel["assessments"]:
-            if a.get("item_id"):
-                price_map[a["item_id"]] = a
+    # Day 141.8: price intel no longer loaded in wizard — moved to
+    # post-confirmation trigger, displayed only in the editor.
 
     # Restaurant info for summary page
     restaurant = None
@@ -6800,6 +6748,7 @@ def draft_wizard(draft_id: int):
             pass
 
     # Day 141.6: Load user's restaurants for confirmation screen
+    # Day 141.8: include cuisine_type so user can verify it before price scrape
     user_restaurants = []
     if wizard_step == "confirmation":
         u = session.get("user") or {}
@@ -6807,7 +6756,6 @@ def draft_wizard(draft_id: int):
         if uid and users_store:
             try:
                 user_restaurants = users_store.get_user_restaurants(uid)
-                # Enrich with address/phone for display
                 for ur in user_restaurants:
                     try:
                         full = users_store.get_restaurant(ur["restaurant_id"])
@@ -6817,6 +6765,7 @@ def draft_wizard(draft_id: int):
                             ur["city"] = full.get("city") or ""
                             ur["state"] = full.get("state") or ""
                             ur["zip_code"] = full.get("zip_code") or ""
+                            ur["cuisine_type"] = full.get("cuisine_type") or ""
                     except Exception:
                         pass
             except Exception:
@@ -6863,8 +6812,6 @@ def draft_wizard(draft_id: int):
         current_subcategory=requested_subcat,
         wizard_step=wizard_step,
         restaurant=restaurant,
-        price_map=price_map,
-        price_intel=price_intel,
         source_job_id=source_job_id,
         source_is_structured=source_is_structured,
         item_coordinates=item_coordinates,
@@ -6977,8 +6924,9 @@ def wizard_complete_review(draft_id: int):
 @app.post("/drafts/<int:draft_id>/wizard/finalize")
 @login_required
 def wizard_finalize(draft_id: int):
-    """Day 141.6: Confirmation screen submit — assign restaurant + menu title,
-    then land in the editor."""
+    """Day 141.6 / 141.8: Confirmation screen submit — assign restaurant + menu
+    title. Premium users with a restaurant get routed through the price-intel
+    analyzer; everyone else lands directly in the editor."""
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id)
     if not draft:
@@ -6991,19 +6939,90 @@ def wizard_finalize(draft_id: int):
         from datetime import datetime
         menu_title = f"Imported {datetime.utcnow().strftime('%b %d')}"
 
-    # Save title
     drafts_store.save_draft_metadata(draft_id, title=menu_title)
 
-    # Assign restaurant if provided
+    rid_int = None
     if restaurant_id:
         try:
-            rid = int(restaurant_id)
-            drafts_store.save_draft_metadata(draft_id, restaurant_id=rid)
+            rid_int = int(restaurant_id)
+            drafts_store.save_draft_metadata(draft_id, restaurant_id=rid_int)
         except (ValueError, TypeError):
-            pass
+            rid_int = None
+
+    # Day 141.8: route premium users through the price-intel analyzer first.
+    u = session.get("user") or {}
+    tier = (u.get("account_tier") or "free").lower()
+    if tier == "premium" and rid_int and ai_price_intel:
+        return redirect(url_for("draft_analyzing_prices", draft_id=draft_id))
 
     flash("All categories reviewed! Welcome to the full editor.", "success")
     return redirect(url_for("draft_editor", draft_id=draft_id))
+
+
+# Day 141.8: background status tracker for post-wizard price analysis.
+# Simple in-memory dict keyed by draft_id. Each entry:
+#   {"status": "running"|"done"|"error", "started_at": ts, "error": str|None}
+_PRICE_ANALYSIS_JOBS: dict = {}
+_PRICE_ANALYSIS_LOCK = threading.Lock()
+
+
+def _run_price_analysis_job(draft_id: int, restaurant_id: int) -> None:
+    """Background worker: runs Claude Call 4 and updates the status dict."""
+    try:
+        result = ai_price_intel.analyze_menu_prices(
+            draft_id=draft_id,
+            restaurant_id=restaurant_id,
+        )
+        with _PRICE_ANALYSIS_LOCK:
+            if result and result.get("error"):
+                _PRICE_ANALYSIS_JOBS[draft_id] = {
+                    "status": "error",
+                    "error": result["error"],
+                }
+            else:
+                _PRICE_ANALYSIS_JOBS[draft_id] = {"status": "done", "error": None}
+    except Exception as e:
+        with _PRICE_ANALYSIS_LOCK:
+            _PRICE_ANALYSIS_JOBS[draft_id] = {
+                "status": "error",
+                "error": f"{type(e).__name__}: {e}",
+            }
+
+
+@app.get("/drafts/<int:draft_id>/analyzing-prices")
+@login_required
+def draft_analyzing_prices(draft_id: int):
+    """Loading screen that kicks off Call 4 in a background thread and
+    polls for completion before redirecting to the editor."""
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+
+    rid = draft.get("restaurant_id")
+    if not rid or not ai_price_intel:
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    with _PRICE_ANALYSIS_LOCK:
+        job = _PRICE_ANALYSIS_JOBS.get(draft_id)
+        if not job or job.get("status") == "error":
+            _PRICE_ANALYSIS_JOBS[draft_id] = {"status": "running", "error": None}
+            threading.Thread(
+                target=_run_price_analysis_job,
+                args=(draft_id, int(rid)),
+                daemon=True,
+            ).start()
+
+    return _safe_render("analyzing_prices.html", draft=draft)
+
+
+@app.get("/api/drafts/<int:draft_id>/analyzing-prices/status")
+@login_required
+def api_analyzing_prices_status(draft_id: int):
+    """Poll endpoint for the analyzing-prices page."""
+    with _PRICE_ANALYSIS_LOCK:
+        job = _PRICE_ANALYSIS_JOBS.get(draft_id) or {"status": "unknown"}
+    return jsonify(job)
 
 
 @app.get("/drafts/<int:draft_id>/source_file")

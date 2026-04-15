@@ -762,12 +762,7 @@ def analyze_menu_prices(
             "total_items": len(items),
         }
 
-    # Get competitor data from Google Places (cached from Day 134)
-    competitor_data = get_cached_comparisons(restaurant_id)
-    market_summary = get_market_summary(restaurant_id)
-
-    # Day 141.7: Fetch real competitor menus via Apify (premium tier only)
-    # Uses owner's tier; if multiple users, premium wins.
+    # Day 141.7: Tier lookup (premium wins if multiple users linked)
     user_tier = "free"
     try:
         linked_users = get_restaurant_users(restaurant_id)
@@ -778,6 +773,36 @@ def analyze_menu_prices(
                 break
     except Exception as e:
         log.warning("Tier lookup failed for restaurant %d: %s", restaurant_id, e)
+
+    # Get competitor data from Google Places (cached from Day 134).
+    # Day 141.8: if cache is empty, auto-trigger the search here so the
+    # post-wizard analyzer is fully self-contained. Premium-only — free
+    # tier doesn't need competitor data since Apify scraping is gated.
+    competitor_data = get_cached_comparisons(restaurant_id)
+    if not competitor_data and user_tier == "premium":
+        log.info(
+            "Price intel: no cached nearby competitors for rest %d — "
+            "running Google Places search now",
+            restaurant_id,
+        )
+        try:
+            from storage.price_intel import search_nearby_restaurants
+            search_result = search_nearby_restaurants(restaurant_id, force_refresh=False)
+            if search_result.get("error"):
+                log.warning(
+                    "Price intel: nearby search failed for rest %d: %s",
+                    restaurant_id, search_result["error"],
+                )
+            else:
+                competitor_data = get_cached_comparisons(restaurant_id)
+                log.info(
+                    "Price intel: nearby search populated %d competitors for rest %d",
+                    len(competitor_data), restaurant_id,
+                )
+        except Exception as e:
+            log.warning("Price intel: nearby search raised for rest %d: %s", restaurant_id, e)
+
+    market_summary = get_market_summary(restaurant_id)
 
     competitor_menus = []
     if competitor_data:

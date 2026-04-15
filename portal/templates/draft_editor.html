@@ -5018,9 +5018,17 @@
     }
 
     // Load Google Maps API
+    function _showMapError(reason) {
+      mapEl.innerHTML =
+        '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;color:var(--muted);font-size:.82rem;gap:6px;">' +
+          '<div style="font-size:1.4rem;">🗺️</div>' +
+          '<div style="font-weight:600;color:var(--ink,#2C2C2C);">Map unavailable</div>' +
+          '<div style="max-width:240px;line-height:1.4;">' + reason + '</div>' +
+        '</div>';
+    }
     window.gm_authFailure = function() {
-      // Google Maps auth failure — hide the broken map, keep the list
-      mapEl.style.display = 'none';
+      console.warn('Google Maps auth failure — enable Maps JavaScript API on your Google Cloud key.');
+      _showMapError('Enable "Maps JavaScript API" on your Google Cloud project to see pins.');
     };
     window._editorInitMap = function() {
       window._editorMapLoaded = true;
@@ -5082,21 +5090,17 @@
     script.src = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&callback=_editorInitMap`;
     script.async = true;
     script.defer = true;
-    script.onerror = function() { mapEl.style.display = 'none'; };
+    script.onerror = function() {
+      _showMapError('Could not load Google Maps. Check your network or API key.');
+    };
     document.head.appendChild(script);
 
-    // Watch for Google's error overlay and hide the map if it appears
-    const observer = new MutationObserver(() => {
-      const dismissBtn = mapEl.querySelector('.dismissButton, [style*="z-index: 1"]');
-      const errorText = mapEl.querySelector('[style*="background-color: white"]');
-      if (dismissBtn || errorText || mapEl.textContent.includes('Oops')) {
-        mapEl.style.display = 'none';
-        observer.disconnect();
+    // Fallback: if the map never initializes within 8s, show a helpful message.
+    setTimeout(() => {
+      if (!window._editorMapLoaded) {
+        _showMapError('Google Maps did not respond. Check API key and that "Maps JavaScript API" is enabled.');
       }
-    });
-    observer.observe(mapEl, { childList: true, subtree: true });
-    // Stop watching after 10s regardless
-    setTimeout(() => observer.disconnect(), 10000);
+    }, 8000);
   })();
 
   /* Pan map to a competitor */

@@ -174,9 +174,15 @@ def _get_api_key() -> str:
 
 
 def _geocode_zip(zip_code: str, api_key: str) -> Optional[Dict[str, float]]:
-    """Convert a US zip code to lat/lng via Google Geocoding API."""
+    """Convert a US zip code to lat/lng via Google Geocoding API.
+
+    Accepts ZIP+4 ("01001-2543") — strips the suffix so the 5-digit base
+    is used (Google's geocoder tolerates both, but the 5-digit form is
+    also used as the cache key, so we normalize here).
+    """
+    zip5 = (zip_code or "").strip().split("-", 1)[0]
     params = urllib.parse.urlencode({
-        "address": zip_code,
+        "address": zip5,
         "components": "country:US",
         "key": api_key,
     })
@@ -354,7 +360,8 @@ def search_nearby_restaurants(
     if not restaurant:
         return {"error": "Restaurant not found", "results": [], "result_count": 0}
 
-    zip_code = (restaurant.get("zip_code") or "").strip()
+    # Normalize ZIP+4 ("01001-2543") to 5-digit form for consistent cache keys
+    zip_code = (restaurant.get("zip_code") or "").strip().split("-", 1)[0]
     cuisine_type = (restaurant.get("cuisine_type") or "other").strip().lower()
 
     if not zip_code:

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Analyzing competitor prices · MenuFlow{% endblock %}
+
+{% block content %}
+<section style="max-width:520px; margin:40px auto; padding:0 16px;">
+  <div class="card" style="padding:40px 28px; text-align:center;">
+    <div class="ap-spinner" aria-hidden="true"></div>
+    <h1 style="font-size:1.25rem; font-weight:700; margin:18px 0 8px; color:var(--ink, #2C2C2C);">
+      Checking your local market
+    </h1>
+    <p style="color:var(--muted); font-size:.92rem; line-height:1.55; margin:0 auto 16px; max-width:380px;">
+      We're looking at nearby restaurants to show how similar items are priced in your area.
+    </p>
+    <div id="ap-status" style="font-size:.82rem; color:var(--muted); min-height:1.2em;">Starting…</div>
+
+    <div style="margin-top:28px;">
+      <a href="{{ url_for('draft_editor', draft_id=draft.id) }}"
+         style="display:inline-block; font-size:.82rem; color:var(--muted); text-decoration:underline;">
+        Skip and open the editor
+      </a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .ap-spinner {
+    display: inline-block;
+    width: 48px;
+    height: 48px;
+    border: 4px solid rgba(184, 92, 56, 0.15);
+    border-top-color: #B85C38;
+    border-radius: 50%;
+    animation: ap-spin 0.9s linear infinite;
+  }
+  @keyframes ap-spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+(function () {
+  const DRAFT_ID = {{ draft.id }};
+  const EDITOR_URL = {{ url_for('draft_editor', draft_id=draft.id)|tojson }};
+  const STATUS_URL = "/api/drafts/" + DRAFT_ID + "/analyzing-prices/status";
+  const statusEl = document.getElementById('ap-status');
+
+  const rotations = [
+    "Finding restaurants in your area…",
+    "Gathering nearby menu prices…",
+    "Matching items similar to yours…",
+    "Noticing local pricing patterns…",
+    "Building your market overview…",
+  ];
+  let rotIdx = 0;
+  const rotateTimer = setInterval(() => {
+    rotIdx = (rotIdx + 1) % rotations.length;
+    if (statusEl) statusEl.textContent = rotations[rotIdx];
+  }, 4500);
+
+  function poll() {
+    fetch(STATUS_URL, { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'done') {
+          clearInterval(rotateTimer);
+          statusEl.textContent = "Done! Opening editor…";
+          setTimeout(() => { window.location.href = EDITOR_URL; }, 400);
+          return;
+        }
+        if (data.status === 'error') {
+          clearInterval(rotateTimer);
+          statusEl.textContent = "Couldn't finish analysis. Opening editor anyway…";
+          setTimeout(() => { window.location.href = EDITOR_URL; }, 1500);
+          return;
+        }
+        setTimeout(poll, 2500);
+      })
+      .catch(() => setTimeout(poll, 2500));
+  }
+
+  setTimeout(poll, 1500);
+})();
+</script>
+{% endblock %}

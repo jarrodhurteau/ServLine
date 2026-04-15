@@ -1292,25 +1292,7 @@
       {% endfor %}
     </div>
 
-    {% if price_intel and price_intel.items_assessed %}
-    <div class="card" style="padding:20px; margin-bottom:20px;">
-      <div style="font-weight:700; font-size:.95rem; margin-bottom:12px; color:var(--ink);">Price Intelligence</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
-        <div>
-          <div style="font-size:1.3rem; font-weight:700; color:#34d058;">{{ price_intel.fair_priced }}</div>
-          <div style="font-size:.78rem; color:var(--muted);">Fair</div>
-        </div>
-        <div>
-          <div style="font-size:1.3rem; font-weight:700; color:#60a5fa;">{{ price_intel.underpriced }}</div>
-          <div style="font-size:.78rem; color:var(--muted);">Underpriced</div>
-        </div>
-        <div>
-          <div style="font-size:1.3rem; font-weight:700; color:#fbbf24;">{{ price_intel.overpriced }}</div>
-          <div style="font-size:.78rem; color:var(--muted);">Overpriced</div>
-        </div>
-      </div>
-    </div>
-    {% endif %}
+    {# Day 141.8: price intel removed from wizard — runs after confirmation #}
 
     <!-- Begin review button -->
     <div style="text-align:center; padding:16px 0;">
@@ -1357,30 +1339,54 @@
                 onchange="wizConfirmRestaurantChanged(this)" required>
           <option value="" disabled {% if not draft.restaurant_id %}selected{% endif %}>Choose a restaurant...</option>
           {% for r in user_restaurants %}
-          <option value="{{ r.restaurant_id }}" {% if draft.restaurant_id == r.restaurant_id %}selected{% endif %}>
+          <option value="{{ r.restaurant_id }}"
+                  data-name="{{ r.restaurant_name|e }}"
+                  data-address="{{ r.address|e }}"
+                  data-city="{{ r.city|e }}"
+                  data-state="{{ r.state|e }}"
+                  data-zip="{{ r.zip_code|e }}"
+                  data-cuisine="{{ r.cuisine_type|e }}"
+                  {% if draft.restaurant_id == r.restaurant_id %}selected{% endif %}>
             {{ r.restaurant_name|e }}{% if r.address %} &mdash; {{ r.address|e }}{% endif %}
           </option>
           {% endfor %}
           <option value="__new__">+ Create New Restaurant</option>
         </select>
+
+        {# Day 141.8: verify panel — user must confirm these details are correct,
+           because we use them to find competitors for price comparison. #}
+        <div id="wiz-verify-panel" style="display:none; margin-top:14px; padding:14px 16px; border:1.5px solid #d5c4a1; border-radius:8px; background:#faf7f2;">
+          <div style="font-size:.78rem; font-weight:700; color:#B85C38; text-transform:uppercase; letter-spacing:.04em; margin-bottom:10px;">
+            Please confirm before we compare prices
+          </div>
+          <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:.88rem; color:var(--ink);">
+            <div style="color:var(--muted);">Restaurant</div><div id="wiz-verify-name" style="font-weight:600;">—</div>
+            <div style="color:var(--muted);">Address</div><div id="wiz-verify-address">—</div>
+            <div style="color:var(--muted);">Cuisine</div><div id="wiz-verify-cuisine">—</div>
+          </div>
+          <div id="wiz-verify-warning" style="display:none; margin-top:10px; padding:8px 10px; background:rgba(220,53,69,.08); border:1px solid rgba(220,53,69,.3); border-radius:6px; font-size:.8rem; color:#dc3545;"></div>
+          <div style="margin-top:10px; font-size:.78rem; color:var(--muted);">
+            Something wrong? <a href="{{ url_for('restaurants_index') if false else '#' }}" id="wiz-verify-edit" style="color:#B85C38; text-decoration:underline;">Edit restaurant details</a> first.
+          </div>
+        </div>
         {% else %}
         <input type="hidden" name="restaurant_id" id="wiz-restaurant-hidden" value="" />
         <div style="color:var(--muted); font-size:.9rem; margin-bottom:12px;">No restaurants yet. Create one below.</div>
         {% endif %}
 
         <!-- Inline new restaurant form (hidden by default) -->
-        <div id="wiz-new-restaurant-form" style="display:none; margin-top:16px; padding:16px; border:2px dashed #d5c4a1; border-radius:8px; background:#faf7f2;">
+        <div id="wiz-new-restaurant-form" style="display:none; margin-top:16px; padding:16px; border:2px dashed #d5c4a1; border-radius:8px; background:#faf7f2; box-sizing:border-box;">
           <div style="font-weight:600; font-size:.9rem; color:var(--ink); margin-bottom:12px;">New Restaurant</div>
           <div style="display:grid; gap:10px;">
-            <input type="text" id="wiz-new-rest-name" placeholder="Restaurant name *" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
-            <input type="text" id="wiz-new-rest-address" placeholder="Street address" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
-            <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
-              <input type="text" id="wiz-new-rest-city" placeholder="City" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
-              <input type="text" id="wiz-new-rest-state" placeholder="State" maxlength="2" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem; text-transform:uppercase;" />
-              <input type="text" id="wiz-new-rest-zip" placeholder="Zip" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-name" placeholder="Restaurant name *" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-address" placeholder="Street address" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px; min-width:0;">
+              <input type="text" id="wiz-new-rest-city" placeholder="City" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              <input type="text" id="wiz-new-rest-state" placeholder="State" maxlength="2" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem; text-transform:uppercase;" />
+              <input type="text" id="wiz-new-rest-zip" placeholder="Zip" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
             </div>
-            <input type="text" id="wiz-new-rest-phone" placeholder="Phone" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
-            <input type="text" id="wiz-new-rest-cuisine" placeholder="Cuisine type (e.g. Italian, Mexican)" style="padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-phone" placeholder="Phone" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+            <input type="text" id="wiz-new-rest-cuisine" placeholder="Cuisine type (e.g. Italian, Mexican)" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
             <div style="display:flex; gap:8px; justify-content:flex-end;">
               <button type="button" onclick="wizCancelNewRestaurant()" style="padding:8px 16px; border:1.5px solid #d5c4a1; border-radius:6px; background:#fff; color:var(--ink); cursor:pointer; font-size:.85rem;">Cancel</button>
               <button type="button" onclick="wizCreateNewRestaurant()" style="padding:8px 16px; border:none; border-radius:6px; background:#B85C38; color:#fff; cursor:pointer; font-weight:600; font-size:.85rem;">Create</button>
@@ -1410,13 +1416,60 @@
   <script>
   function wizConfirmRestaurantChanged(sel) {
     const newForm = document.getElementById('wiz-new-restaurant-form');
+    const panel = document.getElementById('wiz-verify-panel');
     if (sel.value === '__new__') {
       newForm.style.display = 'block';
+      if (panel) panel.style.display = 'none';
       document.getElementById('wiz-new-rest-name').focus();
-    } else {
-      newForm.style.display = 'none';
+      return;
     }
+    newForm.style.display = 'none';
+    wizUpdateVerifyPanel(sel);
   }
+
+  function wizUpdateVerifyPanel(sel) {
+    const panel = document.getElementById('wiz-verify-panel');
+    if (!panel) return;
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value || opt.value === '__new__') {
+      panel.style.display = 'none';
+      return;
+    }
+    const name = opt.dataset.name || '—';
+    const addr = opt.dataset.address || '';
+    const city = opt.dataset.city || '';
+    const state = opt.dataset.state || '';
+    const zip = opt.dataset.zip || '';
+    const cuisine = opt.dataset.cuisine || '';
+
+    const addrParts = [addr, [city, state].filter(Boolean).join(', '), zip].filter(Boolean);
+    document.getElementById('wiz-verify-name').textContent = name;
+    document.getElementById('wiz-verify-address').textContent = addrParts.join(' · ') || '(not set)';
+    document.getElementById('wiz-verify-cuisine').textContent = cuisine || '(not set)';
+
+    const missing = [];
+    if (!zip) missing.push('zip code');
+    if (!cuisine) missing.push('cuisine type');
+    const warn = document.getElementById('wiz-verify-warning');
+    if (missing.length) {
+      warn.style.display = 'block';
+      warn.textContent = 'Competitor comparison needs a ' + missing.join(' and a ') +
+        '. Update the restaurant before continuing.';
+    } else {
+      warn.style.display = 'none';
+    }
+
+    const editLink = document.getElementById('wiz-verify-edit');
+    if (editLink) editLink.href = '/restaurants/' + opt.value + '/detail';
+
+    panel.style.display = 'block';
+  }
+
+  // Render panel on page load if a restaurant is already selected
+  (function initVerifyPanel() {
+    const sel = document.getElementById('wiz-restaurant-select');
+    if (sel && sel.value && sel.value !== '__new__') wizUpdateVerifyPanel(sel);
+  })();
 
   function wizCancelNewRestaurant() {
     document.getElementById('wiz-new-restaurant-form').style.display = 'none';
@@ -1754,26 +1807,8 @@
               {% if it.low_confidence %}
               <span class="wiz-badge wiz-badge-low">Low confidence</span>
               {% endif %}
-
-              {% set pi = price_map.get(it.id) %}
-              {% if pi %}
-                {% set assess = pi.assessment or '' %}
-                {% if 'under' in assess %}
-                <span class="wiz-price-tag price-under" title="{{ pi.reasoning or '' }}">&#8593; Underpriced</span>
-                {% elif assess == 'fair' %}
-                <span class="wiz-price-tag price-fair" title="{{ pi.reasoning or '' }}">&#10003; Fair price</span>
-                {% elif 'over' in assess %}
-                <span class="wiz-price-tag price-over" title="{{ pi.reasoning or '' }}">&#8595; Overpriced</span>
-                {% endif %}
-              {% endif %}
+              {# Day 141.8: price-intel badges removed — shown in editor instead #}
             </div>
-
-            {% if pi and pi.suggested_low and pi.suggested_high %}
-            <div class="price-tooltip">
-              Suggested range: ${{ '%.2f'|format(pi.suggested_low / 100) }} &ndash; ${{ '%.2f'|format(pi.suggested_high / 100) }}
-              {% if pi.regional_avg %} &middot; Regional avg: ${{ '%.2f'|format(pi.regional_avg / 100) }}{% endif %}
-            </div>
-            {% endif %}
 
             {% if it.variants %}
             <div class="wiz-variants">
