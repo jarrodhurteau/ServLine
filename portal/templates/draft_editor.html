@@ -1609,6 +1609,50 @@
     }
     @keyframes comp-spin { to { transform: rotate(360deg); } }
 
+    /* Free-tier upgrade prompt (Day 141.7) */
+    .comparison-upgrade {
+      text-align: center;
+      padding: 48px 28px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    .comparison-upgrade-icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+    .comparison-upgrade-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text, #2C2C2C);
+    }
+    .comparison-upgrade-body {
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .comparison-upgrade-perks {
+      text-align: left;
+      display: inline-block;
+      margin: 0 auto 24px;
+      color: var(--text, #2C2C2C);
+      font-size: .9rem;
+      line-height: 1.8;
+    }
+    .comparison-upgrade-cta {
+      display: inline-block;
+      padding: 10px 22px;
+      background: var(--brand, #B85C38);
+      color: #fff !important;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .comparison-upgrade-cta:hover {
+      background: var(--brand-dark, #9b4a2b);
+    }
+
     /* Table */
     .comparison-table {
       width: 100%;
@@ -5123,8 +5167,26 @@
       credentials: 'same-origin',
       body: JSON.stringify({ competitor_name: compName })
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(r => r.json().then(d => ({ status: r.status, data: d })))
+    .then(({ status, data }) => {
+      if (status === 402 || data.error === 'upgrade_required') {
+        const upgradeUrl = data.upgrade_url || '/account';
+        const msg = data.message || 'Real competitor price comparisons require a paid plan.';
+        body.innerHTML = `
+          <div class="comparison-upgrade">
+            <div class="comparison-upgrade-icon">🔒</div>
+            <div class="comparison-upgrade-title">Upgrade to compare real prices</div>
+            <div class="comparison-upgrade-body">${msg}</div>
+            <div class="comparison-upgrade-perks">
+              <div>✓ Live DoorDash + Grubhub menu scraping</div>
+              <div>✓ Per-item side-by-side price deltas</div>
+              <div>✓ Unlimited comparisons, refreshed weekly</div>
+            </div>
+            <a href="${upgradeUrl}" class="comparison-upgrade-cta">See plans</a>
+          </div>`;
+        summary.style.display = 'none';
+        return;
+      }
       if (data.error) {
         body.innerHTML = `<div class="comparison-loading" style="color:#dc3545;">${data.error}</div>`;
         return;

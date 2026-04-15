@@ -193,11 +193,16 @@ def _fetch_competitor_menus(
     items: List[Dict[str, Any]],
     max_competitors: int = 5,
     max_fresh_searches: int = 3,
+    user_tier: str = "free",
 ) -> List[Dict[str, Any]]:
     """
     Fetch real menu data for the top same-tier competitors.
-    Checks cache first, web-searches if miss. Filters out competitors
+    Checks cache first, Apify-scrapes if miss. Filters out competitors
     with no category overlap.
+
+    Gated by tier (Day 141.7): free-tier users get no real competitor data —
+    Claude Call 4 falls back to market-rate estimates only. Paid tiers
+    (premium) get full Apify-scraped competitor menus.
 
     Returns list of:
         {
@@ -212,6 +217,11 @@ def _fetch_competitor_menus(
         }
     """
     from storage.price_intel import scrape_competitor_menu
+
+    # Tier gate: free users get no competitor scraping
+    if (user_tier or "free").lower() != "premium":
+        log.info("Price intel: skipping competitor menu fetch for non-premium tier (%s)", user_tier)
+        return []
 
     # Extract our categories
     our_cats = set()
@@ -711,7 +721,7 @@ def analyze_menu_prices(
     Returns dict with assessments, category_avgs, market_context, and metadata.
     """
     from storage.drafts import get_draft_items
-    from storage.users import get_restaurant
+    from storage.users import get_restaurant, get_restaurant_users, get_user_tier
     from storage.price_intel import (
         get_cached_comparisons,
         get_market_summary,
@@ -756,15 +766,31 @@ def analyze_menu_prices(
     competitor_data = get_cached_comparisons(restaurant_id)
     market_summary = get_market_summary(restaurant_id)
 
-    # NEW: Fetch real competitor menus (web search, cached)
+    # Day 141.7: Fetch real competitor menus via Apify (premium tier only)
+    # Uses owner's tier; if multiple users, premium wins.
+    user_tier = "free"
+    try:
+        linked_users = get_restaurant_users(restaurant_id)
+        for u in linked_users:
+            t = (get_user_tier(u["user_id"]) or "free").lower()
+            if t == "premium":
+                user_tier = "premium"
+                break
+    except Exception as e:
+        log.warning("Tier lookup failed for restaurant %d: %s", restaurant_id, e)
+
     competitor_menus = []
     if competitor_data:
-        log.info("Price intel: fetching real competitor menus for draft %d...", draft_id)
+        log.info(
+            "Price intel: fetching real competitor menus for draft %d (tier=%s)...",
+            draft_id, user_tier,
+        )
         competitor_menus = _fetch_competitor_menus(
             competitor_data=competitor_data,
             items=items,
             max_competitors=5,
             max_fresh_searches=5,
+            user_tier=user_tier,
         )
 
     # Batch items by category to avoid token overflow on large menus

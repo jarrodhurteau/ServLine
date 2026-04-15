@@ -35,13 +35,14 @@ log = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "servline.db"
 
-# Cache TTL — don't re-query the same zip+cuisine combo within 7 days
-CACHE_TTL_DAYS = 7
+# Cache TTL — don't re-query the same zip+cuisine combo within 30 days
+CACHE_TTL_DAYS = 30
 
-# Max nearby restaurants to store per search
-MAX_RESULTS = 20
+# Max nearby restaurants to store per search (closest 10 of matching cuisine)
+MAX_RESULTS = 10
 
-# Google Places API radius (meters).  ~8 km ≈ 5 miles
+# Google Places API radius (meters).  ~8 km ≈ 5 miles.
+# Note: unused when rankby=distance, kept for reference / future fallback.
 SEARCH_RADIUS_METERS = 8000
 
 # Rate limiting: max API calls per minute
@@ -200,10 +201,15 @@ def _search_nearby(
     keyword: str,
     api_key: str,
 ) -> List[Dict[str, Any]]:
-    """Search Google Places Nearby for restaurants matching keyword."""
+    """Search Google Places Nearby for restaurants matching keyword.
+
+    Uses rankby=distance to return closest matches first (required for
+    cost control — we only scrape the top N, so they must be the nearest
+    cuisine-matched competitors, not a 5-mile grab bag).
+    """
     params = urllib.parse.urlencode({
         "location": f"{lat},{lng}",
-        "radius": SEARCH_RADIUS_METERS,
+        "rankby": "distance",
         "keyword": keyword,
         "type": "restaurant",
         "key": api_key,
@@ -511,7 +517,7 @@ def _ensure_menu_scrape_schema() -> None:
         conn.commit()
 
 
-_MENU_CACHE_TTL_DAYS = 7
+_MENU_CACHE_TTL_DAYS = 30
 
 _ensure_menu_scrape_schema()
 
@@ -920,9 +926,16 @@ RULES:
 
 
 def _claude_web_search_menu(place_name: str, place_address: str) -> List[Dict[str, Any]]:
-    """Use Claude web search to find a delivery platform URL, then extract
-    the full structured menu from that page. Falls back to web search
-    extraction if no structured data is found."""
+    """Find competitor menu items + prices.
+
+    Flow (Day 141.7):
+      1. Claude web search finds delivery-platform URLs (DoorDash, Grubhub, ...)
+      2. DoorDash / Grubhub URLs → Apify actor (reliable, structured)
+      3. Other URLs (restaurant's own site, ChowNow, etc.) → existing
+         JSON-LD / __NEXT_DATA__ structured extraction
+      4. Nothing found → empty list (no Claude web-search price extraction —
+         too unreliable and expensive)
+    """
     try:
         from .ai_menu_extract import _get_client
         client = _get_client()
@@ -931,17 +944,20 @@ def _claude_web_search_menu(place_name: str, place_address: str) -> List[Dict[st
     except Exception:
         return []
 
-    # Step 1: Ask Claude to find the delivery platform URL
+    # Step 1: Ask Claude to find up to 3 delivery-platform URLs (cascade)
     url_prompt = f"""\
-Find the online ordering or delivery menu URL for "{place_name}" at {place_address}.
+Find online ordering / delivery menu URLs for "{place_name}" at {place_address}.
 
-Search for this restaurant on GrubHub, DoorDash, Seamless, UberEats, GetSauce,
-ChowNow, Slice, or any delivery platform that has their full menu with prices.
+Search DoorDash, Grubhub, Seamless, UberEats, ChowNow, Slice, and the
+restaurant's own website. Prefer DoorDash and Grubhub first — their URLs
+look like:
+  https://www.doordash.com/store/...
+  https://www.grubhub.com/restaurant/...
 
-Return ONLY the URL — nothing else. Just the raw URL string.
-If you can't find one, return "NOT_FOUND"."""
+Return up to 3 URLs, one per line, in order of preference. No commentary.
+If nothing found, return exactly: NOT_FOUND"""
 
-    menu_url = None
+    menu_urls: List[str] = []
     try:
         resp = client.messages.create(
             model="claude-sonnet-4-5",
@@ -953,28 +969,47 @@ If you can't find one, return "NOT_FOUND"."""
             }],
             messages=[{"role": "user", "content": url_prompt}],
         )
+        import re as _re
+        seen = set()
         for block in resp.content:
             if hasattr(block, "text") and block.text.strip():
-                text = block.text.strip()
-                # Extract URL from response
-                import re as _re
-                urls = _re.findall(r'https?://[^\s<>"\']+', text)
-                if urls:
-                    menu_url = urls[0]
-                    log.info("Found delivery menu URL for %s: %s", place_name, menu_url)
+                for url in _re.findall(r'https?://[^\s<>"\']+', block.text):
+                    # Strip trailing punctuation Claude sometimes includes
+                    url = url.rstrip(".,);]'\"")
+                    if url not in seen:
+                        seen.add(url)
+                        menu_urls.append(url)
+        if menu_urls:
+            log.info("Found %d candidate URL(s) for %s", len(menu_urls), place_name)
     except Exception as e:
         log.warning("URL search failed for %s: %s", place_name, e)
 
-    # Step 2: If we found a URL, fetch it and try to extract structured data
-    if menu_url:
-        items = _extract_structured_menu(menu_url, place_name)
+    if not menu_urls:
+        return []
+
+    # Step 2: Try Apify actors first (DoorDash / Grubhub — structured, reliable)
+    try:
+        from .apify_client import scrape_menu_by_url, is_configured as apify_ok
+    except Exception:
+        apify_ok = lambda: False  # noqa: E731
+        scrape_menu_by_url = None  # type: ignore
+
+    if apify_ok() and scrape_menu_by_url:
+        for url in menu_urls:
+            items, platform = scrape_menu_by_url(url)
+            if items:
+                log.info("Apify (%s) extracted %d items for %s", platform, len(items), place_name)
+                return items
+
+    # Step 3: Fallback for non-delivery URLs — try existing structured extraction
+    for url in menu_urls:
+        items = _extract_structured_menu(url, place_name)
         if items:
-            log.info("Extracted %d items from structured data for %s", len(items), place_name)
+            log.info("Structured-data extracted %d items for %s", len(items), place_name)
             return items
 
-    # Step 3: Fall back to Claude web search for direct price extraction
-    log.info("No structured data — falling back to web search extraction for %s", place_name)
-    return _claude_web_search_extract(client, place_name, place_address)
+    log.info("No menu data found for %s across %d URL(s)", place_name, len(menu_urls))
+    return []
 
 
 def _extract_structured_menu(url: str, place_name: str) -> List[Dict[str, Any]]:
@@ -1108,49 +1143,6 @@ def _parse_nextjs_menu(data: dict) -> List[Dict[str, Any]]:
     except (AttributeError, TypeError):
         pass
     return items
-
-
-def _claude_web_search_extract(
-    client, place_name: str, place_address: str,
-) -> List[Dict[str, Any]]:
-    """Direct Claude web search extraction — last resort."""
-    prompt = f"""\
-I need a COMPLETE menu with prices for "{place_name}" at {place_address}.
-
-Search for this restaurant on DoorDash, Grubhub, Seamless, UberEats,
-allmenus.com, menupages.com, or any source with their current menu.
-
-I need as MANY items as possible with REAL prices. Search multiple sources.
-
-Return ONLY a JSON array:
-[{{"name": "Exact Item Name", "price_cents": 2195, "category": "Wraps"}}, ...]
-
-RULES:
-- price_cents in cents (e.g. $21.95 = 2195)
-- Only REAL verified prices — no guessing
-- Use EXACT item names from their menu"""
-
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=8000,
-            tools=[{
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": 10,
-            }],
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = ""
-        for block in response.content:
-            if hasattr(block, "text") and block.text.strip():
-                raw = block.text.strip()
-        if not raw:
-            return []
-        return _parse_json_items(raw, place_name)
-    except Exception as e:
-        log.error("Claude web search extract failed for %s: %s", place_name, e)
-        return []
 
 
 def _claude_parse_menu_response(client, prompt: str, place_name: str) -> List[Dict[str, Any]]:

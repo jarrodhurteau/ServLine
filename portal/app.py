@@ -4458,6 +4458,16 @@ def api_compare_competitor(draft_id):
     if not ai_price_intel:
         return jsonify({"error": "Price intelligence not available"}), 503
 
+    # Day 141.7: real competitor comparison is a paid feature.
+    # Admins bypass the gate for internal testing.
+    u = session.get("user") or {}
+    if u.get("role") != "admin" and (u.get("account_tier") or "free").lower() != "premium":
+        return jsonify({
+            "error": "upgrade_required",
+            "message": "Real competitor price comparisons are available on the $80/month plan.",
+            "upgrade_url": url_for("account_page"),
+        }), 402
+
     _require_drafts_storage()
     draft = drafts_store.get_draft(draft_id)
     if not draft:
