@@ -1280,38 +1280,6 @@
       text-overflow: ellipsis;
     }
 
-    /* ===== Menu Details Modal (Day 141.6) ===== */
-    .menu-details-overlay {
-      position: fixed; inset: 0; z-index: 2000;
-      background: rgba(0,0,0,.5);
-      display: flex; align-items: center; justify-content: center;
-    }
-    .menu-details-modal {
-      background: #FAF4EC; border-radius: 14px; padding: 32px;
-      max-width: 460px; width: 92%;
-      box-shadow: 0 16px 48px rgba(0,0,0,.2);
-    }
-    .menu-details-modal h2 { margin: 0 0 4px; font-size: 1.2rem; color: #2C2C2C; }
-    .menu-details-modal .md-sub { font-size: .82rem; color: #888; margin-bottom: 20px; }
-    .menu-details-modal label { display: block; font-size: .82rem; font-weight: 600; color: #2C2C2C; margin-bottom: 4px; }
-    .menu-details-modal .md-field { margin-bottom: 14px; }
-    .menu-details-modal input,
-    .menu-details-modal select {
-      width: 100%; padding: 10px 12px;
-      border: 1.5px solid #d5c4a1; border-radius: 8px;
-      font-size: .9rem; background: #fff; color: #2C2C2C; outline: none;
-    }
-    .menu-details-modal input:focus,
-    .menu-details-modal select:focus { border-color: #B85C38; }
-    .menu-details-modal .md-submit {
-      width: 100%; padding: 12px; margin-top: 8px;
-      border: none; border-radius: 10px;
-      background: #B85C38; color: #fff;
-      font-size: 1rem; font-weight: 700; cursor: pointer;
-      transition: opacity .2s;
-    }
-    .menu-details-modal .md-submit:hover { opacity: .9; }
-    .menu-details-modal .md-submit:disabled { opacity: .5; cursor: not-allowed; }
     .editor-header-center { flex: 1; display: flex; justify-content: center; min-width: 180px; }
     .editor-search-wrap {
       display: flex;
@@ -5318,124 +5286,9 @@
 </script>
 
 <!-- Day 141.6: Copy Menu Modal -->
-<!-- Day 141.6: Forced Menu Details Modal -->
-{% if not restaurant or not draft.title or draft.title.startswith('New Menu') or draft.title.startswith('Imported') or draft.title.startswith('Structured Import') %}
-<div class="menu-details-overlay" id="menu-details-modal">
-  <div class="menu-details-modal">
-    <h2>Menu Details</h2>
-    <p class="md-sub">Tell us about this menu before you start editing.</p>
-
-    <div class="md-field">
-      <label for="md-restaurant">Restaurant *</label>
-      <select id="md-restaurant">
-        <option value="" disabled {% if not draft.restaurant_id %}selected{% endif %}>Select a restaurant...</option>
-        {% for r in user_restaurants %}
-        <option value="{{ r.restaurant_id }}" {% if draft.restaurant_id == r.restaurant_id %}selected{% endif %}>
-          {{ r.restaurant_name|e }}{% if r.address %} — {{ r.address|e }}{% endif %}
-        </option>
-        {% endfor %}
-        <option value="__new__">+ Create New Restaurant</option>
-      </select>
-    </div>
-
-    <!-- Inline new restaurant (hidden) -->
-    <div id="md-new-rest-fields" style="display:none; padding:12px; border:1.5px dashed #d5c4a1; border-radius:8px; margin-bottom:14px; background:#f5f0e8;">
-      <div class="md-field"><label>Restaurant Name *</label><input type="text" id="md-new-rest-name" placeholder="e.g. Mario's Pizza" /></div>
-      <div class="md-field"><label>Address</label><input type="text" id="md-new-rest-address" placeholder="123 Main St" /></div>
-      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px;">
-        <div class="md-field"><label>City</label><input type="text" id="md-new-rest-city" /></div>
-        <div class="md-field"><label>State</label><input type="text" id="md-new-rest-state" maxlength="2" style="text-transform:uppercase;" /></div>
-        <div class="md-field"><label>Zip</label><input type="text" id="md-new-rest-zip" /></div>
-      </div>
-    </div>
-
-    <div class="md-field">
-      <label for="md-cuisine">Cuisine Type *</label>
-      <select id="md-cuisine">
-        <option value="" disabled selected>Select cuisine...</option>
-        <option value="pizza">Pizza</option>
-        <option value="italian">Italian</option>
-        <option value="mexican">Mexican</option>
-        <option value="chinese">Chinese</option>
-        <option value="japanese">Japanese</option>
-        <option value="thai">Thai</option>
-        <option value="indian">Indian</option>
-        <option value="american">American</option>
-        <option value="mediterranean">Mediterranean</option>
-        <option value="seafood">Seafood</option>
-        <option value="bbq">BBQ</option>
-        <option value="deli">Deli / Sandwich</option>
-        <option value="bakery">Bakery / Cafe</option>
-        <option value="bar">Bar / Pub</option>
-        <option value="other">Other</option>
-      </select>
-    </div>
-
-    <div class="md-field">
-      <label for="md-menu-name">Menu Name *</label>
-      <input type="text" id="md-menu-name" placeholder="e.g. Lunch Menu, Dinner Menu, Full Menu" value="{{ draft.title if draft.title and not draft.title.startswith('New Menu') and not draft.title.startswith('Imported') and not draft.title.startswith('Structured Import') else '' }}" />
-    </div>
-
-    <button class="md-submit" id="md-submit-btn" onclick="submitMenuDetails()">Continue to Editor</button>
-  </div>
-</div>
-<script>
-(function() {
-  const restSelect = document.getElementById('md-restaurant');
-  const newFields = document.getElementById('md-new-rest-fields');
-  restSelect.addEventListener('change', function() {
-    newFields.style.display = this.value === '__new__' ? 'block' : 'none';
-  });
-
-  window.submitMenuDetails = async function() {
-    const btn = document.getElementById('md-submit-btn');
-    const restVal = restSelect.value;
-    const cuisine = document.getElementById('md-cuisine').value;
-    const menuName = document.getElementById('md-menu-name').value.trim();
-
-    if (!menuName) { document.getElementById('md-menu-name').style.borderColor = '#dc3545'; document.getElementById('md-menu-name').focus(); return; }
-    if (!cuisine) { document.getElementById('md-cuisine').style.borderColor = '#dc3545'; document.getElementById('md-cuisine').focus(); return; }
-    if (!restVal) { restSelect.style.borderColor = '#dc3545'; restSelect.focus(); return; }
-
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-
-    let restaurantId = restVal;
-
-    // Create new restaurant if needed
-    if (restVal === '__new__') {
-      const newName = document.getElementById('md-new-rest-name').value.trim();
-      if (!newName) { document.getElementById('md-new-rest-name').style.borderColor = '#dc3545'; document.getElementById('md-new-rest-name').focus(); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
-      const body = new URLSearchParams();
-      body.append('name', newName);
-      body.append('address', document.getElementById('md-new-rest-address').value.trim());
-      body.append('city', document.getElementById('md-new-rest-city').value.trim());
-      body.append('state', document.getElementById('md-new-rest-state').value.trim());
-      body.append('zip_code', document.getElementById('md-new-rest-zip').value.trim());
-      body.append('cuisine_type', cuisine);
-      body.append('_redirect', '__json__');
-      try {
-        const resp = await fetch('{{ url_for("create_restaurant") }}', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
-        const data = await resp.json();
-        if (!data.id) { wizToast(data.error || 'Failed to create restaurant'); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
-        restaurantId = data.id;
-      } catch(e) { wizToast('Failed to create restaurant'); btn.disabled = false; btn.textContent = 'Continue to Editor'; return; }
-    }
-
-    // Save menu title + restaurant assignment
-    await fetch('/drafts/{{ draft.id }}/assign_restaurant', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'restaurant_id=' + restaurantId });
-    await fetch('/drafts/{{ draft.id }}/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: menuName, items: [] }) });
-
-    // Update the page title
-    document.getElementById('editor-menu-title').textContent = menuName;
-
-    // Close modal
-    window._menuDetailsCompleted = true;
-    document.getElementById('menu-details-modal').remove();
-  };
-})();
-</script>
-{% endif %}
+{# Day 141.7: legacy Day 141.6 "Menu Details" modal removed. Wizard
+   confirmation screen now collects restaurant + cuisine + menu name
+   before the editor loads, making this modal redundant. #}
 
 <div id="copy-menu-modal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.4); align-items:center; justify-content:center;"
      onclick="if(event.target===this)this.style.display='none'">

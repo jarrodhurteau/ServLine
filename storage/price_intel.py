@@ -859,6 +859,17 @@ def scrape_competitor_menu(
     if items:
         items = [it for it in items if it.get("price_cents") and it["price_cents"] > 0]
 
+    # Day 141.7: classify roles + canonical names so downstream can skip
+    # sauce ramekins and collapse size variants. Safe to skip on failure —
+    # consumers fall back to raw items when role is None.
+    if items:
+        try:
+            from .menu_classifier import classify_menu_items
+            items = classify_menu_items(place_name, items)
+            log.info("Classified %d items for %s", len(items), place_name)
+        except Exception as e:
+            log.warning("Classifier failed for %s: %s", place_name, e)
+
     if items:
         _save_menu_cache(place_id, place_name, None, None, items,
                          "web_search", None, now)
@@ -937,15 +948,16 @@ def _claude_web_search_menu(place_name: str, place_address: str) -> List[Dict[st
 
     # Step 1: Ask Claude to find up to 3 delivery-platform URLs (cascade)
     url_prompt = f"""\
-Find online ordering / delivery menu URLs for "{place_name}" at {place_address}.
+Find menu URLs for "{place_name}" at {place_address}.
 
-Search DoorDash, Grubhub, Seamless, UberEats, ChowNow, Slice, and the
-restaurant's own website. Prefer DoorDash and Grubhub first — their URLs
-look like:
-  https://www.doordash.com/store/...
-  https://www.grubhub.com/restaurant/...
+Prefer in this order:
+  1. The restaurant's OWN website with the menu page
+     (e.g. https://casadilisa.com/dinner-menu/)
+  2. A DoorDash store page (https://www.doordash.com/store/...)
+  3. A Grubhub restaurant page (https://www.grubhub.com/restaurant/...)
+  4. Any aggregator with their full menu (Slice, ChowNow, Yelp menu tab, etc.)
 
-Return up to 3 URLs, one per line, in order of preference. No commentary.
+Return up to 4 URLs, one per line, in preference order. No commentary.
 If nothing found, return exactly: NOT_FOUND"""
 
     menu_urls: List[str] = []
@@ -975,24 +987,48 @@ If nothing found, return exactly: NOT_FOUND"""
     except Exception as e:
         log.warning("URL search failed for %s: %s", place_name, e)
 
-    if not menu_urls:
-        return []
-
-    # Step 2: Try Apify actors first (DoorDash / Grubhub — structured, reliable)
     try:
-        from .apify_client import scrape_menu_by_url, is_configured as apify_ok
+        from .apify_client import (
+            scrape_menu_by_url,
+            scrape_google_menu_panel,
+            scrape_menus_r_us_by_search,
+            is_configured as apify_ok,
+        )
     except Exception:
         apify_ok = lambda: False  # noqa: E731
         scrape_menu_by_url = None  # type: ignore
+        scrape_google_menu_panel = None  # type: ignore
+        scrape_menus_r_us_by_search = None  # type: ignore
 
-    if apify_ok() and scrape_menu_by_url:
+    # Step 2: Google menu panel first — highest-coverage source. Google
+    # aggregates menus from Single Platform + restaurant websites into
+    # the knowledge panel; we parse that page via menus-r-us.
+    if apify_ok() and scrape_google_menu_panel:
+        location = place_address or ""
+        items = scrape_google_menu_panel(place_name, location)
+        if items:
+            log.info("Google menu panel extracted %d items for %s", len(items), place_name)
+            return items
+
+    # Step 3: For each Claude-found URL, route to the right Apify actor.
+    # scrape_menu_by_url handles DoorDash/Grubhub natively and falls
+    # back to menus-r-us for any other domain.
+    if apify_ok() and menu_urls and scrape_menu_by_url:
         for url in menu_urls:
             items, platform = scrape_menu_by_url(url)
             if items:
                 log.info("Apify (%s) extracted %d items for %s", platform, len(items), place_name)
                 return items
 
-    # Step 3: Fallback for non-delivery URLs — try existing structured extraction
+    # Step 4: URL-less fallback — ask menus-r-us to resolve by name + location.
+    if apify_ok() and scrape_menus_r_us_by_search:
+        location = place_address or place_name
+        items = scrape_menus_r_us_by_search(place_name, location)
+        if items:
+            log.info("Apify menus-r-us search-mode found %d items for %s", len(items), place_name)
+            return items
+
+    # Step 5: Last-resort JSON-LD / __NEXT_DATA__ parsing on any URL we have.
     for url in menu_urls:
         items = _extract_structured_menu(url, place_name)
         if items:

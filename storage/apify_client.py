@@ -32,6 +32,11 @@ APIFY_BASE = "https://api.apify.com/v2"
 # Actor identifiers (username~actor-name format for URL paths)
 ACTOR_DOORDASH = "alizarin_refrigerator-owner~doordash-scraper"
 ACTOR_GRUBHUB = "alizarin_refrigerator-owner~grubhub-scraper"
+# Day 141.7: generic restaurant-website scraper. Works on any URL and has
+# a search-mode fallback (name + city). ~$0.02-0.05 per successful scrape,
+# pay-only-on-success. Preferred over delivery-platform scrapers because
+# restaurant websites carry richer/cleaner menu data at 30x lower cost.
+ACTOR_MENUS_R_US = "menus-r-us~restaurant-menu-scraper"
 
 RUN_TIMEOUT_SECONDS = 180
 
@@ -178,6 +183,92 @@ def _normalize_items(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _normalize_menus_r_us(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Flatten menus-r-us output to [{name, price_cents, category}]."""
+    if not raw or not isinstance(raw, list):
+        return []
+    first = raw[0]
+    if not isinstance(first, dict) or not first.get("success"):
+        return []
+    menu = first.get("menu") or {}
+    categories = menu.get("categories") if isinstance(menu, dict) else None
+    if not isinstance(categories, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = str(cat.get("name") or "Other").strip() or "Other"
+        for it in cat.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            out.append({
+                "name": name,
+                "price_cents": _parse_price_cents(it.get("price")),
+                "category": cat_name,
+                "description": (it.get("description") or "").strip() or None,
+            })
+    return out
+
+
+def scrape_menus_r_us_by_url(page_url: str) -> List[Dict[str, Any]]:
+    """Scrape a restaurant menu from any website URL via menus-r-us actor.
+    Returns normalized items or [] on failure. Only charged on success."""
+    raw = _run_actor_sync(ACTOR_MENUS_R_US, {"url": page_url})
+    items = _normalize_menus_r_us(raw)
+    log.info("Apify menus-r-us URL %s → %d items", page_url, len(items))
+    return items
+
+
+def scrape_google_menu_panel(restaurant_name: str, location: str) -> List[Dict[str, Any]]:
+    """
+    Extract the menu widget Google shows on a restaurant's search result page.
+
+    Google aggregates menu data from Single Platform + restaurant websites
+    and displays it in the knowledge panel. There's no official API for
+    this, but menus-r-us can parse the Google search URL directly.
+
+    Returns normalized items. Empty list if Google has no menu panel for
+    this restaurant.
+    """
+    q = f"{restaurant_name} menu {location}".strip()
+    google_url = (
+        "https://www.google.com/search?q="
+        + urllib.parse.quote(q)
+    )
+    raw = _run_actor_sync(ACTOR_MENUS_R_US, {"url": google_url})
+    items = _normalize_menus_r_us(raw)
+    log.info("Google menu panel for '%s' → %d items", restaurant_name, len(items))
+    return items
+
+
+def scrape_menus_r_us_by_search(restaurant_name: str, location: str) -> List[Dict[str, Any]]:
+    """Search-mode fallback when we don't have a direct URL. Location is
+    free-form (city, state or address) — the actor resolves it."""
+    raw = _run_actor_sync(ACTOR_MENUS_R_US, {
+        "searchTerm": restaurant_name,
+        "location": location,
+    })
+    if not raw or not raw[0].get("success"):
+        log.info("Apify menus-r-us search '%s' @ '%s' → no match", restaurant_name, location)
+        return []
+    # Verify the returned restaurant name loosely matches what we asked for
+    returned = (raw[0].get("restaurantName") or "").lower()
+    want = restaurant_name.lower()
+    if returned and not (want in returned or returned in want):
+        log.info(
+            "Apify menus-r-us search matched wrong place: wanted '%s', got '%s'",
+            restaurant_name, raw[0].get("restaurantName"),
+        )
+        return []
+    items = _normalize_menus_r_us(raw)
+    log.info("Apify menus-r-us search '%s' → %d items", restaurant_name, len(items))
+    return items
+
+
 def scrape_doordash_menu(store_url: str) -> List[Dict[str, Any]]:
     """Scrape a DoorDash store URL. Returns normalized items or []."""
     demo = _demo_mode()
@@ -223,16 +314,25 @@ def _platform_for_url(url: str) -> Optional[str]:
 
 def scrape_menu_by_url(url: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
-    Dispatch a delivery-platform URL to the right Apify actor.
+    Dispatch a URL to the best-fit Apify actor.
 
-    Returns (items, platform_name) or ([], None) if platform isn't supported
-    or the actor returned no items.
+    Day 141.7 ordering:
+      1. DoorDash / Grubhub delivery-platform URLs → their dedicated actors.
+      2. Anything else (restaurant websites, aggregators) → menus-r-us
+         generic scraper, which handles any site and is far cheaper.
+
+    Returns (items, platform_name) or ([], None) if nothing scrapes.
     """
     platform = _platform_for_url(url)
     if platform == "doordash":
         return scrape_doordash_menu(url), "doordash"
     if platform == "grubhub":
         return scrape_grubhub_menu(url), "grubhub"
+    # Generic fallback: menus-r-us reads the restaurant's own site or
+    # aggregator page and returns structured items.
+    items = scrape_menus_r_us_by_url(url)
+    if items:
+        return items, "menus_r_us"
     return [], None
 
 

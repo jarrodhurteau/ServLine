@@ -271,7 +271,15 @@ def _fetch_competitor_menus(
             log.info("Hit max fresh searches (%d), skipping remaining", max_fresh_searches)
             break
 
-        their_items = menu_data.get("items", []) if menu_data else []
+        raw_items = menu_data.get("items", []) if menu_data else []
+        # Day 141.7: filter by classifier role so sauce ramekins and size
+        # variants don't pollute the comparison prompt. Unclassified items
+        # (role=None) are kept so we don't regress on un-tagged cache rows.
+        try:
+            from storage.menu_classifier import filter_comparison_items
+            their_items = filter_comparison_items(raw_items)
+        except Exception:
+            their_items = raw_items
         their_cats = {it.get("category", "Other") for it in their_items}
         overlap = _categories_overlap(our_cats, their_cats)
 
@@ -1197,9 +1205,18 @@ def compare_with_competitor(
         return {"error": "Anthropic client not available", "comparisons": []}
 
     if data_source == "scraped" and real_menu and real_menu.get("items"):
+        # Day 141.7: strip modifiers + collapse size variants from the
+        # competitor menu before sending to Claude. Sauce ramekins and
+        # size variants only add noise to the comparison.
+        their_items = real_menu["items"]
+        try:
+            from storage.menu_classifier import filter_comparison_items
+            their_items = filter_comparison_items(their_items)
+        except Exception:
+            pass
         # Real data path: ask Claude to match our items against their actual menu
         prompt = _build_real_comparison_prompt(
-            priced_items, real_menu["items"], comp_name, competitor
+            priced_items, their_items, comp_name, competitor
         )
     else:
         # Estimate path: ask Claude to estimate prices
@@ -1322,7 +1339,13 @@ def get_cached_competitor_menu_comparison(
     if not cached or not cached.get("items"):
         return None
 
-    their_items = cached["items"]
+    raw_items = cached["items"]
+    # Day 141.7: strip modifiers + collapse variants before comparison
+    try:
+        from storage.menu_classifier import filter_comparison_items
+        their_items = filter_comparison_items(raw_items)
+    except Exception:
+        their_items = raw_items
     # Filter to items with real prices
     their_items = [it for it in their_items if it.get("price_cents") and it["price_cents"] > 0]
     if not their_items:

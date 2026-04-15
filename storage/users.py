@@ -363,7 +363,12 @@ VALID_CUISINE_TYPES = frozenset({
     "american", "italian", "mexican", "chinese", "japanese", "thai",
     "indian", "mediterranean", "french", "korean", "vietnamese",
     "greek", "caribbean", "bbq", "seafood", "pizza", "burger",
-    "deli", "bakery", "cafe", "bar", "other",
+    "deli", "bakery", "cafe", "bar",
+    # Day 141.7: added to match common small-business types
+    "diner", "breakfast", "brunch", "sandwich", "sushi", "steakhouse",
+    "vegan", "vegetarian", "coffee", "pub", "fast food", "wings",
+    "ice cream", "donut",
+    "other",
 })
 
 
