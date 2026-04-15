@@ -50,30 +50,6 @@ RATE_LIMIT_PER_MINUTE = 10
 _call_timestamps: list[float] = []
 
 # Cuisine type → Google Places search keyword
-CUISINE_SEARCH_TERMS: Dict[str, str] = {
-    "american": "american restaurant",
-    "italian": "italian restaurant",
-    "mexican": "mexican restaurant",
-    "chinese": "chinese restaurant",
-    "japanese": "japanese restaurant",
-    "thai": "thai restaurant",
-    "indian": "indian restaurant",
-    "mediterranean": "mediterranean restaurant",
-    "french": "french restaurant",
-    "korean": "korean restaurant",
-    "vietnamese": "vietnamese restaurant",
-    "greek": "greek restaurant",
-    "caribbean": "caribbean restaurant",
-    "bbq": "bbq restaurant",
-    "seafood": "seafood restaurant",
-    "pizza": "pizza restaurant",
-    "burger": "burger restaurant",
-    "deli": "deli",
-    "bakery": "bakery",
-    "cafe": "cafe",
-    "bar": "bar restaurant",
-    "other": "restaurant",
-}
 
 # Google price_level mapping → display labels
 PRICE_LEVEL_LABELS = {
@@ -209,9 +185,9 @@ def _search_nearby(
 ) -> List[Dict[str, Any]]:
     """Search Google Places Nearby for restaurants matching keyword.
 
-    Uses rankby=distance to return closest matches first (required for
-    cost control — we only scrape the top N, so they must be the nearest
-    cuisine-matched competitors, not a 5-mile grab bag).
+    Uses rankby=distance so the top N are the closest matches. We trust
+    Google's keyword match — whatever it returns first is what the user
+    sees. No post-filtering; simpler and less surprising.
     """
     params = urllib.parse.urlencode({
         "location": f"{lat},{lng}",
@@ -412,7 +388,15 @@ def search_nearby_restaurants(
     _record_api_call()
 
     # Step 2: nearby search
-    keyword = CUISINE_SEARCH_TERMS.get(cuisine_type, "restaurant")
+    # Day 141.7: build the keyword straight from the user's cuisine.
+    # Google's keyword match is loose — feeding "diner" or "chinese" or
+    # whatever the owner typed is more reliable than a hand-maintained
+    # lookup table that drifts out of date.
+    cuisine_clean = (cuisine_type or "").strip().lower()
+    if cuisine_clean in ("", "other"):
+        keyword = "restaurant"
+    else:
+        keyword = f"{cuisine_clean} restaurant"
     _check_rate_limit()
     results = _search_nearby(location["lat"], location["lng"], keyword, api_key)
     _record_api_call()

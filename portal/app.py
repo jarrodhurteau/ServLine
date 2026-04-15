@@ -2890,7 +2890,7 @@ def run_ocr_and_make_draft(job_id: int, saved_file_path: Path, *, extra_pages: l
             print(f"[Draft] ERROR creating draft items: {_draft_err}")
             import traceback; traceback.print_exc()
 
-        # Day 141.8: Call 4 (Price Intelligence) moved OUT of the import
+        # Day 141.7: Call 4 (Price Intelligence) moved OUT of the import
         # pipeline. It now runs on-demand after the restaurant-details
         # confirmation screen, gated by tier. Keeps upload fast and lets
         # users verify their own restaurant info before we scrape
@@ -6730,7 +6730,7 @@ def draft_wizard(draft_id: int):
         if current_category is None and category_list:
             current_category = category_list[-1]
 
-    # Day 141.8: price intel no longer loaded in wizard — moved to
+    # Day 141.7: price intel no longer loaded in wizard — moved to
     # post-confirmation trigger, displayed only in the editor.
 
     # Restaurant info for summary page
@@ -6748,7 +6748,7 @@ def draft_wizard(draft_id: int):
             pass
 
     # Day 141.6: Load user's restaurants for confirmation screen
-    # Day 141.8: include cuisine_type so user can verify it before price scrape
+    # Day 141.7: include cuisine_type so user can verify it before price scrape
     user_restaurants = []
     if wizard_step == "confirmation":
         u = session.get("user") or {}
@@ -6949,7 +6949,7 @@ def wizard_finalize(draft_id: int):
         except (ValueError, TypeError):
             rid_int = None
 
-    # Day 141.8: route premium users through the price-intel analyzer first.
+    # Day 141.7: route premium users through the price-intel analyzer first.
     u = session.get("user") or {}
     tier = (u.get("account_tier") or "free").lower()
     if tier == "premium" and rid_int and ai_price_intel:
@@ -6959,7 +6959,7 @@ def wizard_finalize(draft_id: int):
     return redirect(url_for("draft_editor", draft_id=draft_id))
 
 
-# Day 141.8: background status tracker for post-wizard price analysis.
+# Day 141.7: background status tracker for post-wizard price analysis.
 # Simple in-memory dict keyed by draft_id. Each entry:
 #   {"status": "running"|"done"|"error", "started_at": ts, "error": str|None}
 _PRICE_ANALYSIS_JOBS: dict = {}

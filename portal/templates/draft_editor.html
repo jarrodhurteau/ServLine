@@ -2196,7 +2196,8 @@
             <div class="competitor-name">
               {{ c.place_name|e }}
               {% if tier_diff == 0 %}
-              <span style="font-size:.65rem;background:rgba(40,167,69,.12);color:#34d058;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600;vertical-align:middle;">Similar</span>
+              <span title="This restaurant sits in the same price tier as yours — a more useful comparison."
+                    style="font-size:.65rem;background:rgba(40,167,69,.12);color:#34d058;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600;vertical-align:middle;">Same price tier</span>
               {% endif %}
             </div>
             <div class="competitor-meta">

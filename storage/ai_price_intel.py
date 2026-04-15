@@ -775,7 +775,7 @@ def analyze_menu_prices(
         log.warning("Tier lookup failed for restaurant %d: %s", restaurant_id, e)
 
     # Get competitor data from Google Places (cached from Day 134).
-    # Day 141.8: if cache is empty, auto-trigger the search here so the
+    # Day 141.7: if cache is empty, auto-trigger the search here so the
     # post-wizard analyzer is fully self-contained. Premium-only — free
     # tier doesn't need competitor data since Apify scraping is gated.
     competitor_data = get_cached_comparisons(restaurant_id)
