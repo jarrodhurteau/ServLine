@@ -104,6 +104,13 @@ def _ensure_schema() -> None:
             conn.execute("ALTER TABLE price_intelligence_results ADD COLUMN price_sources TEXT")
         except Exception:
             pass
+        # Day 141.7: comparison_count tracks how many REAL competitor
+        # matches drove the aggregated range. Helps the UI say "range
+        # based on 7 similar items across competitors" vs one lonely hit.
+        try:
+            conn.execute("ALTER TABLE price_intelligence_results ADD COLUMN comparison_count INTEGER DEFAULT 0")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS price_intelligence_summary (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -244,30 +251,38 @@ def _fetch_competitor_menus(
     sorted_comps = sorted(competitor_data, key=_sort_key)
     candidates = [c for c in sorted_comps[:max_competitors] if c.get("place_id")]
 
-    # Day 141.7: serial scraping. Tried ThreadPoolExecutor earlier; Apify's
-    # run-sync endpoint appeared to dedupe concurrent calls to the same
-    # actor and returned identical datasets for every worker, which
-    # poisoned every competitor's menu with the same content. Parallel
-    # Apify calls are off until we have a reliable way to force unique
-    # dataset IDs per request.
-    fetched: List[tuple] = []
-    fresh_count = 0
-    for comp in candidates:
+    # Day 141.7: parallel Playwright scraping. Earlier parallel attempt
+    # failed because menus-r-us (Apify) deduped concurrent calls to the
+    # same actor — gave identical datasets to every worker. We've since
+    # moved the primary scrape path to Playwright-in-process + Claude
+    # Vision: each Chromium runs in its own process, each Vision call is
+    # an independent Anthropic request. No shared-dataset risk.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _scrape_one(comp):
         place_id = comp["place_id"]
         place_name = comp.get("place_name", "Unknown")
         try:
-            menu_data = scrape_competitor_menu(place_id, place_name, force_refresh=False)
+            return comp, scrape_competitor_menu(place_id, place_name, force_refresh=False)
         except Exception as e:
             log.warning("Failed to fetch menu for %s: %s", place_name, e)
-            menu_data = None
-        if menu_data and not menu_data.get("from_cache"):
-            fresh_count += 1
-            if fresh_count >= max_fresh_searches:
-                # Keep what we have, stop firing new scrapes
-                fetched.append((comp, menu_data))
-                log.info("Hit max fresh searches (%d), stopping", max_fresh_searches)
-                break
-        fetched.append((comp, menu_data))
+            return comp, None
+
+    fetched: List[tuple] = []
+    # 3 concurrent scrapes — balances parallelism against memory. Each
+    # Playwright + Vision run uses ~500MB-1GB peak, so 3x = ~2-3 GB peak.
+    max_workers = min(3, len(candidates))
+    if max_workers > 0:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for fut in as_completed([pool.submit(_scrape_one, c) for c in candidates]):
+                fetched.append(fut.result())
+
+    # Preserve original ordering (distance-sorted) in the output
+    order = {c["place_id"]: i for i, c in enumerate(candidates)}
+    fetched.sort(key=lambda p: order.get(p[0]["place_id"], 9999))
+
+    fresh_count = sum(1 for _, md in fetched if md and not md.get("from_cache"))
+    log.info("Scraped %d competitors in parallel (%d fresh)", len(fetched), fresh_count)
 
     results = []
     for comp, menu_data in fetched:
@@ -733,28 +748,196 @@ def _preload_comparisons_async(
     def _worker():
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                for comp in competitors:
+                futures = [
                     pool.submit(_preload_one_comparison, draft_id, restaurant_id, comp)
+                    for comp in competitors
+                ]
+                # Wait for all comparisons before aggregating. The pool's
+                # __exit__ blocks until every submitted task finishes.
         except Exception as e:
             log.warning("Comparison preload pool failed: %s", e)
+
+        # Day 141.7: once every per-competitor comparison is cached, roll
+        # up the matched prices and replace Claude's invented ranges with
+        # real computed stats. Runs last so it has all the data.
+        try:
+            n = _aggregate_price_ranges(draft_id)
+            log.info("Aggregated price ranges updated %d items for draft %d", n, draft_id)
+        except Exception as e:
+            log.warning("Price range aggregation failed for draft %d: %s", draft_id, e)
 
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _aggregate_price_ranges(draft_id: int) -> int:
+    """Replace Claude-inferred ranges with real stats from competitor matches.
+
+    For every row in `price_intelligence_results` for this draft, scan
+    every cached `competitor_comparisons` row, collect the
+    `their_estimated_cents` for matches whose `match_quality` is exact /
+    close / approximate (not no_match) and whose price is > 0, then
+    compute min / max / mean and write back.
+
+    Returns the number of rows updated.
+    """
+    with _db_connect() as conn:
+        conn.row_factory = sqlite3.Row
+
+        # Pull our items from the assessments we already stored
+        our_rows = conn.execute(
+            "SELECT item_id, item_name, current_price FROM price_intelligence_results WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchall()
+        if not our_rows:
+            return 0
+
+        # Pull every competitor's comparison matches
+        comp_rows = conn.execute(
+            "SELECT competitor_name, comparisons FROM competitor_comparisons WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchall()
+
+        # name.lower() -> list of (their_price_cents, competitor_name, their_item_name)
+        from collections import defaultdict
+        matches_by_item: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for cr in comp_rows:
+            try:
+                payload = json.loads(cr["comparisons"]) if cr["comparisons"] else []
+            except Exception:
+                continue
+            # Handle both shapes: bare list, or {"comparisons": [...]}
+            if isinstance(payload, dict):
+                payload = payload.get("comparisons", [])
+            if not isinstance(payload, list):
+                continue
+            for c in payload:
+                if not isinstance(c, dict):
+                    continue
+                mq = (c.get("match_quality") or "").lower()
+                if mq not in ("exact", "close", "approximate"):
+                    continue
+                tp = c.get("their_estimated_cents") or 0
+                if not isinstance(tp, (int, float)) or tp <= 0:
+                    continue
+                name = (c.get("our_item") or "").strip().lower()
+                if not name:
+                    continue
+                matches_by_item[name].append({
+                    "price": int(tp),
+                    "competitor": cr["competitor_name"],
+                    "their_item": (c.get("their_item_name") or "").strip(),
+                })
+
+        updated = 0
+        total_underpriced = 0
+        total_fair = 0
+        total_overpriced = 0
+        total_assessed = 0
+
+        for row in our_rows:
+            key = (row["item_name"] or "").strip().lower()
+            matches = matches_by_item.get(key) or []
+            current_price = row["current_price"] or 0
+
+            if not matches:
+                conn.execute(
+                    """UPDATE price_intelligence_results
+                       SET suggested_low = NULL,
+                           suggested_high = NULL,
+                           regional_avg = NULL,
+                           assessment = 'unknown',
+                           price_sources = ?,
+                           comparison_count = 0
+                       WHERE draft_id = ? AND item_id = ?""",
+                    (json.dumps([]), draft_id, row["item_id"]),
+                )
+                updated += 1
+                continue
+
+            prices = sorted(m["price"] for m in matches)
+            low = prices[0]
+            high = prices[-1]
+            avg = int(round(sum(prices) / len(prices)))
+
+            # Day 141.7: deterministic assessment from real prices, not
+            # a Claude guess. 15% band around the mean = fair.
+            if current_price and avg:
+                if current_price < avg * 0.85:
+                    assessment = "underpriced"
+                    total_underpriced += 1
+                elif current_price > avg * 1.15:
+                    assessment = "overpriced"
+                    total_overpriced += 1
+                else:
+                    assessment = "fair"
+                    total_fair += 1
+                total_assessed += 1
+            else:
+                assessment = "unknown"
+
+            sources = [
+                {"competitor": m["competitor"], "item": m["their_item"], "price_cents": m["price"]}
+                for m in matches
+            ]
+            conn.execute(
+                """UPDATE price_intelligence_results
+                   SET suggested_low = ?,
+                       suggested_high = ?,
+                       regional_avg = ?,
+                       assessment = ?,
+                       price_sources = ?,
+                       comparison_count = ?,
+                       confidence = ?
+                   WHERE draft_id = ? AND item_id = ?""",
+                (low, high, avg, assessment, json.dumps(sources),
+                 len(matches), min(1.0, 0.4 + 0.1 * len(matches)),
+                 draft_id, row["item_id"]),
+            )
+            updated += 1
+
+        # Refresh summary counts from the real data we just computed
+        conn.execute(
+            """UPDATE price_intelligence_summary
+               SET items_assessed = ?,
+                   underpriced = ?,
+                   fair_priced = ?,
+                   overpriced = ?,
+                   updated_at = ?
+               WHERE draft_id = ?""",
+            (total_assessed, total_underpriced, total_fair, total_overpriced,
+             _now(), draft_id),
+        )
+
+        conn.commit()
+        return updated
+
+
 def _preload_one_comparison(draft_id: int, restaurant_id: int, comp: Dict[str, Any]) -> None:
-    """Single-competitor preload step. Skips if already cached."""
+    """Single-competitor preload step. Skips if already cached.
+
+    After the comparison lands, re-runs aggregation so any already-finished
+    work stays visible in the editor even if the rest of the pool dies.
+    Cheap — aggregation is pure Python math against cached rows.
+    """
     try:
         name = comp.get("place_name") or ""
         if not name:
             return
         existing = get_competitor_comparison(draft_id, name)
         if existing:
-            return  # already cached, nothing to do
+            return
         compare_with_competitor(
             draft_id=draft_id,
             restaurant_id=restaurant_id,
             competitor=comp,
         )
+        # Incremental aggregation: every finished comparison updates the
+        # editor's ranges. If the preload thread dies halfway through,
+        # the user still sees real data for what completed.
+        try:
+            _aggregate_price_ranges(draft_id)
+        except Exception as e:
+            log.info("Incremental aggregation failed after %s: %s", name, e)
     except Exception as e:
         log.info("Preload compare failed for %s: %s", comp.get("place_name"), e)
 
@@ -875,54 +1058,24 @@ def analyze_menu_prices(
             user_tier=user_tier,
         )
 
-    # Batch items by category to avoid token overflow on large menus
-    batches = _make_batches(items)
-    log.info(
-        "Price intel: %d items → %d batch(es) for draft %d (%d competitor menus with data)",
-        len(items), len(batches), draft_id,
-        sum(1 for m in competitor_menus if m.get("items")),
-    )
-
-    batch_results: List[Dict[str, Any]] = []
-    for i, batch in enumerate(batches):
-        log.info("Price intel batch %d/%d: %d items", i + 1, len(batches), len(batch))
-        prompt = _build_prompt(
-            batch, cuisine_type, zip_code, competitor_data, market_summary,
-            competitor_menus=competitor_menus,
-        )
-        raw = _call_claude(prompt, model=model)
-        if raw:
-            batch_results.append(raw)
-        else:
-            log.warning("Price intel batch %d/%d failed, skipping", i + 1, len(batches))
-
-    if not batch_results:
-        return {
-            "error": "All Claude API batches failed",
-            "skipped": True,
-            "assessments": [],
-            "total_items": len(items),
-        }
-
-    # Merge batches and validate
-    merged = _merge_batch_results(batch_results)
-    validated = _validate_results(merged, items)
-
-    # Save to DB
-    _save_results(
+    # Day 141.7: Bulk Call 4 (Sonnet per-category batch prompting) is
+    # GONE. It added 15-20 min for Sonnet to invent ranges Claude later
+    # couldn't trace back to real prices. Replaced with:
+    #   1) Stub out price_intelligence_results (one row per item, no range yet)
+    #   2) Fire per-competitor Opus+thinking comparisons in parallel
+    #   3) _aggregate_price_ranges computes real range/avg/assessment from
+    #      the actual matched competitor prices
+    # The aggregator sets `assessment` from deterministic price math, not
+    # an LLM's subjective opinion — and every number has a traceable source.
+    _stub_price_intelligence(
         draft_id=draft_id,
         restaurant_id=restaurant_id,
-        validated=validated,
+        items=items,
         cuisine_type=cuisine_type,
         zip_code=zip_code,
         competitor_count=market_summary.get("competitor_count", 0),
-        model=merged.get("_model", model),
     )
 
-    # Day 141.7: preload per-competitor comparisons in background so
-    # clicking "Compare" in the editor is instant instead of 10-30s.
-    # Fires fire-and-forget threads; errors are swallowed (user can
-    # re-trigger by clicking if a preload fails).
     if competitor_data:
         _preload_comparisons_async(
             draft_id=draft_id,
@@ -931,17 +1084,66 @@ def analyze_menu_prices(
         )
 
     return {
-        "assessments": validated["assessments"],
-        "category_avgs": validated["category_avgs"],
-        "market_context": validated["market_context"],
-        "model": merged.get("_model", model),
+        "assessments": [],  # filled in asynchronously by the aggregator
+        "category_avgs": {},
+        "market_context": {"market_tier": market_summary.get("avg_market_tier", "$$")},
+        "model": _COMPARE_MODEL,  # Opus drives the real work now
         "total_items": len(items),
-        "items_assessed": sum(
-            1 for a in validated["assessments"] if a["assessment"] != "unknown"
-        ),
+        "items_assessed": 0,  # aggregator updates summary after comparisons finish
         "skipped": False,
         "from_cache": False,
     }
+
+
+def _stub_price_intelligence(
+    *,
+    draft_id: int,
+    restaurant_id: int,
+    items: List[Dict[str, Any]],
+    cuisine_type: str,
+    zip_code: str,
+    competitor_count: int,
+) -> None:
+    """Seed price_intelligence_results with one row per user item + a
+    summary row — all with blank range/assessment fields. The aggregator
+    fills them in after comparisons complete."""
+    now = _now()
+    with _db_connect() as conn:
+        # Wipe prior stubs so reruns don't leave stale rows
+        conn.execute("DELETE FROM price_intelligence_results WHERE draft_id = ?", (draft_id,))
+        conn.execute("DELETE FROM price_intelligence_summary WHERE draft_id = ?", (draft_id,))
+        for it in items:
+            conn.execute(
+                """INSERT INTO price_intelligence_results
+                   (draft_id, restaurant_id, item_id, item_name, item_category,
+                    current_price, assessment, suggested_low, suggested_high,
+                    regional_avg, reasoning, confidence, price_sources,
+                    comparison_count, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'unknown', NULL, NULL, NULL, NULL,
+                           0.0, ?, 0, ?)""",
+                (
+                    draft_id, restaurant_id, it.get("id"),
+                    it.get("name") or "",
+                    it.get("category") or "Uncategorized",
+                    int(it.get("price_cents") or 0),
+                    json.dumps([]), now,
+                ),
+            )
+        conn.execute(
+            """INSERT INTO price_intelligence_summary
+               (draft_id, restaurant_id, cuisine_type, zip_code,
+                competitor_count, avg_market_tier, total_items, items_assessed,
+                underpriced, fair_priced, overpriced, category_avgs,
+                model_used, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, '$$', ?, 0, 0, 0, 0, ?, ?, ?, ?)""",
+            (
+                draft_id, restaurant_id, cuisine_type, zip_code,
+                competitor_count, len(items),
+                json.dumps({}),
+                _COMPARE_MODEL, now, now,
+            ),
+        )
+        conn.commit()
 
 
 def get_price_intelligence(draft_id: int) -> Optional[Dict[str, Any]]:
@@ -958,7 +1160,7 @@ def get_price_intelligence(draft_id: int) -> Optional[Dict[str, Any]]:
         items = conn.execute(
             """SELECT item_id, item_name, item_category, current_price,
                       assessment, suggested_low, suggested_high, regional_avg,
-                      reasoning, confidence
+                      reasoning, confidence, comparison_count, price_sources
                FROM price_intelligence_results
                WHERE draft_id = ?
                ORDER BY id""",
@@ -997,7 +1199,7 @@ def get_item_assessment(draft_id: int, item_id: int) -> Optional[Dict[str, Any]]
         row = conn.execute(
             """SELECT item_name, item_category, current_price, assessment,
                       suggested_low, suggested_high, regional_avg,
-                      reasoning, confidence
+                      reasoning, confidence, comparison_count, price_sources
                FROM price_intelligence_results
                WHERE draft_id = ? AND item_id = ?""",
             (draft_id, item_id),
@@ -1024,8 +1226,13 @@ def clear_price_intelligence(draft_id: int) -> int:
 # Competitor side-by-side comparison (Day 141.5)
 # ---------------------------------------------------------------------------
 
-_COMPARE_MODEL = "claude-sonnet-4-5"
-_COMPARE_MAX_TOKENS = 6_000
+_COMPARE_MODEL = "claude-opus-4-6"
+# Match the extraction pattern in ai_menu_extract.py:
+# max_tokens = total thinking + response. Budget caps thinking so the
+# JSON response isn't starved. 32k - 10k = 22k headroom for output
+# (the extraction baseline uses this exact split and has never run dry).
+_COMPARE_MAX_TOKENS = 32_000
+_COMPARE_THINKING_BUDGET = 10_000
 
 
 def _ensure_comparison_schema() -> None:
@@ -1251,135 +1458,103 @@ def _build_real_comparison_prompt(
     comp_name: str,
     competitor: Dict[str, Any],
 ) -> str:
-    """Build a prompt for matching our items against their REAL scraped menu.
+    """Build the Opus+thinking prompt for per-competitor menu comparison.
 
-    Day 141.7: pre-filters competitor items to overlapping categories so
-    Claude can't match a pizza to a burger just because they share a word.
+    Day 141.7: moved from Sonnet with a hand-rolled per-category pre-filter
+    (brittle — kept cross-matching cookies to pizzas) to Opus with extended
+    thinking. Opus reasons about category, cuisine, item type, and name
+    similarity rather than pattern-matching. No pre-filter necessary; we
+    give Opus the full competitor menu and let it decide what matches.
     """
-    # Per-category pre-filter: group our items and their items by
-    # normalized category, then only pair categories that overlap.
-    # Items in categories with no competitor match become auto-no_match
-    # without Claude ever seeing them — can't match a calzone to a cake
-    # if cakes never enter the prompt.
-    from collections import defaultdict
-    our_by_cat: Dict[str, List[Dict]] = defaultdict(list)
-    for it in our_items:
-        our_by_cat[_normalize_menu_category(it.get("category") or "Other")].append(it)
-    their_by_cat: Dict[str, List[Dict]] = defaultdict(list)
-    for it in their_items:
-        their_by_cat[_normalize_menu_category(it.get("category") or "Other")].append(it)
+    def _fmt_item(it: Dict[str, Any]) -> str:
+        price = f"${it['price_cents'] / 100:.2f}" if it.get("price_cents") else "no price"
+        cat = (it.get("category") or "Other").strip()
+        sub = (it.get("subcategory") or "").strip()
+        label = f"{cat} > {sub}" if sub else cat
+        desc = (it.get("description") or "").strip()
+        desc_part = f" — {desc[:80]}" if desc else ""
+        return f"- [{label}] {it['name']} | {price}{desc_part}"
 
-    matched_ours: List[Dict] = []
-    matched_theirs: List[Dict] = []
-    auto_no_match: List[Dict] = []
-    for norm_cat, items_list in our_by_cat.items():
-        if norm_cat in their_by_cat:
-            matched_ours.extend(items_list)
-            # Include their matching-category items (only add once)
-            if norm_cat not in {_normalize_menu_category(it.get("category") or "Other") for it in matched_theirs}:
-                matched_theirs.extend(their_by_cat[norm_cat])
-        else:
-            auto_no_match.extend(items_list)
-
-    our_block = []
-    for item in matched_ours:
-        price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
-        cat = item.get("category") or "Uncategorized"
-        sub = item.get("subcategory") or ""
-        cat_label = f"{cat} > {sub}" if sub else cat
-        our_block.append(f"- {item['name']} | {cat_label} | {price_str}")
-    our_text = "\n".join(our_block) if our_block else "(none)"
-
-    their_block = []
-    for item in matched_theirs:
-        price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
-        cat = item.get("category") or "Other"
-        their_block.append(f"- {item['name']} | {cat} | {price_str}")
-    their_text = "\n".join(their_block) if their_block else "(none)"
+    our_block = "\n".join(_fmt_item(it) for it in our_items) or "(none)"
+    their_block = "\n".join(_fmt_item(it) for it in their_items) or "(none)"
 
     comp_price = competitor.get("price_label", "N/A")
     comp_rating = competitor.get("rating", "N/A")
 
-    # Stash auto-no-match items on the function itself so the caller
-    # can append them to the Claude response without a return-type change.
-    _build_real_comparison_prompt._auto_no_match = [
-        {
-            "our_item": it.get("name", ""),
-            "our_price_cents": it.get("price_cents", 0),
-            "their_estimated_cents": 0,
-            "their_item_name": "",
-            "difference_cents": 0,
-            "verdict": "no_match",
-            "match_quality": "no_match",
-        }
-        for it in auto_no_match
-    ]
-
-    # If ALL our items are auto-no-match (zero category overlap), return
-    # a prompt that tells Claude there's nothing to compare — it'll just
-    # echo back no_match rows, which is redundant but keeps the response
-    # format consistent.
-    if not matched_ours:
-        _build_real_comparison_prompt._auto_no_match = [
-            {
-                "our_item": it.get("name", ""),
-                "our_price_cents": it.get("price_cents", 0),
-                "their_estimated_cents": 0,
-                "their_item_name": "",
-                "difference_cents": 0,
-                "verdict": "no_match",
-                "match_quality": "no_match",
-            }
-            for it in our_items
-        ]
-        return None  # signal to caller: skip the Claude call entirely
-
     return f"""\
-Compare these two restaurant menus. Match each of OUR items to the
-closest SAME-TYPE item on {comp_name}'s menu.
+You are a restaurant pricing analyst comparing our menu to a real
+competitor's menu. Your output drives a side-by-side UI the restaurant
+owner uses to price-check their items, so the match quality matters
+more than the count — a wrong match is worse than many honest "no_match".
 
-CRITICAL MATCHING RULES (violations = broken output):
-1. CATEGORY FIRST: a Pizza matches ONLY another Pizza. A Burger matches
-   ONLY another Burger. A Calzone matches ONLY a Calzone. A Side matches
-   a Side. NEVER cross categories.
-   Equivalent categories (treat as same):
-   - Subs = Grinders = Heroes = Hoagies
-   - Appetizers = Starters = Small Bites
-   - Entrees = Mains = From the Grill
-   - Club Sandwiches = Sandwiches = Melts
-   - Wraps = Wrap Sandwiches
-2. NAME SIMILARITY SECOND: within the same category, pick the closest
-   name match. "Cheese Pizza" → "Plain Cheese Pizza" (close).
-3. PREFER NO_MATCH: if {comp_name} has no item in the same category,
-   return match_quality "no_match" — do NOT force a match to a different
-   food type. 20 honest "no_match" rows are better than 1 wrong match.
-4. ONE-TO-ONE: each competitor item used at most once.
+OUR MENU ({len(our_items)} items):
+{our_block}
 
-OUR MENU:
-{our_text}
+{comp_name.upper()} — {comp_price} · ★{comp_rating} — ({len(their_items)} items):
+{their_block}
 
-{comp_name.upper()}'S MENU ({comp_price}, ★{comp_rating}):
-{their_text}
+For each of OUR items, find the best-matching item on {comp_name}'s menu
+— OR return "no_match" if nothing on their menu is a real peer.
 
-Return JSON:
+Think through matches like a human would:
+
+1. **Item type first.** A pizza competes with another pizza. A calzone
+   competes with another calzone. A burger with a burger, a grinder/sub/
+   hoagie with the same, a side (fries/rings) with a side, a salad with
+   a salad, an appetizer with an appetizer. NEVER match across types —
+   pizza ↔ salad, pizza ↔ cookie, calzone ↔ pasta are all wrong.
+
+2. **Flavor/ingredient family second.** Within the same type, pick the
+   closest flavor profile:
+   - Our "Buffalo Chicken Pizza" → their "Buffalo Chicken Pizza" (exact),
+     or "Spicy Chicken Pizza" (close), or any chicken pizza (approximate)
+   - Our "Cheese Pizza" → their "Cheese Pizza" or "Plain Cheese" (exact/
+     close), NOT "4 Cheese" if a simpler match exists
+   - Our "Meat Lovers Pizza" → their "Meat Lovers" / "All Meats" / "Carnivore"
+   - Our "Combination Pizza" → their "House Special" / "Supreme" / "The Works"
+
+3. **Category-name synonyms to treat as equivalent when assessing type:**
+   - Subs = Grinders = Heroes = Hoagies = Heros
+   - Sandwiches = Melts = Club Sandwiches
+   - Entrees = Mains = Dinner Entrees = Dinner Specials
+   - Appetizers = Starters = Small Plates = Small Bites
+   - Flatbreads ≈ Pizzas (if no real pizza section exists)
+   - Soda / Beverages / Drinks = Drinks
+
+4. **Return "no_match" freely.** If their menu has NO item of the same
+   type (e.g. they're an Italian restaurant with no pizzas, or a sub shop
+   with no burgers), every one of our items in that missing type should
+   be "no_match". Owners understand "no comparable item" — they don't
+   understand pizza-to-cookie comparisons.
+
+5. **One-to-one.** Don't reuse the same competitor item for multiple of
+   our items unless absolutely nothing else would fit — prefer no_match
+   over reusing.
+
+6. **Use their REAL prices from the menu above. Do NOT estimate.** If
+   the listed price is 0 or "no price", the item isn't really orderable
+   (it's a modifier or category header) — treat as a bad match.
+
+Return JSON only, no markdown fencing:
+
 {{
   "comparisons": [
     {{
       "our_item": "exact item name from our list",
-      "our_price_cents": integer,
-      "their_estimated_cents": integer (REAL price from their menu, NOT a guess),
-      "their_item_name": "matching item from their menu or empty string",
-      "difference_cents": integer (their - ours, 0 if no_match),
+      "our_price_cents": <int>,
+      "their_item_name": "exact item name from their menu, or empty string",
+      "their_estimated_cents": <int, their real price in cents; 0 if no_match>,
+      "difference_cents": <int, their - ours; 0 if no_match>,
       "verdict": "cheaper|similar|pricier|no_match",
-      "match_quality": "exact|close|approximate|no_match"
+      "match_quality": "exact|close|approximate|no_match",
+      "reasoning": "one short sentence on why you picked this match (or no_match)"
     }}
   ]
 }}
 
-- Return ONLY valid JSON, no markdown.
-- Every one of our items must appear.
-- "similar" = within 15%. "cheaper" = our price lower. "pricier" = our price higher.
-- If no_match: verdict="no_match", difference_cents=0, their_estimated_cents=0."""
+- Every one of OUR items must appear exactly once.
+- "similar" = within 15% either way. "cheaper" = our price lower. "pricier" = our price higher.
+- `difference_cents` is (their - ours), signed."""
 
 
 def compare_with_competitor(
@@ -1467,33 +1642,48 @@ def compare_with_competitor(
         prompt = _build_real_comparison_prompt(
             priced_items, their_items, comp_name, competitor
         )
-        # Grab any auto-no-match items (categories competitor doesn't carry)
-        auto_no_match = getattr(_build_real_comparison_prompt, "_auto_no_match", [])
+        use_thinking = True
     else:
-        # Estimate path: ask Claude to estimate prices
+        # Estimate path: ask Claude to estimate prices (still Sonnet — lighter task)
         prompt = _build_comparison_prompt(priced_items, competitor, cuisine_type, zip_code)
-        auto_no_match = []
+        use_thinking = False
 
     comparisons = []
-    if prompt is not None:
-        try:
+    try:
+        if use_thinking:
+            # Opus + extended thinking for real menu matching. Streams
+            # because thinking runs can exceed the non-streaming timeout.
+            api_kwargs = {
+                "model": _COMPARE_MODEL,
+                "max_tokens": _COMPARE_MAX_TOKENS,
+                "temperature": 1,  # required for extended thinking
+                "thinking": {"type": "enabled", "budget_tokens": _COMPARE_THINKING_BUDGET},
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            with client.messages.stream(**api_kwargs) as stream:
+                message = stream.get_final_message()
+            raw = ""
+            for block in message.content:
+                if getattr(block, "type", None) == "text" or hasattr(block, "text"):
+                    raw += getattr(block, "text", "") or ""
+            raw = raw.strip()
+        else:
+            # Estimates path — Sonnet, non-streaming
             response = client.messages.create(
-                model=_COMPARE_MODEL,
-                max_tokens=_COMPARE_MAX_TOKENS,
+                model="claude-sonnet-4-5",
+                max_tokens=6000,
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = re.sub(r"^```(?:json)?\s*", "", raw)
-                raw = re.sub(r"\s*```$", "", raw)
-            data = json.loads(raw)
-            comparisons = data.get("comparisons", [])
-        except Exception as e:
-            log.error("Competitor comparison failed: %s", e)
-            return {"error": str(e), "comparisons": []}
 
-    # Append auto-no-match rows for categories the competitor doesn't carry
-    comparisons.extend(auto_no_match)
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+        comparisons = data.get("comparisons", [])
+    except Exception as e:
+        log.error("Competitor comparison failed for %s: %s", comp_name, e)
+        return {"error": str(e), "comparisons": []}
     menu_url = real_menu.get("menu_url") if real_menu else None
 
     # Cache the result (include data_source in competitor_data)

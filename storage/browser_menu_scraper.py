@@ -354,7 +354,21 @@ def _render_pdf_to_screenshots(pdf_url: str) -> List[str]:
     return out
 
 
-def _compress_for_vision(png_path: str) -> Optional[str]:
+def _compress_for_vision(png_path: str) -> Optional[str]:  # noqa: C901
+    """Compress an oversize PNG screenshot to JPEG at step-down quality.
+
+    Day 141.7: earlier version also capped MAX_DIM pixel size, which
+    squashed the WIDTH of tall full-page screenshots (1280x14000 → 370x4096)
+    and made text unreadable to Vision. Now width is preserved; we only
+    reduce quality. If even quality=40 can't fit under the Vision limit
+    AND the image is very tall, we crop it from the top — losing bottom
+    items is less harmful than rendering everything illegibly small.
+    """
+    # (impl below)
+    return _do_compress(png_path)
+
+
+def _do_compress(png_path: str) -> Optional[str]:
     """Convert a PNG screenshot to JPEG at step-down quality until under
     the Vision size limit. Returns the JPEG path, or the original path
     if compression failed."""
@@ -369,28 +383,39 @@ def _compress_for_vision(png_path: str) -> Optional[str]:
         log.warning("browser scraper: PIL couldn't open %s: %s", png_path, e)
         return png_path
 
-    # Also cap total pixel dimensions — Vision resizes anything bigger
-    # anyway, and we save bandwidth by downscaling up front.
-    MAX_DIM = 4096
-    w, h = img.size
-    if max(w, h) > MAX_DIM:
-        scale = MAX_DIM / max(w, h)
-        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-        log.info("browser scraper: downscaled from %dx%d to %dx%d", w, h, img.size[0], img.size[1])
-
+    # Width is sacred — never downscale below 1280 (our viewport width).
+    # Tiny text in menu screenshots becomes unreadable to Vision if we
+    # crush the width. Only reduce quality here.
     out_fd, out_path = tempfile.mkstemp(suffix=".jpg", prefix="menuscrn_")
     os.close(out_fd)
+    w, h = img.size
+    last_size = 0
     for quality in (90, 80, 70, 60, 50, 40):
         try:
             img.save(out_path, "JPEG", quality=quality, optimize=True)
         except Exception as e:
             log.warning("browser scraper: JPEG save failed at Q=%d: %s", quality, e)
             continue
-        size = os.path.getsize(out_path)
-        if size <= SCREENSHOT_MAX_BYTES:
-            log.info("browser scraper: compressed at quality=%d -> %d bytes", quality, size)
+        last_size = os.path.getsize(out_path)
+        if last_size <= SCREENSHOT_MAX_BYTES:
+            log.info("browser scraper: compressed %dx%d at Q=%d -> %d bytes",
+                     w, h, quality, last_size)
             return out_path
-    log.warning("browser scraper: even Q=40 exceeds %d bytes; sending as-is",
+
+    # Quality alone didn't fit. If the image is unusually tall (>3x wide),
+    # crop from the top half — preserves the most important menu sections
+    # at readable width rather than squashing everything tiny.
+    if h > w * 3:
+        log.warning(
+            "browser scraper: image %dx%d too big even at Q=40 (%d bytes); "
+            "cropping top half to preserve text width", w, h, last_size,
+        )
+        top = img.crop((0, 0, w, h // 2))
+        for quality in (85, 75, 60, 45):
+            top.save(out_path, "JPEG", quality=quality, optimize=True)
+            if os.path.getsize(out_path) <= SCREENSHOT_MAX_BYTES:
+                return out_path
+    log.warning("browser scraper: could not fit under %d bytes; sending as-is",
                 SCREENSHOT_MAX_BYTES)
     return out_path
 

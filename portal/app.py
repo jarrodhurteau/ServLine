@@ -4462,17 +4462,21 @@ def api_compare_competitor(draft_id):
         return jsonify({"error": f"Competitor '{competitor_name}' not found in cache"}), 404
 
     try:
-        # Try cache-read first (instant, free — uses cached competitor menus)
-        cached = ai_price_intel.get_cached_competitor_menu_comparison(
+        # Day 141.7: primary cache is the Opus+thinking comparison stored
+        # in competitor_comparisons (written by the preload). The old
+        # Python-based fuzzy matcher (get_cached_competitor_menu_comparison)
+        # was producing the bad cross-category matches we've been seeing
+        # (Gyro → Genoa Salami, Combination → Pizza With Pepperoni $3.50).
+        # It's dropped from the path entirely.
+        opus_cached = ai_price_intel.get_competitor_comparison(
             draft_id=draft_id,
-            restaurant_id=rest_id,
             competitor_name=competitor_name,
-            competitor=competitor,
         )
-        if cached:
-            return jsonify(cached)
+        if opus_cached:
+            return jsonify(opus_cached)
 
-        # Fall back to Claude call if no cached menu
+        # No Opus result yet (preload still running or errored). Fall
+        # through to an on-demand Opus comparison.
         result = ai_price_intel.compare_with_competitor(
             draft_id=draft_id,
             restaurant_id=rest_id,
