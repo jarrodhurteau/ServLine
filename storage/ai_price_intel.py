@@ -242,39 +242,39 @@ def _fetch_competitor_menus(
         return (tier_dist, rating)
 
     sorted_comps = sorted(competitor_data, key=_sort_key)
+    candidates = [c for c in sorted_comps[:max_competitors] if c.get("place_id")]
 
-    results = []
+    # Day 141.7: serial scraping. Tried ThreadPoolExecutor earlier; Apify's
+    # run-sync endpoint appeared to dedupe concurrent calls to the same
+    # actor and returned identical datasets for every worker, which
+    # poisoned every competitor's menu with the same content. Parallel
+    # Apify calls are off until we have a reliable way to force unique
+    # dataset IDs per request.
+    fetched: List[tuple] = []
     fresh_count = 0
-
-    for comp in sorted_comps[:max_competitors]:
-        place_id = comp.get("place_id")
+    for comp in candidates:
+        place_id = comp["place_id"]
         place_name = comp.get("place_name", "Unknown")
-        if not place_id:
-            continue
-
-        # Fetch menu (cache or fresh)
-        menu_data = None
         try:
-            menu_data = scrape_competitor_menu(
-                place_id, place_name,
-                force_refresh=False,
-            )
+            menu_data = scrape_competitor_menu(place_id, place_name, force_refresh=False)
         except Exception as e:
             log.warning("Failed to fetch menu for %s: %s", place_name, e)
-
-        if menu_data and menu_data.get("source") == "not_found" and not menu_data.get("from_cache"):
+            menu_data = None
+        if menu_data and not menu_data.get("from_cache"):
             fresh_count += 1
-        elif menu_data and not menu_data.get("from_cache"):
-            fresh_count += 1
+            if fresh_count >= max_fresh_searches:
+                # Keep what we have, stop firing new scrapes
+                fetched.append((comp, menu_data))
+                log.info("Hit max fresh searches (%d), stopping", max_fresh_searches)
+                break
+        fetched.append((comp, menu_data))
 
-        if fresh_count >= max_fresh_searches and not (menu_data and menu_data.get("from_cache")):
-            log.info("Hit max fresh searches (%d), skipping remaining", max_fresh_searches)
-            break
+    results = []
+    for comp, menu_data in fetched:
+        place_id = comp["place_id"]
+        place_name = comp.get("place_name", "Unknown")
 
         raw_items = menu_data.get("items", []) if menu_data else []
-        # Day 141.7: filter by classifier role so sauce ramekins and size
-        # variants don't pollute the comparison prompt. Unclassified items
-        # (role=None) are kept so we don't regress on un-tagged cache rows.
         try:
             from storage.menu_classifier import filter_comparison_items
             their_items = filter_comparison_items(raw_items)
@@ -283,11 +283,8 @@ def _fetch_competitor_menus(
         their_cats = {it.get("category", "Other") for it in their_items}
         overlap = _categories_overlap(our_cats, their_cats)
 
-        # Keep competitors even without exact category overlap —
-        # Claude will match individual items. Only skip if debugging shows
-        # a need to filter (e.g., completely different cuisine).
         if their_items and not overlap:
-            log.info("No exact category overlap for %s, but keeping (items may still match)", place_name)
+            log.info("No exact category overlap for %s, but keeping", place_name)
 
         results.append({
             "place_name": place_name,
@@ -301,7 +298,7 @@ def _fetch_competitor_menus(
         })
 
     log.info(
-        "Fetched %d competitor menus (%d with items, %d fresh searches)",
+        "Fetched %d competitor menus in parallel (%d with items, %d fresh)",
         len(results),
         sum(1 for r in results if r["items"]),
         fresh_count,
@@ -711,6 +708,58 @@ def _save_results(
 
 
 # ---------------------------------------------------------------------------
+# Preload helpers (Day 141.7)
+# ---------------------------------------------------------------------------
+def _preload_comparisons_async(
+    draft_id: int,
+    restaurant_id: int,
+    competitors: List[Dict[str, Any]],
+    max_workers: int = 4,
+) -> None:
+    """Fire background threads that precompute per-competitor comparisons.
+
+    When the user clicks "Compare" on a competitor in the editor, the
+    `compare_with_competitor` call takes 10-30s (cached menu + Claude
+    Sonnet match). Running it eagerly here — in parallel — means most
+    clicks hit the cache instantly. Costs ~$0.30-0.50 total in Claude
+    tokens per full preload, worth it for the UX.
+
+    Errors are swallowed per-task: a failed preload just means that one
+    competitor's click will run on-demand like before.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _worker():
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for comp in competitors:
+                    pool.submit(_preload_one_comparison, draft_id, restaurant_id, comp)
+        except Exception as e:
+            log.warning("Comparison preload pool failed: %s", e)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _preload_one_comparison(draft_id: int, restaurant_id: int, comp: Dict[str, Any]) -> None:
+    """Single-competitor preload step. Skips if already cached."""
+    try:
+        name = comp.get("place_name") or ""
+        if not name:
+            return
+        existing = get_competitor_comparison(draft_id, name)
+        if existing:
+            return  # already cached, nothing to do
+        compare_with_competitor(
+            draft_id=draft_id,
+            restaurant_id=restaurant_id,
+            competitor=comp,
+        )
+    except Exception as e:
+        log.info("Preload compare failed for %s: %s", comp.get("place_name"), e)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def analyze_menu_prices(
@@ -869,6 +918,17 @@ def analyze_menu_prices(
         competitor_count=market_summary.get("competitor_count", 0),
         model=merged.get("_model", model),
     )
+
+    # Day 141.7: preload per-competitor comparisons in background so
+    # clicking "Compare" in the editor is instant instead of 10-30s.
+    # Fires fire-and-forget threads; errors are swallowed (user can
+    # re-trigger by clicking if a preload fails).
+    if competitor_data:
+        _preload_comparisons_async(
+            draft_id=draft_id,
+            restaurant_id=restaurant_id,
+            competitors=competitor_data,
+        )
 
     return {
         "assessments": validated["assessments"],
@@ -1060,77 +1120,266 @@ RULES:
 - Base your estimates on what a {comp_price} restaurant in this area would actually charge."""
 
 
+# Menu categories that mean the same thing across restaurants. The
+# canonical (first) name is what the pre-filter uses for overlap checks.
+_CATEGORY_SYNONYMS = {
+    # Subs / Grinders / Sandwiches / Clubs / Melts — all comparable handhelds.
+    # A BLT Club and a BLT Grinder serve the same role on a menu.
+    "subs": "sandwiches",
+    "sub": "sandwiches",
+    "grinders": "sandwiches",
+    "grinder": "sandwiches",
+    "heroes": "sandwiches",
+    "hero": "sandwiches",
+    "hoagies": "sandwiches",
+    "hoagie": "sandwiches",
+    "cold subs": "sandwiches",
+    "hot subs": "sandwiches",
+    "cold grinders": "sandwiches",
+    "hot grinders": "sandwiches",
+    "parmigiana grinders": "sandwiches",
+    '12" grinders': "sandwiches",
+    "sandwiches": "sandwiches",
+    "sandwich": "sandwiches",
+    "club sandwiches": "sandwiches",
+    "melt sandwiches": "sandwiches",
+    "melts": "sandwiches",
+    # Appetizers
+    "appetizers": "appetizers",
+    "appetizer": "appetizers",
+    "starters": "appetizers",
+    "small bites": "appetizers",
+    "apps": "appetizers",
+    # Entrees
+    "entrees": "entrees",
+    "entrées": "entrees",
+    "mains": "entrees",
+    "main dishes": "entrees",
+    "dinner entrees": "entrees",
+    "from the grill": "entrees",
+    "italian dishes": "entrees",
+    "italian specialties": "entrees",
+    # Sides
+    "sides": "sides",
+    "side orders": "sides",
+    "side items": "sides",
+    "side dishes": "sides",
+    "fries": "sides",
+    # Desserts
+    "desserts": "desserts",
+    "dessert": "desserts",
+    "sweets": "desserts",
+    # Drinks
+    "beverages": "drinks",
+    "drinks": "drinks",
+    # Wraps
+    "wraps": "wraps",
+    "wrap": "wraps",
+    # Wings
+    "wings": "wings",
+    "chicken wings": "wings",
+    "buffalo wings": "wings",
+    # Pizza
+    "pizza": "pizza",
+    "pizzas": "pizza",
+    "gourmet pizza": "pizza",
+    "specialty pizza": "pizza",
+    "specialty pizzas": "pizza",
+    # Calzones
+    "calzones": "calzones",
+    "calzone": "calzones",
+    # Burgers
+    "burgers": "burgers",
+    "burger": "burgers",
+    "hamburgers": "burgers",
+    "6 oz angus burgers": "burgers",
+    # Salads
+    "salads": "salads",
+    "salad": "salads",
+    # Pasta
+    "pasta": "pasta",
+    "pasta dishes": "pasta",
+    # Seafood
+    "seafood": "seafood",
+    "fresh seafood": "seafood",
+    # Soups
+    "soups": "soups",
+    "soup": "soups",
+    # Nachos
+    "nachos": "appetizers",
+    # Dinner (generic)
+    "dinner": "entrees",
+    "lunch": "entrees",
+    # Flatbreads (close enough to pizza for comparison)
+    "flatbreads": "pizza",
+    "flatbread": "pizza",
+    # Small plates
+    "plates": "appetizers",
+    # Catch tokens that appear inside compound names
+    "appetizer": "appetizers",
+    "grinder": "sandwiches",
+    "sub": "sandwiches",
+}
+
+
+def _normalize_menu_category(cat: str) -> str:
+    """Map a menu category to its canonical name using token-based matching.
+
+    Handles the infinite variety of real restaurant category names:
+    '12" Grinders' → sandwiches (token 'grinders' hits the map)
+    'Appetizers & Sides' → appetizers (token 'appetizers' hits)
+    'Dinner Menu' → entrees (token 'dinner' hits)
+    'Specialty Pizza' → pizza (token 'pizza' hits)
+    """
+    key = cat.strip().lower()
+    # Try exact match first (fastest)
+    if key in _CATEGORY_SYNONYMS:
+        return _CATEGORY_SYNONYMS[key]
+    # Token-based: split on spaces and punctuation, check each word
+    import re
+    tokens = re.split(r'[\s&/,\-\'"]+', key)
+    for tok in tokens:
+        tok = tok.strip()
+        if tok and tok in _CATEGORY_SYNONYMS:
+            return _CATEGORY_SYNONYMS[tok]
+    return key
+
+
 def _build_real_comparison_prompt(
     our_items: List[Dict[str, Any]],
     their_items: List[Dict[str, Any]],
     comp_name: str,
     competitor: Dict[str, Any],
 ) -> str:
-    """Build a prompt for matching our items against their REAL scraped menu."""
+    """Build a prompt for matching our items against their REAL scraped menu.
+
+    Day 141.7: pre-filters competitor items to overlapping categories so
+    Claude can't match a pizza to a burger just because they share a word.
+    """
+    # Per-category pre-filter: group our items and their items by
+    # normalized category, then only pair categories that overlap.
+    # Items in categories with no competitor match become auto-no_match
+    # without Claude ever seeing them — can't match a calzone to a cake
+    # if cakes never enter the prompt.
+    from collections import defaultdict
+    our_by_cat: Dict[str, List[Dict]] = defaultdict(list)
+    for it in our_items:
+        our_by_cat[_normalize_menu_category(it.get("category") or "Other")].append(it)
+    their_by_cat: Dict[str, List[Dict]] = defaultdict(list)
+    for it in their_items:
+        their_by_cat[_normalize_menu_category(it.get("category") or "Other")].append(it)
+
+    matched_ours: List[Dict] = []
+    matched_theirs: List[Dict] = []
+    auto_no_match: List[Dict] = []
+    for norm_cat, items_list in our_by_cat.items():
+        if norm_cat in their_by_cat:
+            matched_ours.extend(items_list)
+            # Include their matching-category items (only add once)
+            if norm_cat not in {_normalize_menu_category(it.get("category") or "Other") for it in matched_theirs}:
+                matched_theirs.extend(their_by_cat[norm_cat])
+        else:
+            auto_no_match.extend(items_list)
+
     our_block = []
-    for item in our_items:
+    for item in matched_ours:
         price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
         cat = item.get("category") or "Uncategorized"
         sub = item.get("subcategory") or ""
         cat_label = f"{cat} > {sub}" if sub else cat
         our_block.append(f"- {item['name']} | {cat_label} | {price_str}")
-    our_text = "\n".join(our_block)
+    our_text = "\n".join(our_block) if our_block else "(none)"
 
     their_block = []
-    for item in their_items:
+    for item in matched_theirs:
         price_str = f"${item['price_cents'] / 100:.2f}" if item.get("price_cents") else "no price"
         cat = item.get("category") or "Other"
         their_block.append(f"- {item['name']} | {cat} | {price_str}")
-    their_text = "\n".join(their_block)
+    their_text = "\n".join(their_block) if their_block else "(none)"
 
     comp_price = competitor.get("price_label", "N/A")
     comp_rating = competitor.get("rating", "N/A")
 
-    return f"""\
-You are a restaurant pricing analyst. Compare two real restaurant menus side by side.
+    # Stash auto-no-match items on the function itself so the caller
+    # can append them to the Claude response without a return-type change.
+    _build_real_comparison_prompt._auto_no_match = [
+        {
+            "our_item": it.get("name", ""),
+            "our_price_cents": it.get("price_cents", 0),
+            "their_estimated_cents": 0,
+            "their_item_name": "",
+            "difference_cents": 0,
+            "verdict": "no_match",
+            "match_quality": "no_match",
+        }
+        for it in auto_no_match
+    ]
 
-OUR MENU ITEMS:
+    # If ALL our items are auto-no-match (zero category overlap), return
+    # a prompt that tells Claude there's nothing to compare — it'll just
+    # echo back no_match rows, which is redundant but keeps the response
+    # format consistent.
+    if not matched_ours:
+        _build_real_comparison_prompt._auto_no_match = [
+            {
+                "our_item": it.get("name", ""),
+                "our_price_cents": it.get("price_cents", 0),
+                "their_estimated_cents": 0,
+                "their_item_name": "",
+                "difference_cents": 0,
+                "verdict": "no_match",
+                "match_quality": "no_match",
+            }
+            for it in our_items
+        ]
+        return None  # signal to caller: skip the Claude call entirely
+
+    return f"""\
+Compare these two restaurant menus. Match each of OUR items to the
+closest SAME-TYPE item on {comp_name}'s menu.
+
+CRITICAL MATCHING RULES (violations = broken output):
+1. CATEGORY FIRST: a Pizza matches ONLY another Pizza. A Burger matches
+   ONLY another Burger. A Calzone matches ONLY a Calzone. A Side matches
+   a Side. NEVER cross categories.
+   Equivalent categories (treat as same):
+   - Subs = Grinders = Heroes = Hoagies
+   - Appetizers = Starters = Small Bites
+   - Entrees = Mains = From the Grill
+   - Club Sandwiches = Sandwiches = Melts
+   - Wraps = Wrap Sandwiches
+2. NAME SIMILARITY SECOND: within the same category, pick the closest
+   name match. "Cheese Pizza" → "Plain Cheese Pizza" (close).
+3. PREFER NO_MATCH: if {comp_name} has no item in the same category,
+   return match_quality "no_match" — do NOT force a match to a different
+   food type. 20 honest "no_match" rows are better than 1 wrong match.
+4. ONE-TO-ONE: each competitor item used at most once.
+
+OUR MENU:
 {our_text}
 
-{comp_name.upper()}'S ACTUAL MENU ({comp_price}, ★{comp_rating}):
+{comp_name.upper()}'S MENU ({comp_price}, ★{comp_rating}):
 {their_text}
 
-For each of OUR items, find the closest matching item on {comp_name}'s menu.
-Use their REAL price — do not estimate.
-
-Return a JSON object:
+Return JSON:
 {{
   "comparisons": [
     {{
       "our_item": "exact item name from our list",
-      "our_price_cents": integer (our price in cents),
-      "their_estimated_cents": integer (their REAL price in cents from their menu),
-      "their_item_name": "the actual matching item name from their menu",
-      "difference_cents": integer (their price - our price),
-      "verdict": "cheaper|similar|pricier",
+      "our_price_cents": integer,
+      "their_estimated_cents": integer (REAL price from their menu, NOT a guess),
+      "their_item_name": "matching item from their menu or empty string",
+      "difference_cents": integer (their - ours, 0 if no_match),
+      "verdict": "cheaper|similar|pricier|no_match",
       "match_quality": "exact|close|approximate|no_match"
     }}
   ]
 }}
 
-RULES:
-- Return ONLY valid JSON, no markdown fencing.
-- Every one of our items must appear in comparisons.
-- Use REAL prices from their menu — this is not an estimate.
-- "match_quality" indicates how close the match is:
-  - "exact": same item name (e.g., Tuna Wrap → Tuna Wrap)
-  - "close": very similar item (e.g., Grilled Chicken Wrap → Chicken Wrap)
-  - "no_match": no comparable item on their menu
-- IMPORTANT: prefer "no_match" over bad matches. Do NOT match different items just
-  because they're in the same category. "Buffalo Chicken Wrap" should only match
-  "Buffalo Chicken Wrap" or "Spicy Chicken Wrap" — NOT a generic "Gyro Wrap."
-  Each of their items can only be used as a match ONCE — don't reuse the same
-  competitor item for multiple of our items.
-- "similar" verdict means prices within 15% of each other.
-- "cheaper" means OUR price is lower. "pricier" means OUR price is higher.
-- If no_match, set verdict to "no_match" and difference_cents to 0.
-- Only compare like-for-like: wraps vs wraps, burgers vs burgers, pizza vs pizza.
-  Never match a topping/modifier against a full dish or side."""
+- Return ONLY valid JSON, no markdown.
+- Every one of our items must appear.
+- "similar" = within 15%. "cheaper" = our price lower. "pricier" = our price higher.
+- If no_match: verdict="no_match", difference_cents=0, their_estimated_cents=0."""
 
 
 def compare_with_competitor(
@@ -1218,26 +1467,33 @@ def compare_with_competitor(
         prompt = _build_real_comparison_prompt(
             priced_items, their_items, comp_name, competitor
         )
+        # Grab any auto-no-match items (categories competitor doesn't carry)
+        auto_no_match = getattr(_build_real_comparison_prompt, "_auto_no_match", [])
     else:
         # Estimate path: ask Claude to estimate prices
         prompt = _build_comparison_prompt(priced_items, competitor, cuisine_type, zip_code)
+        auto_no_match = []
 
-    try:
-        response = client.messages.create(
-            model=_COMPARE_MODEL,
-            max_tokens=_COMPARE_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw)
-        data = json.loads(raw)
-    except Exception as e:
-        log.error("Competitor comparison failed: %s", e)
-        return {"error": str(e), "comparisons": []}
+    comparisons = []
+    if prompt is not None:
+        try:
+            response = client.messages.create(
+                model=_COMPARE_MODEL,
+                max_tokens=_COMPARE_MAX_TOKENS,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+            data = json.loads(raw)
+            comparisons = data.get("comparisons", [])
+        except Exception as e:
+            log.error("Competitor comparison failed: %s", e)
+            return {"error": str(e), "comparisons": []}
 
-    comparisons = data.get("comparisons", [])
+    # Append auto-no-match rows for categories the competitor doesn't carry
+    comparisons.extend(auto_no_match)
     menu_url = real_menu.get("menu_url") if real_menu else None
 
     # Cache the result (include data_source in competitor_data)

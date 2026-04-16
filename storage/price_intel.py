@@ -990,45 +990,23 @@ If nothing found, return exactly: NOT_FOUND"""
     try:
         from .apify_client import (
             scrape_menu_by_url,
-            scrape_google_menu_panel,
-            scrape_menus_r_us_by_search,
             is_configured as apify_ok,
         )
     except Exception:
         apify_ok = lambda: False  # noqa: E731
         scrape_menu_by_url = None  # type: ignore
-        scrape_google_menu_panel = None  # type: ignore
-        scrape_menus_r_us_by_search = None  # type: ignore
 
-    # Step 2: Google menu panel first — highest-coverage source. Google
-    # aggregates menus from Single Platform + restaurant websites into
-    # the knowledge panel; we parse that page via menus-r-us.
-    if apify_ok() and scrape_google_menu_panel:
-        location = place_address or ""
-        items = scrape_google_menu_panel(place_name, location)
-        if items:
-            log.info("Google menu panel extracted %d items for %s", len(items), place_name)
-            return items
-
-    # Step 3: For each Claude-found URL, route to the right Apify actor.
-    # scrape_menu_by_url handles DoorDash/Grubhub natively and falls
-    # back to menus-r-us for any other domain.
+    # Step 2: URL mode — for each Claude-found URL, dispatch to the right
+    # actor (DoorDash/Grubhub natively, menus-r-us for everything else).
+    # We pass place_name so menus-r-us can validate the match.
     if apify_ok() and menu_urls and scrape_menu_by_url:
         for url in menu_urls:
-            items, platform = scrape_menu_by_url(url)
+            items, platform = scrape_menu_by_url(url, expected_name=place_name)
             if items:
                 log.info("Apify (%s) extracted %d items for %s", platform, len(items), place_name)
                 return items
 
-    # Step 4: URL-less fallback — ask menus-r-us to resolve by name + location.
-    if apify_ok() and scrape_menus_r_us_by_search:
-        location = place_address or place_name
-        items = scrape_menus_r_us_by_search(place_name, location)
-        if items:
-            log.info("Apify menus-r-us search-mode found %d items for %s", len(items), place_name)
-            return items
-
-    # Step 5: Last-resort JSON-LD / __NEXT_DATA__ parsing on any URL we have.
+    # Step 3: Last-resort JSON-LD / __NEXT_DATA__ parsing on any URL we have.
     for url in menu_urls:
         items = _extract_structured_menu(url, place_name)
         if items:

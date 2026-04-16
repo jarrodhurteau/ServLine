@@ -522,15 +522,18 @@ def score_item_quality(item: Dict[str, Any]) -> Tuple[int, bool]:
 
 @app.context_processor
 def inject_globals():
-    """Provide `now`, `show_admin`, `is_customer`, and `account_tier` to all templates."""
+    """Provide `now`, `show_admin`, `is_customer`, `account_tier`, and
+    `dev_tools` (env-gated opt-in for in-editor testing helpers) to templates."""
     raw = session.get("user")
     u = raw if isinstance(raw, dict) else {}
     role = u.get("role")
+    dev_tools = os.environ.get("DEV_TOOLS_ENABLED", "").strip().lower() in ("1", "true", "yes")
     return {
         "now": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "show_admin": role == "admin" or (bool(u) and role is None),
         "is_customer": role == "customer",
         "account_tier": u.get("account_tier"),
+        "dev_tools": dev_tools,
     }
 
 # ------------------------
@@ -7023,6 +7026,51 @@ def api_analyzing_prices_status(draft_id: int):
     with _PRICE_ANALYSIS_LOCK:
         job = _PRICE_ANALYSIS_JOBS.get(draft_id) or {"status": "unknown"}
     return jsonify(job)
+
+
+@app.post("/drafts/<int:draft_id>/rerun_price_analysis")
+@login_required
+def rerun_price_analysis(draft_id: int):
+    """Admin/dev helper: wipe price-intel cache for this draft's restaurant
+    and re-run the full analyzer. Short-circuits the wizard re-run loop."""
+    u = session.get("user") or {}
+    dev_tools = os.environ.get("DEV_TOOLS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+    if u.get("role") != "admin" and not dev_tools:
+        abort(403)
+
+    _require_drafts_storage()
+    draft = drafts_store.get_draft(draft_id)
+    if not draft:
+        abort(404)
+    rid = draft.get("restaurant_id")
+    if not rid or not ai_price_intel:
+        flash("Restaurant or price intel not available.", "error")
+        return redirect(url_for("draft_editor", draft_id=draft_id))
+
+    # Wipe the caches that would block a fresh full run:
+    # - per-restaurant Google Places results
+    # - every cached competitor menu scrape (shared across restaurants, but
+    #   for testing we clear globally so stale poisoned data can't linger)
+    # - this draft's Claude Call 4 results + per-competitor comparisons
+    with db_connect() as conn:
+        conn.execute("DELETE FROM price_comparison_cache WHERE id IN "
+                     "(SELECT cache_id FROM price_comparison_results WHERE restaurant_id=?)", (rid,))
+        conn.execute("DELETE FROM price_comparison_results WHERE restaurant_id=?", (rid,))
+        conn.execute("DELETE FROM competitor_menus")
+        conn.execute("DELETE FROM competitor_comparisons WHERE draft_id=?", (draft_id,))
+        conn.execute("DELETE FROM price_intelligence_results WHERE draft_id=?", (draft_id,))
+        conn.execute("DELETE FROM price_intelligence_summary WHERE draft_id=?", (draft_id,))
+        conn.commit()
+
+    with _PRICE_ANALYSIS_LOCK:
+        _PRICE_ANALYSIS_JOBS[draft_id] = {"status": "running", "error": None}
+        threading.Thread(
+            target=_run_price_analysis_job,
+            args=(draft_id, int(rid)),
+            daemon=True,
+        ).start()
+
+    return redirect(url_for("draft_analyzing_prices", draft_id=draft_id))
 
 
 @app.get("/drafts/<int:draft_id>/source_file")

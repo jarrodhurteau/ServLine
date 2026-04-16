@@ -2135,6 +2135,17 @@
           Original {% if source_is_structured %}File{% else %}Menu{% endif %}
         </button>
         {% endif %}
+        {% if show_admin or dev_tools %}
+        {# Dev-only: wipe cache + rerun the full price-intel pipeline. #}
+        <form method="post" action="{{ url_for('rerun_price_analysis', draft_id=draft.id) }}"
+              style="margin-left:auto;">
+          <button type="submit"
+                  title="Dev tool: clear price-intel cache + rerun full analyzer. Burns real API calls."
+                  style="padding:4px 10px; font-size:.72rem; font-weight:600; border:1px solid #B85C38; color:#B85C38; background:transparent; border-radius:6px; cursor:pointer;">
+            &#x21bb; Rerun analysis
+          </button>
+        </form>
+        {% endif %}
       </div>
 
       <!-- Google Maps competitor view -->
