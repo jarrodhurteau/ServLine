@@ -177,6 +177,34 @@ def _geocode_zip(zip_code: str, api_key: str) -> Optional[Dict[str, float]]:
         return None
 
 
+_INSIDE_VENUE_HINTS = (
+    # Theme parks
+    "six flags", "riverside", "amusement park", "theme park", "disney",
+    "universal studios", "busch gardens", "cedar point", "funtown",
+    # Malls / food courts / airports / stadiums / hospitals
+    "mall", "food court", "airport", "terminal", "stadium", "arena",
+    "hospital", "medical center", "casino", "hotel",
+)
+
+
+def _is_inside_venue(place: Dict[str, Any]) -> bool:
+    """Return True if a Google Places result is inside a theme park, mall,
+    airport, or similar captive venue — those aren't real competitors for
+    a standalone restaurant."""
+    name = (place.get("name") or "").lower()
+    vicinity = (place.get("vicinity") or "").lower()
+    hay = f"{name} {vicinity}"
+    if any(hint in hay for hint in _INSIDE_VENUE_HINTS):
+        return True
+    # located_in hint (Google sometimes sets this)
+    plus_code = (place.get("plus_code") or {})
+    if isinstance(plus_code, dict):
+        located_in = (plus_code.get("compound_code") or "").lower()
+        if any(hint in located_in for hint in _INSIDE_VENUE_HINTS):
+            return True
+    return False
+
+
 def _search_nearby(
     lat: float,
     lng: float,
@@ -205,7 +233,12 @@ def _search_nearby(
             log.warning("Places search failed: %s", data.get("status"))
             return []
         results = []
-        for place in data.get("results", [])[:MAX_RESULTS]:
+        for place in data.get("results", []):
+            # Day 141.7: skip results inside theme parks, malls, airports,
+            # and hospitals. These are usually concession-style spots that
+            # aren't real competitors for a standalone restaurant.
+            if _is_inside_venue(place):
+                continue
             results.append({
                 "place_id": place.get("place_id"),
                 "name": place.get("name", "Unknown"),
@@ -218,6 +251,8 @@ def _search_nearby(
                 "lng": place.get("geometry", {}).get("location", {}).get("lng"),
                 "types": place.get("types", []),
             })
+            if len(results) >= MAX_RESULTS:
+                break
         return results
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         log.error("Places search error: %s", exc)
@@ -989,11 +1024,25 @@ If nothing found, return exactly: NOT_FOUND"""
     try:
         from .apify_client import (
             scrape_menu_by_url,
+            find_website_via_google_maps,
             is_configured as apify_ok,
         )
     except Exception:
         apify_ok = lambda: False  # noqa: E731
         scrape_menu_by_url = None  # type: ignore
+        find_website_via_google_maps = None  # type: ignore
+
+    # Day 141.7: if Claude web search couldn't find a site, fall back to
+    # Google Maps scraper which reads the website field off the business
+    # panel. Catches small local places Claude can't surface organically.
+    if not menu_urls and apify_ok() and find_website_via_google_maps:
+        try:
+            gm_url = find_website_via_google_maps(place_name, place_address)
+            if gm_url:
+                menu_urls.append(gm_url)
+                log.info("Google Maps fallback URL for %s: %s", place_name, gm_url)
+        except Exception as e:
+            log.warning("Google Maps URL lookup failed for %s: %s", place_name, e)
 
     # Step 2: Try every URL through every extraction path, keep the MOST
     # complete result. Paths: DoorDash/Grubhub dedicated actor, menus-r-us,

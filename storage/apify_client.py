@@ -37,6 +37,10 @@ ACTOR_GRUBHUB = "alizarin_refrigerator-owner~grubhub-scraper"
 # pay-only-on-success. Preferred over delivery-platform scrapers because
 # restaurant websites carry richer/cleaner menu data at 30x lower cost.
 ACTOR_MENUS_R_US = "menus-r-us~restaurant-menu-scraper"
+# Day 141.7: fallback URL discovery. When Claude web search can't find
+# a restaurant's website, this actor queries Google Maps by name and
+# returns the `website` field from their business panel.
+ACTOR_GOOGLE_MAPS = "compass~crawler-google-places"
 
 RUN_TIMEOUT_SECONDS = 180
 
@@ -302,6 +306,37 @@ def scrape_menus_r_us_by_search(
     items = _normalize_menus_r_us([match])
     log.info("menus-r-us search matched '%s' → %d items", restaurant_name, len(items))
     return items
+
+
+def find_website_via_google_maps(
+    restaurant_name: str,
+    location_hint: str = "",
+) -> Optional[str]:
+    """Look up a restaurant on Google Maps and return its `website` URL.
+
+    Used as a fallback when Claude web search can't surface a site.
+    Many small local restaurants have their website only on Google's
+    business panel, not in organic search results.
+
+    Returns the URL or None. ~$0.002 per call.
+    """
+    query = f"{restaurant_name} {location_hint}".strip()
+    raw = _run_actor_sync(ACTOR_GOOGLE_MAPS, {
+        "searchStringsArray": [query],
+        "maxCrawledPlacesPerSearch": 1,
+        "language": "en",
+        "countryCode": "us",
+    })
+    if not raw or not isinstance(raw, list):
+        return None
+    first = raw[0] if isinstance(raw[0], dict) else None
+    if not first:
+        return None
+    website = (first.get("website") or "").strip()
+    if website:
+        log.info("Google Maps URL fallback for '%s' -> %s", restaurant_name, website)
+        return website
+    return None
 
 
 def scrape_doordash_menu(store_url: str) -> List[Dict[str, Any]]:

@@ -37,11 +37,17 @@ log = logging.getLogger(__name__)
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 1024
 
-# Full-page screenshots can get huge on long menus. Claude Vision accepts
-# up to ~5MB per image; if our screenshot is bigger we need to split it.
-SCREENSHOT_MAX_BYTES = 4_500_000
-NAV_TIMEOUT_MS = 25_000
+# Full-page screenshots can get huge on long menus. Claude Vision's
+# 5MB cap applies to the BASE64-encoded payload, which is ~1.33x the raw
+# file. A 4.5MB PNG becomes a 6MB base64 upload and gets rejected. Set
+# the threshold at 3.6MB raw so we stay under 5MB after encoding.
+SCREENSHOT_MAX_BYTES = 3_600_000
+NAV_TIMEOUT_MS = 45_000  # slow sites (Ferrentino's) need >25s
 SETTLE_WAIT_MS = 2_500
+
+# Common URL patterns restaurants use for their menu page. Tried in
+# order when the nav has no obvious "menu" link.
+_COMMON_MENU_SUBPATHS = ("/menu", "/our-menu", "/menus", "/food", "/dinner-menu", "/order")
 
 # Minimum $-signs we expect on a real menu page. Screenshots with fewer
 # probably captured a landing page / error / splash instead.
@@ -129,8 +135,19 @@ def scrape_menu_via_browser(
                     ),
                 )
                 page = context.new_page()
-                page.goto(url, timeout=NAV_TIMEOUT_MS, wait_until="networkidle")
-                page.wait_for_timeout(SETTLE_WAIT_MS)
+                # Two-stage navigation: DOM first (fast, most sites), then
+                # give JS time to render. Falls back to domcontentloaded
+                # if networkidle doesn't settle within the timeout.
+                try:
+                    page.goto(url, timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+                    page.wait_for_timeout(SETTLE_WAIT_MS)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=8000)
+                    except Exception:
+                        pass  # good enough with domcontentloaded
+                except Exception as e:
+                    log.warning("browser scraper: initial nav to %s failed: %s", url, e)
+                    raise
                 _try_dismiss_overlays(page)
 
                 # Figure out which pages to screenshot. Build a list
@@ -155,6 +172,15 @@ def scrape_menu_via_browser(
                     if best_menu_href:
                         _add_page(best_menu_href)
                         log.info("browser scraper: primary menu page %s", best_menu_href)
+                    else:
+                        # Common URL pattern fallback. Sites often have
+                        # /menu even if the nav doesn't link it textually
+                        # (e.g. link is an image).
+                        parsed = urlparse(url)
+                        origin = f"{parsed.scheme}://{parsed.netloc}"
+                        for sub in _COMMON_MENU_SUBPATHS:
+                            _add_page(origin + sub)
+                        log.info("browser scraper: no menu link found, trying common subpaths")
                 _add_page(url)
 
                 # Discover sub-menu pages (lunch, dinner, drinks, etc.)
@@ -171,10 +197,16 @@ def scrape_menu_via_browser(
 
                 # Capture each page. Keep only screenshots that pass the
                 # sanity check so we don't waste Vision calls on junk.
+                # PDF URLs are handled separately (Playwright downloads
+                # them instead of rendering).
                 for target in pages_to_capture[:max_subpages]:
-                    shot = _capture_page(page, target)
-                    if shot:
-                        screenshots.append(shot)
+                    if target.lower().split("?")[0].endswith(".pdf"):
+                        pdf_shots = _render_pdf_to_screenshots(target)
+                        screenshots.extend(pdf_shots)
+                    else:
+                        shot = _capture_page(page, target)
+                        if shot:
+                            screenshots.append(shot)
             finally:
                 browser.close()
     except Exception as e:
@@ -210,8 +242,12 @@ def _capture_page(page, target_url: str) -> Optional[str]:
     Returns temp-file path on success or None if the page doesn't look
     like a real menu (too few price markers)."""
     try:
-        page.goto(target_url, timeout=NAV_TIMEOUT_MS, wait_until="networkidle")
+        page.goto(target_url, timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
         page.wait_for_timeout(SETTLE_WAIT_MS)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
     except Exception as e:
         log.info("browser scraper: nav to %s failed: %s", target_url, e)
         return None
@@ -248,10 +284,115 @@ def _capture_page(page, target_url: str) -> Optional[str]:
         try: os.unlink(shot_path)
         except OSError: pass
         return None
+    # Claude Vision rejects images > 5MB. Long menu pages regularly hit
+    # this — compress to JPEG with step-down quality until we fit.
     if size > SCREENSHOT_MAX_BYTES:
-        log.info("browser scraper: screenshot %d bytes — Vision may truncate", size)
+        compressed = _compress_for_vision(shot_path)
+        if compressed and compressed != shot_path:
+            try: os.unlink(shot_path)
+            except OSError: pass
+            shot_path = compressed
+            size = os.path.getsize(shot_path)
+            log.info("browser scraper: compressed to %d bytes", size)
     log.info("browser scraper: captured %s (%d bytes) from %s", shot_path, size, target_url)
     return shot_path
+
+
+def _render_pdf_to_screenshots(pdf_url: str) -> List[str]:
+    """Download a PDF menu and convert each page to a JPEG screenshot.
+
+    Some restaurants (Kaptain Jimmy's, older sites) publish their menu
+    as one or more PDFs. Playwright can't navigate to them (triggers a
+    download). We fetch manually, render pages, feed each to Vision
+    alongside regular HTML screenshots.
+
+    Returns a list of temp-file paths (one per page). Empty on failure.
+    """
+    try:
+        import urllib.request as _ur
+        req = _ur.Request(pdf_url, headers={"User-Agent": "ServLine/1.0"})
+        with _ur.urlopen(req, timeout=30) as resp:
+            pdf_bytes = resp.read(16 * 1024 * 1024 + 1)
+        if len(pdf_bytes) > 16 * 1024 * 1024:
+            log.warning("pdf too big (>16MB), skipping: %s", pdf_url)
+            return []
+    except Exception as e:
+        log.info("pdf download failed for %s: %s", pdf_url, e)
+        return []
+
+    try:
+        from pdf2image import convert_from_bytes
+    except ImportError:
+        log.warning("pdf2image not installed — can't render PDF menus")
+        return []
+
+    try:
+        # DPI 150 keeps file size modest while staying legible for Vision
+        pages = convert_from_bytes(pdf_bytes, dpi=150, fmt="jpeg")
+    except Exception as e:
+        log.warning("pdf2image failed for %s: %s (is Poppler installed?)", pdf_url, e)
+        return []
+
+    out: List[str] = []
+    for i, pil_img in enumerate(pages):
+        try:
+            fd, path = tempfile.mkstemp(suffix=".jpg", prefix=f"pdfpage{i}_")
+            os.close(fd)
+            pil_img.save(path, "JPEG", quality=85, optimize=True)
+            size = os.path.getsize(path)
+            if size > SCREENSHOT_MAX_BYTES:
+                # Re-save with lower quality. PDF pages tend to be clean,
+                # so we can drop quality aggressively without losing readability.
+                for q in (70, 55, 40):
+                    pil_img.save(path, "JPEG", quality=q, optimize=True)
+                    if os.path.getsize(path) <= SCREENSHOT_MAX_BYTES:
+                        break
+            out.append(path)
+        except Exception as e:
+            log.warning("pdf page save failed: %s", e)
+    log.info("pdf %s rendered to %d pages", pdf_url, len(out))
+    return out
+
+
+def _compress_for_vision(png_path: str) -> Optional[str]:
+    """Convert a PNG screenshot to JPEG at step-down quality until under
+    the Vision size limit. Returns the JPEG path, or the original path
+    if compression failed."""
+    try:
+        from PIL import Image
+    except ImportError:
+        log.warning("browser scraper: Pillow not installed, cannot compress oversize screenshot")
+        return png_path
+    try:
+        img = Image.open(png_path).convert("RGB")
+    except Exception as e:
+        log.warning("browser scraper: PIL couldn't open %s: %s", png_path, e)
+        return png_path
+
+    # Also cap total pixel dimensions — Vision resizes anything bigger
+    # anyway, and we save bandwidth by downscaling up front.
+    MAX_DIM = 4096
+    w, h = img.size
+    if max(w, h) > MAX_DIM:
+        scale = MAX_DIM / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        log.info("browser scraper: downscaled from %dx%d to %dx%d", w, h, img.size[0], img.size[1])
+
+    out_fd, out_path = tempfile.mkstemp(suffix=".jpg", prefix="menuscrn_")
+    os.close(out_fd)
+    for quality in (90, 80, 70, 60, 50, 40):
+        try:
+            img.save(out_path, "JPEG", quality=quality, optimize=True)
+        except Exception as e:
+            log.warning("browser scraper: JPEG save failed at Q=%d: %s", quality, e)
+            continue
+        size = os.path.getsize(out_path)
+        if size <= SCREENSHOT_MAX_BYTES:
+            log.info("browser scraper: compressed at quality=%d -> %d bytes", quality, size)
+            return out_path
+    log.warning("browser scraper: even Q=40 exceeds %d bytes; sending as-is",
+                SCREENSHOT_MAX_BYTES)
+    return out_path
 
 
 def _scroll_to_bottom(page) -> None:
@@ -417,13 +558,25 @@ def _extract_from_screenshot(screenshot_path: str, place_name: str) -> List[Dict
             continue
         seen.add(key)
 
+        # Resolve price: prefer top-level, fall back to the lowest
+        # `sizes[].price` (many multi-size items have price=0 at the top
+        # level with real prices nested under sizes).
         price_cents = it.get("price_cents")
         if price_cents is None:
             price = it.get("price")
-            if isinstance(price, (int, float)):
+            if isinstance(price, (int, float)) and price > 0:
                 price_cents = int(round(float(price) * 100))
-            else:
-                price_cents = 0
+        if not price_cents:
+            sizes = it.get("sizes") or []
+            if isinstance(sizes, list):
+                size_prices = []
+                for s in sizes:
+                    if isinstance(s, dict):
+                        sp = s.get("price")
+                        if isinstance(sp, (int, float)) and sp > 0:
+                            size_prices.append(float(sp))
+                if size_prices:
+                    price_cents = int(round(min(size_prices) * 100))
 
         out.append({
             "name": name,
