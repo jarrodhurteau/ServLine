@@ -2169,6 +2169,7 @@
                data-lat="{{ c.latitude }}"
                data-lng="{{ c.longitude }}"
                data-comp-name="{{ c.place_name|e }}"
+               data-comp-addr="{{ c.place_address|e }}"
                data-comp-tier="{{ c.price_label|e }}"
                data-comp-rating="{{ c.rating }}"
                data-comp-reviews="{{ c.user_ratings }}">
@@ -5115,17 +5116,21 @@
         card.dataset.compName,
         card.dataset.compTier,
         card.dataset.compRating,
-        card.dataset.compReviews
+        card.dataset.compReviews,
+        card.dataset.compAddr
       );
     });
   });
 
-  function openComparison(compName, priceTier, rating, reviews) {
+  function openComparison(compName, priceTier, rating, reviews, compAddr) {
     const overlay = document.getElementById('comparison-overlay');
     const title = document.getElementById('comparison-title');
     const subtitle = document.getElementById('comparison-subtitle');
     const body = document.getElementById('comparison-body');
     const summary = document.getElementById('comparison-summary');
+
+    // Stash address so the Google search link (built later) can use it
+    window._comparisonCompAddr = compAddr || '';
 
     title.textContent = `Your Menu vs ${compName}`;
     subtitle.textContent = [
@@ -5204,7 +5209,11 @@
       : '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3);">Market Estimates</span>'
         + '<div style="font-size:.72rem;color:var(--muted);margin-top:4px;">This restaurant\'s menu isn\'t publicly available. Prices are estimated from their price tier and local market data.</div>';
     // Google search link for the competitor's menu
-    const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(compName + ' menu prices')}`;
+    // Include the address so Google resolves the correct location,
+    // not a same-named restaurant in another city. Strip street number
+    // to keep the query short but specific.
+    const locHint = (window._comparisonCompAddr || '').replace(/^\d+\s+/, '');
+    const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(compName + ' menu' + (locHint ? ' ' + locHint : ''))}`;
     const menuLink = ` <a href="${googleSearchUrl}" target="_blank" rel="noopener" style="margin-left:8px;font-size:.75rem;color:var(--brand, #2E5B5E);">Search menu on Google ↗</a>`;
     subtitle.innerHTML = tierInfo + sourceBadge + menuLink;
 

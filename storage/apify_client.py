@@ -352,30 +352,42 @@ def scrape_menu_by_url(
     expected_name: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
-    Dispatch a URL to Apify.
+    Dispatch a URL to the best-fit Apify actor.
 
-    Day 141.7 ordering — menus-r-us first (cheap, general, ~$0.02-0.05),
-    DoorDash/Grubhub actors as fallbacks for their specific URLs (~$0.10-0.83):
-      1. Try menus-r-us on any URL. Its URL-mode handles restaurant sites,
-         Toast, Square, Popmenu, PDF menus.
-      2. If that fails AND the URL is DoorDash/Grubhub, try the platform
-         actor that's built for it.
+    Day 141.7 ordering — use the specialist actor for delivery platforms
+    (complete menus), menus-r-us for everything else:
+      1. DoorDash / Grubhub URLs → their dedicated actors first (built for
+         those platforms, return full menus). menus-r-us fallback if they fail.
+      2. Any other URL → menus-r-us (restaurant sites, Toast, Square, PDF).
 
     `expected_name` is passed to menus-r-us for name-match validation.
     Returns (items, platform_name) or ([], None) if nothing scrapes.
     """
-    # Primary: menus-r-us (cheaper + broader coverage)
+    platform = _platform_for_url(url)
+
+    # Delivery platforms: dedicated actor first, menus-r-us fallback
+    if platform == "doordash":
+        items = scrape_doordash_menu(url)
+        if items:
+            return items, "doordash"
+        items = scrape_menus_r_us_by_url(url, expected_name=expected_name)
+        if items:
+            return items, "menus_r_us"
+        return [], None
+
+    if platform == "grubhub":
+        items = scrape_grubhub_menu(url)
+        if items:
+            return items, "grubhub"
+        items = scrape_menus_r_us_by_url(url, expected_name=expected_name)
+        if items:
+            return items, "menus_r_us"
+        return [], None
+
+    # Everything else: menus-r-us (restaurant websites, aggregators)
     items = scrape_menus_r_us_by_url(url, expected_name=expected_name)
     if items:
         return items, "menus_r_us"
-
-    # Fallback: delivery-platform actors when the URL is a known one
-    platform = _platform_for_url(url)
-    if platform == "doordash":
-        return scrape_doordash_menu(url), "doordash"
-    if platform == "grubhub":
-        return scrape_grubhub_menu(url), "grubhub"
-
     return [], None
 
 

@@ -951,10 +951,9 @@ def _claude_web_search_menu(place_name: str, place_address: str) -> List[Dict[st
 Find menu URLs for "{place_name}" at {place_address}.
 
 Prefer in this order:
-  1. The restaurant's OWN website with the menu page
-     (e.g. https://casadilisa.com/dinner-menu/)
-  2. A DoorDash store page (https://www.doordash.com/store/...)
-  3. A Grubhub restaurant page (https://www.grubhub.com/restaurant/...)
+  1. A DoorDash store page (https://www.doordash.com/store/...)
+  2. A Grubhub restaurant page (https://www.grubhub.com/restaurant/...)
+  3. The restaurant's OWN website with the menu page
   4. Any aggregator with their full menu (Slice, ChowNow, Yelp menu tab, etc.)
 
 Return up to 4 URLs, one per line, in preference order. No commentary.
@@ -996,22 +995,70 @@ If nothing found, return exactly: NOT_FOUND"""
         apify_ok = lambda: False  # noqa: E731
         scrape_menu_by_url = None  # type: ignore
 
-    # Step 2: URL mode — for each Claude-found URL, dispatch to the right
-    # actor (DoorDash/Grubhub natively, menus-r-us for everything else).
-    # We pass place_name so menus-r-us can validate the match.
-    if apify_ok() and menu_urls and scrape_menu_by_url:
-        for url in menu_urls:
-            items, platform = scrape_menu_by_url(url, expected_name=place_name)
-            if items:
-                log.info("Apify (%s) extracted %d items for %s", platform, len(items), place_name)
-                return items
+    # Step 2: Try every URL through every extraction path, keep the MOST
+    # complete result. Paths: DoorDash/Grubhub dedicated actor, menus-r-us,
+    # and JSON-LD direct parse. Whichever returns the most items wins.
+    best_items: List[Dict[str, Any]] = []
+    best_source: Optional[str] = None
 
-    # Step 3: Last-resort JSON-LD / __NEXT_DATA__ parsing on any URL we have.
-    for url in menu_urls:
-        items = _extract_structured_menu(url, place_name)
-        if items:
-            log.info("Structured-data extracted %d items for %s", len(items), place_name)
-            return items
+    def _consider(items: List[Dict[str, Any]], source: str) -> None:
+        nonlocal best_items, best_source
+        if items and len(items) > len(best_items):
+            best_items = items
+            best_source = source
+            log.info("%s got %d items for %s (best so far)", source, len(items), place_name)
+
+    # Day 141.7: primary path — Playwright opens the URL, takes a full-page
+    # screenshot, Claude Vision extracts the menu. Works on any site
+    # (JS-rendered, weird CMS, image menus, delivery platforms) because
+    # the screenshot captures whatever the user would actually see. Slower
+    # per call but ~3-5x higher coverage than Apify actors.
+    try:
+        from .browser_menu_scraper import scrape_menu_via_browser
+    except Exception:
+        scrape_menu_via_browser = None  # type: ignore
+
+    if menu_urls:
+        for url in menu_urls:
+            # Browser screenshot — strongest signal first
+            if scrape_menu_via_browser:
+                try:
+                    browser_items = scrape_menu_via_browser(url, place_name)
+                    _consider(browser_items, "browser_screenshot")
+                except Exception as e:
+                    log.info("browser screenshot failed for %s: %s", url, e)
+            if apify_ok() and scrape_menu_by_url:
+                items, platform = scrape_menu_by_url(url, expected_name=place_name)
+                _consider(items, f"apify_{platform or 'unknown'}")
+            # JSON-LD is cheap (no API cost) — run it on every URL too
+            jsonld_items = _extract_structured_menu(url, place_name)
+            _consider(jsonld_items, "jsonld")
+
+    # Day 141.7: if all structured paths came up empty, last-resort OCR
+    # fallback for image-based menus (small restaurants that publish
+    # their menu as a JPEG/PNG on their own site). Slow and more expensive
+    # than other paths, but it's the only thing that works for sites like
+    # The Back Room whose menu is literally a picture. Only fires when
+    # every other path failed — doesn't add cost to healthy cases.
+    if not best_items and menu_urls:
+        try:
+            from .menu_ocr_fallback import scrape_menu_via_image_ocr
+            for url in menu_urls:
+                # Skip delivery platforms — their pages aren't image menus
+                parsed = urllib.parse.urlparse(url)
+                host = (parsed.hostname or "").lower()
+                if any(d in host for d in ("doordash.com", "grubhub.com", "ubereats.com", "seamless.com")):
+                    continue
+                ocr_items = scrape_menu_via_image_ocr(url, place_name)
+                _consider(ocr_items, "image_ocr")
+                if best_items:
+                    break  # One working OCR result is enough
+        except Exception as e:
+            log.warning("Image OCR fallback raised for %s: %s", place_name, e)
+
+    if best_items:
+        log.info("%s won for %s with %d items", best_source, place_name, len(best_items))
+        return best_items
 
     log.info("No menu data found for %s across %d URL(s)", place_name, len(menu_urls))
     return []
