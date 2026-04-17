@@ -25,7 +25,7 @@
       width: 60%;
       flex-shrink: 0;
       position: sticky;
-      top: 0;
+      top: 48px;
       padding: 0 16px;
       display: flex;
       flex-direction: column;
@@ -4652,11 +4652,12 @@
     if (!preview) return;
     function setHeight() {
       const rect = preview.getBoundingClientRect();
-      preview.style.height = (window.innerHeight - rect.top) + 'px';
+      // rect.top is 0 when sticky kicks in; use max to avoid negative
+      const top = Math.max(0, rect.top);
+      preview.style.height = (window.innerHeight - top) + 'px';
     }
     setHeight();
     window.addEventListener('resize', setHeight);
-    // Recalc after scroll settles (sticky top may shift)
     window.addEventListener('scroll', () => { requestAnimationFrame(setHeight); }, { passive: true });
   })();
   </script>
@@ -5461,10 +5462,17 @@
     if (menuBtn) menuBtn.classList.remove('active');
     if (compBtn) { compBtn.classList.add('active'); compBtn.style.display = ''; }
 
-    // Show/hide per-tab iframes (each tab gets its own iframe to preserve state)
+    // Show/hide per-tab iframes — use visibility instead of display
+    // to preserve scroll position and iframe state
     const container = document.getElementById('comp-frames-container');
     container.querySelectorAll('.comp-browser-frame').forEach(f => {
-      f.style.display = f.dataset.tabId === id ? '' : 'none';
+      if (f.dataset.tabId === id) {
+        f.style.visibility = 'visible';
+        f.style.zIndex = '1';
+      } else {
+        f.style.visibility = 'hidden';
+        f.style.zIndex = '0';
+      }
     });
 
     // If this tab doesn't have an iframe yet and has a URL, create one
@@ -5474,7 +5482,7 @@
       const frame = document.createElement('iframe');
       frame.className = 'comp-browser-frame';
       frame.referrerPolicy = 'no-referrer';
-      frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;';
+      frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;visibility:visible;z-index:1;';
       frame.dataset.tabId = id;
       frame.addEventListener('load', () => _compFrameOnLoad(frame));
       frame.src = tab.url;
