@@ -7103,6 +7103,15 @@ def browse_proxy():
     if parsed.scheme not in ("http", "https"):
         return "Invalid URL scheme", 400
 
+    # Block sites with aggressive bot detection that won't work through proxy
+    blocked_hosts = ("yelp.com", "tripadvisor.com", "facebook.com", "instagram.com", "doordash.com", "grubhub.com", "ubereats.com")
+    host = (parsed.hostname or "").lower()
+    if any(host == b or host.endswith("." + b) for b in blocked_hosts):
+        return (f'<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:sans-serif;color:#666;text-align:center;padding:40px;">'
+                f'<div><h3 style="margin:0 0 8px;">{parsed.hostname} blocks embedded viewing</h3>'
+                f'<p style="margin:0 0 16px;">This site has bot detection that prevents proxy loading.</p>'
+                f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;">Open directly in new tab &rarr;</a></div></div>'), 200
+
     try:
         resp = _req.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -7112,6 +7121,140 @@ def browse_proxy():
 
         content = resp.content
         ct = resp.headers.get("Content-Type", "text/html")
+
+        # PDF files: render in an inline viewer with zoom/drag
+        if "pdf" in ct.lower() or url.lower().endswith(".pdf"):
+            import base64
+            b64 = base64.b64encode(content).decode()
+            viewer_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Menu PDF</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:#2c2c2c; overflow:hidden; font-family:sans-serif; }}
+  .toolbar {{ position:fixed; top:0; left:0; right:0; height:36px; background:#333; display:flex; align-items:center; gap:6px; padding:0 10px; z-index:100; }}
+  .toolbar button {{ background:#555; border:none; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:.75rem; }}
+  .toolbar button:hover {{ background:#777; }}
+  .toolbar span {{ color:#aaa; font-size:.75rem; }}
+  #viewer {{ position:fixed; top:36px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }}
+  #viewer.dragging {{ cursor:grabbing; }}
+  #pages {{ transform-origin:0 0; position:absolute; }}
+  canvas {{ display:block; margin-bottom:8px; box-shadow:0 2px 8px rgba(0,0,0,.4); background:#fff; pointer-events:none; }}
+</style>
+</head><body>
+<div class="toolbar">
+  <button onclick="zoom(1.25)">+</button>
+  <button onclick="zoom(0.8)">&minus;</button>
+  <button onclick="fit()">Fit</button>
+  <span id="zoom-label">100%</span>
+  <span id="page-label" style="margin-left:auto;"></span>
+</div>
+<div id="viewer">
+  <div id="pages"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const b64 = "{b64}";
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+
+  let pdfDoc = null, renderScale = 3;
+  let scale = 1, panX = 0, panY = 0;
+  const pages = document.getElementById('pages');
+  const viewer = document.getElementById('viewer');
+
+  function applyTransform() {{
+    pages.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
+    document.getElementById('zoom-label').textContent = Math.round(scale * 100) + '%';
+  }}
+
+  pdfjsLib.getDocument({{ data: arr }}).promise.then(pdf => {{
+    pdfDoc = pdf;
+    document.getElementById('page-label').textContent = pdf.numPages + ' page' + (pdf.numPages > 1 ? 's' : '');
+    // Render all pages at high res once, then use transform for zoom
+    const promises = [];
+    for (let i = 1; i <= pdf.numPages; i++) {{
+      promises.push(pdf.getPage(i).then(page => {{
+        const vp = page.getViewport({{ scale: renderScale }});
+        const canvas = document.createElement('canvas');
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        canvas.dataset.pageNum = i;
+        return page.render({{ canvasContext: canvas.getContext('2d'), viewport: vp }}).promise.then(() => canvas);
+      }}));
+    }}
+    Promise.all(promises).then(canvases => {{
+      canvases.sort((a, b) => a.dataset.pageNum - b.dataset.pageNum);
+      canvases.forEach(c => pages.appendChild(c));
+      fit();
+    }});
+  }});
+
+  function fit() {{
+    if (!pages.firstChild) return;
+    const vw = viewer.clientWidth;
+    const natW = pages.firstChild.width;
+    scale = (vw * 0.95) / natW;
+    panX = (vw - natW * scale) / 2;
+    panY = 10;
+    applyTransform();
+  }}
+
+  function zoom(factor) {{
+    const vw = viewer.clientWidth, vh = viewer.clientHeight;
+    const cx = vw / 2, cy = vh / 2;
+    const oldScale = scale;
+    scale = Math.min(10, Math.max(0.1, scale * factor));
+    const ratio = scale / oldScale;
+    panX = cx - ratio * (cx - panX);
+    panY = cy - ratio * (cy - panY);
+    applyTransform();
+  }}
+
+  // Drag to pan
+  let dragging = false, startX, startY, origX, origY;
+  viewer.addEventListener('mousedown', e => {{
+    e.preventDefault();
+    dragging = true;
+    viewer.classList.add('dragging');
+    startX = e.clientX; startY = e.clientY;
+    origX = panX; origY = panY;
+  }});
+  document.addEventListener('mousemove', e => {{
+    if (!dragging) return;
+    panX = origX + (e.clientX - startX);
+    panY = origY + (e.clientY - startY);
+    applyTransform();
+  }});
+  document.addEventListener('mouseup', () => {{
+    dragging = false;
+    viewer.classList.remove('dragging');
+  }});
+
+  // Scroll-wheel zoom toward cursor
+  viewer.addEventListener('wheel', e => {{
+    e.preventDefault();
+    const rect = viewer.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const oldScale = scale;
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    scale = Math.min(10, Math.max(0.1, scale * factor));
+    const ratio = scale / oldScale;
+    panX = mx - ratio * (mx - panX);
+    panY = my - ratio * (my - panY);
+    applyTransform();
+  }}, {{ passive: false }});
+</script>
+</body></html>"""
+            response = make_response(viewer_html)
+            response.headers["Content-Type"] = "text/html; charset=utf-8"
+            response.headers["Content-Disposition"] = "inline"
+            response.headers.pop("X-Frame-Options", None)
+            response.headers.pop("Content-Security-Policy", None)
+            return response
 
         # For HTML pages: inject <base> tag so relative URLs resolve correctly
         if "text/html" in ct:
@@ -7151,6 +7294,8 @@ def browse_proxy():
         # Remove headers that block iframe embedding
         response.headers.pop("X-Frame-Options", None)
         response.headers.pop("Content-Security-Policy", None)
+        # Force PDFs and other files to display inline (not download)
+        response.headers["Content-Disposition"] = "inline"
         return response
 
     except _req.exceptions.Timeout:

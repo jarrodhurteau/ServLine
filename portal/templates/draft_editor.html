@@ -5304,25 +5304,28 @@
   (function() {
     const frame = document.getElementById('comp-browser-frame');
     if (!frame) return;
+
     frame.addEventListener('load', () => {
       const overlay = document.getElementById('comp-blocked-overlay');
-      if (!overlay) return;
+      if (!overlay || !_activeCompTab) return;
+      let blocked = false;
       try {
-        // Try accessing content — blocked cross-origin pages may
-        // show error pages served by the browser itself (about: or chrome-error://)
+        // Same-origin — we can read content (our proxy pages or error pages)
         const doc = frame.contentDocument;
         if (doc) {
           const text = (doc.body && doc.body.innerText) || '';
-          if (text.includes('refused to connect') || text.includes('blocked')
-              || text.includes('ERR_BLOCKED') || text.length < 20) {
-            overlay.style.display = 'flex';
-            return;
+          // Only flag browser-generated error pages, not short legitimate pages
+          if (text.includes('refused to connect') || text.includes('ERR_BLOCKED')
+              || text.includes('ERR_CONNECTION_REFUSED')) {
+            blocked = true;
           }
         }
       } catch(e) {
-        // Cross-origin — normal for Google. Not blocked, just can't read it.
+        // Cross-origin — ignore. This fires for Google igu pages (which work)
+        // and for external sites the user clicked into. Don't auto-block —
+        // the back button is always available in the nav bar.
       }
-      overlay.style.display = 'none';
+      overlay.style.display = blocked ? 'flex' : 'none';
     });
   })();
 
