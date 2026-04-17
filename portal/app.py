@@ -6515,6 +6515,13 @@ def draft_editor(draft_id: int):
     if price_intel and price_intel.get("assessments"):
         for a in price_intel["assessments"]:
             if a.get("item_id"):
+                # Day 141.8: parse price_sources JSON for template rendering
+                ps = a.get("price_sources")
+                if isinstance(ps, str):
+                    try:
+                        a["price_sources"] = json.loads(ps)
+                    except (json.JSONDecodeError, TypeError):
+                        a["price_sources"] = []
                 price_map[a["item_id"]] = a
 
     # Restaurant info
@@ -7075,6 +7082,115 @@ def rerun_price_analysis(draft_id: int):
         ).start()
 
     return redirect(url_for("draft_analyzing_prices", draft_id=draft_id))
+
+
+# Day 141.8: Web proxy for competitor browser iframe embedding.
+# Fetches external page server-side and strips X-Frame-Options / CSP
+# so it can render inside the editor's competitor browser panel.
+@app.get("/browse")
+@login_required
+def browse_proxy():
+    """Proxy an external URL for iframe embedding."""
+    import requests as _req
+    from urllib.parse import urljoin, urlparse
+
+    url = request.args.get("url", "").strip()
+    if not url:
+        return "No URL provided", 400
+
+    # Basic allowlist — only http/https
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "Invalid URL scheme", 400
+
+    try:
+        resp = _req.get(url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }, allow_redirects=True, verify=True)
+
+        content = resp.content
+        ct = resp.headers.get("Content-Type", "text/html")
+
+        # For HTML pages: inject <base> tag so relative URLs resolve correctly
+        if "text/html" in ct:
+            base_url = resp.url  # final URL after redirects
+            base_tag = f'<base href="{base_url}" target="_self">'.encode()
+            # Inject after <head> or at the very start
+            if b"<head>" in content:
+                content = content.replace(b"<head>", b"<head>" + base_tag, 1)
+            elif b"<head " in content:
+                idx = content.find(b">", content.find(b"<head "))
+                if idx > 0:
+                    content = content[:idx+1] + base_tag + content[idx+1:]
+            elif b"<HEAD>" in content:
+                content = content.replace(b"<HEAD>", b"<HEAD>" + base_tag, 1)
+            else:
+                content = base_tag + content
+
+            # Rewrite links that navigate the frame to also go through proxy
+            # so clicking links inside the proxied page keeps working
+            import re
+            def _rewrite_href(m):
+                href = m.group(2)
+                if href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    return m.group(0)
+                abs_url = urljoin(base_url, href)
+                return f'{m.group(1)}/browse?url={abs_url}'
+            content = re.sub(
+                rb'(href=["\'])([^"\']*)',
+                lambda m: _rewrite_href(
+                    type('M', (), {'group': lambda s, i: m.group(i).decode()})()
+                ).encode(),
+                content,
+            )
+
+        response = make_response(content)
+        response.headers["Content-Type"] = ct
+        # Remove headers that block iframe embedding
+        response.headers.pop("X-Frame-Options", None)
+        response.headers.pop("Content-Security-Policy", None)
+        return response
+
+    except _req.exceptions.Timeout:
+        return "<h3 style='padding:40px;text-align:center;color:#999;'>Site took too long to respond</h3>", 504
+    except Exception as e:
+        return f"<h3 style='padding:40px;text-align:center;color:#999;'>Could not load page: {type(e).__name__}</h3>", 502
+
+
+# Day 141.8: Resolve a competitor's website URL from their Google Place ID
+@app.get("/api/competitor_website")
+@login_required
+def api_competitor_website():
+    """Look up a competitor's website URL by name, return proxied URL."""
+    name = request.args.get("name", "").strip()
+    addr = request.args.get("addr", "").strip()
+    if not name:
+        return jsonify({"error": "No name"}), 400
+
+    # Try to find the place_id from our cached data
+    from storage.price_intel import get_place_details
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT place_id FROM price_comparison_results WHERE place_name = ? LIMIT 1",
+            (name,),
+        ).fetchone()
+
+    website_url = None
+    if row:
+        details = get_place_details(row["place_id"])
+        if details:
+            website_url = details.get("website")
+
+    if not website_url:
+        # Fallback: construct a likely URL from the name
+        slug = name.lower().replace("'", "").replace("&", "and")
+        slug = "".join(c if c.isalnum() or c == " " else "" for c in slug)
+        slug = slug.strip().replace(" ", "")
+        website_url = f"https://www.google.com/search?q={name}+{addr}+menu"
+
+    return jsonify({"url": website_url, "proxy_url": f"/browse?url={website_url}"})
 
 
 @app.get("/drafts/<int:draft_id>/source_file")

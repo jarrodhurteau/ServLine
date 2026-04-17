@@ -38,8 +38,11 @@ DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "servline.db"
 # Cache TTL — don't re-query the same zip+cuisine combo within 30 days
 CACHE_TTL_DAYS = 30
 
-# Max nearby restaurants to store per search (closest 10 of matching cuisine)
-MAX_RESULTS = 10
+# Max nearby restaurants to store per search (closest 20 of matching cuisine)
+# Day 141.8: bumped 10→20. Larger sample = more defensible median even
+# with some bad/missing data, and the aggregated-range UX doesn't need
+# every competitor to have perfect matches.
+MAX_RESULTS = 20
 
 # Google Places API radius (meters).  ~8 km ≈ 5 miles.
 # Note: unused when rankby=distance, kept for reference / future fallback.

@@ -111,6 +111,11 @@ def _ensure_schema() -> None:
             conn.execute("ALTER TABLE price_intelligence_results ADD COLUMN comparison_count INTEGER DEFAULT 0")
         except Exception:
             pass
+        # Day 141.8: median is the primary stat for the market-range UX
+        try:
+            conn.execute("ALTER TABLE price_intelligence_results ADD COLUMN median_price INTEGER")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS price_intelligence_summary (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -769,6 +774,69 @@ def _preload_comparisons_async(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _estimate_category_market_rates(categories: List[str], city: str, state: str,
+                                    zip_code: str, cuisine: str) -> Dict[str, Dict[str, int]]:
+    """Ask Haiku for typical market price ranges PER CATEGORY.
+
+    Returns {category_name: {low, high, median}} in cents.
+    One API call for all categories — cheap and fast.
+    """
+    if not categories:
+        return {}
+
+    client = _get_client()
+    if not client:
+        return {}
+
+    cat_list = "\n".join(f"- {c}" for c in categories)
+
+    prompt = f"""You are a restaurant pricing analyst. For each menu CATEGORY below,
+provide the typical price range a customer would expect at a casual/mid-range
+{cuisine} restaurant in {city}, {state} ({zip_code}).
+
+Categories:
+{cat_list}
+
+Return JSON only — an array of objects, one per category:
+[{{"category": "exact category name", "low_cents": 800, "high_cents": 1400, "median_cents": 1100}}]
+
+Rules:
+- Prices in US cents (e.g. $9.00 = 900)
+- low = cheapest item you'd typically see in this category
+- high = most expensive item you'd typically see
+- median = most common price point for this category
+- For categories that are clearly toppings/add-ons, give typical add-on pricing ($1-$3 range)
+- Return ONLY the JSON array, no other text"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text.rsplit("```", 1)[0]
+        text = text.strip()
+
+        results = json.loads(text)
+        out: Dict[str, Dict[str, int]] = {}
+        for r in results:
+            cat = (r.get("category") or "").strip()
+            low = r.get("low_cents", 0)
+            high = r.get("high_cents", 0)
+            med = r.get("median_cents", 0)
+            if cat and low > 0 and high > 0 and med > 0:
+                out[cat] = {"low": int(low), "high": int(high), "median": int(med)}
+        log.info("Category market estimates: got %d/%d from Haiku", len(out), len(categories))
+        return out
+    except Exception as e:
+        log.warning("Category market estimation failed: %s", e)
+        return {}
+
+
 def _aggregate_price_ranges(draft_id: int) -> int:
     """Replace Claude-inferred ranges with real stats from competitor matches.
 
@@ -785,7 +853,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
 
         # Pull our items from the assessments we already stored
         our_rows = conn.execute(
-            "SELECT item_id, item_name, current_price FROM price_intelligence_results WHERE draft_id = ?",
+            "SELECT item_id, item_name, item_category, current_price FROM price_intelligence_results WHERE draft_id = ?",
             (draft_id,),
         ).fetchall()
         if not our_rows:
@@ -834,33 +902,38 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         total_overpriced = 0
         total_assessed = 0
 
+        # Day 141.8: two-pass approach.
+        # Pass 1 — compute per-item ranges from direct matches and
+        #           collect category-level price pools for fallback.
+        cat_prices: Dict[str, List[int]] = defaultdict(list)
+        unmatched_rows = []   # rows with no direct match — get fallback
+
         for row in our_rows:
             key = (row["item_name"] or "").strip().lower()
             matches = matches_by_item.get(key) or []
             current_price = row["current_price"] or 0
+            category = (row["item_category"] or "").strip()
 
             if not matches:
-                conn.execute(
-                    """UPDATE price_intelligence_results
-                       SET suggested_low = NULL,
-                           suggested_high = NULL,
-                           regional_avg = NULL,
-                           assessment = 'unknown',
-                           price_sources = ?,
-                           comparison_count = 0
-                       WHERE draft_id = ? AND item_id = ?""",
-                    (json.dumps([]), draft_id, row["item_id"]),
-                )
-                updated += 1
+                unmatched_rows.append(row)
                 continue
 
             prices = sorted(m["price"] for m in matches)
             low = prices[0]
             high = prices[-1]
             avg = int(round(sum(prices) / len(prices)))
+            # Median — more robust than mean with outliers
+            n = len(prices)
+            if n % 2 == 1:
+                median = prices[n // 2]
+            else:
+                median = int(round((prices[n // 2 - 1] + prices[n // 2]) / 2))
 
-            # Day 141.7: deterministic assessment from real prices, not
-            # a Claude guess. 15% band around the mean = fair.
+            # Collect into category pool for fallback
+            if category:
+                cat_prices[category].extend(prices)
+
+            # Deterministic assessment: 15% band around the mean = fair.
             if current_price and avg:
                 if current_price < avg * 0.85:
                     assessment = "underpriced"
@@ -884,16 +957,146 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                    SET suggested_low = ?,
                        suggested_high = ?,
                        regional_avg = ?,
+                       median_price = ?,
                        assessment = ?,
                        price_sources = ?,
                        comparison_count = ?,
                        confidence = ?
                    WHERE draft_id = ? AND item_id = ?""",
-                (low, high, avg, assessment, json.dumps(sources),
+                (low, high, avg, median, assessment, json.dumps(sources),
                  len(matches), min(1.0, 0.4 + 0.1 * len(matches)),
                  draft_id, row["item_id"]),
             )
             updated += 1
+
+        # Build category-level stats from matched items
+        cat_stats: Dict[str, Dict[str, int]] = {}
+        for cat, pool in cat_prices.items():
+            sp = sorted(pool)
+            n = len(sp)
+            cat_stats[cat] = {
+                "low": sp[0],
+                "high": sp[-1],
+                "avg": int(round(sum(sp) / n)),
+                "median": sp[n // 2] if n % 2 == 1 else int(round((sp[n // 2 - 1] + sp[n // 2]) / 2)),
+                "count": n,
+            }
+
+        # Pass 2 — fallback for unmatched items
+        # Step A: items whose CATEGORY has matches get category-level stats
+        # Step B: remaining items get per-item Haiku market estimates
+        needs_haiku = []
+        for row in unmatched_rows:
+            category = (row["item_category"] or "").strip()
+            current_price = row["current_price"] or 0
+            cs = cat_stats.get(category) if category else None
+
+            if cs:
+                low, high, avg, median = cs["low"], cs["high"], cs["avg"], cs["median"]
+                if current_price and avg:
+                    if current_price < avg * 0.85:
+                        assessment = "underpriced"
+                        total_underpriced += 1
+                    elif current_price > avg * 1.15:
+                        assessment = "overpriced"
+                        total_overpriced += 1
+                    else:
+                        assessment = "fair"
+                        total_fair += 1
+                    total_assessed += 1
+                else:
+                    assessment = "unknown"
+                conn.execute(
+                    """UPDATE price_intelligence_results
+                       SET suggested_low = ?,
+                           suggested_high = ?,
+                           regional_avg = ?,
+                           median_price = ?,
+                           assessment = ?,
+                           price_sources = ?,
+                           comparison_count = -1,
+                           confidence = ?
+                   WHERE draft_id = ? AND item_id = ?""",
+                    (low, high, avg, median, assessment,
+                     json.dumps([{"source": "category_estimate", "category": category, "based_on": cs["count"]}]),
+                     min(0.5, 0.2 + 0.05 * cs["count"]),
+                     draft_id, row["item_id"]),
+                )
+                updated += 1
+            else:
+                needs_haiku.append(row)
+
+        # Step B: ask Haiku for market rates per CATEGORY (one call)
+        if needs_haiku:
+            rest_row = conn.execute(
+                """SELECT r.city, r.state, r.zip_code, r.cuisine_type
+                   FROM restaurants r JOIN drafts d ON d.restaurant_id = r.id
+                   WHERE d.id = ?""",
+                (draft_id,),
+            ).fetchone()
+            city = (rest_row["city"] or "Unknown") if rest_row else "Unknown"
+            state = (rest_row["state"] or "") if rest_row else ""
+            zip_code = (rest_row["zip_code"] or "") if rest_row else ""
+            cuisine = (rest_row["cuisine_type"] or "restaurant") if rest_row else "restaurant"
+
+            # Unique categories that need estimates
+            haiku_cats = list({(r["item_category"] or "").strip()
+                              for r in needs_haiku if (r["item_category"] or "").strip()})
+            cat_market = _estimate_category_market_rates(
+                haiku_cats, city, state, zip_code, cuisine) if haiku_cats else {}
+
+            for row in needs_haiku:
+                category = (row["item_category"] or "").strip()
+                current_price = row["current_price"] or 0
+                mr = cat_market.get(category)
+
+                if mr:
+                    low, high, median = mr["low"], mr["high"], mr["median"]
+                    avg = int(round((low + high) / 2))
+                    if current_price and median:
+                        if current_price < median * 0.85:
+                            assessment = "underpriced"
+                            total_underpriced += 1
+                        elif current_price > median * 1.15:
+                            assessment = "overpriced"
+                            total_overpriced += 1
+                        else:
+                            assessment = "fair"
+                            total_fair += 1
+                        total_assessed += 1
+                    else:
+                        assessment = "unknown"
+                    conn.execute(
+                        """UPDATE price_intelligence_results
+                           SET suggested_low = ?,
+                               suggested_high = ?,
+                               regional_avg = ?,
+                               median_price = ?,
+                               assessment = ?,
+                               price_sources = ?,
+                               comparison_count = -2,
+                               confidence = 0.35
+                           WHERE draft_id = ? AND item_id = ?""",
+                        (low, high, avg, median, assessment,
+                         json.dumps([{"source": "market_estimate",
+                                      "category": category,
+                                      "location": f"{city}, {state} {zip_code}"}]),
+                         draft_id, row["item_id"]),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE price_intelligence_results
+                           SET suggested_low = NULL,
+                               suggested_high = NULL,
+                               regional_avg = NULL,
+                               median_price = NULL,
+                               assessment = 'unknown',
+                               price_sources = ?,
+                               comparison_count = 0
+                           WHERE draft_id = ? AND item_id = ?""",
+                        (json.dumps([]), draft_id, row["item_id"]),
+                    )
+                updated += 1
 
         # Refresh summary counts from the real data we just computed
         conn.execute(
@@ -1160,7 +1363,8 @@ def get_price_intelligence(draft_id: int) -> Optional[Dict[str, Any]]:
         items = conn.execute(
             """SELECT item_id, item_name, item_category, current_price,
                       assessment, suggested_low, suggested_high, regional_avg,
-                      reasoning, confidence, comparison_count, price_sources
+                      median_price, reasoning, confidence, comparison_count,
+                      price_sources
                FROM price_intelligence_results
                WHERE draft_id = ?
                ORDER BY id""",
@@ -1199,7 +1403,8 @@ def get_item_assessment(draft_id: int, item_id: int) -> Optional[Dict[str, Any]]
         row = conn.execute(
             """SELECT item_name, item_category, current_price, assessment,
                       suggested_low, suggested_high, regional_avg,
-                      reasoning, confidence, comparison_count, price_sources
+                      median_price, reasoning, confidence, comparison_count,
+                      price_sources
                FROM price_intelligence_results
                WHERE draft_id = ? AND item_id = ?""",
             (draft_id, item_id),

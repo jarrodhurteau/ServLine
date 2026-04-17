@@ -22,15 +22,15 @@
     .editor-sidebar { width: 280px; flex-shrink: 0; }
     .editor-main { flex: 1; min-width: 320px; }
     .editor-preview {
-      width: 470px;
+      width: 60%;
       flex-shrink: 0;
       position: sticky;
-      top: 80px;
-      max-height: calc(100vh - 100px);
+      top: 0;
       padding: 0 16px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 8px;
+      overflow: hidden;
     }
     @media (max-width: 900px) {
       .editor-container { flex-direction: column; }
@@ -43,18 +43,20 @@
     }
     /* Column resizer handles (between sidebar/main and main/preview) */
     .col-resizer {
-      width: 6px;
+      width: 8px;
       flex-shrink: 0;
       cursor: col-resize;
       background: transparent;
       transition: background .15s;
       position: relative;
       z-index: 10;
+      overflow: visible;
     }
     .col-resizer:hover, .col-resizer.dragging {
-      background: rgba(184, 92, 56, 0.25);
+      background: rgba(184, 92, 56, 0.15);
     }
-    .col-resizer::after {
+    /* Vertical line */
+    .col-resizer::before {
       content: '';
       position: absolute;
       top: 0;
@@ -62,21 +64,70 @@
       transform: translateX(-50%);
       width: 2px;
       height: 100%;
-      background: #8B4513;
-      opacity: .7;
+      background: var(--line, #E8DACA);
+      transition: background .15s;
+    }
+    .col-resizer:hover::before, .col-resizer.dragging::before {
+      background: #B85C38;
+    }
+    /* Grab handle — always-visible, sticks to viewport center */
+    .resizer-grip {
+      position: sticky;
+      top: 50vh;
+      transform: translateX(-5px);
+      width: 18px;
+      height: 36px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      background: var(--bg, #FAF4EC);
+      border: 1px solid #d4c8b8;
+      border-radius: 9px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      z-index: 11;
+      pointer-events: none;
+      transition: border-color .2s, box-shadow .2s, background .2s;
+    }
+    /* Three vertical lines inside the grip (indicating horizontal drag) */
+    .resizer-grip::before,
+    .resizer-grip::after {
+      content: '';
+      width: 1.5px;
+      height: 14px;
+      background: #B85C38;
       border-radius: 1px;
-      transition: opacity .15s, background .15s, width .15s;
+      opacity: .45;
+      transition: opacity .2s;
     }
-    .col-resizer:hover::after, .col-resizer.dragging::after {
-      opacity: 1;
-      width: 3px;
+    .resizer-grip span.grip-mid {
+      width: 1.5px;
+      height: 14px;
       background: #B85C38;
+      border-radius: 1px;
+      opacity: .45;
+      transition: opacity .2s;
+      font-size: 0;
     }
-    .col-resizer:hover::after, .col-resizer.dragging::after {
+    .col-resizer:hover .resizer-grip, .col-resizer.dragging .resizer-grip {
+      border-color: #B85C38;
       background: #B85C38;
+      box-shadow: 0 2px 8px rgba(184,92,56,.25);
+    }
+    .col-resizer:hover .resizer-grip::before,
+    .col-resizer:hover .resizer-grip::after,
+    .col-resizer:hover .resizer-grip .grip-mid,
+    .col-resizer.dragging .resizer-grip::before,
+    .col-resizer.dragging .resizer-grip::after,
+    .col-resizer.dragging .resizer-grip .grip-mid {
+      background: #fff;
+      opacity: .9;
     }
     body.col-resizing { cursor: col-resize !important; user-select: none; }
     body.col-resizing * { cursor: col-resize !important; }
+    /* Block iframe from stealing mouse events during drag */
+    body.col-resizing iframe { pointer-events: none !important; }
 
     /* ===== Progress Header ===== */
     .editor-header {
@@ -714,6 +765,62 @@
       margin-top: 4px;
       padding-left: 2px;
     }
+    /* Day 141.8: market-range display */
+    .market-range-line {
+      font-size: .78rem;
+      color: var(--fg, #e0e0e0);
+      margin-top: 4px;
+      padding-left: 2px;
+      font-weight: 500;
+    }
+    .muted-range {
+      color: var(--muted);
+      font-style: italic;
+      font-weight: 400;
+    }
+    .market-hint {
+      font-size: .72rem;
+      margin-top: 2px;
+      padding-left: 2px;
+      font-weight: 500;
+    }
+    .hint-under { color: #60a5fa; }
+    .hint-over  { color: #fbbf24; }
+    .ref-toggle {
+      color: var(--brand, #2E5B5E);
+      text-decoration: none;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .ref-toggle:hover { text-decoration: underline; }
+    .ref-list {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: rgba(0,0,0,.15);
+      border-radius: 6px;
+      font-size: .72rem;
+    }
+    .ref-list.hidden { display: none; }
+    .ref-row {
+      padding: 2px 0;
+      color: var(--fg, #e0e0e0);
+    }
+    .ref-row + .ref-row { border-top: 1px solid rgba(255,255,255,.06); }
+    .estimate-label {
+      font-size: .65rem;
+      background: rgba(255,255,255,.08);
+      padding: 1px 6px;
+      border-radius: 999px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    body.theme-customer .market-range-line { color: var(--text, #2C2C2C); }
+    body.theme-customer .ref-list { background: rgba(0,0,0,.04); }
+    body.theme-customer .ref-row { color: var(--text, #2C2C2C); }
+    body.theme-customer .ref-row + .ref-row { border-color: rgba(0,0,0,.08); }
+    body.theme-customer .estimate-label { background: rgba(0,0,0,.06); }
+    body.theme-customer .hint-under { color: #2563eb; }
+    body.theme-customer .hint-over  { color: #d97706; }
 
     /* ===== Variants / Modifiers inline ===== */
     .wiz-variants {
@@ -1434,11 +1541,14 @@
       flex-direction: column;
       min-height: 0;
       overflow: hidden;
+      /* Isolate scroll — prevents bleed to main page */
+      overscroll-behavior: contain;
     }
     .competitor-list {
       flex: 1;
       overflow-y: auto;
       min-height: 0;
+      overscroll-behavior: contain;
     }
     .competitor-list-header {
       display: flex;
@@ -1508,174 +1618,125 @@
     .theme-customer .competitor-map { border-color: #E8DACA; background: #f5f0e8; }
     .theme-customer .competitor-count { background: rgba(184,92,56,.1); color: #B85C38; }
 
-    /* ===== Competitor Comparison Panel (Day 141.5) ===== */
-    .comparison-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 2000;
-      background: rgba(0,0,0,.5);
-    }
-    .comparison-overlay.open { display: flex; align-items: center; justify-content: center; }
-    .comparison-panel {
-      background: var(--card-bg, #1a2236);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      width: 90%;
-      max-width: 900px;
-      max-height: 85vh;
+    /* ===== Day 141.8: Competitor Browser Tabs ===== */
+    .comp-tab-bar {
       display: flex;
-      flex-direction: column;
-      box-shadow: 0 20px 60px rgba(0,0,0,.4);
-      overflow: hidden;
+      gap: 0;
+      background: var(--card-bg, #141c30);
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+      flex-shrink: 0;
+      scrollbar-width: none;
     }
-    .comparison-header {
+    .comp-tab-bar::-webkit-scrollbar { display: none; }
+    .comp-tab {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--line);
-      flex-shrink: 0;
+      gap: 6px;
+      padding: 8px 14px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color .15s, border-color .15s;
     }
-    .comparison-header-info { flex: 1; min-width: 0; }
-    .comparison-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--ink);
-      margin-bottom: 2px;
+    .comp-tab:hover { color: var(--ink); }
+    .comp-tab.active {
+      color: var(--brand, #B85C38);
+      border-bottom-color: var(--brand, #B85C38);
     }
-    .comparison-subtitle { font-size: .82rem; color: var(--muted); }
-    .comparison-close {
+    .comp-tab-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      font-size: .7rem;
+      line-height: 1;
       background: transparent;
       border: none;
       color: var(--muted);
-      font-size: 1.4rem;
       cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 6px;
-    }
-    .comparison-close:hover { color: var(--ink); background: rgba(255,255,255,.06); }
-    .comparison-body {
-      flex: 1;
-      overflow-y: auto;
       padding: 0;
     }
-    .comparison-loading {
-      text-align: center;
-      padding: 48px 20px;
-      color: var(--muted);
-    }
-    .comparison-loading-spinner {
-      display: inline-block;
-      width: 28px;
-      height: 28px;
-      border: 3px solid var(--line);
-      border-top-color: var(--brand, #B85C38);
-      border-radius: 50%;
-      animation: comp-spin .7s linear infinite;
-      margin-bottom: 12px;
-    }
-    @keyframes comp-spin { to { transform: rotate(360deg); } }
-
-    /* Free-tier upgrade prompt (Day 141.7) */
-    .comparison-upgrade {
-      text-align: center;
-      padding: 48px 28px;
-      max-width: 480px;
-      margin: 0 auto;
-    }
-    .comparison-upgrade-icon {
-      font-size: 2rem;
-      margin-bottom: 12px;
-    }
-    .comparison-upgrade-title {
-      font-size: 1.2rem;
-      font-weight: 700;
-      margin-bottom: 8px;
-      color: var(--text, #2C2C2C);
-    }
-    .comparison-upgrade-body {
-      color: var(--muted);
-      margin-bottom: 20px;
-      line-height: 1.5;
-    }
-    .comparison-upgrade-perks {
-      text-align: left;
-      display: inline-block;
-      margin: 0 auto 24px;
-      color: var(--text, #2C2C2C);
-      font-size: .9rem;
-      line-height: 1.8;
-    }
-    .comparison-upgrade-cta {
-      display: inline-block;
-      padding: 10px 22px;
-      background: var(--brand, #B85C38);
-      color: #fff !important;
-      border-radius: 6px;
-      text-decoration: none;
-      font-weight: 600;
-      transition: background .15s;
-    }
-    .comparison-upgrade-cta:hover {
-      background: var(--brand-dark, #9b4a2b);
-    }
-
-    /* Table */
-    .comparison-table {
+    .comp-tab-close:hover { background: rgba(255,255,255,.1); color: var(--ink); }
+    .comp-browser-frame {
+      flex: 1;
+      border: none;
       width: 100%;
-      border-collapse: collapse;
-      font-size: .85rem;
+      min-height: 0;
     }
-    .comparison-table thead { position: sticky; top: 0; z-index: 1; }
-    .comparison-table th {
-      background: var(--card-bg, #141c30);
-      color: var(--muted);
-      font-weight: 600;
-      font-size: .75rem;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      padding: 10px 14px;
-      text-align: left;
-      border-bottom: 1px solid var(--line);
-    }
-    .comparison-table td {
-      padding: 10px 14px;
-      border-bottom: 1px solid rgba(255,255,255,.04);
-      vertical-align: top;
-    }
-    .comparison-table tr:hover td { background: rgba(255,255,255,.02); }
-    .comp-item-name { font-weight: 600; color: var(--ink); }
-    .comp-their-name { font-size: .78rem; color: var(--muted); font-style: italic; }
-    .comp-price { font-weight: 600; white-space: nowrap; }
-    .comp-diff {
-      font-size: .8rem;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      white-space: nowrap;
-    }
-    .comp-diff.cheaper { background: rgba(96,165,250,.12); color: #60a5fa; }
-    .comp-diff.similar { background: rgba(40,167,69,.12); color: #34d058; }
-    .comp-diff.pricier { background: rgba(251,191,36,.12); color: #fbbf24; }
-
-    .comparison-summary {
+    .comp-nav-bar {
       display: flex;
-      gap: 16px;
-      padding: 12px 20px;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: var(--card-bg, #141c30);
       border-bottom: 1px solid var(--line);
-      font-size: .82rem;
       flex-shrink: 0;
     }
-    .comp-stat { display: flex; align-items: center; gap: 4px; }
-    .comp-stat-val { font-weight: 700; color: var(--ink); }
-
-    /* Customer theme */
-    .theme-customer .comparison-panel { background: #fff; border-color: #E8DACA; box-shadow: 0 20px 60px rgba(0,0,0,.12); }
-    .theme-customer .comparison-header { border-color: #E8DACA; }
-    .theme-customer .comparison-table th { background: #FAF4EC; color: #8A8578; border-color: #E8DACA; }
-    .theme-customer .comparison-table td { border-color: rgba(0,0,0,.06); }
-    .theme-customer .comparison-table tr:hover td { background: rgba(0,0,0,.02); }
+    .comp-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      transition: background .1s, color .1s;
+    }
+    .comp-nav-btn:hover { background: rgba(255,255,255,.08); color: var(--ink); }
+    body.theme-customer .comp-tab-bar { background: #FAF4EC; border-color: #E8DACA; }
+    body.theme-customer .comp-tab.active { color: #B85C38; border-bottom-color: #B85C38; }
+    body.theme-customer .comp-tab-close:hover { background: rgba(0,0,0,.06); }
+    .comp-nav-labeled { gap: 4px; width: auto; padding: 0 10px; font-size: .72rem; }
+    .comp-blocked-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg, #0f1524);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 32px;
+      z-index: 10;
+    }
+    .comp-blocked-icon { color: var(--muted); margin-bottom: 16px; }
+    .comp-blocked-title { font-size: 1.05rem; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+    .comp-blocked-desc { font-size: .85rem; color: var(--muted); max-width: 340px; line-height: 1.5; margin-bottom: 24px; }
+    .comp-blocked-actions { display: flex; gap: 10px; }
+    .comp-blocked-btn {
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: .85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+    }
+    .comp-blocked-btn:hover { background: rgba(255,255,255,.06); }
+    .comp-blocked-btn.primary {
+      background: var(--brand, #B85C38);
+      color: #fff;
+      border-color: var(--brand, #B85C38);
+    }
+    .comp-blocked-btn.primary:hover { opacity: .9; }
+    body.theme-customer .comp-blocked-overlay { background: #FAF4EC; }
+    body.theme-customer .comp-blocked-btn { border-color: #E8DACA; color: #2C2C2C; }
+    body.theme-customer .comp-blocked-btn:hover { background: rgba(0,0,0,.04); }
+    body.theme-customer .comp-nav-bar { background: #FAF4EC; border-color: #E8DACA; }
+    body.theme-customer .comp-nav-btn:hover { background: rgba(0,0,0,.06); color: #2C2C2C; }
     .theme-customer .comparison-close:hover { background: rgba(0,0,0,.04); }
 
   </style>
@@ -1837,7 +1898,7 @@
       </div>
     </div>
 
-    <div class="col-resizer" data-resizer="left" title="Drag to resize"></div>
+    <div class="col-resizer" data-resizer="left" title="Drag to resize"><span class="resizer-grip"><span class="grip-mid"></span></span></div>
 
     <!-- ===== Main: Current Category Items ===== -->
     <div class="editor-main">
@@ -1987,11 +2048,38 @@
               {% endif %}
             </div>
 
-            {% if pi and pi.suggested_low and pi.suggested_high %}
-            <div class="price-tooltip">
-              Suggested range: ${{ '%.2f'|format(pi.suggested_low / 100) }} &ndash; ${{ '%.2f'|format(pi.suggested_high / 100) }}
-              {% if pi.regional_avg %} &middot; Regional avg: ${{ '%.2f'|format(pi.regional_avg / 100) }}{% endif %}
-            </div>
+            {# Day 141.8: market-range line under the pill badge #}
+            {% if pi %}
+              {% set cc = pi.comparison_count|default(0, true) %}
+              {% if cc > 0 and pi.suggested_low and pi.suggested_high %}
+              {# Direct competitor matches #}
+              <div class="market-range-line">
+                Market range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}, {% endif %}
+                <a href="#" class="ref-toggle" onclick="event.preventDefault();this.parentElement.nextElementSibling.classList.toggle('hidden')">{{ cc }} reference{{ 's' if cc != 1 else '' }}{% if not pi.median_price %}({% endif %})</a>
+              </div>
+              <div class="ref-list hidden">
+                {% for src in (pi.price_sources|default([], true)) if src is mapping and src.competitor is defined %}
+                <div class="ref-row">{{ src.competitor }}: {{ src.item }} &mdash; ${{ '%.2f'|format(src.price_cents / 100) }}</div>
+                {% endfor %}
+              </div>
+              {% elif cc == -1 and pi.suggested_low and pi.suggested_high %}
+              {# Category-level estimate — no direct item match #}
+              <div class="market-range-line muted-range">
+                Category avg ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+                <span class="estimate-label">category estimate</span>
+              </div>
+              {% elif cc == -2 and pi.suggested_low and pi.suggested_high %}
+              {# Menu-wide estimate — no category matches at all #}
+              <div class="market-range-line muted-range">
+                Market avg ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+                <span class="estimate-label">market estimate</span>
+              </div>
+              {% elif cc == 0 %}
+              <div class="market-range-line muted-range">Not enough market data</div>
+              {% endif %}
             {% endif %}
 
             {% if it.variants %}
@@ -2119,7 +2207,7 @@
       {# Empty state handled by All Items view #}
     </div>
 
-    <div class="col-resizer" data-resizer="right" title="Drag to resize"></div>
+    <div class="col-resizer" data-resizer="right" title="Drag to resize"><span class="resizer-grip"><span class="grip-mid"></span></span></div>
 
     <!-- ===== Right Column: Map / Original Menu + Selected Panel ===== -->
     <div class="editor-preview">
@@ -2204,6 +2292,48 @@
           </div>
         </div>
         {% endif %}
+      </div>
+
+      <!-- Day 141.8: Competitor browser panel (hidden until a competitor tab is opened) -->
+      <div id="preview-comp-panel" class="preview-panel" style="display:none; flex-direction:column;">
+        <div class="comp-tab-bar" id="comp-tab-bar"></div>
+        <div class="comp-nav-bar" id="comp-nav-bar">
+          <button class="comp-nav-btn" id="comp-back-btn" onclick="compGoBack()" title="Back">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button class="comp-nav-btn" onclick="compReload()" title="Reload">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+          <button class="comp-nav-btn comp-nav-labeled" onclick="compShowGoogle()" title="Show Google listing" style="margin-left:auto;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Google</span>
+          </button>
+          <button class="comp-nav-btn comp-nav-labeled" onclick="compViewWebsite()" title="Load competitor website">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <span>Website</span>
+          </button>
+          <button class="comp-nav-btn comp-nav-labeled" onclick="compOpenExternal()" title="Open in new tab">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            <span>New tab</span>
+          </button>
+        </div>
+        <div style="position:relative; flex:1; min-height:0;">
+          <iframe id="comp-browser-frame" class="comp-browser-frame"
+                  referrerpolicy="no-referrer"
+                  style="position:absolute;inset:0;width:100%;height:100%;"></iframe>
+          <div id="comp-blocked-overlay" class="comp-blocked-overlay" style="display:none;">
+            <div class="comp-blocked-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="comp-blocked-title">This site blocks embedded viewing</div>
+            <div class="comp-blocked-desc">Some sites block being loaded inside other pages. Try loading it through our viewer, or go back to the Google listing.</div>
+            <div class="comp-blocked-actions">
+              <button class="comp-blocked-btn primary" onclick="compViewWebsite()">Load through viewer</button>
+              <button class="comp-blocked-btn" onclick="compGoBack()">Back to Google</button>
+              <button class="comp-blocked-btn" onclick="compOpenExternal()">Open in new tab</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Original menu/file viewer (hidden by default, toggled) -->
@@ -4496,6 +4626,22 @@
 
   </script>
 
+  {# Pin preview panel height to exactly fill from its top edge to the viewport bottom #}
+  <script>
+  (function() {
+    const preview = document.querySelector('.editor-preview');
+    if (!preview) return;
+    function setHeight() {
+      const rect = preview.getBoundingClientRect();
+      preview.style.height = (window.innerHeight - rect.top) + 'px';
+    }
+    setHeight();
+    window.addEventListener('resize', setHeight);
+    // Recalc after scroll settles (sticky top may shift)
+    window.addEventListener('scroll', () => { requestAnimationFrame(setHeight); }, { passive: true });
+  })();
+  </script>
+
   {# Column resizers — drag the dividers to resize sidebar / main / preview columns #}
   <script>
   (function() {
@@ -4829,30 +4975,7 @@
   </div>
 </div>
 
-<!-- ===== Competitor Comparison Overlay ===== -->
-<div class="comparison-overlay" id="comparison-overlay" onclick="if(event.target===this)closeComparison()">
-  <div class="comparison-panel">
-    <div class="comparison-header">
-      <div class="comparison-header-info">
-        <div class="comparison-title" id="comparison-title">Comparing with...</div>
-        <div class="comparison-subtitle" id="comparison-subtitle"></div>
-      </div>
-      <button class="comparison-close" onclick="closeComparison()">&times;</button>
-    </div>
-    <div class="comparison-summary" id="comparison-summary" style="display:none;">
-      <div class="comp-stat">We're cheaper on <span class="comp-stat-val" id="comp-cheaper-count">0</span> items</div>
-      <div class="comp-stat">Similar on <span class="comp-stat-val" id="comp-similar-count">0</span></div>
-      <div class="comp-stat">We're pricier on <span class="comp-stat-val" id="comp-pricier-count">0</span></div>
-    </div>
-    <div class="comparison-body" id="comparison-body">
-      <div class="comparison-loading">
-        <div class="comparison-loading-spinner"></div>
-        <div>Analyzing prices at this restaurant...</div>
-        <div style="font-size:.78rem; margin-top:4px; opacity:.6;">This may take a few seconds (results are cached for next time)</div>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- Day 141.8: no comparison overlay — competitor browser is in the right panel -->
 
 <!-- ===== Editor JS: Save, Search, Map Toggle, Ctrl+S ===== -->
 <script>
@@ -4906,8 +5029,12 @@
   function editorTogglePreview(view) {
     const mapPanel = document.getElementById('preview-map-panel');
     const menuPanel = document.getElementById('preview-menu-panel');
+    const compPanel = document.getElementById('preview-comp-panel');
     const mapBtn = document.getElementById('preview-map-btn');
     const menuBtn = document.getElementById('preview-menu-btn');
+    // Hide comp panel + deactivate comp tabs when switching to map/menu
+    if (compPanel) compPanel.style.display = 'none';
+    _activeCompTab = null;
     if (view === 'map') {
       if (mapPanel) mapPanel.style.display = '';
       if (menuPanel) menuPanel.style.display = 'none';
@@ -5104,203 +5231,374 @@
     });
   });
 
-  /* --- Competitor Comparison --- */
+  /* --- Day 141.8: Competitor Browser Tabs --- */
   const DRAFT_ID = {{ draft.id }};
+  const _compTabs = [];       // [{id, name, url, history: [url]}]
+  let _activeCompTab = null;
 
-  // Delegated click handler for competitor cards
+  function compGoBack() {
+    // Reload the original Google search URL for this tab
+    const tab = _compTabs.find(t => t.id === _activeCompTab);
+    if (!tab) return;
+    const frame = document.getElementById('comp-browser-frame');
+    if (frame) {
+      frame.src = tab.url;
+      frame.dataset.tabId = tab.id;
+    }
+    document.getElementById('comp-blocked-overlay').style.display = 'none';
+  }
+
+  function compReload() {
+    const frame = document.getElementById('comp-browser-frame');
+    if (frame) frame.src = frame.src;
+    document.getElementById('comp-blocked-overlay').style.display = 'none';
+  }
+
+  function compOpenExternal() {
+    const tab = _compTabs.find(t => t.id === _activeCompTab);
+    if (tab) window.open(tab.url, '_blank');
+  }
+
+  function compViewWebsite() {
+    const tab = _compTabs.find(t => t.id === _activeCompTab);
+    if (!tab) return;
+    const frame = document.getElementById('comp-browser-frame');
+    const overlay = document.getElementById('comp-blocked-overlay');
+
+    if (tab.websiteUrl) {
+      // Already have the URL — load through proxy
+      const proxyUrl = '/browse?url=' + encodeURIComponent(tab.websiteUrl);
+      if (frame) frame.src = proxyUrl;
+      if (overlay) overlay.style.display = 'none';
+    } else {
+      // Fetch it
+      fetch(`/api/competitor_website?name=${encodeURIComponent(tab.name)}&addr=${encodeURIComponent(tab.addr || '')}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.url && !data.url.includes('google.com/search')) {
+            tab.websiteUrl = data.url;
+            const proxyUrl = '/browse?url=' + encodeURIComponent(data.url);
+            if (frame) frame.src = proxyUrl;
+            if (overlay) overlay.style.display = 'none';
+          } else {
+            compOpenExternal();
+          }
+        })
+        .catch(() => compOpenExternal());
+    }
+  }
+
+  function compShowGoogle() {
+    const tab = _compTabs.find(t => t.id === _activeCompTab);
+    if (!tab) return;
+    const frame = document.getElementById('comp-browser-frame');
+    const overlay = document.getElementById('comp-blocked-overlay');
+    const q = encodeURIComponent(tab.name + ' ' + (tab.addr || ''));
+    const googleUrl = 'https://www.google.com/search?igu=1&q=' + q;
+    if (frame) frame.src = googleUrl;
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  // Detect blocked pages: after iframe loads, check if we can access it.
+  // If the iframe navigated away from Google and hit a block, show overlay.
+  (function() {
+    const frame = document.getElementById('comp-browser-frame');
+    if (!frame) return;
+    frame.addEventListener('load', () => {
+      const overlay = document.getElementById('comp-blocked-overlay');
+      if (!overlay) return;
+      try {
+        // Try accessing content — blocked cross-origin pages may
+        // show error pages served by the browser itself (about: or chrome-error://)
+        const doc = frame.contentDocument;
+        if (doc) {
+          const text = (doc.body && doc.body.innerText) || '';
+          if (text.includes('refused to connect') || text.includes('blocked')
+              || text.includes('ERR_BLOCKED') || text.length < 20) {
+            overlay.style.display = 'flex';
+            return;
+          }
+        }
+      } catch(e) {
+        // Cross-origin — normal for Google. Not blocked, just can't read it.
+      }
+      overlay.style.display = 'none';
+    });
+  })();
+
+  function _compTabId(name) {
+    return 'comp-' + name.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40);
+  }
+
+  function compOpenTab(name, addr) {
+    const id = _compTabId(name);
+
+    // If tab already exists, just switch to it
+    if (_compTabs.find(t => t.id === id)) {
+      compSwitchTab(id);
+      return;
+    }
+
+    // Build Google search URL as fallback
+    const q = encodeURIComponent(name + ' ' + (addr || ''));
+    const googleUrl = 'https://www.google.com/search?igu=1&q=' + q;
+
+    // Start with a loading state, then fetch website URL
+    _compTabs.push({ id, name, addr: addr || '', url: googleUrl, history: [] });
+    compSwitchTab(id);
+
+    // Try to load their actual website through our proxy
+    fetch(`/api/competitor_website?name=${encodeURIComponent(name)}&addr=${encodeURIComponent(addr || '')}`)
+      .then(r => r.json())
+      .then(data => {
+        const tab = _compTabs.find(t => t.id === id);
+        if (!tab) return;
+        if (data.url && !data.url.includes('google.com/search')) {
+          // Got a real website — load it through proxy
+          tab.websiteUrl = data.url;
+          const proxyUrl = '/browse?url=' + encodeURIComponent(data.url);
+          tab.url = proxyUrl;
+          tab.history = [proxyUrl];
+          const frame = document.getElementById('comp-browser-frame');
+          if (frame && _activeCompTab === id) frame.src = proxyUrl;
+        } else {
+          // No website found — keep Google search
+          tab.history = [googleUrl];
+        }
+      })
+      .catch(() => {
+        // API failed — keep Google search
+        const tab = _compTabs.find(t => t.id === id);
+        if (tab) tab.history = [googleUrl];
+      });
+  }
+
+  function compSwitchTab(id) {
+    _activeCompTab = id;
+    const tab = _compTabs.find(t => t.id === id);
+    if (!tab) return;
+
+    // Show the comp panel, hide map + menu
+    const mapPanel = document.getElementById('preview-map-panel');
+    const menuPanel = document.getElementById('preview-menu-panel');
+    const compPanel = document.getElementById('preview-comp-panel');
+    if (mapPanel) mapPanel.style.display = 'none';
+    if (menuPanel) menuPanel.style.display = 'none';
+    if (compPanel) compPanel.style.display = 'flex';
+
+    // Update toggle buttons
+    const mapBtn = document.getElementById('preview-map-btn');
+    const menuBtn = document.getElementById('preview-menu-btn');
+    if (mapBtn) mapBtn.classList.remove('active');
+    if (menuBtn) menuBtn.classList.remove('active');
+
+    // Load iframe
+    const frame = document.getElementById('comp-browser-frame');
+    if (frame.dataset.tabId !== id) {
+      frame.src = tab.url;
+      frame.dataset.tabId = id;
+    }
+
+    // Rebuild tab bar
+    _renderCompTabs();
+  }
+
+  function compCloseTab(id) {
+    const idx = _compTabs.findIndex(t => t.id === id);
+    if (idx === -1) return;
+    _compTabs.splice(idx, 1);
+
+    if (_compTabs.length === 0) {
+      // No more comp tabs — go back to map
+      _activeCompTab = null;
+      editorTogglePreview('map');
+      return;
+    }
+
+    // Switch to adjacent tab
+    if (_activeCompTab === id) {
+      const next = _compTabs[Math.min(idx, _compTabs.length - 1)];
+      compSwitchTab(next.id);
+    } else {
+      _renderCompTabs();
+    }
+  }
+
+  function _renderCompTabs() {
+    const bar = document.getElementById('comp-tab-bar');
+    if (!bar) return;
+
+    let html = '';
+    // "Map" tab always first — clicking returns to map view
+    html += `<button class="comp-tab" onclick="editorTogglePreview('map')" title="Back to map">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg>
+      Map
+    </button>`;
+
+    _compTabs.forEach(t => {
+      const isActive = t.id === _activeCompTab;
+      const shortName = t.name.length > 20 ? t.name.substring(0, 18) + '...' : t.name;
+      html += `<button class="comp-tab${isActive ? ' active' : ''}"
+                       onclick="compSwitchTab('${t.id}')"
+                       title="${t.name}">
+        ${shortName}
+        <span class="comp-tab-close" onclick="event.stopPropagation();compCloseTab('${t.id}')">&times;</span>
+      </button>`;
+    });
+
+    bar.innerHTML = html;
+  }
+
+  // Click handler for competitor cards — open tab in right panel
   document.querySelectorAll('.competitor-card').forEach(card => {
     card.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      openComparison(
-        card.dataset.compName,
-        card.dataset.compTier,
-        card.dataset.compRating,
-        card.dataset.compReviews,
-        card.dataset.compAddr
-      );
+      compOpenTab(card.dataset.compName, card.dataset.compAddr);
     });
   });
 
-  function openComparison(compName, priceTier, rating, reviews, compAddr) {
-    const overlay = document.getElementById('comparison-overlay');
-    const title = document.getElementById('comparison-title');
-    const subtitle = document.getElementById('comparison-subtitle');
-    const body = document.getElementById('comparison-body');
-    const summary = document.getElementById('comparison-summary');
-
-    // Stash address so the Google search link (built later) can use it
-    window._comparisonCompAddr = compAddr || '';
-
-    title.textContent = `Your Menu vs ${compName}`;
-    subtitle.textContent = [
-      priceTier || null,
-      rating ? `★${rating}` : null,
-      reviews ? `(${reviews} reviews)` : null
-    ].filter(Boolean).join(' · ');
-
-    // Show loading state
-    body.innerHTML = `
-      <div class="comparison-loading">
-        <div class="comparison-loading-spinner"></div>
-        <div>Analyzing prices at ${compName}...</div>
-        <div style="font-size:.78rem; margin-top:4px; opacity:.6;">This may take a few seconds (results are cached for next time)</div>
-      </div>`;
-    summary.style.display = 'none';
-    overlay.classList.add('open');
-
-    // Fetch comparison
-    fetch(`/api/drafts/${DRAFT_ID}/compare_competitor`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ competitor_name: compName })
-    })
-    .then(r => r.json().then(d => ({ status: r.status, data: d })))
-    .then(({ status, data }) => {
-      if (status === 402 || data.error === 'upgrade_required') {
-        const upgradeUrl = data.upgrade_url || '/account';
-        const msg = data.message || 'Real competitor price comparisons require a paid plan.';
-        body.innerHTML = `
-          <div class="comparison-upgrade">
-            <div class="comparison-upgrade-icon">🔒</div>
-            <div class="comparison-upgrade-title">Upgrade to compare real prices</div>
-            <div class="comparison-upgrade-body">${msg}</div>
-            <div class="comparison-upgrade-perks">
-              <div>✓ Live DoorDash + Grubhub menu scraping</div>
-              <div>✓ Per-item side-by-side price deltas</div>
-              <div>✓ Unlimited comparisons, refreshed weekly</div>
-            </div>
-            <a href="${upgradeUrl}" class="comparison-upgrade-cta">See plans</a>
-          </div>`;
-        summary.style.display = 'none';
-        return;
-      }
-      if (data.error) {
-        body.innerHTML = `<div class="comparison-loading" style="color:#dc3545;">${data.error}</div>`;
-        return;
-      }
-      renderComparison(data, compName);
-    })
-    .catch(err => {
-      body.innerHTML = `<div class="comparison-loading" style="color:#dc3545;">Failed to load comparison: ${err.message}</div>`;
-    });
+  // Persist active comp tabs across category navigation
+  function _saveCompState() {
+    try {
+      const data = {
+        tabs: _compTabs.map(t => ({
+          id: t.id, name: t.name, addr: t.addr,
+          url: t.url, websiteUrl: t.websiteUrl || null
+        })),
+        active: _activeCompTab || ''
+      };
+      sessionStorage.setItem('compState_' + DRAFT_ID, JSON.stringify(data));
+    } catch(e) {}
   }
 
-  function renderComparison(data, compName) {
-    const body = document.getElementById('comparison-body');
-    const summary = document.getElementById('comparison-summary');
-    const subtitle = document.getElementById('comparison-subtitle');
-    const comps = data.comparisons || [];
-    const isReal = data.data_source === 'scraped';
+  // Wrap compSwitchTab + compCloseTab + compOpenTab to auto-save
+  const _origSwitch = compSwitchTab;
+  compSwitchTab = function(id) { _origSwitch(id); _saveCompState(); };
+  const _origClose = compCloseTab;
+  compCloseTab = function(id) { _origClose(id); _saveCompState(); };
+  window.addEventListener('beforeunload', _saveCompState);
 
-    if (comps.length === 0) {
-      body.innerHTML = '<div class="comparison-loading">No comparison data available.</div>';
-      return;
+  // Restore on load — rebuild tabs directly from saved state
+  (function() {
+    try {
+      const raw = sessionStorage.getItem('compState_' + DRAFT_ID);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data.tabs || !data.tabs.length || !data.active) return;
+
+      // Rebuild tab objects directly (no async fetch)
+      data.tabs.forEach(t => {
+        if (_compTabs.find(x => x.id === t.id)) return;
+        _compTabs.push({
+          id: t.id, name: t.name, addr: t.addr || '',
+          url: t.url, websiteUrl: t.websiteUrl || null,
+          history: [t.url]
+        });
+      });
+
+      // Switch to the active tab — this hides the map and shows the comp panel
+      if (_compTabs.find(t => t.id === data.active)) {
+        _origSwitch(data.active);
+      }
+    } catch(e) { console.warn('comp restore failed', e); }
+  })();
+
+  // Day 141.8: AJAX category switching — no page reload, preserves competitor browser
+  (function() {
+    const mainCol = document.querySelector('.editor-main');
+    if (!mainCol) return;
+
+    function ajaxNav(url) {
+      // Update sidebar active state immediately
+      const catList = document.getElementById('cat-list');
+      if (catList) {
+        catList.querySelectorAll('li').forEach(li => li.classList.remove('active', 'cat-parent-of-active'));
+      }
+
+      fetch(url, { credentials: 'same-origin' })
+        .then(r => r.text())
+        .then(html => {
+          // Parse the fetched page and extract just the .editor-main content
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const newMain = doc.querySelector('.editor-main');
+          const newSidebar = doc.querySelector('.editor-sidebar');
+          if (newMain) {
+            mainCol.innerHTML = newMain.innerHTML;
+          }
+          // Update sidebar (active states, counts)
+          const sidebar = document.querySelector('.editor-sidebar');
+          if (newSidebar && sidebar) {
+            sidebar.innerHTML = newSidebar.innerHTML;
+            // Re-bind sidebar click handlers
+            bindCatClicks();
+          }
+          // Update URL without reload
+          history.pushState(null, '', url);
+          // Re-bind any inline handlers in the new content
+          rebindEditorHandlers();
+        })
+        .catch(err => {
+          // Fallback: do a real navigation if AJAX fails
+          console.warn('AJAX nav failed, falling back:', err);
+          window.location = url;
+        });
     }
 
-    // Update subtitle with data source badge
-    const tierInfo = [
-      data.competitor_tier || null,
-      data.competitor_rating ? `★${data.competitor_rating}` : null,
-    ].filter(Boolean).join(' · ');
-    const sourceBadge = isReal
-      ? '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;background:rgba(40,167,69,.12);color:#34d058;border:1px solid rgba(40,167,69,.3);">Real Menu Data</span>'
-      : '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3);">Market Estimates</span>'
-        + '<div style="font-size:.72rem;color:var(--muted);margin-top:4px;">This restaurant\'s menu isn\'t publicly available. Prices are estimated from their price tier and local market data.</div>';
-    // Google search link for the competitor's menu
-    // Include the address so Google resolves the correct location,
-    // not a same-named restaurant in another city. Strip street number
-    // to keep the query short but specific.
-    const locHint = (window._comparisonCompAddr || '').replace(/^\d+\s+/, '');
-    const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(compName + ' menu' + (locHint ? ' ' + locHint : ''))}`;
-    const menuLink = ` <a href="${googleSearchUrl}" target="_blank" rel="noopener" style="margin-left:8px;font-size:.75rem;color:var(--brand, #2E5B5E);">Search menu on Google ↗</a>`;
-    subtitle.innerHTML = tierInfo + sourceBadge + menuLink;
+    function bindCatClicks() {
+      // Intercept all category label clicks in sidebar
+      document.querySelectorAll('#cat-list .cat-label').forEach(label => {
+        const origOnclick = label.getAttribute('onclick');
+        if (!origOnclick) return;
+        // Extract URL from onclick="window.location='...'"
+        const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
+        if (!match) return;
+        const url = match[1];
+        label.removeAttribute('onclick');
+        label.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          ajaxNav(url);
+        });
+      });
 
-    // Count verdicts
-    let cheaper = 0, similar = 0, pricier = 0;
-    comps.forEach(c => {
-      if (c.verdict === 'cheaper') cheaper++;
-      else if (c.verdict === 'similar') similar++;
-      else if (c.verdict === 'pricier') pricier++;
+      // Also intercept subcategory clicks
+      document.querySelectorAll('#cat-list .subcat-label').forEach(label => {
+        const origOnclick = label.getAttribute('onclick');
+        if (!origOnclick) return;
+        const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
+        if (!match) return;
+        const url = match[1];
+        label.removeAttribute('onclick');
+        label.addEventListener('click', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          ajaxNav(url);
+        });
+      });
+    }
+
+    function rebindEditorHandlers() {
+      // Re-bind prev/next category buttons
+      mainCol.querySelectorAll('.editor-actions a.btn').forEach(btn => {
+        const url = btn.getAttribute('href');
+        if (!url) return;
+        btn.addEventListener('click', e => {
+          e.preventDefault();
+          ajaxNav(url);
+        });
+      });
+    }
+
+    // Handle browser back/forward
+    window.addEventListener('popstate', () => {
+      ajaxNav(window.location.href);
     });
 
-    document.getElementById('comp-cheaper-count').textContent = cheaper;
-    document.getElementById('comp-similar-count').textContent = similar;
-    document.getElementById('comp-pricier-count').textContent = pricier;
-    summary.style.display = 'flex';
-
-    // Column header
-    const priceColLabel = isReal ? `Price at ${compName}` : `Est. at ${compName}`;
-
-    // Build table
-    let html = `
-      <table class="comparison-table">
-        <thead>
-          <tr>
-            <th>Your Item</th>
-            <th>Your Price</th>
-            <th>${priceColLabel}</th>
-            <th>Difference</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-    comps.forEach(c => {
-      const ourPrice = c.our_price_cents ? `$${(c.our_price_cents / 100).toFixed(2)}` : '—';
-      const theirPrice = c.their_estimated_cents ? `$${(c.their_estimated_cents / 100).toFixed(2)}` : '—';
-      const diff = c.difference_cents || 0;
-      const verdict = c.verdict || 'similar';
-
-      if (verdict === 'no_match') {
-        html += `
-          <tr style="opacity:.5;">
-            <td>
-              <div class="comp-item-name">${c.our_item || '—'}</div>
-            </td>
-            <td class="comp-price">${ourPrice}</td>
-            <td class="comp-price" style="color:var(--muted);">No match</td>
-            <td><span class="comp-diff" style="opacity:.5;">—</span></td>
-          </tr>`;
-        return;
-      }
-
-      const diffStr = diff > 0
-        ? `+$${(diff / 100).toFixed(2)}`
-        : diff < 0
-          ? `-$${(Math.abs(diff) / 100).toFixed(2)}`
-          : '$0.00';
-      const verdictLabel = verdict === 'cheaper' ? 'We\'re cheaper'
-                         : verdict === 'pricier' ? 'We\'re pricier'
-                         : 'Similar';
-      const matchBadge = c.match_quality && c.match_quality !== 'exact' && isReal
-        ? ` <span style="font-size:.65rem;opacity:.6;">(${c.match_quality})</span>`
-        : '';
-
-      html += `
-        <tr>
-          <td>
-            <div class="comp-item-name">${c.our_item || '—'}</div>
-            ${c.their_item_name ? `<div class="comp-their-name">≈ ${c.their_item_name}${matchBadge}</div>` : ''}
-          </td>
-          <td class="comp-price">${ourPrice}</td>
-          <td class="comp-price">${theirPrice}</td>
-          <td><span class="comp-diff ${verdict}">${verdictLabel} ${diffStr}</span></td>
-        </tr>`;
-    });
-
-    html += '</tbody></table>';
-    body.innerHTML = html;
-  }
-
-  function closeComparison() {
-    document.getElementById('comparison-overlay').classList.remove('open');
-  }
-
-  // Escape key closes comparison
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeComparison();
-  });
+    // Initial bind
+    bindCatClicks();
+    rebindEditorHandlers();
+  })();
 
   // Day 141.6: Empty draft cleanup handled by explicit delete only — no auto-delete
 </script>
