@@ -4069,7 +4069,7 @@
         if (data.ok) {
           // Remember new item ID so we auto-open it in edit mode after reload
           if (data.item_id) sessionStorage.setItem('wizNewItemId', String(data.item_id));
-          window.location.reload();
+          ajaxNav(window.location.href);
         } else {
           wizToast(data.error || 'Failed to add item');
         }
@@ -4278,7 +4278,7 @@
           wizUpdateSelection();
           const dest = targetSubcat ? `${target} › ${targetSubcat}` : target;
           wizToast(`Moved ${ids.length} item${ids.length > 1 ? 's' : ''} to ${dest}`);
-          setTimeout(() => window.location.reload(), 1500);
+          setTimeout(() => ajaxNav(window.location.href), 1500);
         }
       } catch (e) { wizToast('Network error'); }
     }
@@ -4318,7 +4318,7 @@
           const newSpan = document.createElement('span');
           newSpan.className = 'cat-label';
           newSpan.textContent = oldName;
-          newSpan.onclick = () => window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(oldName)}`;
+          newSpan.onclick = () => ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(oldName)}`);
           newSpan.ondblclick = (e) => { e.stopPropagation(); wizRenameCat(newSpan, oldName); };
           input.replaceWith(newSpan);
           return;
@@ -4334,7 +4334,7 @@
           const data = await res.json();
           if (data.ok) {
             // Redirect to the renamed category
-            window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`;
+            ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`);
           } else {
             wizToast(data.error || 'Rename failed');
           }
@@ -4381,7 +4381,7 @@
           });
           const data = await res.json();
           if (data.ok) {
-            window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`;
+            ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(newName)}`);
           } else {
             wizToast(data.error || 'Rename failed');
           }
@@ -4439,7 +4439,7 @@
         });
         const data = await res.json();
         if (data.ok) {
-          window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(name.trim())}`;
+          ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(name.trim())}`);
         } else {
           wizToast(data.error || 'Failed to create category');
         }
@@ -4470,7 +4470,7 @@
         const data = await res.json();
         if (data.ok) {
           document.getElementById('subcat-modal').classList.remove('open');
-          window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(parent)}&subcategory=${encodeURIComponent(name)}`;
+          ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}?category=${encodeURIComponent(parent)}&subcategory=${encodeURIComponent(name)}`);
         } else {
           wizToast(data.error || 'Failed to create subcategory');
         }
@@ -4503,7 +4503,7 @@
         const data = await res.json();
         if (data.ok) {
           wizToast(`Deleted "${label}"`);
-          setTimeout(() => window.location = `{{ url_for('draft_editor', draft_id=draft.id) }}`, 500);
+          setTimeout(() => ajaxNav(`{{ url_for('draft_editor', draft_id=draft.id) }}`), 500);
         } else {
           wizToast(data.error || 'Delete failed');
         }
@@ -4618,7 +4618,7 @@
               if (data.ok) {
                 wizToast(`Moved "${subcatName}" to ${newParent}`);
                 const base = `{{ url_for('draft_editor', draft_id=draft.id) }}`;
-                setTimeout(() => { window.location = `${base}?category=${encodeURIComponent(newParent)}&subcategory=${encodeURIComponent(subcatName)}`; }, 1000);
+                setTimeout(() => { ajaxNav(`${base}?category=${encodeURIComponent(newParent)}&subcategory=${encodeURIComponent(subcatName)}`); }, 1000);
               } else { wizToast(data.error || 'Move failed'); }
             }).catch(() => wizToast('Network error'));
             dragLi = null;
@@ -5604,101 +5604,67 @@
     } catch(e) { console.warn('comp restore failed', e); }
   })();
 
-  // Day 141.8: AJAX category switching — no page reload, preserves competitor browser
-  (function() {
+  // Day 141.8: AJAX navigation — no page reload, preserves competitor browser
+  function ajaxNav(url) {
+    const mainCol = document.querySelector('.editor-main');
+    if (!mainCol) { window.location = url; return; }
+    const catList = document.getElementById('cat-list');
+    if (catList) {
+      catList.querySelectorAll('li').forEach(li => li.classList.remove('active', 'cat-parent-of-active'));
+    }
+    fetch(url, { credentials: 'same-origin' })
+      .then(r => r.text())
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const newMain = doc.querySelector('.editor-main');
+        const newSidebar = doc.querySelector('.editor-sidebar');
+        if (newMain) mainCol.innerHTML = newMain.innerHTML;
+        const sidebar = document.querySelector('.editor-sidebar');
+        if (newSidebar && sidebar) {
+          sidebar.innerHTML = newSidebar.innerHTML;
+          bindCatClicks();
+        }
+        history.pushState(null, '', url);
+        rebindEditorHandlers();
+      })
+      .catch(err => {
+        console.warn('AJAX nav failed, falling back:', err);
+        window.location = url;
+      });
+  }
+
+  function bindCatClicks() {
+    document.querySelectorAll('#cat-list .cat-label, #cat-list .subcat-label').forEach(label => {
+      const origOnclick = label.getAttribute('onclick');
+      if (!origOnclick) return;
+      const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
+      if (!match) return;
+      const url = match[1];
+      label.removeAttribute('onclick');
+      label.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        ajaxNav(url);
+      });
+    });
+  }
+
+  function rebindEditorHandlers() {
     const mainCol = document.querySelector('.editor-main');
     if (!mainCol) return;
-
-    function ajaxNav(url) {
-      // Update sidebar active state immediately
-      const catList = document.getElementById('cat-list');
-      if (catList) {
-        catList.querySelectorAll('li').forEach(li => li.classList.remove('active', 'cat-parent-of-active'));
-      }
-
-      fetch(url, { credentials: 'same-origin' })
-        .then(r => r.text())
-        .then(html => {
-          // Parse the fetched page and extract just the .editor-main content
-          const doc = new DOMParser().parseFromString(html, 'text/html');
-          const newMain = doc.querySelector('.editor-main');
-          const newSidebar = doc.querySelector('.editor-sidebar');
-          if (newMain) {
-            mainCol.innerHTML = newMain.innerHTML;
-          }
-          // Update sidebar (active states, counts)
-          const sidebar = document.querySelector('.editor-sidebar');
-          if (newSidebar && sidebar) {
-            sidebar.innerHTML = newSidebar.innerHTML;
-            // Re-bind sidebar click handlers
-            bindCatClicks();
-          }
-          // Update URL without reload
-          history.pushState(null, '', url);
-          // Re-bind any inline handlers in the new content
-          rebindEditorHandlers();
-        })
-        .catch(err => {
-          // Fallback: do a real navigation if AJAX fails
-          console.warn('AJAX nav failed, falling back:', err);
-          window.location = url;
-        });
-    }
-
-    function bindCatClicks() {
-      // Intercept all category label clicks in sidebar
-      document.querySelectorAll('#cat-list .cat-label').forEach(label => {
-        const origOnclick = label.getAttribute('onclick');
-        if (!origOnclick) return;
-        // Extract URL from onclick="window.location='...'"
-        const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
-        if (!match) return;
-        const url = match[1];
-        label.removeAttribute('onclick');
-        label.addEventListener('click', e => {
-          e.preventDefault();
-          e.stopPropagation();
-          ajaxNav(url);
-        });
+    mainCol.querySelectorAll('.editor-actions a.btn').forEach(btn => {
+      const url = btn.getAttribute('href');
+      if (!url) return;
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        ajaxNav(url);
       });
-
-      // Also intercept subcategory clicks
-      document.querySelectorAll('#cat-list .subcat-label').forEach(label => {
-        const origOnclick = label.getAttribute('onclick');
-        if (!origOnclick) return;
-        const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
-        if (!match) return;
-        const url = match[1];
-        label.removeAttribute('onclick');
-        label.addEventListener('click', e => {
-          e.preventDefault();
-          e.stopPropagation();
-          ajaxNav(url);
-        });
-      });
-    }
-
-    function rebindEditorHandlers() {
-      // Re-bind prev/next category buttons
-      mainCol.querySelectorAll('.editor-actions a.btn').forEach(btn => {
-        const url = btn.getAttribute('href');
-        if (!url) return;
-        btn.addEventListener('click', e => {
-          e.preventDefault();
-          ajaxNav(url);
-        });
-      });
-    }
-
-    // Handle browser back/forward
-    window.addEventListener('popstate', () => {
-      ajaxNav(window.location.href);
     });
+  }
 
-    // Initial bind
-    bindCatClicks();
-    rebindEditorHandlers();
-  })();
+  window.addEventListener('popstate', () => ajaxNav(window.location.href));
+  bindCatClicks();
+  rebindEditorHandlers();
 
   // Day 141.6: Empty draft cleanup handled by explicit delete only — no auto-delete
 </script>
