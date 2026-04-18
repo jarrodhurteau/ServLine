@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -774,6 +775,295 @@ def _preload_comparisons_async(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
+                          zip_code: str, cuisine: str) -> Dict[int, Dict[str, Any]]:
+    """Use Gemini with Google Search grounding to get real market prices.
+
+    Batches items and asks Gemini to search Google for actual local pricing.
+    Returns {item_id: {low, high, median, sizes: {...}}} in cents.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key or not items:
+        return {}
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        log.warning("google-genai not installed")
+        return {}
+
+    client = genai.Client(api_key=api_key)
+    out: Dict[int, Dict[str, Any]] = {}
+    batch_size = 10
+
+    def _run_batch(batch):
+        item_lines = ""
+        for it in batch:
+            variants = it.get("variants", [])
+            if variants:
+                sizes_str = ", ".join(v["label"] for v in variants if v.get("label"))
+                item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]}) [sizes: {sizes_str}]\n'
+            else:
+                item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
+
+        prompt = f"""For each item below, give me a low-high price range using price data from 7 restaurants in {city}, {state}.
+
+For items WITHOUT sizes, search: "(item name) (category) price in {city}, {state}"
+For items WITH sizes, search EACH size separately: "(size) (item name) (category) price in {city}, {state}"
+
+Items:
+{item_lines}
+
+Return JSON only — an array:
+[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null}}]
+
+For items with [sizes], include per-size ranges from your searches:
+{{"id": 123, "low_cents": 800, "high_cents": 2500, "median_cents": 1500,
+  "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100}}}}
+}}
+
+Rules:
+- Use real price data from 7 restaurants in {city}, {state}
+- Prices in US cents (e.g. $9.00 = 900)
+- If you can't find real data for an item, set low_cents to 0
+- Use the item ID numbers exactly as given
+- Return ONLY the JSON array, no other text"""
+
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.1,
+                ),
+            )
+            text = (response.text or "").strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+            text = text.strip()
+
+            results = json.loads(text)
+            batch_out = {}
+            for r in results:
+                iid = r.get("id")
+                low = r.get("low_cents", 0)
+                high = r.get("high_cents", 0)
+                med = r.get("median_cents", 0)
+                if iid and low > 0 and high > 0 and med > 0:
+                    entry = {"low": int(low), "high": int(high), "median": int(med)}
+                    raw_sizes = r.get("sizes")
+                    if isinstance(raw_sizes, dict):
+                        sizes_out = {}
+                        for slabel, sdata in raw_sizes.items():
+                            if isinstance(sdata, dict):
+                                sl = sdata.get("low_cents", 0)
+                                sh = sdata.get("high_cents", 0)
+                                sm = sdata.get("median_cents", 0)
+                                if sl > 0 and sh > 0 and sm > 0:
+                                    sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                        if sizes_out:
+                            entry["sizes"] = sizes_out
+                    batch_out[int(iid)] = entry
+            log.info("Gemini search batch: got %d items with real prices", len(batch_out))
+            return batch_out
+        except Exception as e:
+            log.warning("Gemini search batch failed: %s", e)
+            return {}
+
+    # Run ALL batches in parallel — Gemini allows ~1000 RPM on paid tier
+    batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+        futures = [pool.submit(_run_batch, b) for b in batches]
+        for f in futures:
+            try:
+                out.update(f.result())
+            except Exception:
+                pass
+
+    log.info("Gemini search: got real prices for %d/%d items", len(out), len(items))
+    return out
+
+
+def _search_item_prices(items: List[Dict[str, Any]], city: str, state: str,
+                        zip_code: str, cuisine: str) -> Dict[int, Dict[str, Any]]:
+    """Google-search real prices for each menu item, then extract with Haiku.
+
+    For each item (+ size variants), searches Google for actual local pricing,
+    then passes the search results to Haiku to extract low/high/median.
+
+    Returns {item_id: {low, high, median, sizes: {label: {low, high, median}}}} in cents.
+    """
+    if not items:
+        return {}
+
+    client = _get_client()
+    if not client:
+        return {}
+
+    # Step 1: Google search for each unique item (dedupe by name+category)
+    # Items with sizes get one search per size
+    search_tasks = []  # (item_id, search_query, size_label_or_None)
+    seen_queries = {}  # query -> [(item_id, size_label)]
+
+    for it in items:
+        name = it["item_name"]
+        category = it.get("category", "")
+        variants = it.get("variants", [])
+
+        if variants:
+            for v in variants:
+                slabel = v.get("label", "")
+                q = f"{name} {slabel} {cuisine} price in {city} {state}"
+                if q not in seen_queries:
+                    seen_queries[q] = []
+                    search_tasks.append((it["item_id"], q, slabel))
+                seen_queries[q].append((it["item_id"], slabel))
+        else:
+            q = f"{name} {cuisine} price in {city} {state}"
+            if q not in seen_queries:
+                seen_queries[q] = []
+                search_tasks.append((it["item_id"], q, None))
+            seen_queries[q].append((it["item_id"], None))
+
+    # Step 2: Run Google searches in parallel
+    from concurrent.futures import ThreadPoolExecutor
+    search_results = {}  # query -> text
+
+    def _do_search(task):
+        iid, query, slabel = task
+        text = _web_search_text(query)
+        return query, text
+
+    log.info("Running %d Google searches for price data...", len(search_tasks))
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        for query, text in pool.map(lambda t: _do_search(t), search_tasks):
+            if text:
+                search_results[query] = text
+
+    log.info("Got %d/%d search results", len(search_results), len(search_tasks))
+
+    # Step 3: Batch the search results to Haiku for extraction
+    # Group items into batches of 15 for extraction
+    out: Dict[int, Dict[str, Any]] = {}
+    batch_size = 15
+    extraction_items = []
+
+    for it in items:
+        name = it["item_name"]
+        category = it.get("category", "")
+        variants = it.get("variants", [])
+        item_searches = {}
+
+        if variants:
+            for v in variants:
+                slabel = v.get("label", "")
+                q = f"{name} {slabel} {cuisine} price in {city} {state}"
+                if q in search_results:
+                    item_searches[slabel] = search_results[q]
+        else:
+            q = f"{name} {cuisine} price in {city} {state}"
+            if q in search_results:
+                item_searches["_base"] = search_results[q]
+
+        if item_searches:
+            extraction_items.append({
+                "item_id": it["item_id"],
+                "item_name": name,
+                "category": category,
+                "searches": item_searches,
+                "has_sizes": bool(variants),
+            })
+
+    def _extract_batch(batch):
+        """Send a batch of search results to Haiku for price extraction."""
+        prompt_parts = []
+        for ei in batch:
+            prompt_parts.append(f'## Item #{ei["item_id"]}: "{ei["item_name"]}" ({ei["category"]})')
+            for label, text in ei["searches"].items():
+                tag = f" [{label}]" if label != "_base" else ""
+                prompt_parts.append(f"Search results{tag}:\n{text[:2500]}\n")
+
+        prompt = f"""You are a restaurant pricing analyst. Extract REAL prices from the Google search
+results below. These are actual prices from restaurants in {city}, {state}.
+
+{chr(10).join(prompt_parts)}
+
+For each item, return the price range you found in the search results.
+Return JSON only — an array:
+[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null}}]
+
+For items with size-specific search results ([12" Sml], [16" Lrg], etc.), include per-size ranges:
+{{"id": 123, "low_cents": 800, "high_cents": 2500, "median_cents": 1500,
+  "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100}}}}
+}}
+
+Rules:
+- ONLY use prices you can actually see in the search results text
+- If no prices found for an item, use low_cents: 0 (we'll skip it)
+- Prices in US cents
+- Return ONLY the JSON array"""
+
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+            text = text.strip()
+
+            results = json.loads(text)
+            batch_out = {}
+            for r in results:
+                iid = r.get("id")
+                low = r.get("low_cents", 0)
+                high = r.get("high_cents", 0)
+                med = r.get("median_cents", 0)
+                if iid and low > 0 and high > 0 and med > 0:
+                    entry = {"low": int(low), "high": int(high), "median": int(med)}
+                    raw_sizes = r.get("sizes")
+                    if isinstance(raw_sizes, dict):
+                        sizes_out = {}
+                        for slabel, sdata in raw_sizes.items():
+                            if isinstance(sdata, dict):
+                                sl = sdata.get("low_cents", 0)
+                                sh = sdata.get("high_cents", 0)
+                                sm = sdata.get("median_cents", 0)
+                                if sl > 0 and sh > 0 and sm > 0:
+                                    sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                        if sizes_out:
+                            entry["sizes"] = sizes_out
+                    batch_out[int(iid)] = entry
+            return batch_out
+        except Exception as e:
+            log.warning("Price extraction batch failed: %s", e)
+            return {}
+
+    # Run extraction batches in parallel
+    batches = [extraction_items[i:i + batch_size]
+               for i in range(0, len(extraction_items), batch_size)]
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(_extract_batch, b) for b in batches]
+        for f in futures:
+            try:
+                out.update(f.result())
+            except Exception:
+                pass
+
+    log.info("Extracted prices for %d/%d items from Google search data", len(out), len(items))
+    return out
+
+
 def _estimate_item_market_rates(items: List[Dict[str, Any]], city: str, state: str,
                                 zip_code: str, cuisine: str) -> Dict[int, Dict[str, Any]]:
     """Ask Haiku for per-item market price ranges. Batches of 40.
@@ -998,8 +1288,10 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         conn.row_factory = sqlite3.Row
 
         our_rows = conn.execute(
-            """SELECT pi.item_id, pi.item_name, pi.item_category, pi.current_price
+            """SELECT pi.item_id, pi.item_name, pi.item_category, pi.current_price,
+                      di.subcategory
                FROM price_intelligence_results pi
+               LEFT JOIN draft_items di ON di.id = pi.item_id
                WHERE pi.draft_id = ?""",
             (draft_id,),
         ).fetchall()
@@ -1040,21 +1332,35 @@ def _aggregate_price_ranges(draft_id: int) -> int:
             item_variants[iid].append({"label": (vr["label"] or "").strip(),
                                        "price": vr["price_cents"] or 0})
 
-        # Build items list for Haiku
+        # Build items list for Gemini/Haiku
         haiku_items = []
         for row in our_rows:
+            cat = (row["item_category"] or "").strip()
+            subcat = (row["subcategory"] or "").strip() if row.keys().__contains__("subcategory") and row["subcategory"] else ""
+            # Include subcategory so Gemini knows "Pepperoni" is a "Pizza Topping" not a whole pizza
+            full_cat = f"{cat} {subcat}" if subcat else cat
             entry = {
                 "item_id": row["item_id"],
                 "item_name": (row["item_name"] or "").strip(),
-                "category": (row["item_category"] or "").strip(),
+                "category": full_cat,
             }
             if row["item_id"] in item_variants:
                 entry["variants"] = item_variants[row["item_id"]]
             haiku_items.append(entry)
 
-        # Per-item Haiku estimates (batched, ~10 seconds total)
-        item_market = _estimate_item_market_rates(
+        # Gemini with Google Search grounding — real prices from real menus
+        # Falls back to Haiku estimates for items Gemini can't find
+        item_market = _gemini_search_prices(
             haiku_items, city, state, zip_code, cuisine)
+        # Fill gaps with Haiku estimates for items Google didn't cover
+        if len(item_market) < len(haiku_items):
+            missing = [it for it in haiku_items if it["item_id"] not in item_market]
+            if missing:
+                log.info("Gemini missed %d items, falling back to Haiku estimates", len(missing))
+                fallback = _estimate_item_market_rates(missing, city, state, zip_code, cuisine)
+                for iid, data in fallback.items():
+                    if iid not in item_market:
+                        item_market[iid] = data
 
         for row in our_rows:
             current_price = row["current_price"] or 0
