@@ -23,6 +23,7 @@
     .editor-main { flex: 1; min-width: 320px; }
     .editor-preview {
       width: 60%;
+      min-width: 420px;
       flex-shrink: 0;
       position: sticky;
       top: 48px;
@@ -1627,15 +1628,19 @@
       border-bottom: 1px solid var(--line);
       overflow-x: auto;
       flex-shrink: 0;
-      scrollbar-width: none;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(184,92,56,.3) transparent;
     }
-    .comp-tab-bar::-webkit-scrollbar { display: none; }
+    .comp-tab-bar::-webkit-scrollbar { height: 3px; }
+    .comp-tab-bar::-webkit-scrollbar-track { background: transparent; }
+    .comp-tab-bar::-webkit-scrollbar-thumb { background: rgba(184,92,56,.3); border-radius: 3px; }
+    .comp-tab-bar::-webkit-scrollbar-thumb:hover { background: rgba(184,92,56,.6); }
     .comp-tab {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 8px 14px;
-      font-size: .78rem;
+      gap: 4px;
+      padding: 8px 10px;
+      font-size: .75rem;
       font-weight: 600;
       color: var(--muted);
       background: transparent;
@@ -1644,6 +1649,10 @@
       cursor: pointer;
       white-space: nowrap;
       transition: color .15s, border-color .15s;
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .comp-tab:hover { color: var(--ink); }
     .comp-tab.active {
@@ -4720,7 +4729,7 @@
         const dx = e.clientX - startX;
         // Left resizer grows sidebar to the right; right resizer shrinks preview as user drags right
         const newWidth = isLeft ? (startWidth + dx) : (startWidth - dx);
-        const min = 200, max = window.innerWidth - 400;
+        const min = isLeft ? 200 : 420, max = window.innerWidth - 400;
         target.style.width = Math.max(min, Math.min(max, newWidth)) + 'px';
       });
 
@@ -5547,7 +5556,7 @@
 
     _compTabs.forEach(t => {
       const isActive = t.id === _activeCompTab;
-      const shortName = t.name.length > 20 ? t.name.substring(0, 18) + '...' : t.name;
+      const shortName = t.name.length > 16 ? t.name.substring(0, 14) + '...' : t.name;
       html += `<button class="comp-tab${isActive ? ' active' : ''}"
                        onclick="compSwitchTab('${t.id}')"
                        title="${t.name}">
@@ -5560,6 +5569,9 @@
     html += `<button class="comp-tab comp-tab-add" onclick="editorTogglePreview('map')" title="Select another restaurant">+</button>`;
 
     bar.innerHTML = html;
+    // Scroll active tab into view
+    const activeBtn = bar.querySelector('.comp-tab.active');
+    if (activeBtn) activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }
 
   // Click handler for competitor cards — open tab in right panel
