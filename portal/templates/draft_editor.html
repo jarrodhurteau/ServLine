@@ -2044,32 +2044,6 @@
               <span class="wiz-item-num">{{ ns.item_num }}.</span>
               {% if needs_price %}<span class="wiz-needs-price-flag" title="This item is missing a price — please review">!</span>{% endif %}
               <div class="wiz-item-name">{% if it.name %}{{ it.name|e }}{% else %}<span style="color:var(--muted); font-style:italic;">Item name</span>{% endif %}</div>
-              {% if it.price_cents %}
-              <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
-              {% elif needs_price %}
-              <div class="wiz-item-price missing-price" style="color:#dc3545; font-size:.78rem; font-weight:600;">Needs price</div>
-              {% endif %}
-              <label class="wiz-select-box" onclick="event.stopPropagation()">
-                <input type="checkbox" class="wiz-select-check" onchange="wizUpdateSelection()" data-item-id="{{ it.id }}" />
-                <span class="wiz-select-mark"></span>
-              </label>
-            </div>
-
-            {% if it.description %}
-            <div class="wiz-item-desc">{{ it.description|e }}</div>
-            {% endif %}
-
-            <div class="wiz-item-meta">
-              {% if it.variants %}
-              <span class="wiz-badge wiz-badge-variant">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
-              {% endif %}
-              {% if it.modifier_groups %}
-              <span class="wiz-badge wiz-badge-mg">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
-              {% endif %}
-              {% if it.low_confidence %}
-              <span class="wiz-badge wiz-badge-low">Low confidence</span>
-              {% endif %}
-
               {% set pi = price_map.get(it.id) %}
               {% if pi %}
                 {% set assess = pi.assessment or '' %}
@@ -2085,15 +2059,38 @@
                 <span class="wiz-price-tag price-above-market">Above Market</span>
                 {% endif %}
               {% endif %}
+              {% if it.price_cents %}
+              <div class="wiz-item-price">${{ '%.2f'|format(it.price_cents / 100) }}</div>
+              {% elif needs_price %}
+              <div class="wiz-item-price missing-price" style="color:#dc3545; font-size:.78rem; font-weight:600;">Needs price</div>
+              {% endif %}
+              <label class="wiz-select-box" onclick="event.stopPropagation()">
+                <input type="checkbox" class="wiz-select-check" onchange="wizUpdateSelection()" data-item-id="{{ it.id }}" />
+                <span class="wiz-select-mark"></span>
+              </label>
             </div>
 
-            {# Day 141.8: market-range line under the pill badge #}
-            {% if pi and pi.suggested_low and pi.suggested_high %}
-            <div class="market-range-line">
-              Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-              {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+            <div style="display:flex; align-items:baseline; gap:12px; min-height:1.2em;">
+              <div class="wiz-item-desc" style="flex:1; min-width:0; margin:0;">{% if it.description %}{{ it.description|e }}{% endif %}</div>
+              {% if pi and pi.suggested_low and pi.suggested_high %}
+              <div class="market-range-line" style="margin:0; white-space:nowrap; flex-shrink:0; margin-right:32px;">
+                Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+              </div>
+              {% endif %}
             </div>
-            {% endif %}
+
+            <div class="wiz-item-meta">
+              {% if it.variants %}
+              <span class="wiz-badge wiz-badge-variant">{{ it.variants|length }} variant{{ 's' if it.variants|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.modifier_groups %}
+              <span class="wiz-badge wiz-badge-mg">{{ it.modifier_groups|length }} group{{ 's' if it.modifier_groups|length != 1 else '' }}</span>
+              {% endif %}
+              {% if it.low_confidence %}
+              <span class="wiz-badge wiz-badge-low">Low confidence</span>
+              {% endif %}
+            </div>
 
             {% if it.variants %}
             {% set sz_data = namespace(sizes=none) %}
@@ -2106,13 +2103,16 @@
               {% for v in it.variants %}
               <div class="wiz-variant-row" data-variant-id="{{ v.id }}">
                 <span class="wiz-variant-label">{{ v.label|e }}</span>
-                {% if sz_data.sizes and v.price_cents and v.label %}
+                {% if v.price_cents and v.label %}
+                  {# Only show pill if we have real size-specific data #}
                   {% set ns_vm = namespace(match=none) %}
-                  {% for slabel, sdata in sz_data.sizes.items() %}
-                    {% if sdata is mapping and (v.label|lower in slabel|lower or slabel|lower in v.label|lower) %}
-                      {% set ns_vm.match = sdata %}
-                    {% endif %}
-                  {% endfor %}
+                  {% if sz_data.sizes %}
+                    {% for slabel, sdata in sz_data.sizes.items() %}
+                      {% if sdata is mapping and (v.label|lower in slabel|lower or slabel|lower in v.label|lower) %}
+                        {% set ns_vm.match = sdata %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
                   {% if ns_vm.match %}
                     <span class="variant-market-info">
                     <span class="variant-range">${{ '%.2f'|format(ns_vm.match.low / 100) }}&ndash;${{ '%.2f'|format(ns_vm.match.high / 100) }}</span>
