@@ -2045,7 +2045,8 @@
               {% if needs_price %}<span class="wiz-needs-price-flag" title="This item is missing a price — please review">!</span>{% endif %}
               <div class="wiz-item-name">{% if it.name %}{{ it.name|e }}{% else %}<span style="color:var(--muted); font-style:italic;">Item name</span>{% endif %}</div>
               {% set pi = price_map.get(it.id) %}
-              {% if pi %}
+              {# Only show main pill if item has NO size variants — otherwise variant pills handle it #}
+              {% if pi and not it.variants %}
                 {% set assess = pi.assessment or '' %}
                 {% if assess == 'below_market' %}
                 <span class="wiz-price-tag price-below-market">Below Market</span>
@@ -2072,7 +2073,7 @@
 
             <div style="display:flex; align-items:baseline; gap:12px; min-height:1.2em;">
               <div class="wiz-item-desc" style="flex:1; min-width:0; margin:0;">{% if it.description %}{{ it.description|e }}{% endif %}</div>
-              {% if pi and pi.suggested_low and pi.suggested_high %}
+              {% if pi and pi.suggested_low and pi.suggested_high and not it.variants %}
               <div class="market-range-line" style="margin:0; white-space:nowrap; flex-shrink:0; margin-right:32px;">
                 Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
                 {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
@@ -2113,7 +2114,7 @@
                       {% endif %}
                     {% endfor %}
                   {% endif %}
-                  {% if ns_vm.match %}
+                  {% if ns_vm.match and ns_vm.match.low != ns_vm.match.high %}
                     <span class="variant-market-info">
                     <span class="variant-range">${{ '%.2f'|format(ns_vm.match.low / 100) }}&ndash;${{ '%.2f'|format(ns_vm.match.high / 100) }}</span>
                     {% if v.price_cents < ns_vm.match.low %}

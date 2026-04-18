@@ -807,7 +807,7 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
             else:
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
-        prompt = f"""For each item below, give me a low-high price range using price data from 7 restaurants in {city}, {state}.
+        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants in {city}, {state}.
 
 For items WITHOUT sizes, search: "(item name) (category) price in {city}, {state}"
 For items WITH sizes, search EACH size separately: "(size) (item name) (category) price in {city}, {state}"
@@ -816,29 +816,49 @@ Items:
 {item_lines}
 
 Return JSON only — an array:
-[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null}}]
+[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null,
+   "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}, {{"restaurant": "Main St Pizzeria", "price_cents": 1200}}]
+}}]
 
-For items with [sizes], include per-size ranges from your searches:
+For items with [sizes], include per-size ranges AND sources per size:
 {{"id": 123, "low_cents": 800, "high_cents": 2500, "median_cents": 1500,
-  "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100}}}}
+  "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}],
+  "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100,
+    "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}, {{"restaurant": "Main St Pizzeria", "price_cents": 1200}}]
+  }}}}
 }}
 
 Rules:
-- Use real price data from 7 restaurants in {city}, {state}
+- Use real price data from 5 restaurants in {city}, {state}
 - Prices in US cents (e.g. $9.00 = 900)
+- Include the actual restaurant name and price for each source you find
+- low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
 - If you can't find real data for an item, set low_cents to 0
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
         try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
-                    temperature=0.1,
-                ),
-            )
+            # Retry up to 2 times on transient errors (503, 429)
+            response = None
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            tools=[types.Tool(google_search=types.GoogleSearch())],
+                            temperature=0.1,
+                        ),
+                    )
+                    break
+                except Exception as retry_err:
+                    err_str = str(retry_err)
+                    if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
+                        time.sleep(5 * (attempt + 1))
+                        continue
+                    raise
+            if not response:
+                return {}
             text = (response.text or "").strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -1332,12 +1352,13 @@ def _aggregate_price_ranges(draft_id: int) -> int:
             item_variants[iid].append({"label": (vr["label"] or "").strip(),
                                        "price": vr["price_cents"] or 0})
 
-        # Build items list for Gemini/Haiku
+        # Build items list for Gemini/Haiku — skip items with no price (sauce/bread choices)
         haiku_items = []
         for row in our_rows:
+            if not row["current_price"] or row["current_price"] <= 0:
+                continue
             cat = (row["item_category"] or "").strip()
             subcat = (row["subcategory"] or "").strip() if row.keys().__contains__("subcategory") and row["subcategory"] else ""
-            # Include subcategory so Gemini knows "Pepperoni" is a "Pizza Topping" not a whole pizza
             full_cat = f"{cat} {subcat}" if subcat else cat
             entry = {
                 "item_id": row["item_id"],
