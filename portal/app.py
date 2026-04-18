@@ -6615,70 +6615,113 @@ def draft_editor(draft_id: int):
             for n in existing_names:
                 added_normalized.add(_normalize_restaurant_name(n).lower())
 
+            # Look up Gemini restaurants via Places API and cache in DB
+            import requests as _rq
+            api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+
             for rname in sorted(gemini_restaurants):
                 norm = _normalize_restaurant_name(rname).lower()
                 if not norm or norm in added_normalized or rname.lower() in existing_names:
                     continue
                 added_normalized.add(norm)
-                place_data = None
+
+                # Check if we already cached this lookup
+                cached = None
                 try:
-                    import requests as _rq
-                    api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
-                    if api_key:
-                        params = {
-                            "key": api_key,
-                            "input": f"{rname} restaurant {rest_city} {rest_state}",
-                            "inputtype": "textquery",
-                            "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
-                        }
-                        if our_lat and our_lng:
-                            params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
-                        resp = _rq.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
-                                       params=params, timeout=5)
-                        if resp.status_code == 200:
-                            candidates = resp.json().get("candidates", [])
-                            if candidates:
-                                c = candidates[0]
-                                loc = c.get("geometry", {}).get("location", {})
-                                if our_lat and our_lng and loc.get("lat") and loc.get("lng"):
-                                    import math
-                                    dlat = math.radians(loc["lat"] - our_lat)
-                                    dlng = math.radians(loc["lng"] - our_lng)
-                                    a = math.sin(dlat/2)**2 + math.cos(math.radians(our_lat)) * math.cos(math.radians(loc["lat"])) * math.sin(dlng/2)**2
-                                    dist_km = 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-                                    if dist_km > 25:
-                                        continue
-                                place_data = c
+                    with db_connect() as conn2:
+                        cached = conn2.execute(
+                            "SELECT place_id, place_name, place_address, rating, user_ratings, price_level, latitude, longitude FROM price_comparison_results WHERE place_name = ? LIMIT 1",
+                            (rname,),
+                        ).fetchone()
                 except Exception:
                     pass
 
-                if place_data:
-                    loc = place_data.get("geometry", {}).get("location", {})
+                if cached:
                     competitors.append({
-                        "place_name": place_data.get("name", rname),
-                        "place_address": place_data.get("formatted_address", ""),
-                        "rating": place_data.get("rating"),
-                        "price_label": {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(place_data.get("price_level")),
-                        "price_level": place_data.get("price_level"),
-                        "user_ratings": place_data.get("user_ratings_total"),
-                        "latitude": loc.get("lat"),
-                        "longitude": loc.get("lng"),
+                        "place_name": cached["place_name"],
+                        "place_address": cached["place_address"] or "",
+                        "rating": cached["rating"],
+                        "price_label": {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(cached["price_level"]),
+                        "price_level": cached["price_level"],
+                        "user_ratings": cached["user_ratings"],
+                        "latitude": cached["latitude"],
+                        "longitude": cached["longitude"],
                         "cuisine_match": None,
-                        "place_id": place_data.get("place_id"),
+                        "place_id": cached["place_id"],
                     })
-                else:
-                    competitors.append({
-                        "place_name": rname,
-                        "place_address": "",
-                        "rating": None,
-                        "price_label": None,
-                        "price_level": None,
-                        "user_ratings": None,
-                        "latitude": None,
-                        "longitude": None,
-                        "cuisine_match": None,
-                        "place_id": None,
-                        })
+                    continue
+
+                # Places lookup
+                if not api_key:
+                    continue
+                try:
+                    params = {
+                        "key": api_key,
+                        "input": f"{rname} restaurant {rest_city} {rest_state}",
+                        "inputtype": "textquery",
+                        "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
+                    }
+                    if our_lat and our_lng:
+                        params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
+                    resp = _rq.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
+                                   params=params, timeout=5)
+                    if resp.status_code == 200:
+                        candidates = resp.json().get("candidates", [])
+                        if candidates:
+                            c = candidates[0]
+                            loc = c.get("geometry", {}).get("location", {})
+                            # Distance filter
+                            if our_lat and our_lng and loc.get("lat") and loc.get("lng"):
+                                import math
+                                dlat = math.radians(loc["lat"] - our_lat)
+                                dlng = math.radians(loc["lng"] - our_lng)
+                                a2 = math.sin(dlat/2)**2 + math.cos(math.radians(our_lat)) * math.cos(math.radians(loc["lat"])) * math.sin(dlng/2)**2
+                                dist_km = 6371 * 2 * math.atan2(math.sqrt(a2), math.sqrt(1-a2))
+                                if dist_km > 25:
+                                    continue
+                            # Cache it in price_comparison_results
+                            try:
+                                rid = draft.get("restaurant_id") or 0
+                                with db_connect() as conn2:
+                                    conn2.execute(
+                                        """INSERT OR IGNORE INTO price_comparison_results
+                                           (restaurant_id, place_id, place_name, place_address, price_level, price_label, rating, user_ratings, latitude, longitude)
+                                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                        (rid, c.get("place_id"), c.get("name", rname),
+                                         c.get("formatted_address", ""),
+                                         c.get("price_level"), {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(c.get("price_level")),
+                                         c.get("rating"), c.get("user_ratings_total"),
+                                         loc.get("lat"), loc.get("lng")),
+                                    )
+                                    conn2.commit()
+                            except Exception:
+                                pass
+                            # Get website URL via Place Details
+                            website_url = None
+                            pid = c.get("place_id")
+                            if pid:
+                                try:
+                                    from storage.price_intel import get_place_details
+                                    details = get_place_details(pid)
+                                    if details:
+                                        website_url = details.get("website")
+                                except Exception:
+                                    pass
+                            competitors.append({
+                                "place_name": c.get("name", rname),
+                                "place_address": c.get("formatted_address", ""),
+                                "rating": c.get("rating"),
+                                "price_label": {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(c.get("price_level")),
+                                "price_level": c.get("price_level"),
+                                "user_ratings": c.get("user_ratings_total"),
+                                "latitude": loc.get("lat"),
+                                "longitude": loc.get("lng"),
+                                "cuisine_match": None,
+                                "place_id": pid,
+                                "website_url": website_url,
+                            })
+                except Exception:
+                    pass
 
     # Day 141.6: User restaurants + their drafts for the menu picker overlay
     user_restaurants = []
@@ -6770,7 +6813,7 @@ def draft_editor(draft_id: int):
         price_map=price_map,
         price_intel=price_intel,
         competitors=(lambda comps: sorted(
-            list({c.get("place_id") or (c.get("place_name","") + c.get("place_address","")).lower(): c
+            list({c.get("place_id") or re.sub(r'[^a-z0-9]', '', (c.get("place_name","")).lower()): c
                   for c in comps}.values()),
             key=lambda c: (c.get("place_name") or "").lower()
         ))(competitors),
@@ -7224,8 +7267,22 @@ def rerun_price_analysis(draft_id: int):
 # Day 141.8: Web proxy for competitor browser iframe embedding.
 # Fetches external page server-side and strips X-Frame-Options / CSP
 # so it can render inside the editor's competitor browser panel.
+@app.get("/browse/pdf/<pdf_id>")
+def browse_pdf_data(pdf_id):
+    """Serve cached PDF data for the inline viewer."""
+    import tempfile
+    pdf_path = os.path.join(tempfile.gettempdir(), f"menuflow_pdf_{pdf_id}.pdf")
+    if not os.path.exists(pdf_path):
+        return "PDF not found", 404
+    with open(pdf_path, "rb") as f:
+        data = f.read()
+    response = make_response(data)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = "inline"
+    return response
+
+
 @app.get("/browse")
-@login_required
 def browse_proxy():
     """Proxy an external URL for iframe embedding."""
     import requests as _req
@@ -7259,138 +7316,55 @@ def browse_proxy():
         content = resp.content
         ct = resp.headers.get("Content-Type", "text/html")
 
-        # PDF files: render in an inline viewer with zoom/drag
+        # PDF files: convert to images server-side, serve as scrollable HTML
         if "pdf" in ct.lower() or url.lower().endswith(".pdf"):
-            import base64
-            b64 = base64.b64encode(content).decode()
-            viewer_html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Menu PDF</title>
+            import hashlib, tempfile, base64
+            try:
+                from pdf2image import convert_from_bytes
+                images = convert_from_bytes(content, dpi=200)
+                img_tags = ""
+                for i, img in enumerate(images):
+                    import io
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG", optimize=True)
+                    b64 = base64.b64encode(buf.getvalue()).decode()
+                    img_tags += f'<img src="data:image/png;base64,{b64}" style="width:100%;display:block;margin-bottom:4px;">\n'
+                viewer_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#2c2c2c; overflow:hidden; font-family:sans-serif; }}
-  .toolbar {{ position:fixed; top:0; left:0; right:0; height:36px; background:#333; display:flex; align-items:center; gap:6px; padding:0 10px; z-index:100; }}
-  .toolbar button {{ background:#555; border:none; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:.75rem; }}
-  .toolbar button:hover {{ background:#777; }}
-  .toolbar span {{ color:#aaa; font-size:.75rem; }}
-  #viewer {{ position:fixed; top:36px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }}
-  #viewer.dragging {{ cursor:grabbing; }}
-  #pages {{ transform-origin:0 0; position:absolute; }}
-  canvas {{ display:block; margin-bottom:8px; box-shadow:0 2px 8px rgba(0,0,0,.4); background:#fff; pointer-events:none; }}
-</style>
-</head><body>
-<div class="toolbar">
-  <button onclick="zoom(1.25)">+</button>
-  <button onclick="zoom(0.8)">&minus;</button>
-  <button onclick="fit()">Fit</button>
-  <span id="zoom-label">100%</span>
-  <span id="page-label" style="margin-left:auto;"></span>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#2c2c2c;overflow:hidden}}
+.tb{{position:fixed;top:0;left:0;right:0;height:36px;background:#333;display:flex;align-items:center;gap:6px;padding:0 10px;z-index:100}}
+.tb button{{background:#555;border:none;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:.75rem}}
+.tb button:hover{{background:#777}}
+.tb span{{color:#aaa;font-size:.75rem}}
+#v{{position:fixed;top:36px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab}}
+#v.d{{cursor:grabbing}}
+#p{{transform-origin:0 0;position:absolute}}
+#p img{{display:block;margin-bottom:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)}}
+</style></head><body>
+<div class="tb">
+<button onclick="z(1.25)">+</button>
+<button onclick="z(0.8)">&minus;</button>
+<button onclick="f()">Fit</button>
+<span id="zl">100%</span>
 </div>
-<div id="viewer">
-  <div id="pages"></div>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<div id="v"><div id="p">{img_tags}</div></div>
 <script>
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-  const b64 = "{b64}";
-  const raw = atob(b64);
-  const arr = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-
-  let pdfDoc = null, renderScale = 3;
-  let scale = 1, panX = 0, panY = 0;
-  const pages = document.getElementById('pages');
-  const viewer = document.getElementById('viewer');
-
-  function applyTransform() {{
-    pages.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
-    document.getElementById('zoom-label').textContent = Math.round(scale * 100) + '%';
-  }}
-
-  pdfjsLib.getDocument({{ data: arr }}).promise.then(pdf => {{
-    pdfDoc = pdf;
-    document.getElementById('page-label').textContent = pdf.numPages + ' page' + (pdf.numPages > 1 ? 's' : '');
-    // Render all pages at high res once, then use transform for zoom
-    const promises = [];
-    for (let i = 1; i <= pdf.numPages; i++) {{
-      promises.push(pdf.getPage(i).then(page => {{
-        const vp = page.getViewport({{ scale: renderScale }});
-        const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        canvas.dataset.pageNum = i;
-        return page.render({{ canvasContext: canvas.getContext('2d'), viewport: vp }}).promise.then(() => canvas);
-      }}));
-    }}
-    Promise.all(promises).then(canvases => {{
-      canvases.sort((a, b) => a.dataset.pageNum - b.dataset.pageNum);
-      canvases.forEach(c => pages.appendChild(c));
-      fit();
-    }});
-  }});
-
-  function fit() {{
-    if (!pages.firstChild) return;
-    const vw = viewer.clientWidth;
-    const natW = pages.firstChild.width;
-    scale = (vw * 0.95) / natW;
-    panX = (vw - natW * scale) / 2;
-    panY = 10;
-    applyTransform();
-  }}
-
-  function zoom(factor) {{
-    const vw = viewer.clientWidth, vh = viewer.clientHeight;
-    const cx = vw / 2, cy = vh / 2;
-    const oldScale = scale;
-    scale = Math.min(10, Math.max(0.1, scale * factor));
-    const ratio = scale / oldScale;
-    panX = cx - ratio * (cx - panX);
-    panY = cy - ratio * (cy - panY);
-    applyTransform();
-  }}
-
-  // Drag to pan
-  let dragging = false, startX, startY, origX, origY;
-  viewer.addEventListener('mousedown', e => {{
-    e.preventDefault();
-    dragging = true;
-    viewer.classList.add('dragging');
-    startX = e.clientX; startY = e.clientY;
-    origX = panX; origY = panY;
-  }});
-  document.addEventListener('mousemove', e => {{
-    if (!dragging) return;
-    panX = origX + (e.clientX - startX);
-    panY = origY + (e.clientY - startY);
-    applyTransform();
-  }});
-  document.addEventListener('mouseup', () => {{
-    dragging = false;
-    viewer.classList.remove('dragging');
-  }});
-
-  // Scroll-wheel zoom toward cursor
-  viewer.addEventListener('wheel', e => {{
-    e.preventDefault();
-    const rect = viewer.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const oldScale = scale;
-    const factor = e.deltaY > 0 ? 0.9 : 1.1;
-    scale = Math.min(10, Math.max(0.1, scale * factor));
-    const ratio = scale / oldScale;
-    panX = mx - ratio * (mx - panX);
-    panY = my - ratio * (my - panY);
-    applyTransform();
-  }}, {{ passive: false }});
-</script>
-</body></html>"""
+var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
+function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
+function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
+var dr=false,sx,sy,ox,oy;
+v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
+document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
+document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
+v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
+setTimeout(f,100);
+</script></body></html>"""
+            except Exception as e:
+                viewer_html = f'<html><body style="padding:40px;color:#999;text-align:center;"><h3>Could not render PDF: {type(e).__name__}</h3></body></html>'
             response = make_response(viewer_html)
             response.headers["Content-Type"] = "text/html; charset=utf-8"
-            response.headers["Content-Disposition"] = "inline"
-            response.headers.pop("X-Frame-Options", None)
-            response.headers.pop("Content-Security-Policy", None)
             return response
 
         # For HTML pages: inject <base> tag so relative URLs resolve correctly
@@ -7409,8 +7383,34 @@ def browse_proxy():
             else:
                 content = base_tag + content
 
+            # Inject script to intercept PDF/document link clicks and route through proxy
+            pdf_intercept = ("""<script>
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a[href]');
+  if (!a) return;
+  var href = a.getAttribute('href') || '';
+  if (href.toLowerCase().match(/\\.pdf($|\\?|#)/i)) {
+    e.preventDefault();
+    // If href is already a /browse URL, extract the original URL
+    if (href.indexOf('/browse?url=') === 0) {
+      href = decodeURIComponent(href.split('/browse?url=')[1]);
+    }
+    // If relative, resolve against the original site base
+    if (href.indexOf('http') !== 0) {
+      href = '""" + base_url.rstrip('/') + """' + (href.indexOf('/') === 0 ? '' : '/') + href;
+    }
+    window.location.href = '/browse?url=' + encodeURIComponent(href);
+  }
+}, true);
+</script>""").encode()
+            if b"</body>" in content:
+                content = content.replace(b"</body>", pdf_intercept + b"</body>", 1)
+            elif b"</BODY>" in content:
+                content = content.replace(b"</BODY>", pdf_intercept + b"</BODY>", 1)
+            else:
+                content += pdf_intercept
+
             # Rewrite links that navigate the frame to also go through proxy
-            # so clicking links inside the proxied page keeps working
             import re
             def _rewrite_href(m):
                 href = m.group(2)
@@ -11179,7 +11179,7 @@ def test_csv_form():
 # Run
 # ------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
 
 # === DEBUG APPEND (auto-added) ===
 import os as _os

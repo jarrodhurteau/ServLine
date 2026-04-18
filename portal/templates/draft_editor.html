@@ -2114,9 +2114,9 @@
                   {% endif %}
                 </div>
                 {% if ns_src.sources %}
-                <div class="source-popover hidden">
+                <div class="source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_src.sources %}
-                  <div class="source-row"><a href="#" class="source-link" onclick="event.preventDefault();event.stopPropagation();compOpenTab('{{ s.restaurant|e }}','');">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});var card=document.querySelector('.competitor-card[data-comp-name=&quot;{{ s.restaurant|e }}&quot;]');compOpenTab('{{ s.restaurant|e }}',card?card.dataset.compAddr:'{{ restaurant.city|default("",true)|e }}, {{ restaurant.state|default("",true)|e }}',card?card.dataset.compWebsite:null);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2183,9 +2183,9 @@
                 <span class="wiz-variant-price missing-price">$0.00</span>
                 {% endif %}
                 {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
-                <div class="var-sources source-popover hidden">
+                <div class="var-sources source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_vm.match.sources %}
-                  <div class="source-row"><a href="#" class="source-link" onclick="event.preventDefault();event.stopPropagation();compOpenTab('{{ s.restaurant|e }}','');">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});var card=document.querySelector('.competitor-card[data-comp-name=&quot;{{ s.restaurant|e }}&quot;]');compOpenTab('{{ s.restaurant|e }}',card?card.dataset.compAddr:'{{ restaurant.city|default("",true)|e }}, {{ restaurant.state|default("",true)|e }}',card?card.dataset.compWebsite:null);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2361,7 +2361,9 @@
                data-comp-addr="{{ c.place_address|e }}"
                data-comp-tier="{{ c.price_label|e }}"
                data-comp-rating="{{ c.rating }}"
-               data-comp-reviews="{{ c.user_ratings }}">
+               data-comp-reviews="{{ c.user_ratings }}"
+               data-comp-website="{{ c.website_url or '' }}"
+               data-comp-place-id="{{ c.place_id or '' }}">
             <div class="competitor-name">
               {{ c.place_name|e }}
             </div>
@@ -5401,10 +5403,16 @@
       fetch(`/api/competitor_website?name=${encodeURIComponent(tab.name)}&addr=${encodeURIComponent(tab.addr || '')}`)
         .then(r => r.json())
         .then(data => {
-          if (data.url && !data.url.includes('google.com/search')) {
+          if (data.url) {
             tab.websiteUrl = data.url;
-            const proxyUrl = '/browse?url=' + encodeURIComponent(data.url);
-            if (frame) frame.src = proxyUrl;
+            if (data.url.includes('google.com/search')) {
+              // Google search fallback — load directly with igu=1
+              const gUrl = data.url.replace('google.com/search?', 'google.com/search?igu=1&');
+              if (frame) frame.src = gUrl;
+            } else {
+              const proxyUrl = '/browse?url=' + encodeURIComponent(data.url);
+              if (frame) frame.src = proxyUrl;
+            }
             if (overlay) overlay.style.display = 'none';
           } else {
             compOpenExternal();
@@ -5450,7 +5458,7 @@
     return 'comp-' + name.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40);
   }
 
-  function compOpenTab(name, addr) {
+  function compOpenTab(name, addr, websiteUrl) {
     const id = _compTabId(name);
 
     // If tab already exists, just switch to it
@@ -5482,22 +5490,35 @@
     if (compBtn) { compBtn.classList.add('active'); compBtn.style.display = ''; }
     _renderCompTabs();
 
-    // Fetch website URL first, THEN load iframe once
+    // If we already have the website URL, use it directly (no API call)
+    if (websiteUrl) {
+      const tab = _compTabs.find(t => t.id === id);
+      if (tab) {
+        tab.websiteUrl = websiteUrl;
+        tab.url = '/browse?url=' + encodeURIComponent(websiteUrl);
+        tab.history = [tab.url];
+        if (_activeCompTab === id) compSwitchTab(id);
+      }
+      return;
+    }
+
+    // Otherwise fetch website URL via API
     fetch(`/api/competitor_website?name=${encodeURIComponent(name)}&addr=${encodeURIComponent(addr || '')}`)
       .then(r => r.json())
       .then(data => {
         const tab = _compTabs.find(t => t.id === id);
         if (!tab) return;
         const ld = document.getElementById('comp-loading');
-        if (data.url && !data.url.includes('google.com/search')) {
+        if (data.url) {
           tab.websiteUrl = data.url;
-          const proxyUrl = '/browse?url=' + encodeURIComponent(data.url);
-          tab.url = proxyUrl;
+          if (data.url.includes('google.com/search')) {
+            tab.url = data.url.replace('google.com/search?', 'google.com/search?igu=1&');
+          } else {
+            tab.url = '/browse?url=' + encodeURIComponent(data.url);
+          }
           tab.history = [tab.url];
-          // Create iframe for this tab via compSwitchTab
           if (_activeCompTab === id) compSwitchTab(id);
         } else {
-          // No website — show message, hide loading
           tab.url = '';
           tab.noWebsite = true;
           if (ld) ld.classList.add('hidden');
@@ -5629,7 +5650,7 @@
     card.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      compOpenTab(card.dataset.compName, card.dataset.compAddr);
+      compOpenTab(card.dataset.compName, card.dataset.compAddr, card.dataset.compWebsite || null);
     });
   });
 
