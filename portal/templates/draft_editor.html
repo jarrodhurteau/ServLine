@@ -752,12 +752,11 @@
       border-radius: 999px;
       font-weight: 600;
     }
-    .price-fair       { background: rgba(40,167,69,.12); color: #34d058; border: 1px solid rgba(40,167,69,.25); }
-    .price-under      { background: rgba(59,130,246,.12); color: #60a5fa; border: 1px solid rgba(59,130,246,.25); }
-    .price-over       { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.25); }
-    body.theme-customer .price-fair  { color: #16a34a; }
-    body.theme-customer .price-under { color: #2563eb; }
-    body.theme-customer .price-over  { color: #d97706; }
+    .price-below-market { background: #F3ECFF; color: #7A4AC9; border: 1px solid rgba(122,74,201,.25); }
+    .price-under        { background: #EAF2FF; color: #3B6FD8; border: 1px solid rgba(59,111,216,.25); }
+    .price-fair         { background: #E8F7EC; color: #2E7D4F; border: 1px solid rgba(46,125,79,.25); }
+    .price-over         { background: #FFF3E6; color: #C77700; border: 1px solid rgba(199,119,0,.25); }
+    .price-above-market { background: #FDECEC; color: #C94A4A; border: 1px solid rgba(201,74,74,.25); }
 
     .price-tooltip {
       font-size: .78rem;
@@ -1665,6 +1664,8 @@
       padding: 0;
     }
     .comp-tab-close:hover { background: rgba(255,255,255,.1); color: var(--ink); }
+    .comp-tab-add { font-size: 1.1rem; font-weight: 400; padding: 8px 12px; opacity: .6; }
+    .comp-tab-add:hover { opacity: 1; }
     .comp-browser-frame {
       flex: 1;
       border: none;
@@ -2061,48 +2062,26 @@
               {% set pi = price_map.get(it.id) %}
               {% if pi %}
                 {% set assess = pi.assessment or '' %}
-                {% if 'under' in assess %}
-                <span class="wiz-price-tag price-under" title="{{ pi.reasoning or '' }}">&#8593; Underpriced</span>
+                {% if assess == 'below_market' %}
+                <span class="wiz-price-tag price-below-market">Below Market</span>
+                {% elif assess == 'lower_range' %}
+                <span class="wiz-price-tag price-under">Lower Range</span>
                 {% elif assess == 'fair' %}
-                <span class="wiz-price-tag price-fair" title="{{ pi.reasoning or '' }}">&#10003; Fair price</span>
-                {% elif 'over' in assess %}
-                <span class="wiz-price-tag price-over" title="{{ pi.reasoning or '' }}">&#8595; Overpriced</span>
+                <span class="wiz-price-tag price-fair">Fair Range</span>
+                {% elif assess == 'higher_range' %}
+                <span class="wiz-price-tag price-over">Higher Range</span>
+                {% elif assess == 'above_market' %}
+                <span class="wiz-price-tag price-above-market">Above Market</span>
                 {% endif %}
               {% endif %}
             </div>
 
             {# Day 141.8: market-range line under the pill badge #}
-            {% if pi %}
-              {% set cc = pi.comparison_count|default(0, true) %}
-              {% if cc > 0 and pi.suggested_low and pi.suggested_high %}
-              {# Direct competitor matches #}
-              <div class="market-range-line">
-                Market range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}, {% endif %}
-                <a href="#" class="ref-toggle" onclick="event.preventDefault();this.parentElement.nextElementSibling.classList.toggle('hidden')">{{ cc }} reference{{ 's' if cc != 1 else '' }}{% if not pi.median_price %}({% endif %})</a>
-              </div>
-              <div class="ref-list hidden">
-                {% for src in (pi.price_sources|default([], true)) if src is mapping and src.competitor is defined %}
-                <div class="ref-row">{{ src.competitor }}: {{ src.item }} &mdash; ${{ '%.2f'|format(src.price_cents / 100) }}</div>
-                {% endfor %}
-              </div>
-              {% elif cc == -1 and pi.suggested_low and pi.suggested_high %}
-              {# Category-level estimate — no direct item match #}
-              <div class="market-range-line muted-range">
-                Category avg ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
-                <span class="estimate-label">category estimate</span>
-              </div>
-              {% elif cc == -2 and pi.suggested_low and pi.suggested_high %}
-              {# Menu-wide estimate — no category matches at all #}
-              <div class="market-range-line muted-range">
-                Market avg ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
-                <span class="estimate-label">market estimate</span>
-              </div>
-              {% elif cc == 0 %}
-              <div class="market-range-line muted-range">Not enough market data</div>
-              {% endif %}
+            {% if pi and pi.suggested_low and pi.suggested_high %}
+            <div class="market-range-line">
+              Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+              {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+            </div>
             {% endif %}
 
             {% if it.variants %}
@@ -2269,7 +2248,7 @@
         <div id="competitor-map" class="competitor-map"></div>
         <div class="competitor-list" id="competitor-list">
           <div class="competitor-list-header">
-            <span class="competitor-list-title">Nearby Restaurants</span>
+            <span class="competitor-list-title">Similar Restaurants</span>
             <span class="competitor-count">{{ competitors|length }}</span>
           </div>
           {# Compute our price tier from avg menu price #}
@@ -2309,12 +2288,12 @@
         {% else %}
         <div class="preview-empty">
           <div class="preview-empty-icon">&#127758;</div>
-          <div class="preview-empty-title">No competitor data yet</div>
+          <div class="preview-empty-title">No local price range data yet</div>
           <div class="preview-empty-desc">
             {% if restaurant and restaurant.zip_code %}
             Run price intelligence to see nearby restaurants on the map.
             {% else %}
-            Add a zip code to your restaurant to enable competitor discovery.
+            Add a zip code to your restaurant to discover similar local restaurants.
             {% endif %}
           </div>
         </div>
@@ -2336,7 +2315,8 @@
             <span>New tab</span>
           </button>
         </div>
-        <div id="comp-frames-container" style="position:relative; flex:1; min-height:0;">
+        <div id="comp-frames-container" style="position:relative; flex:1; min-height:0;"
+             onmouseover="var f=document.querySelector('#comp-frames-container [data-tab-id=&quot;'+(_activeCompTab||'')+'&quot;]');if(f&&document.activeElement!==f)f.focus();">
           <div id="comp-loading" class="comp-loading">
             <div class="comp-loading-spinner"></div>
             <div class="comp-loading-text">Loading...</div>
@@ -4718,6 +4698,9 @@
         resizer.classList.remove('dragging');
         document.body.classList.remove('col-resizing');
         saveSizes();
+        // Re-focus the active comp iframe so scrolling works immediately
+        const af = document.querySelector(`#comp-frames-container [data-tab-id="${_activeCompTab || ''}"]`);
+        if (af) af.focus();
       });
     });
   })();
@@ -5529,11 +5512,6 @@
     if (!bar) return;
 
     let html = '';
-    // "Map" tab always first — clicking returns to map view
-    html += `<button class="comp-tab" onclick="editorTogglePreview('map')" title="Back to map">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/></svg>
-      Map
-    </button>`;
 
     _compTabs.forEach(t => {
       const isActive = t.id === _activeCompTab;
@@ -5545,6 +5523,9 @@
         <span class="comp-tab-close" onclick="event.stopPropagation();compCloseTab('${t.id}')">&times;</span>
       </button>`;
     });
+
+    // "+" button at the end — opens Local Market to pick another competitor
+    html += `<button class="comp-tab comp-tab-add" onclick="editorTogglePreview('map')" title="Select another restaurant">+</button>`;
 
     bar.innerHTML = html;
   }
