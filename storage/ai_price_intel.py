@@ -774,11 +774,123 @@ def _preload_comparisons_async(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _estimate_item_market_rates(items: List[Dict[str, Any]], city: str, state: str,
+                                zip_code: str, cuisine: str) -> Dict[int, Dict[str, Any]]:
+    """Ask Haiku for per-item market price ranges. Batches of 40.
+
+    items: list of {item_id, item_name, category, variants: [{label, price}]}
+    Returns {item_id: {low, high, median, sizes: {label: {low, high, median}}}} in cents.
+    """
+    if not items:
+        return {}
+
+    client = _get_client()
+    if not client:
+        return {}
+
+    out: Dict[int, Dict[str, Any]] = {}
+    batch_size = 25
+
+    def _run_batch(batch, batch_idx):
+        """Process one batch, return parsed results."""
+        item_lines = ""
+        for it in batch:
+            variants = it.get("variants", [])
+            if variants:
+                sizes_str = ", ".join(v["label"] for v in variants if v.get("label"))
+                item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]}) [sizes: {sizes_str}]\n'
+            else:
+                item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
+
+        prompt = f"""You are a restaurant pricing analyst. For each menu item below,
+provide the typical price range a customer would expect at a casual/mid-range
+{cuisine} restaurant in {city}, {state} ({zip_code}).
+
+Items:
+{item_lines}
+
+Return JSON only — an array of objects:
+[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null}}]
+
+For items with [sizes], include per-size price ranges:
+{{"id": 123, "low_cents": 800, "high_cents": 3500, "median_cents": 1800,
+  "sizes": {{"12\\" Sml": {{"low_cents": 1000, "high_cents": 1600, "median_cents": 1300}}}}
+}}
+
+Rules:
+- Prices in US cents (e.g. $9.00 = 900)
+- low/high/median should reflect THIS SPECIFIC ITEM, not the whole category
+- "French Fries" should have a different range than "Loaded Cheese Fries"
+- "Cheese Pizza" should have a different range than "Meat Lovers Pizza"
+- Toppings/add-ons (items clearly priced $1-$5) should get topping-level pricing
+- For items WITHOUT [sizes], set "sizes" to null
+- Use the item ID number exactly as given
+- Return ONLY the JSON array"""
+
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=6000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+            text = text.strip()
+
+            results = json.loads(text)
+            batch_out = {}
+            for r in results:
+                iid = r.get("id")
+                low = r.get("low_cents", 0)
+                high = r.get("high_cents", 0)
+                med = r.get("median_cents", 0)
+                if iid and low > 0 and high > 0 and med > 0:
+                    entry = {"low": int(low), "high": int(high), "median": int(med)}
+                    raw_sizes = r.get("sizes")
+                    if isinstance(raw_sizes, dict):
+                        sizes_out = {}
+                        for slabel, sdata in raw_sizes.items():
+                            if isinstance(sdata, dict):
+                                sl = sdata.get("low_cents", 0)
+                                sh = sdata.get("high_cents", 0)
+                                sm = sdata.get("median_cents", 0)
+                                if sl > 0 and sh > 0 and sm > 0:
+                                    sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                        if sizes_out:
+                            entry["sizes"] = sizes_out
+                    batch_out[int(iid)] = entry
+            log.info("Item market estimates batch %d: got %d items from Haiku",
+                     batch_idx, len(batch_out))
+            return batch_out
+        except Exception as e:
+            log.warning("Item market estimation batch %d failed: %s", batch_idx, e)
+            return {}
+
+    # Run all batches in parallel
+    batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
+        futures = [pool.submit(_run_batch, b, idx) for idx, b in enumerate(batches)]
+        for f in futures:
+            try:
+                out.update(f.result())
+            except Exception:
+                pass
+
+    return out
+
+
 def _estimate_category_market_rates(categories: List[str], city: str, state: str,
-                                    zip_code: str, cuisine: str) -> Dict[str, Dict[str, int]]:
+                                    zip_code: str, cuisine: str,
+                                    size_categories: Optional[Dict[str, List[str]]] = None,
+                                    ) -> Dict[str, Any]:
     """Ask Haiku for typical market price ranges PER CATEGORY.
 
-    Returns {category_name: {low, high, median}} in cents.
+    Returns {category_name: {low, high, median, sizes: {label: {low, high, median}}}} in cents.
+    If size_categories is provided, categories with sizes get per-size breakdowns.
     One API call for all categories — cheap and fast.
     """
     if not categories:
@@ -788,7 +900,13 @@ def _estimate_category_market_rates(categories: List[str], city: str, state: str
     if not client:
         return {}
 
-    cat_list = "\n".join(f"- {c}" for c in categories)
+    cat_list = ""
+    for c in categories:
+        sizes = (size_categories or {}).get(c)
+        if sizes:
+            cat_list += f"- {c} (sizes: {', '.join(sizes)})\n"
+        else:
+            cat_list += f"- {c}\n"
 
     prompt = f"""You are a restaurant pricing analyst. For each menu CATEGORY below,
 provide the typical price range a customer would expect at a casual/mid-range
@@ -798,20 +916,32 @@ Categories:
 {cat_list}
 
 Return JSON only — an array of objects, one per category:
-[{{"category": "exact category name", "low_cents": 800, "high_cents": 1400, "median_cents": 1100}}]
+[{{"category": "exact category name", "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null}}]
+
+IMPORTANT: For categories that list sizes in parentheses, also include a "sizes" object
+with per-size price ranges:
+{{"category": "Pizza", "low_cents": 800, "high_cents": 3500, "median_cents": 1800,
+  "sizes": {{
+    "10\\" Mini": {{"low_cents": 700, "high_cents": 1100, "median_cents": 900}},
+    "12\\" Sml": {{"low_cents": 1000, "high_cents": 1600, "median_cents": 1300}},
+    "16\\" Lrg": {{"low_cents": 1400, "high_cents": 2200, "median_cents": 1800}},
+    "Family Size 17x24\\"": {{"low_cents": 2200, "high_cents": 3500, "median_cents": 2800}}
+  }}
+}}
 
 Rules:
 - Prices in US cents (e.g. $9.00 = 900)
-- low = cheapest item you'd typically see in this category
+- low = cheapest item you'd typically see in this category/size
 - high = most expensive item you'd typically see
-- median = most common price point for this category
+- median = most common price point
 - For categories that are clearly toppings/add-ons, give typical add-on pricing ($1-$3 range)
+- For categories WITHOUT sizes listed, set "sizes" to null
 - Return ONLY the JSON array, no other text"""
 
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
@@ -822,14 +952,31 @@ Rules:
         text = text.strip()
 
         results = json.loads(text)
-        out: Dict[str, Dict[str, int]] = {}
+        out: Dict[str, Any] = {}
         for r in results:
             cat = (r.get("category") or "").strip()
+            # Strip any "(sizes: ...)" suffix Haiku may echo back
+            if " (sizes:" in cat:
+                cat = cat[:cat.index(" (sizes:")].strip()
             low = r.get("low_cents", 0)
             high = r.get("high_cents", 0)
             med = r.get("median_cents", 0)
             if cat and low > 0 and high > 0 and med > 0:
-                out[cat] = {"low": int(low), "high": int(high), "median": int(med)}
+                entry: Dict[str, Any] = {"low": int(low), "high": int(high), "median": int(med)}
+                # Parse per-size breakdowns if present
+                raw_sizes = r.get("sizes")
+                if isinstance(raw_sizes, dict):
+                    sizes_out = {}
+                    for slabel, sdata in raw_sizes.items():
+                        if isinstance(sdata, dict):
+                            sl = sdata.get("low_cents", 0)
+                            sh = sdata.get("high_cents", 0)
+                            sm = sdata.get("median_cents", 0)
+                            if sl > 0 and sh > 0 and sm > 0:
+                                sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                    if sizes_out:
+                        entry["sizes"] = sizes_out
+                out[cat] = entry
         log.info("Category market estimates: got %d/%d from Haiku", len(out), len(categories))
         return out
     except Exception as e:
@@ -838,12 +985,12 @@ Rules:
 
 
 def _aggregate_price_ranges(draft_id: int) -> int:
-    """Set market ranges for all items using Haiku category estimates.
+    """Set market ranges for all items using per-item Haiku estimates.
 
-    Day 141.8: Removed per-competitor item matching (unreliable fuzzy
-    matches destroyed user trust). Now uses a single Haiku call to get
-    typical price ranges per CATEGORY for this restaurant's location.
-    Honest, defensible, and cheap.
+    Day 141.8: Per-item estimates — each item gets its own range based on
+    what it actually is ("French Fries" vs "Loaded Cheese Fries"), not just
+    its category. Items with size variants get per-size breakdowns too.
+    ~$0.02 per menu, ~10 seconds for 150 items.
 
     Returns the number of rows updated.
     """
@@ -851,7 +998,9 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         conn.row_factory = sqlite3.Row
 
         our_rows = conn.execute(
-            "SELECT item_id, item_name, item_category, current_price FROM price_intelligence_results WHERE draft_id = ?",
+            """SELECT pi.item_id, pi.item_name, pi.item_category, pi.current_price
+               FROM price_intelligence_results pi
+               WHERE pi.draft_id = ?""",
             (draft_id,),
         ).fetchall()
         if not our_rows:
@@ -863,7 +1012,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         total_overpriced = 0
         total_assessed = 0
 
-        # Get restaurant location for Haiku call
+        # Get restaurant location
         rest_row = conn.execute(
             """SELECT r.city, r.state, r.zip_code, r.cuisine_type
                FROM restaurants r JOIN drafts d ON d.restaurant_id = r.id
@@ -875,18 +1024,41 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         zip_code = (rest_row["zip_code"] or "") if rest_row else ""
         cuisine = (rest_row["cuisine_type"] or "restaurant") if rest_row else "restaurant"
 
-        # Get all unique categories
-        all_cats = list({(r["item_category"] or "").strip()
-                        for r in our_rows if (r["item_category"] or "").strip()})
+        # Build per-item variant info for size breakdowns
+        var_rows = conn.execute(
+            """SELECT div.item_id, div.label, div.price_cents
+               FROM draft_item_variants div
+               JOIN draft_items di ON di.id = div.item_id
+               WHERE di.draft_id = ? AND div.kind = 'size' AND div.label IS NOT NULL""",
+            (draft_id,),
+        ).fetchall()
+        item_variants: Dict[int, List[Dict[str, Any]]] = {}
+        for vr in var_rows:
+            iid = vr["item_id"]
+            if iid not in item_variants:
+                item_variants[iid] = []
+            item_variants[iid].append({"label": (vr["label"] or "").strip(),
+                                       "price": vr["price_cents"] or 0})
 
-        # One Haiku call for all categories
-        cat_market = _estimate_category_market_rates(
-            all_cats, city, state, zip_code, cuisine) if all_cats else {}
+        # Build items list for Haiku
+        haiku_items = []
+        for row in our_rows:
+            entry = {
+                "item_id": row["item_id"],
+                "item_name": (row["item_name"] or "").strip(),
+                "category": (row["item_category"] or "").strip(),
+            }
+            if row["item_id"] in item_variants:
+                entry["variants"] = item_variants[row["item_id"]]
+            haiku_items.append(entry)
+
+        # Per-item Haiku estimates (batched, ~10 seconds total)
+        item_market = _estimate_item_market_rates(
+            haiku_items, city, state, zip_code, cuisine)
 
         for row in our_rows:
-            category = (row["item_category"] or "").strip()
             current_price = row["current_price"] or 0
-            mr = cat_market.get(category) if category else None
+            mr = item_market.get(row["item_id"])
 
             if mr:
                 low, high, median = mr["low"], mr["high"], mr["median"]
@@ -910,6 +1082,11 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                     total_assessed += 1
                 else:
                     assessment = "unknown"
+                source_info: Dict[str, Any] = {
+                    "source": "market_estimate",
+                    "location": f"{city}, {state} {zip_code}"}
+                if mr.get("sizes"):
+                    source_info["sizes"] = mr["sizes"]
                 conn.execute(
                     """UPDATE price_intelligence_results
                        SET suggested_low = ?,
@@ -922,9 +1099,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                            confidence = 0.35
                        WHERE draft_id = ? AND item_id = ?""",
                     (low, high, avg, median, assessment,
-                     json.dumps([{"source": "market_estimate",
-                                  "category": category,
-                                  "location": f"{city}, {state} {zip_code}"}]),
+                     json.dumps([source_info]),
                      draft_id, row["item_id"]),
                 )
             else:

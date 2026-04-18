@@ -837,7 +837,9 @@
     }
     .wiz-variants-hint { font-size: .68rem; color: var(--muted); opacity: .6; margin-bottom: 2px; font-style: italic; }
     .wiz-variant-label { font-weight: 500; flex: 1; min-width: 0; }
-    .wiz-variant-price { font-weight: 600; color: var(--ink); }
+    .wiz-variant-price { font-weight: 600; color: var(--ink); white-space: nowrap; }
+    .variant-market-info { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+    .variant-range { font-size: .7rem; color: var(--muted); font-weight: 400; }
     /* Editable variant inputs */
     .wiz-variant-row input:not([type="checkbox"]) {
       border: none !important; background: none !important; outline: none !important;
@@ -2085,10 +2087,40 @@
             {% endif %}
 
             {% if it.variants %}
+            {% set sz_data = namespace(sizes=none) %}
+            {% if pi and pi.price_sources is iterable %}
+              {% for src in pi.price_sources if src is mapping and src.get('sizes') %}
+                {% set sz_data.sizes = src.sizes %}
+              {% endfor %}
+            {% endif %}
             <div class="wiz-variants">
               {% for v in it.variants %}
               <div class="wiz-variant-row" data-variant-id="{{ v.id }}">
                 <span class="wiz-variant-label">{{ v.label|e }}</span>
+                {% if sz_data.sizes and v.price_cents and v.label %}
+                  {% set ns_vm = namespace(match=none) %}
+                  {% for slabel, sdata in sz_data.sizes.items() %}
+                    {% if sdata is mapping and (v.label|lower in slabel|lower or slabel|lower in v.label|lower) %}
+                      {% set ns_vm.match = sdata %}
+                    {% endif %}
+                  {% endfor %}
+                  {% if ns_vm.match %}
+                    <span class="variant-market-info">
+                    <span class="variant-range">${{ '%.2f'|format(ns_vm.match.low / 100) }}&ndash;${{ '%.2f'|format(ns_vm.match.high / 100) }}</span>
+                    {% if v.price_cents < ns_vm.match.low %}
+                    <span class="wiz-price-tag price-below-market" style="font-size:.6rem;padding:1px 5px;">Below Market</span>
+                    {% elif v.price_cents > ns_vm.match.high %}
+                    <span class="wiz-price-tag price-above-market" style="font-size:.6rem;padding:1px 5px;">Above Market</span>
+                    {% elif v.price_cents < ns_vm.match.median * 0.90 %}
+                    <span class="wiz-price-tag price-under" style="font-size:.6rem;padding:1px 5px;">Lower Range</span>
+                    {% elif v.price_cents > ns_vm.match.median * 1.10 %}
+                    <span class="wiz-price-tag price-over" style="font-size:.6rem;padding:1px 5px;">Higher Range</span>
+                    {% else %}
+                    <span class="wiz-price-tag price-fair" style="font-size:.6rem;padding:1px 5px;">Fair Range</span>
+                    {% endif %}
+                    </span>
+                  {% endif %}
+                {% endif %}
                 {% if v.price_cents %}
                 <span class="wiz-variant-price">${{ '%.2f'|format(v.price_cents / 100) }}</span>
                 {% else %}
