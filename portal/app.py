@@ -6547,6 +6547,139 @@ def draft_editor(draft_id: int):
         except Exception:
             pass
 
+    # Day 141.8: Add Gemini-sourced restaurants to the competitor list
+    # if they're not already there (so users can browse their websites too)
+    if price_intel and price_intel.get("assessments"):
+        existing_names = {c.get("place_name", "").lower() for c in competitors}
+        gemini_restaurants_raw = set()
+        for a in price_intel["assessments"]:
+            ps = a.get("price_sources")
+            if isinstance(ps, str):
+                try:
+                    ps = json.loads(ps)
+                except Exception:
+                    ps = []
+            if not isinstance(ps, list):
+                continue
+            for src in ps:
+                if not isinstance(src, dict):
+                    continue
+                for s in src.get("sources", []):
+                    if isinstance(s, dict) and s.get("restaurant"):
+                        gemini_restaurants_raw.add(s["restaurant"])
+                for sz_data in (src.get("sizes") or {}).values():
+                    if isinstance(sz_data, dict):
+                        for s in sz_data.get("sources", []):
+                            if isinstance(s, dict) and s.get("restaurant"):
+                                gemini_restaurants_raw.add(s["restaurant"])
+        # Pre-normalize to deduplicate before Places lookups
+        import re as _re
+        _norm_seen = {}
+        gemini_restaurants = set()
+        for raw in gemini_restaurants_raw:
+            n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
+            for sfx in [" Agawam", " Agawam, MA", " Agawam MA", ", Agawam", " MA"]:
+                if n.lower().endswith(sfx.lower()):
+                    n = n[:len(n) - len(sfx)].strip()
+            if n.lower() not in _norm_seen:
+                _norm_seen[n.lower()] = n
+                gemini_restaurants.add(n)
+        # Add any restaurants Gemini found that aren't in our Places cache
+        # Deduplicate and look up details via Google Places
+        if gemini_restaurants:
+            rest_info = restaurant or {}
+            rest_addr = rest_info.get("address", "")
+            rest_city = rest_info.get("city", "")
+            rest_state = rest_info.get("state", "")
+            rest_zip = rest_info.get("zip_code", "")
+
+            def _normalize_restaurant_name(name):
+                import re
+                n = name.strip()
+                n = re.sub(r'\s*\(.*?\)\s*', '', n)
+                for suffix in [f" {rest_city}", f" {rest_city}, {rest_state}", f" {rest_city} {rest_state}",
+                               f", {rest_city}", f" {rest_state}", f" MA", f" {rest_zip}"]:
+                    if suffix and n.lower().endswith(suffix.lower()):
+                        n = n[:len(n) - len(suffix)].strip()
+                return n.strip()
+            our_lat, our_lng = None, None
+            if competitors:
+                lats = [c["latitude"] for c in competitors if c.get("latitude")]
+                lngs = [c["longitude"] for c in competitors if c.get("longitude")]
+                if lats and lngs:
+                    our_lat = sum(lats) / len(lats)
+                    our_lng = sum(lngs) / len(lngs)
+
+            # Normalize all names and deduplicate
+            added_normalized = set()
+            for n in existing_names:
+                added_normalized.add(_normalize_restaurant_name(n).lower())
+
+            for rname in sorted(gemini_restaurants):
+                norm = _normalize_restaurant_name(rname).lower()
+                if not norm or norm in added_normalized or rname.lower() in existing_names:
+                    continue
+                added_normalized.add(norm)
+                place_data = None
+                try:
+                    import requests as _rq
+                    api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+                    if api_key:
+                        params = {
+                            "key": api_key,
+                            "input": f"{rname} restaurant {rest_city} {rest_state}",
+                            "inputtype": "textquery",
+                            "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
+                        }
+                        if our_lat and our_lng:
+                            params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
+                        resp = _rq.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
+                                       params=params, timeout=5)
+                        if resp.status_code == 200:
+                            candidates = resp.json().get("candidates", [])
+                            if candidates:
+                                c = candidates[0]
+                                loc = c.get("geometry", {}).get("location", {})
+                                if our_lat and our_lng and loc.get("lat") and loc.get("lng"):
+                                    import math
+                                    dlat = math.radians(loc["lat"] - our_lat)
+                                    dlng = math.radians(loc["lng"] - our_lng)
+                                    a = math.sin(dlat/2)**2 + math.cos(math.radians(our_lat)) * math.cos(math.radians(loc["lat"])) * math.sin(dlng/2)**2
+                                    dist_km = 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                                    if dist_km > 25:
+                                        continue
+                                place_data = c
+                except Exception:
+                    pass
+
+                if place_data:
+                    loc = place_data.get("geometry", {}).get("location", {})
+                    competitors.append({
+                        "place_name": place_data.get("name", rname),
+                        "place_address": place_data.get("formatted_address", ""),
+                        "rating": place_data.get("rating"),
+                        "price_label": {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(place_data.get("price_level")),
+                        "price_level": place_data.get("price_level"),
+                        "user_ratings": place_data.get("user_ratings_total"),
+                        "latitude": loc.get("lat"),
+                        "longitude": loc.get("lng"),
+                        "cuisine_match": None,
+                        "place_id": place_data.get("place_id"),
+                    })
+                else:
+                    competitors.append({
+                        "place_name": rname,
+                        "place_address": "",
+                        "rating": None,
+                        "price_label": None,
+                        "price_level": None,
+                        "user_ratings": None,
+                        "latitude": None,
+                        "longitude": None,
+                        "cuisine_match": None,
+                        "place_id": None,
+                        })
+
     # Day 141.6: User restaurants + their drafts for the menu picker overlay
     user_restaurants = []
     u = session.get("user") or {}
@@ -6636,7 +6769,11 @@ def draft_editor(draft_id: int):
         restaurant=restaurant,
         price_map=price_map,
         price_intel=price_intel,
-        competitors=competitors,
+        competitors=(lambda comps: sorted(
+            list({c.get("place_id") or (c.get("place_name","") + c.get("place_address","")).lower(): c
+                  for c in comps}.values()),
+            key=lambda c: (c.get("place_name") or "").lower()
+        ))(competitors),
         google_maps_key=google_maps_key,
         source_job_id=source_job_id,
         source_is_structured=source_is_structured,

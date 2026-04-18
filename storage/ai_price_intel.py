@@ -776,7 +776,8 @@ def _preload_comparisons_async(
 
 
 def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
-                          zip_code: str, cuisine: str) -> Dict[int, Dict[str, Any]]:
+                          zip_code: str, cuisine: str,
+                          address: str = "") -> Dict[int, Dict[str, Any]]:
     """Use Gemini with Google Search grounding to get real market prices.
 
     Batches items and asks Gemini to search Google for actual local pricing.
@@ -807,10 +808,13 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
             else:
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
-        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants in {city}, {state}.
+        location = address or f"{city}, {state} {zip_code}"
+        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants within 10 miles of {location}.
 
-For items WITHOUT sizes, search: "(item name) (category) price in {city}, {state}"
-For items WITH sizes, search EACH size separately: "(size) (item name) (category) price in {city}, {state}"
+For items WITHOUT sizes, search: "(item name) (category) price near {location}"
+For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
+
+IMPORTANT: Only use restaurants within 10 miles of {location}. Do NOT include restaurants from other states or distant cities.
 
 Items:
 {item_lines}
@@ -829,7 +833,7 @@ For items with [sizes], include per-size ranges AND sources per size:
 }}
 
 Rules:
-- Use real price data from 5 restaurants in {city}, {state}
+- Use real price data from 5 restaurants within 10 miles of {location}
 - Prices in US cents (e.g. $9.00 = 900)
 - Include the actual restaurant name and price for each source you find
 - low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
@@ -1340,15 +1344,17 @@ def _aggregate_price_ranges(draft_id: int) -> int:
 
         # Get restaurant location
         rest_row = conn.execute(
-            """SELECT r.city, r.state, r.zip_code, r.cuisine_type
+            """SELECT r.address, r.city, r.state, r.zip_code, r.cuisine_type
                FROM restaurants r JOIN drafts d ON d.restaurant_id = r.id
                WHERE d.id = ?""",
             (draft_id,),
         ).fetchone()
+        address = (rest_row["address"] or "") if rest_row else ""
         city = (rest_row["city"] or "Unknown") if rest_row else "Unknown"
         state = (rest_row["state"] or "") if rest_row else ""
         zip_code = (rest_row["zip_code"] or "") if rest_row else ""
         cuisine = (rest_row["cuisine_type"] or "restaurant") if rest_row else "restaurant"
+        full_address = f"{address}, {city}, {state} {zip_code}".strip(", ")
 
         # Build per-item variant info for size breakdowns
         var_rows = conn.execute(
@@ -1386,7 +1392,8 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         # Gemini with Google Search grounding — real prices from real menus
         # Falls back to Haiku estimates for items Gemini can't find
         item_market = _gemini_search_prices(
-            haiku_items, city, state, zip_code, cuisine)
+            haiku_items, city, state, zip_code, cuisine,
+            address=full_address)
         # Fill gaps with Haiku estimates for items Google didn't cover
         if len(item_market) < len(haiku_items):
             missing = [it for it in haiku_items if it["item_id"] not in item_market]

@@ -862,6 +862,8 @@
       white-space: nowrap;
     }
     .source-row + .source-row { border-top: 1px solid rgba(0,0,0,.06); }
+    .source-link { color: var(--brand, #B85C38); text-decoration: none; font-weight: 600; cursor: pointer; }
+    .source-link:hover { text-decoration: underline; }
     .wiz-variant-row { position: relative; }
     .wiz-item { position: relative; }
     /* Editable variant inputs */
@@ -2114,7 +2116,7 @@
                 {% if ns_src.sources %}
                 <div class="source-popover hidden">
                   {% for s in ns_src.sources %}
-                  <div class="source-row">{{ s.restaurant }}: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" onclick="event.preventDefault();event.stopPropagation();compOpenTab('{{ s.restaurant|e }}','');">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2183,7 +2185,7 @@
                 {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
                 <div class="var-sources source-popover hidden">
                   {% for s in ns_vm.match.sources %}
-                  <div class="source-row">{{ s.restaurant }}: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" onclick="event.preventDefault();event.stopPropagation();compOpenTab('{{ s.restaurant|e }}','');">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2362,10 +2364,6 @@
                data-comp-reviews="{{ c.user_ratings }}">
             <div class="competitor-name">
               {{ c.place_name|e }}
-              {% if tier_diff == 0 %}
-              <span title="This restaurant sits in the same price tier as yours — a more useful comparison."
-                    style="font-size:.65rem;background:rgba(40,167,69,.12);color:#34d058;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600;vertical-align:middle;">Same price tier</span>
-              {% endif %}
             </div>
             <div class="competitor-meta">
               {% if c.rating %}<span class="competitor-rating">&#9733; {{ c.rating }}</span>{% endif %}
