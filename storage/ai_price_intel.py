@@ -875,6 +875,13 @@ Rules:
                 med = r.get("median_cents", 0)
                 if iid and low > 0 and high > 0 and med > 0:
                     entry = {"low": int(low), "high": int(high), "median": int(med)}
+                    # Capture source restaurants
+                    raw_sources = r.get("sources")
+                    if isinstance(raw_sources, list):
+                        entry["sources"] = [
+                            {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
+                            for s in raw_sources if isinstance(s, dict) and s.get("restaurant")
+                        ]
                     raw_sizes = r.get("sizes")
                     if isinstance(raw_sizes, dict):
                         sizes_out = {}
@@ -884,7 +891,14 @@ Rules:
                                 sh = sdata.get("high_cents", 0)
                                 sm = sdata.get("median_cents", 0)
                                 if sl > 0 and sh > 0 and sm > 0:
-                                    sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                                    size_entry = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                                    ss = sdata.get("sources")
+                                    if isinstance(ss, list):
+                                        size_entry["sources"] = [
+                                            {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
+                                            for s in ss if isinstance(s, dict) and s.get("restaurant")
+                                        ]
+                                    sizes_out[slabel] = size_entry
                         if sizes_out:
                             entry["sizes"] = sizes_out
                     batch_out[int(iid)] = entry
@@ -1412,6 +1426,8 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 source_info: Dict[str, Any] = {
                     "source": "market_estimate",
                     "location": f"{city}, {state} {zip_code}"}
+                if mr.get("sources"):
+                    source_info["sources"] = mr["sources"]
                 if mr.get("sizes"):
                     source_info["sizes"] = mr["sizes"]
                 conn.execute(

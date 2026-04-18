@@ -841,6 +841,29 @@
     .wiz-variant-price { font-weight: 600; color: var(--ink); white-space: nowrap; }
     .variant-market-info { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
     .variant-range { font-size: .7rem; color: var(--muted); font-weight: 400; }
+    .source-popover {
+      position: absolute;
+      right: 0;
+      top: 100%;
+      z-index: 20;
+      background: #fff;
+      border: 1px solid #E8DACA;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      padding: 8px 12px;
+      min-width: 220px;
+      max-width: 320px;
+    }
+    .source-popover.hidden { display: none; }
+    .source-row {
+      font-size: .75rem;
+      color: #2C2C2C;
+      padding: 3px 0;
+      white-space: nowrap;
+    }
+    .source-row + .source-row { border-top: 1px solid rgba(0,0,0,.06); }
+    .wiz-variant-row { position: relative; }
+    .wiz-item { position: relative; }
     /* Editable variant inputs */
     .wiz-variant-row input:not([type="checkbox"]) {
       border: none !important; background: none !important; outline: none !important;
@@ -2074,9 +2097,27 @@
             <div style="display:flex; align-items:baseline; gap:12px; min-height:1.2em;">
               <div class="wiz-item-desc" style="flex:1; min-width:0; margin:0;">{% if it.description %}{{ it.description|e }}{% endif %}</div>
               {% if pi and pi.suggested_low and pi.suggested_high and not it.variants %}
-              <div class="market-range-line" style="margin:0; white-space:nowrap; flex-shrink:0; margin-right:32px;">
-                Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-                {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+              {% set ns_src = namespace(sources=none) %}
+              {% if pi.price_sources is iterable %}
+                {% for src in pi.price_sources if src is mapping and src.get('sources') %}
+                  {% set ns_src.sources = src.sources %}
+                {% endfor %}
+              {% endif %}
+              <div style="margin:0; flex-shrink:0; margin-right:32px; text-align:right;">
+                <div class="market-range-line" style="margin:0; white-space:nowrap;">
+                  Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                  {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+                  {% if ns_src.sources %}
+                  <a href="#" class="ref-toggle" onclick="event.preventDefault();event.stopPropagation();this.closest('div').parentElement.querySelector('.source-popover').classList.toggle('hidden')" style="margin-left:4px;">{{ ns_src.sources|length }} sources</a>
+                  {% endif %}
+                </div>
+                {% if ns_src.sources %}
+                <div class="source-popover hidden">
+                  {% for s in ns_src.sources %}
+                  <div class="source-row">{{ s.restaurant }}: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  {% endfor %}
+                </div>
+                {% endif %}
               </div>
               {% endif %}
             </div>
@@ -2128,6 +2169,9 @@
                     {% else %}
                     <span class="wiz-price-tag price-fair" style="font-size:.6rem;padding:1px 5px;">Fair Range</span>
                     {% endif %}
+                    {% if ns_vm.match.sources is defined and ns_vm.match.sources %}
+                    <a href="#" class="ref-toggle" style="font-size:.6rem;" onclick="event.preventDefault();event.stopPropagation();var el=this.closest('.wiz-variant-row').querySelector('.var-sources');if(el)el.classList.toggle('hidden');">{{ ns_vm.match.sources|length }} src</a>
+                    {% endif %}
                     </span>
                   {% endif %}
                 {% endif %}
@@ -2135,6 +2179,13 @@
                 <span class="wiz-variant-price">${{ '%.2f'|format(v.price_cents / 100) }}</span>
                 {% else %}
                 <span class="wiz-variant-price missing-price">$0.00</span>
+                {% endif %}
+                {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
+                <div class="var-sources source-popover hidden">
+                  {% for s in ns_vm.match.sources %}
+                  <div class="source-row">{{ s.restaurant }}: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  {% endfor %}
+                </div>
                 {% endif %}
               </div>
               {% endfor %}
@@ -5691,6 +5742,13 @@
   window.addEventListener('popstate', () => ajaxNav(window.location.href));
   bindCatClicks();
   rebindEditorHandlers();
+
+  // Close source popovers when clicking outside
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.ref-toggle') && !e.target.closest('.source-popover')) {
+      document.querySelectorAll('.source-popover:not(.hidden)').forEach(el => el.classList.add('hidden'));
+    }
+  });
 
   // Day 141.6: Empty draft cleanup handled by explicit delete only — no auto-delete
 </script>
