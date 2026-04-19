@@ -2324,6 +2324,11 @@
           Original {% if source_is_structured %}File{% else %}Menu{% endif %}
         </button>
         {% endif %}
+        <button class="preview-toggle-btn" onclick="document.getElementById('pdf-file-input-global').click()" title="View a downloaded PDF menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          View PDF
+        </button>
+        <input type="file" id="pdf-file-input-global" accept=".pdf" style="display:none;" onchange="compLoadPdfFile(this)">
         {% if show_admin or dev_tools %}
         {# Dev-only: wipe cache + rerun the full price-intel pipeline. #}
         <form method="post" action="{{ url_for('rerun_price_analysis', draft_id=draft.id) }}"
@@ -2403,7 +2408,12 @@
           <button class="comp-nav-btn" onclick="compReload()" title="Reload">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           </button>
-          <button class="comp-nav-btn comp-nav-labeled" onclick="compOpenExternal()" title="Open in new tab" style="margin-left:auto;">
+          <button class="comp-nav-btn comp-nav-labeled" onclick="document.getElementById('pdf-file-input').click()" title="View a downloaded PDF menu" style="margin-left:auto;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>View PDF</span>
+          </button>
+          <input type="file" id="pdf-file-input" accept=".pdf" style="display:none;" onchange="compLoadPdfFile(this)">
+          <button class="comp-nav-btn comp-nav-labeled" onclick="compOpenExternal()" title="Open in new tab">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             <span>New tab</span>
           </button>
@@ -5579,7 +5589,16 @@
       frame.referrerPolicy = 'no-referrer';
       frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;visibility:visible;z-index:1;';
       frame.dataset.tabId = id;
-      frame.addEventListener('load', () => _compFrameOnLoad(frame));
+      frame.addEventListener('load', function() {
+        _compFrameOnLoad(frame);
+        // Check if the iframe loaded a PDF URL — redirect to viewer
+        try {
+          var loc = frame.contentWindow.location.href;
+          if (loc && loc.toLowerCase().match(/\.pdf($|\?|#)/i) && !loc.includes('/browse/pdf-viewer')) {
+            frame.src = '/browse/pdf-viewer?url=' + encodeURIComponent(loc);
+          }
+        } catch(e) {}
+      });
       frame.src = tab.url;
       container.appendChild(frame);
     }
@@ -5761,6 +5780,62 @@
   window.addEventListener('popstate', () => ajaxNav(window.location.href));
   bindCatClicks();
   rebindEditorHandlers();
+
+  // Intercept PDF navigation in comp iframes
+  // Monitor iframe load events — if the loaded URL is a PDF, redirect to viewer
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'openPdf' && e.data.url) {
+      var frame = _getActiveFrame();
+      if (frame) frame.src = '/browse/pdf-viewer?url=' + encodeURIComponent(e.data.url);
+    }
+  });
+
+  // Watch for beforeunload on iframes to catch PDF downloads
+  // Use a periodic check on active iframe src
+  setInterval(function() {
+    var frame = _getActiveFrame();
+    if (!frame) return;
+    try {
+      var loc = frame.contentWindow.location.href;
+      if (loc && loc.toLowerCase().match(/\.pdf($|\?|#|%23)/i) && !loc.includes('/browse/pdf-viewer')) {
+        frame.src = '/browse/pdf-viewer?url=' + encodeURIComponent(loc);
+      }
+    } catch(e) {} // cross-origin, ignore
+  }, 500);
+
+  // Upload a PDF file and render in the active comp tab
+  function compLoadPdfFile(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var formData = new FormData();
+    formData.append('pdf', file);
+    var frame = _getActiveFrame();
+    if (!frame) {
+      // No active tab — create one
+      _compTabs.push({ id: 'pdf-viewer', name: file.name, addr: '', url: '', history: [] });
+      _activeCompTab = 'pdf-viewer';
+      compSwitchTab('pdf-viewer');
+      frame = _getActiveFrame();
+    }
+    if (frame) {
+      var ld = document.getElementById('comp-loading');
+      if (ld) ld.classList.remove('hidden');
+      // Upload to server for conversion
+      fetch('/browse/pdf-upload', {
+        method: 'POST',
+        body: formData,
+      }).then(function(r) { return r.text(); })
+        .then(function(html) {
+          frame.srcdoc = html;
+          if (ld) ld.classList.add('hidden');
+        })
+        .catch(function(err) {
+          if (ld) ld.classList.add('hidden');
+          alert('Failed to load PDF: ' + err.message);
+        });
+    }
+    input.value = ''; // reset so same file can be selected again
+  }
 
   // Close source popovers when clicking outside
   document.addEventListener('click', e => {

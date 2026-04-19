@@ -7282,6 +7282,130 @@ def browse_pdf_data(pdf_id):
     return response
 
 
+@app.post("/browse/pdf-upload")
+def browse_pdf_upload():
+    """Accept a PDF file upload and return zoomable image viewer HTML."""
+    if 'pdf' not in request.files:
+        return "No PDF file", 400
+    pdf_file = request.files['pdf']
+    content = pdf_file.read()
+    if not content:
+        return "Empty file", 400
+    try:
+        import base64, io
+        from pdf2image import convert_from_bytes
+        images = convert_from_bytes(content, dpi=200)
+        img_tags = ""
+        for img in images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            img_tags += f'<img src="data:image/png;base64,{b64}" style="width:100%;display:block;margin-bottom:4px;">\n'
+        return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#2c2c2c;overflow:hidden}}
+.tb{{position:fixed;top:0;left:0;right:0;height:36px;background:#333;display:flex;align-items:center;gap:6px;padding:0 10px;z-index:100}}
+.tb button{{background:#555;border:none;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:.75rem}}
+.tb button:hover{{background:#777}}
+.tb span{{color:#aaa;font-size:.75rem}}
+#v{{position:fixed;top:36px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab}}
+#v.d{{cursor:grabbing}}
+#p{{transform-origin:0 0;position:absolute}}
+#p img{{display:block;margin-bottom:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)}}
+</style></head><body>
+<div class="tb">
+<button onclick="z(1.25)">+</button>
+<button onclick="z(0.8)">&minus;</button>
+<button onclick="f()">Fit</button>
+<span id="zl">100%</span>
+</div>
+<div id="v"><div id="p">{img_tags}</div></div>
+<script>
+var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
+function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
+function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
+var dr=false,sx,sy,ox,oy;
+v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
+document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
+document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
+v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
+setTimeout(f,100);
+</script></body></html>"""
+    except Exception as e:
+        return f"<h3 style='padding:40px;color:#999;text-align:center;'>Could not render PDF: {e}</h3>", 502
+
+
+@app.get("/browse/pdf-viewer")
+def browse_pdf_viewer():
+    """Fetch a PDF URL, convert to images, return zoomable viewer HTML."""
+    import requests as _req
+    url = request.args.get("url", "").strip()
+    if not url:
+        return "No URL", 400
+    # Unwrap any proxy prefixes
+    from urllib.parse import unquote
+    while '/browse?url=' in url or '/browse%3Furl%3D' in url:
+        url = url.split('/browse?url=')[-1] if '/browse?url=' in url else unquote(url.split('/browse%3Furl%3D')[-1])
+    if url.startswith('http://localhost') or url.startswith('http://127.0.0.1'):
+        from urllib.parse import urlparse as _up, parse_qs
+        p = _up(url)
+        qs = parse_qs(p.query)
+        if 'url' in qs:
+            url = qs['url'][0]
+    try:
+        resp = _req.get(url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }, allow_redirects=True)
+        if resp.status_code != 200:
+            return f"<h3 style='padding:40px;color:#999;text-align:center;'>PDF fetch failed: {resp.status_code}</h3>", 502
+        import base64, io
+        from pdf2image import convert_from_bytes
+        images = convert_from_bytes(resp.content, dpi=200)
+        img_tags = ""
+        for img in images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            img_tags += f'<img src="data:image/png;base64,{b64}" style="width:100%;display:block;margin-bottom:4px;">\n'
+        viewer_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#2c2c2c;overflow:hidden}}
+.tb{{position:fixed;top:0;left:0;right:0;height:36px;background:#333;display:flex;align-items:center;gap:6px;padding:0 10px;z-index:100}}
+.tb button{{background:#555;border:none;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:.75rem}}
+.tb button:hover{{background:#777}}
+.tb span{{color:#aaa;font-size:.75rem}}
+#v{{position:fixed;top:36px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab}}
+#v.d{{cursor:grabbing}}
+#p{{transform-origin:0 0;position:absolute}}
+#p img{{display:block;margin-bottom:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)}}
+</style></head><body>
+<div class="tb">
+<button onclick="z(1.25)">+</button>
+<button onclick="z(0.8)">&minus;</button>
+<button onclick="f()">Fit</button>
+<span id="zl">100%</span>
+</div>
+<div id="v"><div id="p">{img_tags}</div></div>
+<script>
+var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
+function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
+function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
+var dr=false,sx,sy,ox,oy;
+v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
+document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
+document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
+v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
+setTimeout(f,100);
+</script></body></html>"""
+        return viewer_html
+    except Exception as e:
+        return f"<h3 style='padding:40px;color:#999;text-align:center;'>Could not render PDF: {e}</h3>", 502
+
+
 @app.get("/browse")
 def browse_proxy():
     """Proxy an external URL for iframe embedding."""
@@ -7291,6 +7415,21 @@ def browse_proxy():
     url = request.args.get("url", "").strip()
     if not url:
         return "No URL provided", 400
+
+    # Unwrap double-proxied URLs (e.g. /browse?url=/browse?url=https://...)
+    from urllib.parse import unquote
+    while '/browse?url=' in url or '/browse%3Furl%3D' in url:
+        if '/browse?url=' in url:
+            url = url.split('/browse?url=', 1)[1]
+        elif '/browse%3Furl%3D' in url:
+            url = unquote(url.split('/browse%3Furl%3D', 1)[1])
+    # Also strip localhost prefix if the href rewriter added it
+    if url.startswith('http://localhost') or url.startswith('http://127.0.0.1'):
+        from urllib.parse import urlparse as _up
+        p = _up(url)
+        if p.query and 'url=' in p.query:
+            url = p.query.split('url=', 1)[1]
+            url = unquote(url)
 
     # Basic allowlist — only http/https
     parsed = urlparse(url)
@@ -7383,32 +7522,30 @@ setTimeout(f,100);
             else:
                 content = base_tag + content
 
-            # Inject script to intercept PDF/document link clicks and route through proxy
-            pdf_intercept = ("""<script>
-document.addEventListener('click', function(e) {
-  var a = e.target.closest('a[href]');
-  if (!a) return;
-  var href = a.getAttribute('href') || '';
-  if (href.toLowerCase().match(/\\.pdf($|\\?|#)/i)) {
-    e.preventDefault();
-    // If href is already a /browse URL, extract the original URL
-    if (href.indexOf('/browse?url=') === 0) {
-      href = decodeURIComponent(href.split('/browse?url=')[1]);
-    }
-    // If relative, resolve against the original site base
-    if (href.indexOf('http') !== 0) {
-      href = '""" + base_url.rstrip('/') + """' + (href.indexOf('/') === 0 ? '' : '/') + href;
-    }
-    window.location.href = '/browse?url=' + encodeURIComponent(href);
-  }
-}, true);
-</script>""").encode()
+            # Keep navigation inside iframe — strip target=_blank but don't intercept clicks
+            nav_intercept = b"""<script>
+// Strip target=_blank/_top from all links so they stay in iframe
+document.querySelectorAll('a[target]').forEach(function(a){
+  var t=a.getAttribute('target');
+  if(t==='_blank'||t==='_top'||t==='_parent') a.setAttribute('target','_self');
+});
+new MutationObserver(function(muts){
+  muts.forEach(function(m){
+    m.addedNodes.forEach(function(n){
+      if(n.querySelectorAll) n.querySelectorAll('a[target]').forEach(function(a){
+        var t=a.getAttribute('target');
+        if(t==='_blank'||t==='_top'||t==='_parent') a.setAttribute('target','_self');
+      });
+    });
+  });
+}).observe(document.body,{childList:true,subtree:true});
+</script>"""
             if b"</body>" in content:
-                content = content.replace(b"</body>", pdf_intercept + b"</body>", 1)
+                content = content.replace(b"</body>", nav_intercept + b"</body>", 1)
             elif b"</BODY>" in content:
-                content = content.replace(b"</BODY>", pdf_intercept + b"</BODY>", 1)
+                content = content.replace(b"</BODY>", nav_intercept + b"</BODY>", 1)
             else:
-                content += pdf_intercept
+                content += nav_intercept
 
             # Rewrite links that navigate the frame to also go through proxy
             import re
@@ -7425,6 +7562,8 @@ document.addEventListener('click', function(e) {
                 ).encode(),
                 content,
             )
+            # Strip target="_blank" / "_top" / "_parent" from all tags
+            content = re.sub(rb'\s+target=["\'](_blank|_top|_parent)["\']', b'', content, flags=re.IGNORECASE)
 
         response = make_response(content)
         response.headers["Content-Type"] = ct
@@ -7443,7 +7582,6 @@ document.addEventListener('click', function(e) {
 
 # Day 141.8: Resolve a competitor's website URL from their Google Place ID
 @app.get("/api/competitor_website")
-@login_required
 def api_competitor_website():
     """Look up a competitor's website URL by name, return proxied URL."""
     name = request.args.get("name", "").strip()
