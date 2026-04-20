@@ -2794,7 +2794,28 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
       is done. The "Export to POS" CTA in the wizard hands off to the now-
       bulletproof exporters directly. Roll into the wizard polish work.
 
-Sprint 13.4 — Stripe Payment Gate (Days 148-152)
+Sprint 13.3.6 — Supplier Recommendations (Phase 1) (Days 149-150)
+..................................................................
+  MUST SHIP BEFORE LAUNCH — starts collecting supplier interest data from day one.
+
+  [ ] Ingredient cost detection from menu data
+      - Analyze menu items to identify high-cost ingredient patterns
+      - "Cheese items consistently above market" / "Chicken items high"
+      - Use Gemini market data already collected in Day 141.8
+
+  [ ] Supplier recommendation engine
+      - Google/Yelp business search for local food suppliers by ingredient type
+      - "We recommend looking into new cheese suppliers in your area"
+      - Recommendation cards with supplier name, address, contact
+
+  [ ] Click analytics tracking
+      - Track which suppliers get clicked, which recommendations get acted on
+      - Build the data foundation for Phase 2 (sponsored listings) at launch
+
+  NOTE: Phases 2-4 (sponsored listings, purchasing profiles, blind bid marketplace)
+  are post-launch revenue features. See project_supplier_marketplace.md for full plan.
+
+Sprint 13.4 — Stripe Payment Gate (Days 151-155)
 ..................................................
   [ ] Stripe Checkout integration
       - $50 AI parse — one-time payment per menu
