@@ -6547,43 +6547,49 @@ def draft_editor(draft_id: int):
         except Exception:
             pass
 
-    # Day 141.8: Add Gemini-sourced restaurants to the competitor list
-    # if they're not already there (so users can browse their websites too)
-    if price_intel and price_intel.get("assessments"):
-        existing_names = {c.get("place_name", "").lower() for c in competitors}
-        gemini_restaurants_raw = set()
-        for a in price_intel["assessments"]:
-            ps = a.get("price_sources")
-            if isinstance(ps, str):
-                try:
-                    ps = json.loads(ps)
-                except Exception:
-                    ps = []
-            if not isinstance(ps, list):
-                continue
-            for src in ps:
-                if not isinstance(src, dict):
-                    continue
-                for s in src.get("sources", []):
-                    if isinstance(s, dict) and s.get("restaurant"):
-                        gemini_restaurants_raw.add(s["restaurant"])
-                for sz_data in (src.get("sizes") or {}).values():
-                    if isinstance(sz_data, dict):
-                        for s in sz_data.get("sources", []):
-                            if isinstance(s, dict) and s.get("restaurant"):
-                                gemini_restaurants_raw.add(s["restaurant"])
-        # Pre-normalize to deduplicate before Places lookups
-        import re as _re
-        _norm_seen = {}
+    # Day 141.8: Add Gemini-sourced restaurants from cached Places file (instant load)
+    if draft.get("restaurant_id"):
+        import tempfile as _tf2
+        _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")
+        try:
+            with open(_gpc, "r") as _gcf:
+                _cached_places = json.loads(_gcf.read())
+            _existing_lower = {c.get("place_name", "").lower() for c in competitors}
+            for _cn, _cd in _cached_places.items():
+                if _cd and _cd.get("place_name", "").lower() not in _existing_lower:
+                    competitors.append(_cd)
+                    _existing_lower.add(_cd.get("place_name", "").lower())
+        except Exception:
+            pass
+        # Build cache on first load if it doesn't exist
         gemini_restaurants = set()
-        for raw in gemini_restaurants_raw:
-            n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
-            for sfx in [" Agawam", " Agawam, MA", " Agawam MA", ", Agawam", " MA"]:
-                if n.lower().endswith(sfx.lower()):
-                    n = n[:len(n) - len(sfx)].strip()
-            if n.lower() not in _norm_seen:
-                _norm_seen[n.lower()] = n
-                gemini_restaurants.add(n)
+        if not os.path.exists(_gpc) and price_intel and price_intel.get("assessments"):
+            import re as _re
+            _norm_seen = {}
+            for a in price_intel["assessments"]:
+                ps = a.get("price_sources")
+                if isinstance(ps, str):
+                    try: ps = json.loads(ps)
+                    except: ps = []
+                if not isinstance(ps, list): continue
+                for src in ps:
+                    if not isinstance(src, dict): continue
+                    for s in src.get("sources", []):
+                        if isinstance(s, dict) and s.get("restaurant"):
+                            raw = s["restaurant"]
+                            n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
+                            if n.lower() not in _norm_seen:
+                                _norm_seen[n.lower()] = n
+                                gemini_restaurants.add(n)
+                    for sz in (src.get("sizes") or {}).values():
+                        if isinstance(sz, dict):
+                            for s in sz.get("sources", []):
+                                if isinstance(s, dict) and s.get("restaurant"):
+                                    raw = s["restaurant"]
+                                    n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
+                                    if n.lower() not in _norm_seen:
+                                        _norm_seen[n.lower()] = n
+                                        gemini_restaurants.add(n)
         # Add any restaurants Gemini found that aren't in our Places cache
         # Deduplicate and look up details via Google Places
         if gemini_restaurants:
@@ -6615,44 +6621,46 @@ def draft_editor(draft_id: int):
             for n in existing_names:
                 added_normalized.add(_normalize_restaurant_name(n).lower())
 
-            # Look up Gemini restaurants via Places API and cache in DB
+            # Look up Gemini restaurants — use file cache to avoid repeated API calls
             import requests as _rq
             api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+            import tempfile
+            cache_path = os.path.join(tempfile.gettempdir(), f"menuflow_places_cache_{draft.get('restaurant_id', 0)}.json")
+            places_cache = {}
+            try:
+                with open(cache_path, "r") as cf:
+                    places_cache = json.loads(cf.read())
+            except Exception:
+                pass
 
+            cache_dirty = False
             for rname in sorted(gemini_restaurants):
                 norm = _normalize_restaurant_name(rname).lower()
                 if not norm or norm in added_normalized or rname.lower() in existing_names:
                     continue
                 added_normalized.add(norm)
 
-                # Check if we already cached this lookup
-                cached = None
-                try:
-                    with db_connect() as conn2:
-                        cached = conn2.execute(
-                            "SELECT place_id, place_name, place_address, rating, user_ratings, price_level, latitude, longitude FROM price_comparison_results WHERE place_name = ? LIMIT 1",
-                            (rname,),
-                        ).fetchone()
-                except Exception:
-                    pass
-
-                if cached:
-                    competitors.append({
-                        "place_name": cached["place_name"],
-                        "place_address": cached["place_address"] or "",
-                        "rating": cached["rating"],
-                        "price_label": {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(cached["price_level"]),
-                        "price_level": cached["price_level"],
-                        "user_ratings": cached["user_ratings"],
-                        "latitude": cached["latitude"],
-                        "longitude": cached["longitude"],
-                        "cuisine_match": None,
-                        "place_id": cached["place_id"],
-                    })
+                # Check file cache first
+                if norm in places_cache:
+                    c_data = places_cache[norm]
+                    if c_data:
+                        competitors.append(c_data)
                     continue
 
-                # Places lookup
-                if not api_key:
+                # Places lookup — only on first load (results get cached)
+                # Skip if no API key or if cache already has enough entries
+                if not api_key or len(places_cache) > 50:
+                    # Add without Places data
+                    comp_entry = {
+                        "place_name": rname,
+                        "place_address": f"{rest_city}, {rest_state}",
+                        "rating": None, "price_label": None, "price_level": None,
+                        "user_ratings": None, "latitude": None, "longitude": None,
+                        "cuisine_match": None, "place_id": None, "website_url": None,
+                    }
+                    competitors.append(comp_entry)
+                    places_cache[norm] = comp_entry
+                    cache_dirty = True
                     continue
                 try:
                     params = {
@@ -6707,7 +6715,7 @@ def draft_editor(draft_id: int):
                                         website_url = details.get("website")
                                 except Exception:
                                     pass
-                            competitors.append({
+                            comp_entry = {
                                 "place_name": c.get("name", rname),
                                 "place_address": c.get("formatted_address", ""),
                                 "rating": c.get("rating"),
@@ -6719,7 +6727,20 @@ def draft_editor(draft_id: int):
                                 "cuisine_match": None,
                                 "place_id": pid,
                                 "website_url": website_url,
-                            })
+                            }
+                            competitors.append(comp_entry)
+                            places_cache[norm] = comp_entry
+                            cache_dirty = True
+                except Exception:
+                    # Cache as None so we don't retry
+                    places_cache[norm] = None
+                    cache_dirty = True
+
+            # Save cache
+            if cache_dirty:
+                try:
+                    with open(cache_path, "w") as cf:
+                        cf.write(json.dumps(places_cache))
                 except Exception:
                     pass
 
@@ -7522,7 +7543,7 @@ setTimeout(f,100);
             else:
                 content = base_tag + content
 
-            # Keep navigation inside iframe — strip target=_blank but don't intercept clicks
+            # Keep navigation inside iframe
             nav_intercept = b"""<script>
 // Strip target=_blank/_top from all links so they stay in iframe
 document.querySelectorAll('a[target]').forEach(function(a){
@@ -7539,6 +7560,15 @@ new MutationObserver(function(muts){
     });
   });
 }).observe(document.body,{childList:true,subtree:true});
+// Override window.open so JS-triggered navigations stay in iframe
+var _wo=window.open;
+window.open=function(url,target){
+  if(url && url.indexOf('http')===0){
+    window.location.href='/browse?url='+encodeURIComponent(url);
+    return null;
+  }
+  return _wo.apply(window,arguments);
+};
 </script>"""
             if b"</body>" in content:
                 content = content.replace(b"</body>", nav_intercept + b"</body>", 1)
@@ -7591,23 +7621,46 @@ def api_competitor_website():
 
     # Try to find the place_id from our cached data
     from storage.price_intel import get_place_details
+    website_url = None
     with db_connect() as conn:
+        # Try exact name match first, then fuzzy
         row = conn.execute(
             "SELECT place_id FROM price_comparison_results WHERE place_name = ? LIMIT 1",
             (name,),
         ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT place_id FROM price_comparison_results WHERE place_name LIKE ? LIMIT 1",
+                (f"%{name}%",),
+            ).fetchone()
 
-    website_url = None
-    if row:
+    if row and row["place_id"]:
         details = get_place_details(row["place_id"])
         if details:
             website_url = details.get("website")
 
+    # If not in DB, try a live Google Places lookup
     if not website_url:
-        # Fallback: construct a likely URL from the name
-        slug = name.lower().replace("'", "").replace("&", "and")
-        slug = "".join(c if c.isalnum() or c == " " else "" for c in slug)
-        slug = slug.strip().replace(" ", "")
+        api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+        if api_key:
+            try:
+                import requests as _rq2
+                resp = _rq2.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json", params={
+                    "key": api_key,
+                    "input": f"{name} restaurant {addr}",
+                    "inputtype": "textquery",
+                    "fields": "place_id,name,formatted_address",
+                }, timeout=5)
+                if resp.status_code == 200:
+                    candidates = resp.json().get("candidates", [])
+                    if candidates and candidates[0].get("place_id"):
+                        details = get_place_details(candidates[0]["place_id"])
+                        if details:
+                            website_url = details.get("website")
+            except Exception:
+                pass
+
+    if not website_url:
         website_url = f"https://www.google.com/search?q={name}+{addr}+menu"
 
     return jsonify({"url": website_url, "proxy_url": f"/browse?url={website_url}"})

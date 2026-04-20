@@ -5519,16 +5519,13 @@
         const tab = _compTabs.find(t => t.id === id);
         if (!tab) return;
         const ld = document.getElementById('comp-loading');
-        if (data.url) {
+        if (data.url && !data.url.includes('google.com/search')) {
           tab.websiteUrl = data.url;
-          if (data.url.includes('google.com/search')) {
-            tab.url = data.url.replace('google.com/search?', 'google.com/search?igu=1&');
-          } else {
-            tab.url = '/browse?url=' + encodeURIComponent(data.url);
-          }
+          tab.url = '/browse?url=' + encodeURIComponent(data.url);
           tab.history = [tab.url];
           if (_activeCompTab === id) compSwitchTab(id);
         } else {
+          // No direct website — show message with Google search link
           tab.url = '';
           tab.noWebsite = true;
           if (ld) ld.classList.add('hidden');
@@ -5581,7 +5578,12 @@
     });
 
     // If this tab doesn't have an iframe yet and has a URL, create one
-    if (tab.url && !container.querySelector(`[data-tab-id="${id}"]`)) {
+    const existingFrame = container.querySelector(`[data-tab-id="${id}"]`);
+    if (tab.url && existingFrame && existingFrame.src !== tab.url && !existingFrame.src.includes(tab.url)) {
+      // URL changed (e.g. API returned website) — update existing iframe
+      existingFrame.src = tab.url;
+    }
+    if (tab.url && !existingFrame) {
       const ld = document.getElementById('comp-loading');
       if (ld) ld.classList.remove('hidden');
       const frame = document.createElement('iframe');
@@ -5603,10 +5605,15 @@
       container.appendChild(frame);
     }
 
-    // Hide blocked overlay
+    // Handle no-website state
     const overlay = document.getElementById('comp-blocked-overlay');
-    if (overlay && !tab.noWebsite) overlay.style.display = 'none';
-    if (tab.noWebsite) _showNoWebsite(tab.name);
+    const ldEl = document.getElementById('comp-loading');
+    if (tab.noWebsite) {
+      if (ldEl) ldEl.classList.add('hidden');
+      _showNoWebsite(tab.name);
+    } else if (overlay) {
+      overlay.style.display = 'none';
+    }
 
     // Rebuild tab bar
     _renderCompTabs();

@@ -809,12 +809,12 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
-        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants within 10 miles of {location}.
+        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants within 5 miles of {location}.
 
 For items WITHOUT sizes, search: "(item name) (category) price near {location}"
 For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
 
-IMPORTANT: Only use restaurants within 10 miles of {location}. Do NOT include restaurants from other states or distant cities.
+IMPORTANT: Only use restaurants within 5 miles of {location}. Do NOT include restaurants from other states or distant cities.
 
 Items:
 {item_lines}
@@ -833,7 +833,7 @@ For items with [sizes], include per-size ranges AND sources per size:
 }}
 
 Rules:
-- Use real price data from 5 restaurants within 10 miles of {location}
+- Use real price data from 5 restaurants within 5 miles of {location}
 - Prices in US cents (e.g. $9.00 = 900)
 - Include the actual restaurant name and price for each source you find
 - low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
