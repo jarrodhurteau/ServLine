@@ -7631,13 +7631,13 @@ try{
             )
             # Strip target="_blank" / "_top" / "_parent" from all tags
             content = re.sub(rb'\s+target=["\'](_blank|_top|_parent)["\']', b'', content, flags=re.IGNORECASE)
-            # Strip frame-busting code patterns
-            content = re.sub(rb'top\.location\s*=\s*self\.location', b'void(0)', content)
-            content = re.sub(rb'top\.location\s*=\s*self\.document\.location', b'void(0)', content)
-            content = re.sub(rb'if\s*\(\s*top\s*!==?\s*self\s*\)', b'if(false)', content)
-            content = re.sub(rb'if\s*\(\s*top\.frames\.length\s*!=\s*0\s*\)', b'if(false)', content)
-            content = re.sub(rb'if\s*\(\s*window\.top\s*!==?\s*window\.self\s*\)', b'if(false)', content)
-            content = re.sub(rb'if\s*\(\s*parent\.location\s*!==?\s*self\.location\s*\)', b'if(false)', content)
+            # Detect frame-busting code — if present, show "open in new tab" instead
+            has_framebust = bool(re.search(rb'top\.location\s*=\s*self\.location|if\s*\(\s*top\.frames\.length\s*!=\s*0\s*\)', content))
+            if has_framebust:
+                return (f'<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;text-align:center;padding:40px;">'
+                        f'<div><h3>This website requires a direct browser visit</h3>'
+                        f'<p style="margin:8px 0 16px;">It blocks embedded viewing.</p>'
+                        f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;font-size:1.1rem;">Open in new tab &rarr;</a></div></div>'), 200
 
         response = make_response(content)
         response.headers["Content-Type"] = ct
