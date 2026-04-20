@@ -2115,13 +2115,13 @@
                   Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
                   {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
                   {% if ns_src.sources %}
-                  <a href="#" class="ref-toggle" onclick="event.preventDefault();event.stopPropagation();this.closest('div').parentElement.querySelector('.source-popover').classList.toggle('hidden')" style="margin-left:4px;">{{ ns_src.sources|length }} sources</a>
+                  <a href="#" class="ref-toggle" onclick="event.preventDefault();event.stopPropagation();var sp=this.closest('div').parentElement.querySelector('.source-popover');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==sp)e.classList.add('hidden')});sp.classList.toggle('hidden')" style="margin-left:4px;">{{ ns_src.sources|length }} sources</a>
                   {% endif %}
                 </div>
                 {% if ns_src.sources %}
                 <div class="source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_src.sources %}
-                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2177,7 +2177,7 @@
                     <span class="wiz-price-tag price-fair" style="font-size:.6rem;padding:1px 5px;">Fair Range</span>
                     {% endif %}
                     {% if ns_vm.match.sources is defined and ns_vm.match.sources %}
-                    <a href="#" class="ref-toggle" style="font-size:.6rem;" onclick="event.preventDefault();event.stopPropagation();var el=this.closest('.wiz-variant-row').querySelector('.var-sources');if(el)el.classList.toggle('hidden');">{{ ns_vm.match.sources|length }} src</a>
+                    <a href="#" class="ref-toggle" style="font-size:.6rem;" onclick="event.preventDefault();event.stopPropagation();var el=this.closest('.wiz-variant-row').querySelector('.var-sources');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==el)e.classList.add('hidden')});if(el)el.classList.toggle('hidden');">{{ ns_vm.match.sources|length }} src</a>
                     {% endif %}
                     </span>
                   {% endif %}
@@ -2190,7 +2190,7 @@
                 {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
                 <div class="var-sources source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_vm.match.sources %}
-                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -5870,12 +5870,12 @@
     }
   }
 
-  // Close source popovers when clicking outside
-  document.addEventListener('click', e => {
-    if (!e.target.closest('.ref-toggle') && !e.target.closest('.source-popover')) {
+  // Close source popovers when clicking anywhere outside them
+  document.addEventListener('mousedown', e => {
+    if (!e.target.closest('.source-popover') && !e.target.closest('.ref-toggle')) {
       document.querySelectorAll('.source-popover:not(.hidden)').forEach(el => el.classList.add('hidden'));
     }
-  });
+  }, true);
 
   // Day 141.6: Empty draft cleanup handled by explicit delete only — no auto-delete
 </script>
