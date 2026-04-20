@@ -2068,7 +2068,7 @@
         {% endif %}
         <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}{% if needs_price %} needs-price{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
           <!-- Display mode (click to edit) -->
-          <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle'))wizEdit(this.parentElement)">
+          <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle')&&!event.target.closest('.source-link')&&!event.target.closest('.source-popover')&&!event.target.closest('.ref-toggle'))wizEdit(this.parentElement)">
             <div class="wiz-item-header">
               <span class="wiz-drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;&#8942;</span>
               <span class="wiz-item-num">{{ ns.item_num }}.</span>
@@ -2121,7 +2121,7 @@
                 {% if ns_src.sources %}
                 <div class="source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_src.sources %}
-                  <div class="source-row"><a href="#" class="source-link" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});var card=document.querySelector('.competitor-card[data-comp-name=&quot;{{ s.restaurant|e }}&quot;]');compOpenTab('{{ s.restaurant|e }}',card?card.dataset.compAddr:'{{ restaurant.city|default("",true)|e }}, {{ restaurant.state|default("",true)|e }}',card?card.dataset.compWebsite:null);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2190,7 +2190,7 @@
                 {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
                 <div class="var-sources source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_vm.match.sources %}
-                  <div class="source-row"><a href="#" class="source-link" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});var card=document.querySelector('.competitor-card[data-comp-name=&quot;{{ s.restaurant|e }}&quot;]');compOpenTab('{{ s.restaurant|e }}',card?card.dataset.compAddr:'{{ restaurant.city|default("",true)|e }}, {{ restaurant.state|default("",true)|e }}',card?card.dataset.compWebsite:null);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){e.classList.add('hidden')});clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -5845,6 +5845,29 @@
         });
     }
     input.value = ''; // reset so same file can be selected again
+  }
+
+  // Click a source restaurant — find matching sidebar card and use its data
+  function clickSourceRestaurant(name) {
+    var cards = document.querySelectorAll('.competitor-card');
+    var nameLower = name.toLowerCase();
+    var bestCard = null;
+    // Try exact match first
+    cards.forEach(function(card) {
+      if (card.dataset.compName === name) bestCard = card;
+    });
+    // Then fuzzy — check if card name contains source name or vice versa
+    if (!bestCard) {
+      cards.forEach(function(card) {
+        var cardName = (card.dataset.compName || '').toLowerCase();
+        if (cardName.includes(nameLower) || nameLower.includes(cardName)) bestCard = card;
+      });
+    }
+    if (bestCard) {
+      compOpenTab(bestCard.dataset.compName, bestCard.dataset.compAddr, bestCard.dataset.compWebsite || null);
+    } else {
+      compOpenTab(name, '{{ restaurant.city|default("",true)|e }}, {{ restaurant.state|default("",true)|e }}');
+    }
   }
 
   // Close source popovers when clicking outside
