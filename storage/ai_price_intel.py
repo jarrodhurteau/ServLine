@@ -915,7 +915,7 @@ Rules:
     # Run ALL batches in parallel — Gemini allows ~1000 RPM on paid tier
     batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+    with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
         futures = [pool.submit(_run_batch, b) for b in batches]
         for f in futures:
             try:
