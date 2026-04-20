@@ -795,6 +795,24 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
         return {}
 
     client = genai.Client(api_key=api_key)
+
+    # Health check — one quick search-grounded query to verify Gemini is available
+    try:
+        _test = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="What is 1+1? Reply with just the number.",
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.1,
+            ),
+        )
+        if not _test or not _test.text:
+            log.warning("Gemini health check returned empty — service may be degraded")
+            return {}
+    except Exception as e:
+        log.warning("Gemini health check failed: %s — skipping Google-sourced pricing", e)
+        return {}
+
     out: Dict[int, Dict[str, Any]] = {}
     batch_size = 10
 
