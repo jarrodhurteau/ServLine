@@ -25,11 +25,14 @@
       "Bash(curl -s -c /tmp/cookies2.txt -b /tmp/cookies2.txt -X POST http://localhost:5000/login -d 'email=testuser1@testuser1.com&password=testuser1' -L -o /tmp/login3.html -w 'HTTP %{http_code}\\\\n')",
       "Bash(curl -s -b /tmp/cookies2.txt http://localhost:5000/drafts/219/wizard -o /tmp/wiz2.html -w \"HTTP %{http_code}\\\\n\")",
       "Bash(curl -s -b /tmp/cookies2.txt \"http://localhost:5000/drafts/219/wizard?category=Pizza\" -o /tmp/wiz_pizza.html -w \"HTTP %{http_code}\\\\n\")",
-      "Bash(curl -s -b /tmp/cookies2.txt -X POST http://localhost:5000/api/drafts/219/wizard/apply_variant_labels -H 'Content-Type: application/json' -d '{\"source_item_id\": 99999, \"category\": \"Pizza\"}')"
+      "Bash(curl -s -b /tmp/cookies2.txt -X POST http://localhost:5000/api/drafts/219/wizard/apply_variant_labels -H 'Content-Type: application/json' -d '{\"source_item_id\": 99999, \"category\": \"Pizza\"}')",
+      "Bash(taskkill //f //im python.exe)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Owner\\.claude\\projects\\c--Users-Owner-Desktop-servline\\memory",
-      "C:\\Users\\Owner\\Downloads"
+      "C:\\Users\\Owner\\Downloads",
+      "\\tmp"
     ]
   }
 }
