@@ -7554,22 +7554,24 @@ if(imgs.length===0)setTimeout(f,200);
         # For HTML pages: inject <base> tag so relative URLs resolve correctly
         if "text/html" in ct:
             base_url = resp.url  # final URL after redirects
+            # Anti-frame-busting: inject BEFORE any other scripts to block window.top access
+            anti_bust = b'<script>try{Object.defineProperty(window,"top",{get:function(){return window.self}});}catch(e){} try{Object.defineProperty(window,"parent",{get:function(){return window.self}});}catch(e){}</script>'
             base_tag = f'<base href="{base_url}" target="_self">'.encode()
-            # Inject after <head> or at the very start
+            # Inject anti-bust + base tag after <head> (before any site scripts)
             if b"<head>" in content:
-                content = content.replace(b"<head>", b"<head>" + base_tag, 1)
+                content = content.replace(b"<head>", b"<head>" + anti_bust + base_tag, 1)
             elif b"<head " in content:
                 idx = content.find(b">", content.find(b"<head "))
                 if idx > 0:
-                    content = content[:idx+1] + base_tag + content[idx+1:]
+                    content = content[:idx+1] + anti_bust + base_tag + content[idx+1:]
             elif b"<HEAD>" in content:
-                content = content.replace(b"<HEAD>", b"<HEAD>" + base_tag, 1)
+                content = content.replace(b"<HEAD>", b"<HEAD>" + anti_bust + base_tag, 1)
             else:
-                content = base_tag + content
+                content = anti_bust + base_tag + content
 
-            # Keep navigation inside iframe
+            # Keep navigation inside iframe — prevent top-window hijacking
             nav_intercept = b"""<script>
-// Strip target=_blank/_top from all links so they stay in iframe
+// Strip target=_blank/_top from all links
 document.querySelectorAll('a[target]').forEach(function(a){
   var t=a.getAttribute('target');
   if(t==='_blank'||t==='_top'||t==='_parent') a.setAttribute('target','_self');
@@ -7584,7 +7586,7 @@ new MutationObserver(function(muts){
     });
   });
 }).observe(document.body,{childList:true,subtree:true});
-// Override window.open so JS-triggered navigations stay in iframe
+// Override window.open
 var _wo=window.open;
 window.open=function(url,target){
   if(url && url.indexOf('http')===0){
@@ -7593,6 +7595,17 @@ window.open=function(url,target){
   }
   return _wo.apply(window,arguments);
 };
+// Block top-navigation attempts (IHOP-style frame busting)
+try{
+  if(window.top!==window.self){
+    Object.defineProperty(window,'top',{get:function(){return window.self;}});
+  }
+}catch(e){}
+try{
+  if(window.parent!==window.self){
+    Object.defineProperty(window,'parent',{get:function(){return window.self;}});
+  }
+}catch(e){}
 </script>"""
             if b"</body>" in content:
                 content = content.replace(b"</body>", nav_intercept + b"</body>", 1)
@@ -7618,6 +7631,13 @@ window.open=function(url,target){
             )
             # Strip target="_blank" / "_top" / "_parent" from all tags
             content = re.sub(rb'\s+target=["\'](_blank|_top|_parent)["\']', b'', content, flags=re.IGNORECASE)
+            # Strip frame-busting code patterns
+            content = re.sub(rb'top\.location\s*=\s*self\.location', b'void(0)', content)
+            content = re.sub(rb'top\.location\s*=\s*self\.document\.location', b'void(0)', content)
+            content = re.sub(rb'if\s*\(\s*top\s*!==?\s*self\s*\)', b'if(false)', content)
+            content = re.sub(rb'if\s*\(\s*top\.frames\.length\s*!=\s*0\s*\)', b'if(false)', content)
+            content = re.sub(rb'if\s*\(\s*window\.top\s*!==?\s*window\.self\s*\)', b'if(false)', content)
+            content = re.sub(rb'if\s*\(\s*parent\.location\s*!==?\s*self\.location\s*\)', b'if(false)', content)
 
         response = make_response(content)
         response.headers["Content-Type"] = ct
