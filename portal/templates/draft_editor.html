@@ -1828,6 +1828,11 @@
         </div>
       </div>
       <div class="editor-header-right">
+        {% if source_job_id or source_is_structured %}
+        <button class="editor-header-btn" id="preview-menu-btn-top-top" onclick="editorTogglePreview('menu')">
+          Original {% if source_is_structured %}File{% else %}Menu{% endif %}
+        </button>
+        {% endif %}
         <details class="editor-export-dropdown" id="export-file-dropdown">
           <summary class="editor-header-btn">Export File &#9662;</summary>
           <div class="editor-export-menu">
@@ -2323,17 +2328,11 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           Browser
         </button>
-        {% if source_job_id or source_is_structured %}
-        <button class="preview-toggle-btn" id="preview-menu-btn" onclick="editorTogglePreview('menu')">
+        <button class="preview-toggle-btn" onclick="document.getElementById('pdf-file-input-global').click()" title="Open a PDF in a new tab">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Original {% if source_is_structured %}File{% else %}Menu{% endif %}
+          View PDF In New Tab
         </button>
-        {% endif %}
-        <button class="preview-toggle-btn" onclick="document.getElementById('pdf-file-input-global').click()" title="View a downloaded PDF menu">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          View PDF
-        </button>
-        <input type="file" id="pdf-file-input-global" accept=".pdf" style="display:none;" onchange="compLoadPdfFile(this)">
+        <input type="file" id="pdf-file-input-global" accept=".pdf" style="display:none;" onchange="compLoadPdfNewTab(this)">
         {% if show_admin or dev_tools %}
         {# Dev-only: wipe cache + rerun the full price-intel pipeline. #}
         <form method="post" action="{{ url_for('rerun_price_analysis', draft_id=draft.id) }}"
@@ -2415,12 +2414,12 @@
           </button>
           <button class="comp-nav-btn comp-nav-labeled" onclick="document.getElementById('pdf-file-input').click()" title="View a downloaded PDF menu" style="margin-left:auto;">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span>View PDF</span>
+            <span>Replace With PDF</span>
           </button>
           <input type="file" id="pdf-file-input" accept=".pdf" style="display:none;" onchange="compLoadPdfFile(this)">
           <button class="comp-nav-btn comp-nav-labeled" onclick="compOpenExternal()" title="Open in new tab">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            <span>New tab</span>
+            <span>Open In New Window</span>
           </button>
         </div>
         <div id="comp-frames-container" style="position:relative; flex:1; min-height:0;"
@@ -5141,7 +5140,7 @@
     const menuPanel = document.getElementById('preview-menu-panel');
     const compPanel = document.getElementById('preview-comp-panel');
     const mapBtn = document.getElementById('preview-map-btn');
-    const menuBtn = document.getElementById('preview-menu-btn');
+    const menuBtn = document.getElementById('preview-menu-btn-top');
     // Hide comp panel when switching to map/menu (but keep tabs alive)
     if (compPanel) compPanel.style.display = 'none';
     const compBtn = document.getElementById('preview-comp-btn');
@@ -5380,7 +5379,10 @@
     const tab = _compTabs.find(t => t.id === _activeCompTab);
     if (!tab || !tab.url) return;
     const frame = _getActiveFrame();
-    if (frame) frame.src = tab.url;
+    if (frame) {
+      frame.removeAttribute('srcdoc');
+      frame.src = tab.url;
+    }
     document.getElementById('comp-blocked-overlay').style.display = 'none';
   }
 
@@ -5497,7 +5499,7 @@
     if (menuPanel) menuPanel.style.display = 'none';
     if (compPanel) compPanel.style.display = 'flex';
     const mapBtn = document.getElementById('preview-map-btn');
-    const menuBtn = document.getElementById('preview-menu-btn');
+    const menuBtn = document.getElementById('preview-menu-btn-top');
     const compBtn = document.getElementById('preview-comp-btn');
     if (mapBtn) mapBtn.classList.remove('active');
     if (menuBtn) menuBtn.classList.remove('active');
@@ -5562,7 +5564,7 @@
 
     // Update toggle buttons
     const mapBtn = document.getElementById('preview-map-btn');
-    const menuBtn = document.getElementById('preview-menu-btn');
+    const menuBtn = document.getElementById('preview-menu-btn-top');
     const compBtn = document.getElementById('preview-comp-btn');
     if (mapBtn) mapBtn.classList.remove('active');
     if (menuBtn) menuBtn.classList.remove('active');
@@ -5813,7 +5815,58 @@
     } catch(e) {} // cross-origin, ignore
   }, 500);
 
-  // Upload a PDF file and render in the active comp tab
+  // Button A: Upload a PDF and open in a NEW tab
+  function compLoadPdfNewTab(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var tabName = file.name.replace(/\.pdf$/i, '');
+    var id = _compTabId(tabName);
+    // Create new tab
+    _compTabs.push({ id: id, name: tabName, addr: '', url: '', history: [] });
+    _activeCompTab = id;
+    // Show comp panel
+    var mapPanel = document.getElementById('preview-map-panel');
+    var menuPanel = document.getElementById('preview-menu-panel');
+    var compPanel = document.getElementById('preview-comp-panel');
+    if (mapPanel) mapPanel.style.display = 'none';
+    if (menuPanel) menuPanel.style.display = 'none';
+    if (compPanel) compPanel.style.display = 'flex';
+    var compBtn = document.getElementById('preview-comp-btn');
+    if (compBtn) { compBtn.classList.add('active'); compBtn.style.display = ''; }
+    document.getElementById('preview-map-btn')?.classList.remove('active');
+    document.getElementById('preview-menu-btn-top')?.classList.remove('active');
+    _renderCompTabs();
+    compSwitchTab(id);
+    // Upload to server
+    var formData = new FormData();
+    formData.append('pdf', file);
+    var frame = _getActiveFrame();
+    if (!frame) {
+      // compSwitchTab should have created it, but url was empty so it didn't
+      // Create the iframe manually
+      var container = document.getElementById('comp-frames-container');
+      frame = document.createElement('iframe');
+      frame.className = 'comp-browser-frame';
+      frame.referrerPolicy = 'no-referrer';
+      frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;visibility:visible;z-index:1;';
+      frame.dataset.tabId = id;
+      container.appendChild(frame);
+    }
+    var ld = document.getElementById('comp-loading');
+    if (ld) ld.classList.remove('hidden');
+    fetch('/browse/pdf-upload', { method: 'POST', body: formData })
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        frame.srcdoc = html;
+        if (ld) ld.classList.add('hidden');
+      })
+      .catch(function(err) {
+        if (ld) ld.classList.add('hidden');
+      });
+    input.value = '';
+  }
+
+  // Button B: Upload a PDF and render in the ACTIVE comp tab
   function compLoadPdfFile(input) {
     if (!input.files || !input.files[0]) return;
     var file = input.files[0];
