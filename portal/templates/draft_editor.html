@@ -1651,21 +1651,15 @@
       gap: 0;
       background: var(--card-bg, #141c30);
       border-bottom: 1px solid var(--line);
-      overflow-x: auto;
+      overflow: hidden;
       flex-shrink: 0;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(184,92,56,.3) transparent;
     }
-    .comp-tab-bar::-webkit-scrollbar { height: 3px; }
-    .comp-tab-bar::-webkit-scrollbar-track { background: transparent; }
-    .comp-tab-bar::-webkit-scrollbar-thumb { background: rgba(184,92,56,.3); border-radius: 3px; }
-    .comp-tab-bar::-webkit-scrollbar-thumb:hover { background: rgba(184,92,56,.6); }
     .comp-tab {
       display: flex;
       align-items: center;
       gap: 4px;
-      padding: 8px 10px;
-      font-size: .75rem;
+      padding: 8px 8px;
+      font-size: .73rem;
       font-weight: 600;
       color: var(--muted);
       background: transparent;
@@ -1674,8 +1668,9 @@
       cursor: pointer;
       white-space: nowrap;
       transition: color .15s, border-color .15s;
-      flex-shrink: 1;
-      min-width: 0;
+      flex: 1 1 0;
+      min-width: 40px;
+      max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -1688,10 +1683,11 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
       border-radius: 50%;
-      font-size: .7rem;
+      font-size: .65rem;
       line-height: 1;
       background: transparent;
       border: none;
@@ -1700,7 +1696,8 @@
       padding: 0;
     }
     .comp-tab-close:hover { background: rgba(255,255,255,.1); color: var(--ink); }
-    .comp-tab-add { font-size: 1.1rem; font-weight: 400; padding: 8px 12px; opacity: .6; }
+    .comp-tab-name { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    .comp-tab-add { font-size: 1.1rem; font-weight: 400; padding: 8px 12px; opacity: .6; flex: 0 0 auto; min-width: auto; max-width: none; }
     .comp-tab-add:hover { opacity: 1; }
     .comp-browser-frame {
       flex: 1;
@@ -5653,11 +5650,10 @@
 
     _compTabs.forEach(t => {
       const isActive = t.id === _activeCompTab;
-      const shortName = t.name.length > 16 ? t.name.substring(0, 14) + '...' : t.name;
       html += `<button class="comp-tab${isActive ? ' active' : ''}"
                        onclick="compSwitchTab('${t.id}')"
                        title="${t.name}">
-        ${shortName}
+        <span class="comp-tab-name">${t.name}</span>
         <span class="comp-tab-close" onclick="event.stopPropagation();compCloseTab('${t.id}')">&times;</span>
       </button>`;
     });

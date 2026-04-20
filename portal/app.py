@@ -7471,13 +7471,23 @@ def browse_proxy():
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         }, allow_redirects=True, verify=True)
 
         content = resp.content
         ct = resp.headers.get("Content-Type", "text/html")
 
-        # PDF files: convert to images server-side, serve as scrollable HTML
-        if "pdf" in ct.lower() or url.lower().endswith(".pdf"):
+        # Detect failed pages (403, tiny SPA shells, error pages)
+        if resp.status_code == 403:
+            return (f'<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;text-align:center;padding:40px;">'
+                    f'<div><h3>This website blocked our request</h3>'
+                    f'<p style="margin:8px 0 16px;">Try viewing it directly:</p>'
+                    f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;font-size:1.1rem;">Open in new tab &rarr;</a></div></div>'), 200
+
+        # PDF/binary files: convert to images or show error
+        # Check content type AND first bytes for PDF magic number
+        is_pdf = "pdf" in ct.lower() or url.lower().endswith(".pdf") or content[:5] == b"%PDF-"
+        if is_pdf:
             import hashlib, tempfile, base64
             try:
                 from pdf2image import convert_from_bytes
@@ -7525,6 +7535,14 @@ setTimeout(f,100);
                 viewer_html = f'<html><body style="padding:40px;color:#999;text-align:center;"><h3>Could not render PDF: {type(e).__name__}</h3></body></html>'
             response = make_response(viewer_html)
             response.headers["Content-Type"] = "text/html; charset=utf-8"
+            return response
+
+        # Catch binary content that's not PDF and not text
+        if "text/html" not in ct and "text/" not in ct and not is_pdf:
+            # Binary file — don't render as text. Serve inline or show message.
+            response = make_response(content)
+            response.headers["Content-Type"] = ct
+            response.headers["Content-Disposition"] = "inline"
             return response
 
         # For HTML pages: inject <base> tag so relative URLs resolve correctly
