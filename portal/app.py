@@ -7345,17 +7345,19 @@ body{{background:#2c2c2c;overflow:hidden}}
 <script>
 var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
 function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
-function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function f(){{s=1;px=0;py=0;p.style.width=v.clientWidth+'px';a();}}
 function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
 var dr=false,sx,sy,ox,oy;
 v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
 document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
 document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
 v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
-setTimeout(f,100);
+var imgs=p.querySelectorAll('img');var ld2=0;
+imgs.forEach(function(im){{im.onload=function(){{ld2++;if(ld2===1)f();}};if(im.complete&&im.naturalWidth){{ld2++;if(ld2===1)f();}}}});
+if(imgs.length===0)setTimeout(f,200);
 </script></body></html>"""
     except Exception as e:
-        return f"<h3 style='padding:40px;color:#999;text-align:center;'>Could not render PDF: {e}</h3>", 502
+        return f"<h3 style='padding:40px;color:#999;text-align:center;'>Could not render PDF: {type(e).__name__}</h3>", 502
 
 
 @app.get("/browse/pdf-viewer")
@@ -7413,14 +7415,16 @@ body{{background:#2c2c2c;overflow:hidden}}
 <script>
 var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
 function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
-function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function f(){{s=1;px=0;py=0;p.style.width=v.clientWidth+'px';a();}}
 function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
 var dr=false,sx,sy,ox,oy;
 v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
 document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
 document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
 v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
-setTimeout(f,100);
+var imgs=p.querySelectorAll('img');var ld2=0;
+imgs.forEach(function(im){{im.onload=function(){{ld2++;if(ld2===1)f();}};if(im.complete&&im.naturalWidth){{ld2++;if(ld2===1)f();}}}});
+if(imgs.length===0)setTimeout(f,200);
 </script></body></html>"""
         return viewer_html
     except Exception as e:
@@ -7522,14 +7526,16 @@ body{{background:#2c2c2c;overflow:hidden}}
 <script>
 var s=1,px=0,py=0,p=document.getElementById('p'),v=document.getElementById('v');
 function a(){{p.style.transform='translate('+px+'px,'+py+'px) scale('+s+')';document.getElementById('zl').textContent=Math.round(s*100)+'%';}}
-function f(){{var img=p.querySelector('img');if(!img)return;var vw=v.clientWidth;s=(vw*0.95)/img.naturalWidth;px=(vw-img.naturalWidth*s)/2;py=10;a();}}
+function f(){{s=1;px=0;py=0;p.style.width=v.clientWidth+'px';a();}}
 function z(fc){{var vw=v.clientWidth,vh=v.clientHeight,cx=vw/2,cy=vh/2,os=s;s=Math.min(10,Math.max(0.1,s*fc));var r=s/os;px=cx-r*(cx-px);py=cy-r*(cy-py);a();}}
 var dr=false,sx,sy,ox,oy;
 v.onmousedown=function(e){{e.preventDefault();dr=true;v.classList.add('d');sx=e.clientX;sy=e.clientY;ox=px;oy=py;}};
 document.onmousemove=function(e){{if(!dr)return;px=ox+(e.clientX-sx);py=oy+(e.clientY-sy);a();}};
 document.onmouseup=function(){{dr=false;v.classList.remove('d');}};
 v.onwheel=function(e){{e.preventDefault();var r=v.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top,os=s;var fc=e.deltaY>0?0.9:1.1;s=Math.min(10,Math.max(0.1,s*fc));var rt=s/os;px=mx-rt*(mx-px);py=my-rt*(my-py);a();}};
-setTimeout(f,100);
+var imgs=p.querySelectorAll('img');var ld2=0;
+imgs.forEach(function(im){{im.onload=function(){{ld2++;if(ld2===1)f();}};if(im.complete&&im.naturalWidth){{ld2++;if(ld2===1)f();}}}});
+if(imgs.length===0)setTimeout(f,200);
 </script></body></html>"""
             except Exception as e:
                 viewer_html = f'<html><body style="padding:40px;color:#999;text-align:center;"><h3>Could not render PDF: {type(e).__name__}</h3></body></html>'
