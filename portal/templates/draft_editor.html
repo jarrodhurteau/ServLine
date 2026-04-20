@@ -1534,6 +1534,11 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--bg, #FAF4EC);
     }
     .preview-toggle-btn {
       flex: 1;
@@ -4732,7 +4737,6 @@
     if (!preview) return;
     function setHeight() {
       const rect = preview.getBoundingClientRect();
-      // rect.top is 0 when sticky kicks in; use max to avoid negative
       const top = Math.max(0, rect.top);
       preview.style.height = (window.innerHeight - top) + 'px';
     }
