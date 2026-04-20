@@ -6617,6 +6617,7 @@ def draft_editor(draft_id: int):
                     our_lng = sum(lngs) / len(lngs)
 
             # Normalize all names and deduplicate
+            existing_names = {c.get("place_name", "").lower() for c in competitors}
             added_normalized = set()
             for n in existing_names:
                 added_normalized.add(_normalize_restaurant_name(n).lower())
