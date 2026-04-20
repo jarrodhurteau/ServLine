@@ -1881,3 +1881,23 @@ ServLine now has:
   - Accepted limitations (caught by user audit, ~5 sec each):
     - Smoothed prices on outliers in dense sections — Claude smooths to section average
     - Swapped prices on adjacent items — Claude vision misreads orphaned column-aligned prices
+
+- **Day 141.7 — Browser Scraper + Opus Comparisons:** *** COMPLETE *** (April 17, 2026)
+  - Playwright+Vision scraping, Haiku menu classifier, Opus per-item matching
+  - Aggregator with real competitor prices, parallel scraping
+  - **Superseded by Day 141.8** — scraping approach was unreliable
+
+- **Day 141.8 — Market Range UX + Competitor Browser + Gemini Pricing:** *** COMPLETE *** (April 17-20, 2026)
+  - **Breakthrough: Gemini + Google Search grounding for real local restaurant prices**
+  - Per-item price ranges from 5 restaurants within 5 miles (~$0.05/menu, ~2 min)
+  - Source restaurant names with prices (clickable → opens their website)
+  - 5-tier assessment pills: Below Market / Lower Range / Fair / Higher Range / Above Market
+  - Per-variant size-specific ranges (12" Sml vs 16" Lrg vs Family Size)
+  - Competitor browser: tabbed iframe panel with web proxy
+  - Per-tab iframes preserve scroll position across switches
+  - PDF-to-image viewer (pdf2image) with zoom/drag/fit controls
+  - AJAX category switching (zero page reloads)
+  - Gemini-sourced restaurants auto-added to sidebar with Places lookup
+  - Anti-frame-busting, 403 detection, "Open in new tab" fallbacks
+  - Health check before batch runs prevents wasted API calls
+  - Column resizer with grip handle, sticky preview panel

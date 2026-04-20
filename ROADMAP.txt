@@ -2,11 +2,9 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-13 — Day 141.6 in progress: multi-restaurant workflow,
-              wizard confirmation screen, menu details modal, menus page overhaul,
-              category case normalization, CSV/file original viewer, draft status
-              tracking, restaurant edit, inline title edit, themed modals (no browser
-              dialogs), all imports routed through wizard.
+Last Updated: 2026-04-20 — Day 141.8 COMPLETE: Gemini+Google Search pricing,
+              competitor browser with proxy, PDF viewer, AJAX editor, source
+              restaurant links, 5-tier assessment pills, per-variant size ranges.
 
 ================================================================================
 PROJECT MISSION
@@ -2568,31 +2566,67 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
         - Polish + testing: 1-2 hrs
         Total: 12-20 hrs focused work
 
-  [ ] Day 141.7: Apify Integration for Real Competitor Price Intelligence
-      WHY: Day 141.5 built the competitor comparison pipeline but Claude web
-      search only gets partial menu data (~15-40 items). Apify has dedicated
-      DoorDash/Grubhub/UberEats scrapers that return COMPLETE menus with real
-      prices — 100% reliable. This is the missing piece that makes competitor
-      price intelligence a premium feature worth paying for.
+  [x] Day 141.7: Browser Scraper + Opus Comparisons (COMPLETE)
+      - Playwright+Vision scraping, Haiku classifier, Opus matching
+      - Per-category matching, fuzzy synonyms, aggregator, parallel scrapes
+      - SUPERSEDED by Day 141.8 approach (scraping was unreliable)
 
-      THE PLAN:
-        1. Sign up for Apify (self-serve, pay-as-you-go, $0.01/menu item)
-        2. Replace _claude_web_search_menu() with Apify API calls
-           - Try DoorDash scraper first (best coverage)
-           - Fall back to Grubhub, then UberEats
-           - Same competitor_menus cache table, 7-day TTL
-        3. Gate behind tier check:
-           - Free: no competitor data, comparison modal shows "Upgrade" prompt
-           - $50 one-time: full intel on first upload (bundled with free export)
-           - $80/month: unlimited competitor comparisons + refreshes
+  [x] Day 141.8: Market Range UX + Competitor Browser + Gemini Pricing (COMPLETE)
+      THE BREAKTHROUGH SESSION — completely reimagined price intelligence.
 
-      COST:
-        - ~$0.80-1.50 per competitor menu (~80-150 items × $0.01)
-        - 3-5 competitors per area = ~$4-8 first time, cached 7 days
-        - $50 customer: spend ~$8-15 → $35-42 margin
-        - $80/month customer: ~$8-15 first month, cached → $65-72/month
+      WHAT SHIPPED:
+        Market Intelligence (Gemini + Google Search Grounding):
+        - Per-item price ranges from REAL local restaurant prices via Google
+        - Gemini searches 5 restaurants within 5 miles of the user's address
+        - Source restaurant names shown with each price (clickable → opens website)
+        - 5-tier assessment pills: Below Market / Lower Range / Fair / Higher Range / Above Market
+        - Per-variant size-specific ranges (12" Sml vs 16" Lrg vs Family Size)
+        - Haiku fallback when Gemini is unavailable
+        - Gemini health check before batch runs (prevents wasted API calls)
+        - ~$0.05/menu, ~2 minutes for 158 items
 
-      EFFORT: ~4-6 hrs focused work
+        Competitor Browser:
+        - Tabbed iframe panel with web proxy (strips X-Frame-Options)
+        - Per-tab iframes preserve scroll position across tab switches
+        - PDF-to-image viewer (pdf2image) with zoom/drag/fit controls
+        - "View PDF In New Tab" (Button A) + "Replace With PDF" (Button B)
+        - Source restaurant links open their websites in browser tabs
+        - Anti-frame-busting: detects and handles sites like IHOP
+        - 403/blocked sites show clean "Open in new tab" message
+        - Frame-bust detection prevents iframe hijacking
+
+        Editor Improvements:
+        - AJAX category switching (zero page reloads, preserves browser state)
+        - Column resizer with always-visible grip handle
+        - Sticky preview panel (toggle bar visible on scroll)
+        - Source popovers with click-away-to-close, stay open for link clicks
+        - "Original Menu" button moved to header bar
+
+        Restaurant Discovery:
+        - Gemini-sourced restaurants auto-added to sidebar
+        - Google Places lookup for address/rating/website (file-cached)
+        - Fuzzy name dedup (strips city suffixes, parentheticals)
+        - Alphabetized sidebar list
+        - Clickable source links with fuzzy card matching
+
+      ARCHITECTURE DECISIONS:
+        - Killed per-competitor item matching (unreliable fuzzy matches)
+        - Killed Apify/Playwright scraping (too expensive, too fragile)
+        - Gemini + Google Search = real data, no scraping, $0.05/menu
+        - Proxy-based browser > embedded browser API (cost, simplicity)
+        - PDF-to-image conversion > pdf.js (works regardless of Adobe settings)
+
+      KNOWN LIMITATIONS:
+        - ~20-30% of restaurant websites don't render through proxy (Cloudflare, SPAs)
+        - "Open in new tab" is the escape hatch for those
+        - Gemini can get overloaded (503s) — health check + Haiku fallback handles it
+        - Future: Browserless.io or Hyperbeam for full browser embedding
+
+      PLANNED FOLLOW-UPS (Day 141.9+):
+        - Ordering platform embed detection (Toast/Slice/Square/ChowNow)
+        - Retry failed Gemini items without full rerun
+        - User-facing "Gemini unavailable" banner
+        - Shortening plan: max parallel API calls across pipeline
 
 ================================================================================
 Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
