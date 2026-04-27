@@ -27,7 +27,11 @@
       "Bash(curl -s -b /tmp/cookies2.txt \"http://localhost:5000/drafts/219/wizard?category=Pizza\" -o /tmp/wiz_pizza.html -w \"HTTP %{http_code}\\\\n\")",
       "Bash(curl -s -b /tmp/cookies2.txt -X POST http://localhost:5000/api/drafts/219/wizard/apply_variant_labels -H 'Content-Type: application/json' -d '{\"source_item_id\": 99999, \"category\": \"Pizza\"}')",
       "Bash(taskkill //f //im python.exe)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/)",
+      "Bash(powershell -c \"Get-Process python -EA SilentlyContinue | Select Id,WS,StartTime,CPU | Sort StartTime | Format-Table -AutoSize\")",
+      "PowerShell(Sort StartTime)",
+      "WebFetch(domain:statusgator.com)",
+      "WebFetch(domain:aistudio.google.com)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Owner\\.claude\\projects\\c--Users-Owner-Desktop-servline\\memory",

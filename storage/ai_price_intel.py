@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -914,7 +915,19 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
     # the chance of hitting a transient blip and silently aborting.
 
     out: Dict[int, Dict[str, Any]] = {}
-    batch_size = 10
+    # 20 items/batch (was 10). Gemini 2.5 has a 1M context window so prompt
+    # size isn't the constraint — output JSON is. 20 items × ~200 tokens =
+    # ~4K output tokens, well under any limit. Halves total batch count.
+    batch_size = 20
+
+    # Adaptive model promotion: if the first batch fails on the primary
+    # model (gemini-2.5-flash), demote it to the end of the chain for the
+    # rest of this run. Today's symptom: every batch wastes ~30s hitting
+    # flash before falling through. Once we know flash is degraded, the
+    # remaining batches go straight to flash-lite. This list is local to
+    # this invocation so we don't pollute future runs.
+    active_chain: List[str] = list(_GEMINI_MODEL_FALLBACK)
+    _chain_lock = threading.Lock()
 
     def _run_batch(batch):
         item_lines = ""
@@ -978,7 +991,12 @@ Rules:
         batch_ids = [it["item_id"] for it in batch]
         bail_out_non_retryable = False
 
-        for model_idx, model_name in enumerate(_GEMINI_MODEL_FALLBACK):
+        # Snapshot the active chain — if another worker demotes a model
+        # mid-flight we still finish this batch with a consistent ordering.
+        with _chain_lock:
+            chain_snapshot = list(active_chain)
+
+        for model_idx, model_name in enumerate(chain_snapshot):
             if response is not None or bail_out_non_retryable:
                 break
             for attempt in range(MAX_ATTEMPTS_PER_MODEL):
@@ -1007,29 +1025,26 @@ Rules:
                             "batch_ids": batch_ids,
                         })
                         # Empty body = model rejected this prompt format.
-                        # Retrying the same model usually yields the same
-                        # empty body. Skip to the next model in the chain
-                        # immediately (set attempt to last so loop exits).
+                        # Retrying the same model yields the same empty body;
+                        # fall through to the next model in the chain.
+                        # Same adaptive-demotion rule: empty body on the
+                        # primary model means it's not worth trying first.
+                        if model_idx == 0:
+                            with _chain_lock:
+                                if active_chain and active_chain[0] == model_name:
+                                    demoted = active_chain.pop(0)
+                                    active_chain.append(demoted)
+                                    log.warning(
+                                        "Adaptive demotion: %s (empty body) "
+                                        "moved to end of fallback chain "
+                                        "(new order: %s)",
+                                        demoted, " > ".join(active_chain),
+                                    )
                         log.warning(
                             "Gemini %s returned empty body — falling through to next model",
                             model_name,
                         )
                         break  # exit inner loop, outer loop tries next model
-                        next_model = (
-                            _GEMINI_MODEL_FALLBACK[model_idx + 1]
-                            if model_idx + 1 < len(_GEMINI_MODEL_FALLBACK) else None
-                        )
-                        if next_model:
-                            log.warning(
-                                "Gemini %s kept returning empty body — falling through to %s",
-                                model_name, next_model,
-                            )
-                            break  # exit inner loop, outer loop tries next model
-                        log.error(
-                            "Gemini all fallback models returned empty bodies — items=%s",
-                            batch_ids,
-                        )
-                        break
                     response = candidate
                     used_model = model_name
                     if model_idx > 0:
@@ -1072,9 +1087,24 @@ Rules:
                         time.sleep(sleep_s)
                         continue
                     # Out of attempts on this model — try the next one.
+                    # Adaptive demotion: when the FIRST model in the chain
+                    # exhausts, move it to the end for the rest of this run.
+                    # Future batches skip the wasted ~30s of failed retries
+                    # and go straight to the model that's actually working.
+                    if model_idx == 0:
+                        with _chain_lock:
+                            if active_chain and active_chain[0] == model_name:
+                                demoted = active_chain.pop(0)
+                                active_chain.append(demoted)
+                                log.warning(
+                                    "Adaptive demotion: %s moved to end of "
+                                    "fallback chain for rest of this run "
+                                    "(new order: %s)",
+                                    demoted, " > ".join(active_chain),
+                                )
                     next_model = (
-                        _GEMINI_MODEL_FALLBACK[model_idx + 1]
-                        if model_idx + 1 < len(_GEMINI_MODEL_FALLBACK) else None
+                        chain_snapshot[model_idx + 1]
+                        if model_idx + 1 < len(chain_snapshot) else None
                     )
                     if next_model:
                         log.warning(
@@ -1183,11 +1213,13 @@ Rules:
     batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
     _GEMINI_LAST_RUN["batches_total"] = len(batches)
     from concurrent.futures import ThreadPoolExecutor
-    # Sequential — 1 worker. With long-grounded calls (3-10s each healthy,
-    # 30-60s degraded) and the per-minute Gemini quota, parallel batches
-    # were creating their own throttling. Sequential adds maybe 30-60s of
-    # wall time vs 2-worker parallel, but eliminates self-inflicted 503s.
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    # 2 parallel workers. Earlier "sequential to avoid self-throttling"
+    # turned out to be wrong — the 503s we attributed to rate limiting
+    # were actually the #-prefix parser bug silently dropping successful
+    # responses. With that fixed, parallel pressure is fine. 2 workers
+    # cuts wall time roughly in half; the adaptive demotion makes batch
+    # 2 onwards skip the failing primary model entirely.
+    with ThreadPoolExecutor(max_workers=min(2, len(batches))) as pool:
         futures = [pool.submit(_run_batch, b) for b in batches]
         for f in futures:
             try:
