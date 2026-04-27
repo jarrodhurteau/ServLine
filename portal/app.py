@@ -4432,82 +4432,11 @@ def api_price_intel(rest_id):
         return jsonify({"error": str(e)}), 500
 
 
-# -------------------------------------------------------------------
-# Competitor Comparison — Day 141.5
-# -------------------------------------------------------------------
-@app.post("/api/drafts/<int:draft_id>/compare_competitor")
-@login_required
-def api_compare_competitor(draft_id):
-    """Run a side-by-side price comparison against a specific competitor."""
-    if not ai_price_intel:
-        return jsonify({"error": "Price intelligence not available"}), 503
-
-    # Day 141.7: real competitor comparison is a paid feature.
-    # Admins bypass the gate for internal testing.
-    u = session.get("user") or {}
-    if u.get("role") != "admin" and (u.get("account_tier") or "free").lower() != "premium":
-        return jsonify({
-            "error": "upgrade_required",
-            "message": "Real competitor price comparisons are available on the $80/month plan.",
-            "upgrade_url": url_for("account_page"),
-        }), 402
-
-    _require_drafts_storage()
-    draft = drafts_store.get_draft(draft_id)
-    if not draft:
-        return jsonify({"error": "Draft not found"}), 404
-
-    rest_id = draft.get("restaurant_id")
-    if not rest_id:
-        return jsonify({"error": "No restaurant assigned to this draft"}), 400
-
-    data = request.get_json(silent=True) or {}
-    competitor_name = (data.get("competitor_name") or "").strip()
-    if not competitor_name:
-        return jsonify({"error": "competitor_name is required"}), 400
-
-    # Look up the competitor from cached Google Places data
-    try:
-        from storage.price_intel import get_cached_comparisons
-        comps = get_cached_comparisons(rest_id)
-    except Exception:
-        comps = []
-
-    competitor = None
-    for c in comps:
-        if c.get("place_name") == competitor_name:
-            competitor = c
-            break
-
-    if not competitor:
-        return jsonify({"error": f"Competitor '{competitor_name}' not found in cache"}), 404
-
-    try:
-        # Day 141.7: primary cache is the Opus+thinking comparison stored
-        # in competitor_comparisons (written by the preload). The old
-        # Python-based fuzzy matcher (get_cached_competitor_menu_comparison)
-        # was producing the bad cross-category matches we've been seeing
-        # (Gyro → Genoa Salami, Combination → Pizza With Pepperoni $3.50).
-        # It's dropped from the path entirely.
-        opus_cached = ai_price_intel.get_competitor_comparison(
-            draft_id=draft_id,
-            competitor_name=competitor_name,
-        )
-        if opus_cached:
-            return jsonify(opus_cached)
-
-        # No Opus result yet (preload still running or errored). Fall
-        # through to an on-demand Opus comparison.
-        result = ai_price_intel.compare_with_competitor(
-            draft_id=draft_id,
-            restaurant_id=rest_id,
-            competitor=competitor,
-        )
-        if result.get("error"):
-            return jsonify(result), 500
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# Day 141.9: per-competitor Opus comparison endpoint deleted. The route
+# computed expensive Opus+thinking comparisons that the editor UI never
+# surfaced — burning ~$0.30-0.50 per click for data nobody saw. If a
+# future product brings back side-by-side compare, it'll be designed
+# UI-first and lazy-computed on demand, not background-preloaded.
 
 
 # -------------------------------------------------------------------
@@ -7678,8 +7607,7 @@ def browse_proxy():
     host = (parsed.hostname or "").lower()
     if any(host == b or host.endswith("." + b) for b in blocked_hosts):
         return (f'<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:sans-serif;color:#666;text-align:center;padding:40px;">'
-                f'<div><h3 style="margin:0 0 8px;">{parsed.hostname} blocks embedded viewing</h3>'
-                f'<p style="margin:0 0 16px;">This site has bot detection that prevents proxy loading.</p>'
+                f'<div><h3 style="margin:0 0 16px;">{parsed.hostname} blocks embedded viewing</h3>'
                 f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;">Open directly in new tab &rarr;</a></div></div>'), 200
 
     try:
@@ -7847,9 +7775,8 @@ try{
             has_framebust = bool(re.search(rb'top\.location\s*=\s*self\.location|if\s*\(\s*top\.frames\.length\s*!=\s*0\s*\)', content))
             if has_framebust:
                 return (f'<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;text-align:center;padding:40px;">'
-                        f'<div><h3>This website requires a direct browser visit</h3>'
-                        f'<p style="margin:8px 0 16px;">It blocks embedded viewing.</p>'
-                        f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;font-size:1.1rem;">Open in new tab &rarr;</a></div></div>'), 200
+                        f'<div><h3 style="margin:0 0 16px;">{parsed.hostname} blocks embedded viewing</h3>'
+                        f'<a href="{url}" target="_blank" style="color:#B85C38;font-weight:600;font-size:1.1rem;">Open directly in new tab &rarr;</a></div></div>'), 200
 
         response = make_response(content)
         response.headers["Content-Type"] = ct
