@@ -6839,6 +6839,13 @@ def draft_editor(draft_id: int):
         pass
 
     price_map = {}
+    # Detect "Gemini fully failed" state for the banner: every assessed item
+    # has price_sources that contain only `market_estimate` source type with
+    # no real restaurant citations. Surfaces a customer-facing warning when
+    # we couldn't reach Google's grounded-search API at all and Haiku had to
+    # fill everything.
+    gemini_total_assessed = 0
+    gemini_with_real_sources = 0
     if price_intel and price_intel.get("assessments"):
         for a in price_intel["assessments"]:
             if a.get("item_id"):
@@ -6850,6 +6857,38 @@ def draft_editor(draft_id: int):
                     except (json.JSONDecodeError, TypeError):
                         a["price_sources"] = []
                 price_map[a["item_id"]] = a
+                # Count items with real Gemini sources (not just Haiku estimates)
+                ps_parsed = a.get("price_sources") or []
+                if a.get("regional_avg") is not None:
+                    gemini_total_assessed += 1
+                    has_real = False
+                    for src in ps_parsed if isinstance(ps_parsed, list) else []:
+                        if not isinstance(src, dict):
+                            continue
+                        for s in src.get("sources", []) or []:
+                            if isinstance(s, dict) and s.get("restaurant"):
+                                has_real = True
+                                break
+                        if has_real:
+                            break
+                        for sz in (src.get("sizes") or {}).values():
+                            if isinstance(sz, dict):
+                                for s in sz.get("sources", []) or []:
+                                    if isinstance(s, dict) and s.get("restaurant"):
+                                        has_real = True
+                                        break
+                            if has_real:
+                                break
+                        if has_real:
+                            break
+                    if has_real:
+                        gemini_with_real_sources += 1
+    # Banner condition: assessed items exist but ZERO have real Gemini cites
+    # (i.e. 100% Haiku fallback). Don't fire on partial fallbacks — that's
+    # the normal degraded-Google case and not actionable for the user.
+    gemini_servers_down = (
+        gemini_total_assessed > 0 and gemini_with_real_sources == 0
+    )
 
     # Restaurant info
     restaurant = None
@@ -6973,6 +7012,7 @@ def draft_editor(draft_id: int):
         source_is_structured=source_is_structured,
         item_coordinates=item_coordinates,
         user_restaurants=user_restaurants,
+        gemini_servers_down=gemini_servers_down,
     )
 
 

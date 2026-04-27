@@ -209,8 +209,77 @@ def _ensure_schema() -> None:
         conn.commit()
 
 
+def _ensure_gemini_log_schema() -> None:
+    """Persistent log of every Gemini API call we make. Used to track
+    success/failure rates over time, identify outage windows, and confirm
+    whether `pro` continues to be reliable in production. Append-only —
+    we never modify rows after insert."""
+    with _db_connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gemini_call_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts            TEXT NOT NULL,
+                model         TEXT NOT NULL,
+                outcome       TEXT NOT NULL,   -- 'ok' | 'error' | 'empty_body'
+                error_type    TEXT,
+                error_status  INTEGER,
+                error_message TEXT,
+                batch_size    INTEGER,
+                duration_s    REAL,
+                draft_id      INTEGER
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gemini_log_ts "
+            "ON gemini_call_log(ts)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gemini_log_model "
+            "ON gemini_call_log(model)"
+        )
+        conn.commit()
+
+
+def _log_gemini_call(*, model: str, outcome: str,
+                      error_type: Optional[str] = None,
+                      error_status: Optional[int] = None,
+                      error_message: Optional[str] = None,
+                      batch_size: int = 0, duration_s: float = 0.0,
+                      draft_id: Optional[int] = None) -> None:
+    """Append a single row to gemini_call_log. Swallows DB errors so a
+    log failure can never block a real Gemini call from completing."""
+    try:
+        with _db_connect() as conn:
+            conn.execute(
+                """INSERT INTO gemini_call_log
+                   (ts, model, outcome, error_type, error_status, error_message,
+                    batch_size, duration_s, draft_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _now(), model, outcome,
+                    error_type, error_status,
+                    (error_message or "")[:500] if error_message else None,
+                    batch_size, round(duration_s, 2), draft_id,
+                ),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("Failed to log Gemini call: %s", e)
+
+
+def _extract_status_from_error(exc: Exception) -> Optional[int]:
+    """Best-effort HTTP status code extraction from a Gemini SDK exception.
+    Errors typically format as 'ServerError: 503 UNAVAILABLE. {...}'."""
+    s = str(exc)
+    for code in (503, 500, 502, 504, 429, 400, 401, 403, 404, 408):
+        if str(code) in s:
+            return code
+    return None
+
+
 # Run on import
 _ensure_schema()
+_ensure_gemini_log_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -852,18 +921,23 @@ _GEMINI_LAST_RUN: Dict[str, Any] = {
     "duration_s": 0.0,
 }
 
-# Multi-model fallback chain. When `gemini-2.5-flash` returns sustained
-# 503 UNAVAILABLE under load (which it does — observed in production),
-# fall through to a sibling that runs on different infra. All three
-# support Google Search grounding as of 2026-04. Order is preference:
-# fastest/cheapest first, premium last. Hitting `pro` is cost-noticeable
-# so it only kicks in when both flash variants are saturated.
-_GEMINI_MODEL_FALLBACK = (
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-pro",
-)
-
+# Single grounded-pricing model. Earlier iterations had a multi-model
+# fallback chain (flash → flash-lite → pro) with probe, race, and switch
+# logic, but observation across multiple production runs in Apr 2026
+# showed:
+#   - flash-lite: ~50% empty bodies on grounded prompts, sometimes
+#                 garbage when it does answer. Dropped first.
+#   - flash:      regularly 503s during Google capacity events. When it
+#                 works it's fast, but reliability is too inconsistent
+#                 to keep as primary.
+#   - pro:        slower (~60-120s per 20-item batch) but consistently
+#                 returns clean, well-cited results. Zero observed 503s
+#                 in our production usage (caveat: forum reports show
+#                 pro CAN have outages, but rare).
+# Pro-only keeps the code simple, the data clean, and the cost still
+# under $0.50 per typical menu — well within margin on the $80/mo plan.
+# If pro itself goes down, we Haiku-fallback + show a banner.
+_GEMINI_MODEL = "gemini-2.5-pro"
 
 def _is_retryable_gemini_error(exc: Exception) -> bool:
     """Return True if this Gemini error is worth retrying. Covers the full
@@ -880,7 +954,8 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
 
 def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                           zip_code: str, cuisine: str,
-                          address: str = "") -> Dict[int, Dict[str, Any]]:
+                          address: str = "",
+                          draft_id: Optional[int] = None) -> Dict[int, Dict[str, Any]]:
     """Use Gemini with Google Search grounding to get real market prices.
 
     Batches items and asks Gemini to search Google for actual local pricing.
@@ -910,24 +985,14 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
 
     client = genai.Client(api_key=api_key)
 
-    # No upfront health check. The first batch IS the health check —
-    # adding a separate grounded call before the real work just doubled
-    # the chance of hitting a transient blip and silently aborting.
-
+    # No probe, no fallback chain — pro is the only model. If pro is down,
+    # we'll find out on the first batch's failure and Haiku takes over.
     out: Dict[int, Dict[str, Any]] = {}
-    # 20 items/batch (was 10). Gemini 2.5 has a 1M context window so prompt
-    # size isn't the constraint — output JSON is. 20 items × ~200 tokens =
-    # ~4K output tokens, well under any limit. Halves total batch count.
+    # 20 items/batch. Gemini 2.5 has a 1M context window so prompt size isn't
+    # the constraint — output JSON is. 20 items × ~200 tokens = ~4K output
+    # tokens, well under any limit.
     batch_size = 20
-
-    # Adaptive model promotion: if the first batch fails on the primary
-    # model (gemini-2.5-flash), demote it to the end of the chain for the
-    # rest of this run. Today's symptom: every batch wastes ~30s hitting
-    # flash before falling through. Once we know flash is degraded, the
-    # remaining batches go straight to flash-lite. This list is local to
-    # this invocation so we don't pollute future runs.
-    active_chain: List[str] = list(_GEMINI_MODEL_FALLBACK)
-    _chain_lock = threading.Lock()
+    draft_id_for_log = draft_id
 
     def _run_batch(batch):
         item_lines = ""
@@ -972,157 +1037,85 @@ Rules:
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
-        # Two nested retry layers:
-        #   - Outer loop iterates over fallback models (2.5-flash → 2.5-flash-lite
-        #     → 2.5-pro). When one model is saturated (sustained 503), siblings
-        #     on different infrastructure usually still respond.
-        #   - Inner loop is up to 2 attempts per model with longer backoff.
-        #     Combined: up to ~6 calls across 3 models per batch.
-        # We only fall through to the next model on retryable errors. A
-        # 4xx from one model means the request itself is bad and won't
-        # succeed anywhere — fail fast.
-        # Why so few attempts: aggressive retries against a rate-limited
-        # Gemini caused cascading 503s in production — each retry consumed
-        # throughput, making the next call more likely to fail. Probing
-        # confirmed Gemini itself is healthy; the throttling was self-inflicted.
-        MAX_ATTEMPTS_PER_MODEL = 2
-        response = None
-        used_model = None
+        # Pro-only: one call, one quick retry on transient 503, then give up
+        # the batch (its items will be picked up by the per-item retry pass
+        # or fall to Haiku). Every attempt is logged to gemini_call_log so
+        # we can audit pro's reliability over time.
         batch_ids = [it["item_id"] for it in batch]
-        bail_out_non_retryable = False
 
-        # Snapshot the active chain — if another worker demotes a model
-        # mid-flight we still finish this batch with a consistent ordering.
-        with _chain_lock:
-            chain_snapshot = list(active_chain)
+        def _attempt():
+            t0 = time.time()
+            try:
+                candidate = client.models.generate_content(
+                    model=_GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                        temperature=0.1,
+                    ),
+                )
+                txt = (candidate.text or "").strip() if candidate else ""
+                dur = time.time() - t0
+                if not txt:
+                    _log_gemini_call(
+                        model=_GEMINI_MODEL, outcome="empty_body",
+                        error_type="EmptyResponse",
+                        error_message="200 OK with empty body",
+                        batch_size=len(batch), duration_s=dur,
+                        draft_id=draft_id_for_log,
+                    )
+                    return None, "EmptyResponse", None, "200 OK with empty body"
+                _log_gemini_call(
+                    model=_GEMINI_MODEL, outcome="ok",
+                    batch_size=len(batch), duration_s=dur,
+                    draft_id=draft_id_for_log,
+                )
+                return candidate, None, None, None
+            except Exception as e:
+                dur = time.time() - t0
+                err_type = type(e).__name__
+                err_msg = str(e)[:200]
+                err_status = _extract_status_from_error(e)
+                _log_gemini_call(
+                    model=_GEMINI_MODEL, outcome="error",
+                    error_type=err_type, error_status=err_status,
+                    error_message=err_msg,
+                    batch_size=len(batch), duration_s=dur,
+                    draft_id=draft_id_for_log,
+                )
+                return None, err_type, err_status, err_msg
 
-        for model_idx, model_name in enumerate(chain_snapshot):
-            if response is not None or bail_out_non_retryable:
-                break
-            for attempt in range(MAX_ATTEMPTS_PER_MODEL):
-                try:
-                    candidate = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            tools=[types.Tool(google_search=types.GoogleSearch())],
-                            temperature=0.1,
-                        ),
-                    )
-                    # Some sibling models (notably 2.5-flash-lite) accept
-                    # grounded requests but return 200 with an empty body.
-                    # Treat empty as a retryable failure so we keep falling
-                    # through the chain instead of declaring success and
-                    # then dying on JSON parse.
-                    candidate_text = (candidate.text or "").strip() if candidate else ""
-                    if not candidate_text:
-                        _GEMINI_LAST_RUN["errors"].append({
-                            "model": model_name,
-                            "attempt": attempt + 1,
-                            "error_type": "EmptyResponse",
-                            "message": "200 OK with empty body (model rejected grounded prompt)",
-                            "batch_size": len(batch),
-                            "batch_ids": batch_ids,
-                        })
-                        # Empty body = model rejected this prompt format.
-                        # Retrying the same model yields the same empty body;
-                        # fall through to the next model in the chain.
-                        # Same adaptive-demotion rule: empty body on the
-                        # primary model means it's not worth trying first.
-                        if model_idx == 0:
-                            with _chain_lock:
-                                if active_chain and active_chain[0] == model_name:
-                                    demoted = active_chain.pop(0)
-                                    active_chain.append(demoted)
-                                    log.warning(
-                                        "Adaptive demotion: %s (empty body) "
-                                        "moved to end of fallback chain "
-                                        "(new order: %s)",
-                                        demoted, " > ".join(active_chain),
-                                    )
-                        log.warning(
-                            "Gemini %s returned empty body — falling through to next model",
-                            model_name,
-                        )
-                        break  # exit inner loop, outer loop tries next model
-                    response = candidate
-                    used_model = model_name
-                    if model_idx > 0:
-                        log.info(
-                            "Gemini batch recovered on fallback model %s (attempt %d) — items=%s",
-                            model_name, attempt + 1, batch_ids,
-                        )
-                    break
-                except Exception as retry_err:
-                    err_type = type(retry_err).__name__
-                    err_msg = str(retry_err)[:200]
-                    _GEMINI_LAST_RUN["errors"].append({
-                        "model": model_name,
-                        "attempt": attempt + 1,
-                        "error_type": err_type,
-                        "message": err_msg,
-                        "batch_size": len(batch),
-                        "batch_ids": batch_ids,
-                    })
-                    if not _is_retryable_gemini_error(retry_err):
-                        # Bad request, auth, etc. — falling to a sibling
-                        # model won't help. Stop the whole chain.
-                        log.error(
-                            "Gemini batch hit non-retryable error on %s: %s: %s — items=%s",
-                            model_name, err_type, err_msg, batch_ids,
-                        )
-                        bail_out_non_retryable = True
-                        break
-                    if attempt < MAX_ATTEMPTS_PER_MODEL - 1:
-                        # Long backoff (15-30s) on transient errors. Gemini
-                        # rate-limit windows are typically per-minute, so a
-                        # short retry just hits the same throttle again. A
-                        # long pause lets quota actually recover.
-                        sleep_s = 15.0 + random.uniform(0, 10.0)
-                        log.warning(
-                            "Gemini %s batch %d/%d transient failure (%s) — backing off %.1fs",
-                            model_name, attempt + 1, MAX_ATTEMPTS_PER_MODEL,
-                            err_type, sleep_s,
-                        )
-                        time.sleep(sleep_s)
-                        continue
-                    # Out of attempts on this model — try the next one.
-                    # Adaptive demotion: when the FIRST model in the chain
-                    # exhausts, move it to the end for the rest of this run.
-                    # Future batches skip the wasted ~30s of failed retries
-                    # and go straight to the model that's actually working.
-                    if model_idx == 0:
-                        with _chain_lock:
-                            if active_chain and active_chain[0] == model_name:
-                                demoted = active_chain.pop(0)
-                                active_chain.append(demoted)
-                                log.warning(
-                                    "Adaptive demotion: %s moved to end of "
-                                    "fallback chain for rest of this run "
-                                    "(new order: %s)",
-                                    demoted, " > ".join(active_chain),
-                                )
-                    next_model = (
-                        chain_snapshot[model_idx + 1]
-                        if model_idx + 1 < len(chain_snapshot) else None
-                    )
-                    if next_model:
-                        log.warning(
-                            "Gemini %s exhausted %d attempts — falling through to %s",
-                            model_name, MAX_ATTEMPTS_PER_MODEL, next_model,
-                        )
-                    else:
-                        log.error(
-                            "Gemini batch failed across all fallback models — items=%s",
-                            batch_ids,
-                        )
+        response, err_type, err_status, err_msg = _attempt()
+
+        # One retry on transient errors only (503/429/timeout). Empty body
+        # and 4xx errors don't get retried — they're deterministic.
+        if response is None and err_type and err_type != "EmptyResponse":
+            sleep_s = 15.0 + random.uniform(0, 10.0)
+            log.warning(
+                "Pro batch failed (%s: %s) — retrying in %.1fs",
+                err_type, err_msg, sleep_s,
+            )
+            time.sleep(sleep_s)
+            response, err_type, err_status, err_msg = _attempt()
+
         if not response:
+            _GEMINI_LAST_RUN["errors"].append({
+                "model": _GEMINI_MODEL,
+                "error_type": err_type,
+                "error_status": err_status,
+                "message": err_msg,
+                "batch_size": len(batch),
+                "batch_ids": batch_ids,
+            })
+            log.error(
+                "Pro batch failed after retry (%s) — items=%s",
+                err_type, batch_ids,
+            )
             _GEMINI_LAST_RUN["batches_failed"] += 1
             return {}
-        if used_model:
-            _GEMINI_LAST_RUN["model_usage"][used_model] = (
-                _GEMINI_LAST_RUN["model_usage"].get(used_model, 0) + 1
-            )
+        _GEMINI_LAST_RUN["model_usage"][_GEMINI_MODEL] = (
+            _GEMINI_LAST_RUN["model_usage"].get(_GEMINI_MODEL, 0) + 1
+        )
 
         try:
             text = (response.text or "").strip()
@@ -1716,7 +1709,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         #           loudly so this can be investigated.
         item_market = _gemini_search_prices(
             haiku_items, city, state, zip_code, cuisine,
-            address=full_address)
+            address=full_address, draft_id=draft_id)
 
         # Circuit breaker: if more than half the batched calls failed,
         # Gemini is in a degraded state (sustained 503s, regional outage,
@@ -1757,7 +1750,8 @@ def _aggregate_price_ranges(draft_id: int) -> int:
             _retry_t0 = time.time()
             def _one(it):
                 return _gemini_search_prices(
-                    [it], city, state, zip_code, cuisine, address=full_address,
+                    [it], city, state, zip_code, cuisine,
+                    address=full_address, draft_id=draft_id,
                 )
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(_one, it) for it in missing]
