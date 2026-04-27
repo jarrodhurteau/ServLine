@@ -1361,12 +1361,39 @@
           </div>
           <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:.88rem; color:var(--ink);">
             <div style="color:var(--muted);">Restaurant</div><div id="wiz-verify-name" style="font-weight:600;">—</div>
-            <div style="color:var(--muted);">Address</div><div id="wiz-verify-address">—</div>
+            <div style="color:var(--muted);">Address</div>
+            <div id="wiz-verify-address" style="white-space:pre-line; line-height:1.45;">—</div>
             <div style="color:var(--muted);">Cuisine</div><div id="wiz-verify-cuisine">—</div>
           </div>
           <div id="wiz-verify-warning" style="display:none; margin-top:10px; padding:8px 10px; background:rgba(220,53,69,.08); border:1px solid rgba(220,53,69,.3); border-radius:6px; font-size:.8rem; color:#dc3545;"></div>
           <div style="margin-top:10px; font-size:.78rem; color:var(--muted);">
-            Something wrong? <a href="{{ url_for('restaurants_index') if false else '#' }}" id="wiz-verify-edit" style="color:#B85C38; text-decoration:underline;">Edit restaurant details</a> first.
+            Something wrong? <a href="#" id="wiz-verify-edit" onclick="wizOpenEditRestaurantModal(); return false;" style="color:#B85C38; text-decoration:underline;">Edit restaurant details</a> &mdash; no page reload, your upload stays put.
+          </div>
+        </div>
+
+        {# Inline-edit modal: updates the selected restaurant without leaving
+           the wizard so the uploaded draft stays in scope. #}
+        <div id="wiz-edit-rest-overlay" style="display:none; position:fixed; inset:0; background:rgba(44,44,44,.55); z-index:9000; align-items:center; justify-content:center;" onclick="if(event.target===this) wizCloseEditRestaurantModal();">
+          <div style="background:#FAF4EC; border:1.5px solid #d5c4a1; border-radius:10px; padding:22px 24px; width:min(460px, 92vw); max-height:90vh; overflow:auto; box-shadow:0 16px 40px rgba(0,0,0,.25);">
+            <div style="font-size:1.05rem; font-weight:700; color:#2C2C2C; margin-bottom:4px;">Edit restaurant</div>
+            <div style="font-size:.82rem; color:var(--muted); margin-bottom:14px;">
+              A real street address gives far better competitor matches than zip-only.
+            </div>
+            <div style="display:grid; gap:10px;">
+              <input type="text" id="wiz-edit-rest-name" placeholder="Restaurant name *" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              <input type="text" id="wiz-edit-rest-address" placeholder="Street address" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px; min-width:0;">
+                <input type="text" id="wiz-edit-rest-city" placeholder="City" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+                <input type="text" id="wiz-edit-rest-state" placeholder="State" maxlength="2" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem; text-transform:uppercase;" />
+                <input type="text" id="wiz-edit-rest-zip" placeholder="Zip" style="width:100%; min-width:0; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              </div>
+              <input type="text" id="wiz-edit-rest-cuisine" placeholder="Cuisine type (e.g. pizza, italian)" style="width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #d5c4a1; border-radius:6px; font-size:.9rem;" />
+              <div id="wiz-edit-rest-error" style="display:none; padding:8px 10px; background:rgba(220,53,69,.08); border:1px solid rgba(220,53,69,.3); border-radius:6px; font-size:.8rem; color:#dc3545;"></div>
+              <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
+                <button type="button" onclick="wizCloseEditRestaurantModal()" style="padding:8px 16px; border:1.5px solid #d5c4a1; border-radius:6px; background:#fff; color:var(--ink); cursor:pointer; font-size:.85rem;">Cancel</button>
+                <button type="button" id="wiz-edit-rest-save" onclick="wizSaveEditRestaurant()" style="padding:8px 16px; border:none; border-radius:6px; background:#B85C38; color:#fff; cursor:pointer; font-weight:600; font-size:.85rem;">Save</button>
+              </div>
+            </div>
           </div>
         </div>
         {% else %}
@@ -1442,27 +1469,114 @@
     const zip = opt.dataset.zip || '';
     const cuisine = opt.dataset.cuisine || '';
 
-    const addrParts = [addr, [city, state].filter(Boolean).join(', '), zip].filter(Boolean);
+    // Multi-line address — street on line 1, city/state/zip on line 2.
+    // Each missing chunk shows its own "(no street address)" so users can
+    // tell exactly which pieces are empty; zip-only gives lousy price intel.
+    const addrEl = document.getElementById('wiz-verify-address');
+    const line1 = addr || '(no street address)';
+    const locality = [city, state].filter(Boolean).join(', ');
+    const line2Parts = [locality, zip].filter(Boolean);
+    const line2 = line2Parts.length ? line2Parts.join('  ') : '(no city/state)';
+    addrEl.textContent = line1 + '\n' + line2;
+    addrEl.style.color = (addr && (city || state) && zip) ? '' : '#B85C38';
+
     document.getElementById('wiz-verify-name').textContent = name;
-    document.getElementById('wiz-verify-address').textContent = addrParts.join(' · ') || '(not set)';
     document.getElementById('wiz-verify-cuisine').textContent = cuisine || '(not set)';
 
     const missing = [];
     if (!zip) missing.push('zip code');
     if (!cuisine) missing.push('cuisine type');
+    if (!addr || !city || !state) missing.push('street address');
     const warn = document.getElementById('wiz-verify-warning');
     if (missing.length) {
       warn.style.display = 'block';
-      warn.textContent = 'Competitor comparison needs a ' + missing.join(' and a ') +
-        '. Update the restaurant before continuing.';
+      warn.textContent = 'Missing ' + missing.join(', ') +
+        '. Price comparison is far more accurate with a full address. Tap "Edit restaurant details" below to fix.';
     } else {
       warn.style.display = 'none';
     }
 
-    const editLink = document.getElementById('wiz-verify-edit');
-    if (editLink) editLink.href = '/restaurants/' + opt.value + '/detail';
-
     panel.style.display = 'block';
+  }
+
+  // Day 141.9: inline-edit modal so fixing restaurant details doesn't nuke
+  // the uploaded draft or bounce the user out of the wizard.
+  function wizOpenEditRestaurantModal() {
+    const sel = document.getElementById('wiz-restaurant-select');
+    if (!sel) return;
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value || opt.value === '__new__') return;
+    document.getElementById('wiz-edit-rest-name').value = opt.dataset.name || '';
+    document.getElementById('wiz-edit-rest-address').value = opt.dataset.address || '';
+    document.getElementById('wiz-edit-rest-city').value = opt.dataset.city || '';
+    document.getElementById('wiz-edit-rest-state').value = opt.dataset.state || '';
+    document.getElementById('wiz-edit-rest-zip').value = opt.dataset.zip || '';
+    document.getElementById('wiz-edit-rest-cuisine').value = opt.dataset.cuisine || '';
+    const err = document.getElementById('wiz-edit-rest-error');
+    err.style.display = 'none';
+    err.textContent = '';
+    const ov = document.getElementById('wiz-edit-rest-overlay');
+    ov.style.display = 'flex';
+  }
+
+  function wizCloseEditRestaurantModal() {
+    const ov = document.getElementById('wiz-edit-rest-overlay');
+    if (ov) ov.style.display = 'none';
+  }
+
+  async function wizSaveEditRestaurant() {
+    const sel = document.getElementById('wiz-restaurant-select');
+    const opt = sel && sel.options[sel.selectedIndex];
+    if (!opt || !opt.value || opt.value === '__new__') return;
+    const btn = document.getElementById('wiz-edit-rest-save');
+    const err = document.getElementById('wiz-edit-rest-error');
+    const fd = new FormData();
+    const fields = {
+      name: document.getElementById('wiz-edit-rest-name').value.trim(),
+      address: document.getElementById('wiz-edit-rest-address').value.trim(),
+      city: document.getElementById('wiz-edit-rest-city').value.trim(),
+      state: document.getElementById('wiz-edit-rest-state').value.trim().toUpperCase(),
+      zip_code: document.getElementById('wiz-edit-rest-zip').value.trim(),
+      cuisine_type: document.getElementById('wiz-edit-rest-cuisine').value.trim(),
+    };
+    if (!fields.name) {
+      err.style.display = 'block';
+      err.textContent = 'Restaurant name is required.';
+      return;
+    }
+    Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const resp = await fetch('/restaurants/' + opt.value + '/update', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+        body: fd,
+      });
+      const data = await resp.json().catch(() => ({ ok: false, error: 'Bad response' }));
+      if (!resp.ok || !data.ok) {
+        err.style.display = 'block';
+        err.textContent = data.error || 'Update failed.';
+        return;
+      }
+      // Write the saved values back to the dropdown option so the verify
+      // panel picks them up, then re-render in place.
+      opt.dataset.name = fields.name;
+      opt.dataset.address = fields.address;
+      opt.dataset.city = fields.city;
+      opt.dataset.state = fields.state;
+      opt.dataset.zip = fields.zip_code;
+      opt.dataset.cuisine = fields.cuisine_type;
+      opt.textContent = fields.name + (fields.address ? ' — ' + fields.address : '');
+      wizUpdateVerifyPanel(sel);
+      wizCloseEditRestaurantModal();
+    } catch (e) {
+      err.style.display = 'block';
+      err.textContent = 'Network error. Try again.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
   }
 
   // Render panel on page load if a restaurant is already selected

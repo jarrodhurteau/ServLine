@@ -299,6 +299,18 @@ def _store_cache(
     restaurant_id: int,
 ) -> int:
     """Store search results in cache.  Returns cache row id."""
+    # Don't cache empty result sets — a transient API blip or bad keyword would
+    # otherwise poison the cache for CACHE_TTL_DAYS and silently kill pricing
+    # for every draft in that (zip, cuisine). Clear any existing empty row for
+    # this key so the next call retries the live Places API.
+    if not results:
+        with db_connect() as conn:
+            conn.execute(
+                "DELETE FROM price_comparison_cache WHERE zip_code = ? AND cuisine_type = ?",
+                (zip_code, cuisine_type),
+            )
+            conn.commit()
+        return 0
     now = _now()
     expires = (datetime.utcnow() + timedelta(days=CACHE_TTL_DAYS)).strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -351,6 +363,50 @@ def _store_cache(
     return cache_id
 
 
+def _ensure_restaurant_results(cache_id: int, restaurant_id: int,
+                                results: List[Dict[str, Any]]) -> None:
+    """Make sure `price_comparison_results` has restaurant-scoped rows for
+    this `(cache_id, restaurant_id)` pair, inserting from the cached payload
+    if not. Without this, the second restaurant to hit a cached zip/cuisine
+    serves the cache but ends up with an empty editor map — the results table
+    is keyed on restaurant_id, and the original populator's rows don't help."""
+    if not cache_id or not restaurant_id or not results:
+        return
+    with db_connect() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM price_comparison_results "
+            "WHERE cache_id = ? AND restaurant_id = ? LIMIT 1",
+            (cache_id, restaurant_id),
+        ).fetchone()
+        if existing:
+            return
+        now = _now()
+        for r in results:
+            conn.execute(
+                """INSERT INTO price_comparison_results
+                   (restaurant_id, cache_id, place_id, place_name, place_address,
+                    price_level, price_label, rating, user_ratings, cuisine_match,
+                    latitude, longitude, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    restaurant_id,
+                    cache_id,
+                    r.get("place_id"),
+                    r.get("name") or "",
+                    r.get("address"),
+                    r.get("price_level"),
+                    r.get("price_label"),
+                    r.get("rating"),
+                    r.get("user_ratings_total", 0),
+                    r.get("cuisine_match"),
+                    r.get("lat"),
+                    r.get("lng"),
+                    now,
+                ),
+            )
+        conn.commit()
+
+
 # -------------------------------------------------------------------
 # Public API
 # -------------------------------------------------------------------
@@ -397,6 +453,22 @@ def search_nearby_restaurants(
             )
             cached["zip_code"] = zip_code
             cached["cuisine_type"] = cuisine_type
+            # Backfill restaurant-scoped result rows from the cached payload.
+            # Without this, get_cached_comparisons(restaurant_id) returns
+            # nothing for any restaurant that wasn't the original cache
+            # populator — the editor map ends up empty even though we have
+            # 20 nearby places sitting in cache.
+            try:
+                _ensure_restaurant_results(
+                    cached.get("cache_id"),
+                    restaurant_id,
+                    cached.get("results") or [],
+                )
+            except Exception as exc:
+                log.warning(
+                    "Failed to backfill price_comparison_results for rest %d: %s",
+                    restaurant_id, exc,
+                )
             return cached
 
     # Live API call

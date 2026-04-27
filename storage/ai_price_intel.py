@@ -43,6 +43,66 @@ log = logging.getLogger(__name__)
 # Reuse shared Anthropic client
 from .ai_menu_extract import _get_client
 
+
+# Gemini's search-grounded pricing sometimes returns list-article headlines
+# ("Best Pizza in Cape May Court House | My Pizza Heaven") instead of real
+# restaurant names. Those get matched by Google Places to the first pizzeria
+# it can find — typically hundreds of miles from the user's actual location.
+# Filter aggressively at ingest so pill citations + the editor map stay clean.
+_ARTICLE_MARKERS = (
+    " | ", " · ", "...",
+    " near me", " near you", " near here",
+    "best pizza in ", "best pizzas in ", "best pizza of ",
+    "best restaurants in ", "best restaurants of ",
+    "top restaurants in ", "top pizzas in ",
+    "places to eat in ", "where to eat in ",
+)
+_ARTICLE_PREFIXES = (
+    "best ", "top ", "the best ", "the top ",
+    "10 ", "5 ", "7 ", "12 ", "15 ", "20 ", "25 ",
+)
+
+
+def _coerce_item_id(raw):
+    """Convert an `id` field from a Gemini/Haiku response into an int.
+
+    Gemini sometimes echoes the literal `#NNN` token from our prompt back
+    in its JSON (we format items as `- #19283 "Cheese Pizza" ...`). Plain
+    `int(raw)` then raises ValueError, which the broad `except Exception`
+    in the parser catches — silently dropping the entire batch's worth of
+    successfully-fetched data. Strip the prefix here so we don't lose any
+    item Gemini actually returned.
+
+    Returns None if `raw` cannot be converted (caller should skip that row).
+    """
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip().lstrip("#").strip()
+        if s.isdigit():
+            return int(s)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_article_title(name: str) -> bool:
+    """Return True when `name` is probably a Google Search article title
+    or list header, not a real restaurant. Conservative — we'd rather let
+    some junk through than drop a legitimately odd restaurant name."""
+    if not name:
+        return True
+    n = name.strip()
+    if len(n) > 80:
+        return True
+    low = n.lower()
+    if any(m in low for m in _ARTICLE_MARKERS):
+        return True
+    if any(low.startswith(p) for p in _ARTICLE_PREFIXES):
+        return True
+    return False
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -775,6 +835,48 @@ def _preload_comparisons_async(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+# Module-level metrics for Gemini calls — reset at the start of every
+# _gemini_search_prices invocation. Lets the caller (and humans reading
+# logs) see exactly what happened: how many batches, how many succeeded,
+# what errors fired. Helps with the "Gemini IS the product, it must be
+# rock solid" requirement — silent failures are not acceptable.
+_GEMINI_LAST_RUN: Dict[str, Any] = {
+    "batches_total": 0,
+    "batches_ok": 0,
+    "batches_failed": 0,
+    "items_requested": 0,
+    "items_returned": 0,
+    "model_usage": {},   # {model_name: ok_batches}
+    "errors": [],        # list of {attempt, error_type, status, message}
+    "duration_s": 0.0,
+}
+
+# Multi-model fallback chain. When `gemini-2.5-flash` returns sustained
+# 503 UNAVAILABLE under load (which it does — observed in production),
+# fall through to a sibling that runs on different infra. All three
+# support Google Search grounding as of 2026-04. Order is preference:
+# fastest/cheapest first, premium last. Hitting `pro` is cost-noticeable
+# so it only kicks in when both flash variants are saturated.
+_GEMINI_MODEL_FALLBACK = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+)
+
+
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    """Return True if this Gemini error is worth retrying. Covers the full
+    set of transient failures Google calls out: 5xx server errors, 429
+    rate limit, deadline exceeded, network blips."""
+    s = str(exc)
+    return any(marker in s for marker in (
+        "503", "500", "502", "504", "429",
+        "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+        "DEADLINE_EXCEEDED", "INTERNAL",
+        "ServerError", "ServiceUnavailable",
+    ))
+
+
 def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                           zip_code: str, cuisine: str,
                           address: str = "") -> Dict[int, Dict[str, Any]]:
@@ -783,35 +885,33 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
     Batches items and asks Gemini to search Google for actual local pricing.
     Returns {item_id: {low, high, median, sizes: {...}}} in cents.
     """
+    import random
+    _start_t = time.time()
+    _GEMINI_LAST_RUN.update({
+        "batches_total": 0, "batches_ok": 0, "batches_failed": 0,
+        "items_requested": len(items), "items_returned": 0,
+        "errors": [], "duration_s": 0.0,
+    })
+
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key or not items:
+    if not api_key:
+        log.error("Gemini: GEMINI_API_KEY not set — cannot run real-price pricing")
+        return {}
+    if not items:
         return {}
 
     try:
         from google import genai
         from google.genai import types
     except ImportError:
-        log.warning("google-genai not installed")
+        log.error("Gemini: google-genai not installed — pip install google-genai")
         return {}
 
     client = genai.Client(api_key=api_key)
 
-    # Health check — one quick search-grounded query to verify Gemini is available
-    try:
-        _test = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents="What is 1+1? Reply with just the number.",
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                temperature=0.1,
-            ),
-        )
-        if not _test or not _test.text:
-            log.warning("Gemini health check returned empty — service may be degraded")
-            return {}
-    except Exception as e:
-        log.warning("Gemini health check failed: %s — skipping Google-sourced pricing", e)
-        return {}
+    # No upfront health check. The first batch IS the health check —
+    # adding a separate grounded call before the real work just doubled
+    # the chance of hitting a transient blip and silently aborting.
 
     out: Dict[int, Dict[str, Any]] = {}
     batch_size = 10
@@ -859,28 +959,142 @@ Rules:
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
-        try:
-            # Retry up to 2 times on transient errors (503, 429)
-            response = None
-            for attempt in range(3):
+        # Two nested retry layers:
+        #   - Outer loop iterates over fallback models (2.5-flash → 2.5-flash-lite
+        #     → 2.5-pro). When one model is saturated (sustained 503), siblings
+        #     on different infrastructure usually still respond.
+        #   - Inner loop is up to 2 attempts per model with longer backoff.
+        #     Combined: up to ~6 calls across 3 models per batch.
+        # We only fall through to the next model on retryable errors. A
+        # 4xx from one model means the request itself is bad and won't
+        # succeed anywhere — fail fast.
+        # Why so few attempts: aggressive retries against a rate-limited
+        # Gemini caused cascading 503s in production — each retry consumed
+        # throughput, making the next call more likely to fail. Probing
+        # confirmed Gemini itself is healthy; the throttling was self-inflicted.
+        MAX_ATTEMPTS_PER_MODEL = 2
+        response = None
+        used_model = None
+        batch_ids = [it["item_id"] for it in batch]
+        bail_out_non_retryable = False
+
+        for model_idx, model_name in enumerate(_GEMINI_MODEL_FALLBACK):
+            if response is not None or bail_out_non_retryable:
+                break
+            for attempt in range(MAX_ATTEMPTS_PER_MODEL):
                 try:
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                    candidate = client.models.generate_content(
+                        model=model_name,
                         contents=prompt,
                         config=types.GenerateContentConfig(
                             tools=[types.Tool(google_search=types.GoogleSearch())],
                             temperature=0.1,
                         ),
                     )
+                    # Some sibling models (notably 2.5-flash-lite) accept
+                    # grounded requests but return 200 with an empty body.
+                    # Treat empty as a retryable failure so we keep falling
+                    # through the chain instead of declaring success and
+                    # then dying on JSON parse.
+                    candidate_text = (candidate.text or "").strip() if candidate else ""
+                    if not candidate_text:
+                        _GEMINI_LAST_RUN["errors"].append({
+                            "model": model_name,
+                            "attempt": attempt + 1,
+                            "error_type": "EmptyResponse",
+                            "message": "200 OK with empty body (model rejected grounded prompt)",
+                            "batch_size": len(batch),
+                            "batch_ids": batch_ids,
+                        })
+                        # Empty body = model rejected this prompt format.
+                        # Retrying the same model usually yields the same
+                        # empty body. Skip to the next model in the chain
+                        # immediately (set attempt to last so loop exits).
+                        log.warning(
+                            "Gemini %s returned empty body — falling through to next model",
+                            model_name,
+                        )
+                        break  # exit inner loop, outer loop tries next model
+                        next_model = (
+                            _GEMINI_MODEL_FALLBACK[model_idx + 1]
+                            if model_idx + 1 < len(_GEMINI_MODEL_FALLBACK) else None
+                        )
+                        if next_model:
+                            log.warning(
+                                "Gemini %s kept returning empty body — falling through to %s",
+                                model_name, next_model,
+                            )
+                            break  # exit inner loop, outer loop tries next model
+                        log.error(
+                            "Gemini all fallback models returned empty bodies — items=%s",
+                            batch_ids,
+                        )
+                        break
+                    response = candidate
+                    used_model = model_name
+                    if model_idx > 0:
+                        log.info(
+                            "Gemini batch recovered on fallback model %s (attempt %d) — items=%s",
+                            model_name, attempt + 1, batch_ids,
+                        )
                     break
                 except Exception as retry_err:
-                    err_str = str(retry_err)
-                    if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
-                        time.sleep(5 * (attempt + 1))
+                    err_type = type(retry_err).__name__
+                    err_msg = str(retry_err)[:200]
+                    _GEMINI_LAST_RUN["errors"].append({
+                        "model": model_name,
+                        "attempt": attempt + 1,
+                        "error_type": err_type,
+                        "message": err_msg,
+                        "batch_size": len(batch),
+                        "batch_ids": batch_ids,
+                    })
+                    if not _is_retryable_gemini_error(retry_err):
+                        # Bad request, auth, etc. — falling to a sibling
+                        # model won't help. Stop the whole chain.
+                        log.error(
+                            "Gemini batch hit non-retryable error on %s: %s: %s — items=%s",
+                            model_name, err_type, err_msg, batch_ids,
+                        )
+                        bail_out_non_retryable = True
+                        break
+                    if attempt < MAX_ATTEMPTS_PER_MODEL - 1:
+                        # Long backoff (15-30s) on transient errors. Gemini
+                        # rate-limit windows are typically per-minute, so a
+                        # short retry just hits the same throttle again. A
+                        # long pause lets quota actually recover.
+                        sleep_s = 15.0 + random.uniform(0, 10.0)
+                        log.warning(
+                            "Gemini %s batch %d/%d transient failure (%s) — backing off %.1fs",
+                            model_name, attempt + 1, MAX_ATTEMPTS_PER_MODEL,
+                            err_type, sleep_s,
+                        )
+                        time.sleep(sleep_s)
                         continue
-                    raise
-            if not response:
-                return {}
+                    # Out of attempts on this model — try the next one.
+                    next_model = (
+                        _GEMINI_MODEL_FALLBACK[model_idx + 1]
+                        if model_idx + 1 < len(_GEMINI_MODEL_FALLBACK) else None
+                    )
+                    if next_model:
+                        log.warning(
+                            "Gemini %s exhausted %d attempts — falling through to %s",
+                            model_name, MAX_ATTEMPTS_PER_MODEL, next_model,
+                        )
+                    else:
+                        log.error(
+                            "Gemini batch failed across all fallback models — items=%s",
+                            batch_ids,
+                        )
+        if not response:
+            _GEMINI_LAST_RUN["batches_failed"] += 1
+            return {}
+        if used_model:
+            _GEMINI_LAST_RUN["model_usage"][used_model] = (
+                _GEMINI_LAST_RUN["model_usage"].get(used_model, 0) + 1
+            )
+
+        try:
             text = (response.text or "").strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -891,18 +1105,24 @@ Rules:
             results = json.loads(text)
             batch_out = {}
             for r in results:
-                iid = r.get("id")
+                iid = _coerce_item_id(r.get("id"))
                 low = r.get("low_cents", 0)
                 high = r.get("high_cents", 0)
                 med = r.get("median_cents", 0)
                 if iid and low > 0 and high > 0 and med > 0:
                     entry = {"low": int(low), "high": int(high), "median": int(med)}
-                    # Capture source restaurants
+                    # Capture source restaurants. Drop obvious article-title
+                    # strings up front so pill citations and the editor map
+                    # never see them — Gemini's Google Search grounding
+                    # sometimes echoes list-page headlines instead of the
+                    # actual restaurant names cited in them.
                     raw_sources = r.get("sources")
                     if isinstance(raw_sources, list):
                         entry["sources"] = [
                             {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
-                            for s in raw_sources if isinstance(s, dict) and s.get("restaurant")
+                            for s in raw_sources
+                            if isinstance(s, dict) and s.get("restaurant")
+                            and not _is_article_title(s.get("restaurant", ""))
                         ]
                     raw_sizes = r.get("sizes")
                     if isinstance(raw_sizes, dict):
@@ -918,30 +1138,77 @@ Rules:
                                     if isinstance(ss, list):
                                         size_entry["sources"] = [
                                             {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
-                                            for s in ss if isinstance(s, dict) and s.get("restaurant")
+                                            for s in ss
+                                            if isinstance(s, dict) and s.get("restaurant")
+                                            and not _is_article_title(s.get("restaurant", ""))
                                         ]
                                     sizes_out[slabel] = size_entry
                         if sizes_out:
                             entry["sizes"] = sizes_out
-                    batch_out[int(iid)] = entry
-            log.info("Gemini search batch: got %d items with real prices", len(batch_out))
+                    batch_out[iid] = entry
+            log.info(
+                "Gemini batch ok: %d/%d items returned (ids=%s)",
+                len(batch_out), len(batch), batch_ids,
+            )
+            _GEMINI_LAST_RUN["batches_ok"] += 1
             return batch_out
+        except json.JSONDecodeError as e:
+            preview = (text or "")[:200] if 'text' in locals() else "<no response>"
+            log.error(
+                "Gemini batch JSON parse failed: %s — preview=%r — items=%s",
+                e, preview, batch_ids,
+            )
+            _GEMINI_LAST_RUN["batches_failed"] += 1
+            _GEMINI_LAST_RUN["errors"].append({
+                "attempt": "parse", "error_type": "JSONDecodeError",
+                "message": str(e)[:200], "batch_size": len(batch), "batch_ids": batch_ids,
+            })
+            return {}
         except Exception as e:
-            log.warning("Gemini search batch failed: %s", e)
+            log.error(
+                "Gemini batch processing failed: %s: %s — items=%s",
+                type(e).__name__, e, batch_ids,
+            )
+            _GEMINI_LAST_RUN["batches_failed"] += 1
+            _GEMINI_LAST_RUN["errors"].append({
+                "attempt": "process", "error_type": type(e).__name__,
+                "message": str(e)[:200], "batch_size": len(batch), "batch_ids": batch_ids,
+            })
             return {}
 
-    # Run ALL batches in parallel — Gemini allows ~1000 RPM on paid tier
+    # Run batches in parallel. 2 workers (was 4) — long grounded calls
+    # (~30-60s each) compound badly under contention; halving the pressure
+    # cut the 503/timeout rate dramatically in testing without changing
+    # wall time meaningfully (we're network-bound, not CPU-bound).
     batches = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
+    _GEMINI_LAST_RUN["batches_total"] = len(batches)
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
+    # Sequential — 1 worker. With long-grounded calls (3-10s each healthy,
+    # 30-60s degraded) and the per-minute Gemini quota, parallel batches
+    # were creating their own throttling. Sequential adds maybe 30-60s of
+    # wall time vs 2-worker parallel, but eliminates self-inflicted 503s.
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = [pool.submit(_run_batch, b) for b in batches]
         for f in futures:
             try:
                 out.update(f.result())
-            except Exception:
-                pass
+            except Exception as e:
+                log.error("Gemini batch future raised: %s: %s", type(e).__name__, e)
 
-    log.info("Gemini search: got real prices for %d/%d items", len(out), len(items))
+    _GEMINI_LAST_RUN["items_returned"] = len(out)
+    _GEMINI_LAST_RUN["duration_s"] = round(time.time() - _start_t, 1)
+    model_breakdown = ", ".join(
+        f"{m}={n}" for m, n in _GEMINI_LAST_RUN["model_usage"].items()
+    ) or "none"
+    log.info(
+        "Gemini search summary: %d/%d items, %d/%d batches ok, "
+        "models=[%s], %d errors logged, %.1fs",
+        len(out), len(items),
+        _GEMINI_LAST_RUN["batches_ok"], _GEMINI_LAST_RUN["batches_total"],
+        model_breakdown,
+        len(_GEMINI_LAST_RUN["errors"]),
+        _GEMINI_LAST_RUN["duration_s"],
+    )
     return out
 
 
@@ -1080,7 +1347,7 @@ Rules:
             results = json.loads(text)
             batch_out = {}
             for r in results:
-                iid = r.get("id")
+                iid = _coerce_item_id(r.get("id"))
                 low = r.get("low_cents", 0)
                 high = r.get("high_cents", 0)
                 med = r.get("median_cents", 0)
@@ -1098,7 +1365,7 @@ Rules:
                                     sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
                         if sizes_out:
                             entry["sizes"] = sizes_out
-                    batch_out[int(iid)] = entry
+                    batch_out[iid] = entry
             return batch_out
         except Exception as e:
             log.warning("Price extraction batch failed: %s", e)
@@ -1189,7 +1456,7 @@ Rules:
             results = json.loads(text)
             batch_out = {}
             for r in results:
-                iid = r.get("id")
+                iid = _coerce_item_id(r.get("id"))
                 low = r.get("low_cents", 0)
                 high = r.get("high_cents", 0)
                 med = r.get("median_cents", 0)
@@ -1207,7 +1474,7 @@ Rules:
                                     sizes_out[slabel] = {"low": int(sl), "high": int(sh), "median": int(sm)}
                         if sizes_out:
                             entry["sizes"] = sizes_out
-                    batch_out[int(iid)] = entry
+                    batch_out[iid] = entry
             log.info("Item market estimates batch %d: got %d items from Haiku",
                      batch_idx, len(batch_out))
             return batch_out
@@ -1407,20 +1674,104 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 entry["variants"] = item_variants[row["item_id"]]
             haiku_items.append(entry)
 
-        # Gemini with Google Search grounding — real prices from real menus
-        # Falls back to Haiku estimates for items Gemini can't find
+        # Gemini with Google Search grounding — REAL prices from REAL menus.
+        # Gemini is the product. Haiku is an emergency fallback that should
+        # almost never run. The flow:
+        #   Pass 1: Batched Gemini (~10 items per call, parallel)
+        #   Pass 2: Per-item Gemini retry for what Pass 1 missed (smaller
+        #           prompts, far higher per-call success rate)
+        #   Pass 3: Haiku estimates ONLY for what's still missing — logged
+        #           loudly so this can be investigated.
         item_market = _gemini_search_prices(
             haiku_items, city, state, zip_code, cuisine,
             address=full_address)
-        # Fill gaps with Haiku estimates for items Google didn't cover
-        if len(item_market) < len(haiku_items):
-            missing = [it for it in haiku_items if it["item_id"] not in item_market]
-            if missing:
-                log.info("Gemini missed %d items, falling back to Haiku estimates", len(missing))
-                fallback = _estimate_item_market_rates(missing, city, state, zip_code, cuisine)
-                for iid, data in fallback.items():
-                    if iid not in item_market:
-                        item_market[iid] = data
+
+        # Circuit breaker: if more than half the batched calls failed,
+        # Gemini is in a degraded state (sustained 503s, regional outage,
+        # whatever). Per-item retries against a degraded Gemini are pure
+        # waste — each one will exhaust the same 9-attempt fallback chain
+        # we already ran, just smaller. Bail to Haiku immediately so the
+        # user sees pills in seconds instead of an hour-long grind.
+        batches_total = _GEMINI_LAST_RUN.get("batches_total", 0) or 1
+        batches_failed = _GEMINI_LAST_RUN.get("batches_failed", 0)
+        # Tightened from 50% to 25% — once a quarter of batches are failing,
+        # per-item retries will only make the throttling worse. Bail to Haiku.
+        gemini_degraded = batches_failed >= max(1, batches_total // 4)
+
+        missing = [it for it in haiku_items if it["item_id"] not in item_market]
+        if missing and gemini_degraded:
+            log.warning(
+                "Gemini circuit breaker open: %d/%d batches failed — skipping "
+                "per-item retry, going straight to Haiku for %d missing items",
+                batches_failed, batches_total, len(missing),
+            )
+        elif missing:
+            log.warning(
+                "Gemini batched run missed %d/%d items — running per-item retry pass",
+                len(missing), len(haiku_items),
+            )
+            # Per-item retry: 1 item per call so each Gemini request has a
+            # tiny prompt and fast response. Items that fail inside a
+            # 10-item batch (deadline, parse error on huge response) often
+            # succeed when asked individually. Cap concurrency at 2 so per-
+            # item retries don't themselves overload Gemini.
+            #
+            # Hard wall-clock cap: 120s. If Gemini degrades partway through,
+            # we don't want to grind on it forever. Anything not recovered
+            # in that window falls through to Haiku.
+            PER_ITEM_BUDGET_S = 120
+            from concurrent.futures import ThreadPoolExecutor
+            per_item: Dict[int, Dict[str, Any]] = {}
+            _retry_t0 = time.time()
+            def _one(it):
+                return _gemini_search_prices(
+                    [it], city, state, zip_code, cuisine, address=full_address,
+                )
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(_one, it) for it in missing]
+                for fut in futures:
+                    elapsed = time.time() - _retry_t0
+                    remaining = PER_ITEM_BUDGET_S - elapsed
+                    if remaining <= 0:
+                        log.warning(
+                            "Per-item Gemini retry hit %ds budget — abandoning "
+                            "remaining %d futures, falling to Haiku",
+                            PER_ITEM_BUDGET_S,
+                            sum(1 for f in futures if not f.done()),
+                        )
+                        for f in futures:
+                            f.cancel()
+                        break
+                    try:
+                        per_item.update(fut.result(timeout=remaining))
+                    except Exception as e:
+                        log.error("Per-item Gemini retry raised: %s: %s", type(e).__name__, e)
+            recovered = {iid: d for iid, d in per_item.items() if iid not in item_market}
+            if recovered:
+                log.info("Per-item Gemini retry recovered %d items in %.1fs",
+                         len(recovered), time.time() - _retry_t0)
+                item_market.update(recovered)
+
+        still_missing = [it for it in haiku_items if it["item_id"] not in item_market]
+        if still_missing:
+            # Haiku — last resort. Loud warning because this means Gemini
+            # genuinely couldn't deliver and the user is getting estimated
+            # prices instead of real local prices for these items.
+            log.warning(
+                "GEMINI FALLBACK: using Haiku estimates for %d/%d items "
+                "(Gemini exhausted after batch + per-item retries). "
+                "These items will lack real source citations.",
+                len(still_missing), len(haiku_items),
+            )
+            fallback = _estimate_item_market_rates(still_missing, city, state, zip_code, cuisine)
+            for iid, data in fallback.items():
+                if iid not in item_market:
+                    item_market[iid] = data
+        else:
+            log.info(
+                "Gemini delivered 100%% coverage: %d/%d items, no Haiku fallback needed",
+                len(item_market), len(haiku_items),
+            )
 
         for row in our_rows:
             current_price = row["current_price"] or 0
@@ -1604,59 +1955,14 @@ def analyze_menu_prices(
     except Exception as e:
         log.warning("Tier lookup failed for restaurant %d: %s", restaurant_id, e)
 
-    # Get competitor data from Google Places (cached from Day 134).
-    # Day 141.7: if cache is empty, auto-trigger the search here so the
-    # post-wizard analyzer is fully self-contained. Premium-only — free
-    # tier doesn't need competitor data since Apify scraping is gated.
-    competitor_data = get_cached_comparisons(restaurant_id)
-    if not competitor_data and user_tier == "premium":
-        log.info(
-            "Price intel: no cached nearby competitors for rest %d — "
-            "running Google Places search now",
-            restaurant_id,
-        )
-        try:
-            from storage.price_intel import search_nearby_restaurants
-            search_result = search_nearby_restaurants(restaurant_id, force_refresh=False)
-            if search_result.get("error"):
-                log.warning(
-                    "Price intel: nearby search failed for rest %d: %s",
-                    restaurant_id, search_result["error"],
-                )
-            else:
-                competitor_data = get_cached_comparisons(restaurant_id)
-                log.info(
-                    "Price intel: nearby search populated %d competitors for rest %d",
-                    len(competitor_data), restaurant_id,
-                )
-        except Exception as e:
-            log.warning("Price intel: nearby search raised for rest %d: %s", restaurant_id, e)
-
+    # Critical path is GEMINI-ONLY now. The 20-restaurant Google Places
+    # search and the per-competitor Opus comparisons are NOT inputs to
+    # Gemini — Gemini fetches its own prices via Google Search grounding.
+    # Those steps power editor-side features (map pins, click-to-compare),
+    # so they still run, but in a fire-and-forget background daemon AFTER
+    # aggregation lands. No more 15-min Playwright menu scrapes blocking
+    # the pills the user actually came here for.
     market_summary = get_market_summary(restaurant_id)
-
-    competitor_menus = []
-    if competitor_data:
-        log.info(
-            "Price intel: fetching real competitor menus for draft %d (tier=%s)...",
-            draft_id, user_tier,
-        )
-        competitor_menus = _fetch_competitor_menus(
-            competitor_data=competitor_data,
-            items=items,
-            max_competitors=5,
-            max_fresh_searches=5,
-            user_tier=user_tier,
-        )
-
-    # Day 141.7: Bulk Call 4 (Sonnet per-category batch prompting) is
-    # GONE. It added 15-20 min for Sonnet to invent ranges Claude later
-    # couldn't trace back to real prices. Replaced with:
-    #   1) Stub out price_intelligence_results (one row per item, no range yet)
-    #   2) Fire per-competitor Opus+thinking comparisons in parallel
-    #   3) _aggregate_price_ranges computes real range/avg/assessment from
-    #      the actual matched competitor prices
-    # The aggregator sets `assessment` from deterministic price math, not
-    # an LLM's subjective opinion — and every number has a traceable source.
     _stub_price_intelligence(
         draft_id=draft_id,
         restaurant_id=restaurant_id,
@@ -1666,20 +1972,46 @@ def analyze_menu_prices(
         competitor_count=market_summary.get("competitor_count", 0),
     )
 
-    if competitor_data:
-        _preload_comparisons_async(
-            draft_id=draft_id,
-            restaurant_id=restaurant_id,
-            competitors=competitor_data,
-        )
+    # THE PRODUCT: synchronous Gemini aggregation. Pills + price_sources
+    # land before this function returns. ~30-90s for a typical menu.
+    try:
+        n = _aggregate_price_ranges(draft_id)
+        log.info("Gemini aggregation updated %d items for draft %d", n, draft_id)
+    except Exception as e:
+        log.warning("Gemini aggregation failed for draft %d: %s", draft_id, e)
 
+    # Background enrichment for editor secondary features. Daemon — never
+    # blocks the user. If it dies (Flask reload, server restart), pills
+    # are already in the DB and the editor is fully usable; the map and
+    # click-to-compare just stay empty until the next manual rerun.
+    def _background_enrichment(_did=draft_id, _rid=restaurant_id, _tier=user_tier):
+        try:
+            from storage.price_intel import search_nearby_restaurants
+            comp_data = get_cached_comparisons(_rid)
+            if not comp_data and _tier == "premium":
+                search_nearby_restaurants(_rid, force_refresh=False)
+                comp_data = get_cached_comparisons(_rid)
+            if comp_data:
+                _preload_comparisons_async(
+                    draft_id=_did,
+                    restaurant_id=_rid,
+                    competitors=comp_data,
+                )
+        except Exception as e:
+            log.warning("Background enrichment failed for draft %d: %s", _did, e)
+    import threading as _threading
+    _threading.Thread(target=_background_enrichment, daemon=True).start()
+
+    # Return the freshly-aggregated results so callers see the real counts
+    # instead of an empty shell.
+    final = get_price_intelligence(draft_id) or {}
     return {
-        "assessments": [],  # filled in asynchronously by the aggregator
-        "category_avgs": {},
+        "assessments": final.get("assessments", []),
+        "category_avgs": final.get("category_avgs", {}),
         "market_context": {"market_tier": market_summary.get("avg_market_tier", "$$")},
-        "model": _COMPARE_MODEL,  # Opus drives the real work now
+        "model": _COMPARE_MODEL,
         "total_items": len(items),
-        "items_assessed": 0,  # aggregator updates summary after comparisons finish
+        "items_assessed": final.get("items_assessed", 0),
         "skipped": False,
         "from_cache": False,
     }

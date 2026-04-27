@@ -4333,16 +4333,37 @@ def update_restaurant(rest_id):
     cuisine_type = (request.form.get("cuisine_type") or "").strip() or None
     website = (request.form.get("website") or "").strip() or None
 
+    # Detect AJAX/JSON callers (wizard inline editor) — respond with JSON
+    # instead of redirecting so the caller can refresh the panel in place.
+    wants_json = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in (request.headers.get("Accept") or "")
+    )
+
     try:
         users_store.update_restaurant(rest_id,
                                       name=name, phone=phone, address=address,
                                       address_line2=address_line2, city=city,
                                       state=state, zip_code=zip_code,
                                       cuisine_type=cuisine_type, website=website)
+        if wants_json:
+            return jsonify({
+                "ok": True,
+                "restaurant": {
+                    "id": rest_id, "name": name, "phone": phone,
+                    "address": address, "address_line2": address_line2,
+                    "city": city, "state": state, "zip_code": zip_code,
+                    "cuisine_type": cuisine_type, "website": website,
+                },
+            })
         flash("Restaurant updated.", "success")
     except ValueError as exc:
+        if wants_json:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         flash(str(exc), "error")
     except Exception as e:
+        if wants_json:
+            return jsonify({"ok": False, "error": f"Update failed: {e}"}), 500
         flash(f"Update failed: {e}", "error")
 
     redirect_to = request.form.get("_redirect") or None
@@ -4503,6 +4524,10 @@ def run_price_intelligence(draft_id):
     u = session.get("user") or {}
     rest_id = u.get("restaurant_id", 0)
     force = request.form.get("force_refresh") == "1"
+
+    # New run starting — clear cached editor state so the next render
+    # rebuilds against fresh pipeline output.
+    _invalidate_editor_cache(draft_id, rest_id)
 
     try:
         result = ai_price_intel.analyze_menu_prices(
@@ -6427,6 +6452,308 @@ def _compute_editor_stats(items: list) -> dict:
     }
 
 
+# Restaurant-name sanity check. Gemini's Google-Search-grounded pricing
+# path pulls snippets from article titles and list pages, which show up as
+# `price_sources[].restaurant = "Best Pizza in Cape May Court House | My
+# Pizza Heaven"`. When we hand those to Google Places `findplacefromtext`
+# we get matches to random pizzerias hundreds of miles away.
+#
+# The filter is intentionally conservative — real restaurant names CAN be
+# long and CAN start with "The", so we only flag the unmistakable article
+# markers. Prefer false negatives (junk slips through, caught by the 25km
+# distance filter downstream) over false positives (dropping a legit place).
+_BAD_NAME_MARKERS = (
+    " | ",             # "Name | Website" / "Restaurant | City" title separator
+    " · ",             # middle-dot variant
+    "...",             # truncated snippet
+    " near me",
+    " near you",
+    " near here",
+    "best pizza in ",
+    "best pizza of ",
+    "best pizzas in ",
+    "best restaurants in ",
+    "best restaurants of ",
+    "top restaurants in ",
+    "places to eat in ",
+    "where to eat in ",
+)
+_BAD_NAME_PREFIXES = (
+    "best ", "top ", "the best ", "the top ",
+    "10 ", "5 ", "7 ", "12 ", "15 ", "20 ", "25 ",
+)
+
+
+def _looks_like_article_title(name: str) -> bool:
+    """Return True when `name` is probably a Google Search article title or
+    list header rather than a real restaurant name."""
+    if not name:
+        return True
+    n = name.strip()
+    if len(n) > 80:
+        return True
+    low = n.lower()
+    if any(m in low for m in _BAD_NAME_MARKERS):
+        return True
+    if any(low.startswith(p) for p in _BAD_NAME_PREFIXES):
+        return True
+    return False
+
+
+def _build_editor_competitors(draft, price_intel, restaurant):
+    """Build the full competitor list shown on the editor map panel.
+
+    Combines Google Places cache (from Day 134's nearby search) with
+    Gemini-sourced restaurants scraped out of `price_sources`, enriching
+    unseen names via up to 30 parallel Places `findplacefromtext` calls.
+
+    Expensive on cold builds: the Places enrichment burst can cost ~5-10s
+    even parallelized. Callers should wrap this in the _EDITOR_COMPETITORS_CACHE
+    so pure reloads skip all of it. The cache is explicitly invalidated at
+    every run-start via _invalidate_editor_cache.
+    """
+    competitors = []
+    if not draft.get("restaurant_id"):
+        return competitors
+    try:
+        from storage.price_intel import get_cached_comparisons
+        competitors = get_cached_comparisons(draft["restaurant_id"])
+    except Exception:
+        pass
+
+    import tempfile as _tf2
+    _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")
+    try:
+        with open(_gpc, "r") as _gcf:
+            _cached_places = json.loads(_gcf.read())
+        _existing_lower = {c.get("place_name", "").lower() for c in competitors}
+        for _cn, _cd in _cached_places.items():
+            if not _cd:
+                continue
+            # Skip article-title / list-page junk that may be in caches
+            # written before the filter existed.
+            if _looks_like_article_title(_cd.get("place_name", "")):
+                continue
+            if _cd.get("place_name", "").lower() not in _existing_lower:
+                competitors.append(_cd)
+                _existing_lower.add(_cd.get("place_name", "").lower())
+    except Exception:
+        pass
+    gemini_restaurants = set()
+    if not os.path.exists(_gpc) and price_intel and price_intel.get("assessments"):
+        import re as _re
+        _norm_seen = {}
+        for a in price_intel["assessments"]:
+            ps = a.get("price_sources")
+            if isinstance(ps, str):
+                try: ps = json.loads(ps)
+                except: ps = []
+            if not isinstance(ps, list): continue
+            for src in ps:
+                if not isinstance(src, dict): continue
+                for s in src.get("sources", []):
+                    if isinstance(s, dict) and s.get("restaurant"):
+                        raw = s["restaurant"]
+                        n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
+                        if _looks_like_article_title(n):
+                            continue
+                        if n.lower() not in _norm_seen:
+                            _norm_seen[n.lower()] = n
+                            gemini_restaurants.add(n)
+                for sz in (src.get("sizes") or {}).values():
+                    if isinstance(sz, dict):
+                        for s in sz.get("sources", []):
+                            if isinstance(s, dict) and s.get("restaurant"):
+                                raw = s["restaurant"]
+                                n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
+                                if _looks_like_article_title(n):
+                                    continue
+                                if n.lower() not in _norm_seen:
+                                    _norm_seen[n.lower()] = n
+                                    gemini_restaurants.add(n)
+    if gemini_restaurants:
+        rest_info = restaurant or {}
+        rest_city = rest_info.get("city", "")
+        rest_state = rest_info.get("state", "")
+        rest_zip = rest_info.get("zip_code", "")
+
+        def _normalize_restaurant_name(name):
+            import re
+            n = name.strip()
+            n = re.sub(r'\s*\(.*?\)\s*', '', n)
+            for suffix in [f" {rest_city}", f" {rest_city}, {rest_state}", f" {rest_city} {rest_state}",
+                           f", {rest_city}", f" {rest_state}", f" MA", f" {rest_zip}"]:
+                if suffix and n.lower().endswith(suffix.lower()):
+                    n = n[:len(n) - len(suffix)].strip()
+            return n.strip()
+        our_lat, our_lng = None, None
+        if competitors:
+            lats = [c["latitude"] for c in competitors if c.get("latitude")]
+            lngs = [c["longitude"] for c in competitors if c.get("longitude")]
+            if lats and lngs:
+                our_lat = sum(lats) / len(lats)
+                our_lng = sum(lngs) / len(lngs)
+
+        existing_names = {c.get("place_name", "").lower() for c in competitors}
+        added_normalized = set()
+        for n in existing_names:
+            added_normalized.add(_normalize_restaurant_name(n).lower())
+
+        import requests as _rq
+        api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+        import tempfile
+        cache_path = os.path.join(tempfile.gettempdir(), f"menuflow_places_cache_{draft.get('restaurant_id', 0)}.json")
+        places_cache = {}
+        try:
+            with open(cache_path, "r") as cf:
+                places_cache = json.loads(cf.read())
+        except Exception:
+            pass
+
+        cache_dirty = False
+        to_lookup: list = []
+        for rname in sorted(gemini_restaurants):
+            norm = _normalize_restaurant_name(rname).lower()
+            if not norm or norm in added_normalized or rname.lower() in existing_names:
+                continue
+            added_normalized.add(norm)
+
+            if norm in places_cache:
+                c_data = places_cache[norm]
+                if c_data:
+                    competitors.append(c_data)
+                continue
+
+            if not api_key:
+                comp_entry = {
+                    "place_name": rname,
+                    "place_address": f"{rest_city}, {rest_state}",
+                    "rating": None, "price_label": None, "price_level": None,
+                    "user_ratings": None, "latitude": None, "longitude": None,
+                    "cuisine_match": None, "place_id": None, "website_url": None,
+                }
+                competitors.append(comp_entry)
+                places_cache[norm] = comp_entry
+                cache_dirty = True
+                continue
+
+            to_lookup.append((rname, norm))
+
+        LIVE_LOOKUP_CAP = 30
+        for rname, norm in to_lookup[LIVE_LOOKUP_CAP:]:
+            comp_entry = {
+                "place_name": rname,
+                "place_address": f"{rest_city}, {rest_state}",
+                "rating": None, "price_label": None, "price_level": None,
+                "user_ratings": None, "latitude": None, "longitude": None,
+                "cuisine_match": None, "place_id": None, "website_url": None,
+            }
+            competitors.append(comp_entry)
+            places_cache[norm] = comp_entry
+            cache_dirty = True
+
+        def _lookup_place(rname: str, norm: str):
+            try:
+                params = {
+                    "key": api_key,
+                    "input": f"{rname} restaurant {rest_city} {rest_state}",
+                    "inputtype": "textquery",
+                    "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
+                }
+                if our_lat and our_lng:
+                    params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
+                resp = _rq.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
+                               params=params, timeout=5)
+                if resp.status_code != 200:
+                    return norm, None, None
+                candidates = resp.json().get("candidates", [])
+                if not candidates:
+                    return norm, None, None
+                c = candidates[0]
+                loc = c.get("geometry", {}).get("location", {})
+                if our_lat and our_lng and loc.get("lat") and loc.get("lng"):
+                    import math
+                    dlat = math.radians(loc["lat"] - our_lat)
+                    dlng = math.radians(loc["lng"] - our_lng)
+                    a2 = math.sin(dlat/2)**2 + math.cos(math.radians(our_lat)) * math.cos(math.radians(loc["lat"])) * math.sin(dlng/2)**2
+                    dist_km = 6371 * 2 * math.atan2(math.sqrt(a2), math.sqrt(1-a2))
+                    if dist_km > 25:
+                        return norm, None, None
+                pid = c.get("place_id")
+                website_url = None
+                if pid:
+                    try:
+                        from storage.price_intel import get_place_details
+                        details = get_place_details(pid)
+                        if details:
+                            website_url = details.get("website")
+                    except Exception:
+                        pass
+                price_level = c.get("price_level")
+                comp_entry = {
+                    "place_name": c.get("name", rname),
+                    "place_address": c.get("formatted_address", ""),
+                    "rating": c.get("rating"),
+                    "price_label": {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(price_level),
+                    "price_level": price_level,
+                    "user_ratings": c.get("user_ratings_total"),
+                    "latitude": loc.get("lat"),
+                    "longitude": loc.get("lng"),
+                    "cuisine_match": None,
+                    "place_id": pid,
+                    "website_url": website_url,
+                }
+                db_args = (
+                    draft.get("restaurant_id") or 0, pid, c.get("name", rname),
+                    c.get("formatted_address", ""), price_level,
+                    {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(price_level),
+                    c.get("rating"), c.get("user_ratings_total"),
+                    loc.get("lat"), loc.get("lng"),
+                )
+                return norm, comp_entry, db_args
+            except Exception:
+                return norm, None, None
+
+        batch = to_lookup[:LIVE_LOOKUP_CAP]
+        if batch:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            db_writes = []
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futs = [pool.submit(_lookup_place, rname, norm) for rname, norm in batch]
+                for fut in as_completed(futs):
+                    try:
+                        norm, comp_entry, db_args = fut.result()
+                    except Exception:
+                        continue
+                    if comp_entry:
+                        competitors.append(comp_entry)
+                    places_cache[norm] = comp_entry
+                    cache_dirty = True
+                    if db_args:
+                        db_writes.append(db_args)
+            if db_writes:
+                try:
+                    with db_connect() as conn2:
+                        conn2.executemany(
+                            """INSERT OR IGNORE INTO price_comparison_results
+                               (restaurant_id, place_id, place_name, place_address, price_level, price_label, rating, user_ratings, latitude, longitude)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            db_writes,
+                        )
+                        conn2.commit()
+                except Exception:
+                    pass
+
+        if cache_dirty:
+            try:
+                with open(cache_path, "w") as cf:
+                    cf.write(json.dumps(places_cache))
+            except Exception:
+                pass
+
+    return competitors
+
+
 @app.get("/drafts/<int:draft_id>/edit")
 @login_required
 def draft_editor(draft_id: int):
@@ -6538,212 +6865,14 @@ def draft_editor(draft_id: int):
         except Exception:
             pass
 
-    # Competitors from Google Places cache (use module-level price_intel import)
-    competitors = []
-    if draft.get("restaurant_id"):
-        try:
-            from storage.price_intel import get_cached_comparisons
-            competitors = get_cached_comparisons(draft["restaurant_id"])
-        except Exception:
-            pass
-
-    # Day 141.8: Add Gemini-sourced restaurants from cached Places file (instant load)
-    if draft.get("restaurant_id"):
-        import tempfile as _tf2
-        _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")
-        try:
-            with open(_gpc, "r") as _gcf:
-                _cached_places = json.loads(_gcf.read())
-            _existing_lower = {c.get("place_name", "").lower() for c in competitors}
-            for _cn, _cd in _cached_places.items():
-                if _cd and _cd.get("place_name", "").lower() not in _existing_lower:
-                    competitors.append(_cd)
-                    _existing_lower.add(_cd.get("place_name", "").lower())
-        except Exception:
-            pass
-        # Build cache on first load if it doesn't exist
-        gemini_restaurants = set()
-        if not os.path.exists(_gpc) and price_intel and price_intel.get("assessments"):
-            import re as _re
-            _norm_seen = {}
-            for a in price_intel["assessments"]:
-                ps = a.get("price_sources")
-                if isinstance(ps, str):
-                    try: ps = json.loads(ps)
-                    except: ps = []
-                if not isinstance(ps, list): continue
-                for src in ps:
-                    if not isinstance(src, dict): continue
-                    for s in src.get("sources", []):
-                        if isinstance(s, dict) and s.get("restaurant"):
-                            raw = s["restaurant"]
-                            n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
-                            if n.lower() not in _norm_seen:
-                                _norm_seen[n.lower()] = n
-                                gemini_restaurants.add(n)
-                    for sz in (src.get("sizes") or {}).values():
-                        if isinstance(sz, dict):
-                            for s in sz.get("sources", []):
-                                if isinstance(s, dict) and s.get("restaurant"):
-                                    raw = s["restaurant"]
-                                    n = _re.sub(r'\s*\(.*?\)\s*', '', raw).strip()
-                                    if n.lower() not in _norm_seen:
-                                        _norm_seen[n.lower()] = n
-                                        gemini_restaurants.add(n)
-        # Add any restaurants Gemini found that aren't in our Places cache
-        # Deduplicate and look up details via Google Places
-        if gemini_restaurants:
-            rest_info = restaurant or {}
-            rest_addr = rest_info.get("address", "")
-            rest_city = rest_info.get("city", "")
-            rest_state = rest_info.get("state", "")
-            rest_zip = rest_info.get("zip_code", "")
-
-            def _normalize_restaurant_name(name):
-                import re
-                n = name.strip()
-                n = re.sub(r'\s*\(.*?\)\s*', '', n)
-                for suffix in [f" {rest_city}", f" {rest_city}, {rest_state}", f" {rest_city} {rest_state}",
-                               f", {rest_city}", f" {rest_state}", f" MA", f" {rest_zip}"]:
-                    if suffix and n.lower().endswith(suffix.lower()):
-                        n = n[:len(n) - len(suffix)].strip()
-                return n.strip()
-            our_lat, our_lng = None, None
-            if competitors:
-                lats = [c["latitude"] for c in competitors if c.get("latitude")]
-                lngs = [c["longitude"] for c in competitors if c.get("longitude")]
-                if lats and lngs:
-                    our_lat = sum(lats) / len(lats)
-                    our_lng = sum(lngs) / len(lngs)
-
-            # Normalize all names and deduplicate
-            existing_names = {c.get("place_name", "").lower() for c in competitors}
-            added_normalized = set()
-            for n in existing_names:
-                added_normalized.add(_normalize_restaurant_name(n).lower())
-
-            # Look up Gemini restaurants — use file cache to avoid repeated API calls
-            import requests as _rq
-            api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
-            import tempfile
-            cache_path = os.path.join(tempfile.gettempdir(), f"menuflow_places_cache_{draft.get('restaurant_id', 0)}.json")
-            places_cache = {}
-            try:
-                with open(cache_path, "r") as cf:
-                    places_cache = json.loads(cf.read())
-            except Exception:
-                pass
-
-            cache_dirty = False
-            for rname in sorted(gemini_restaurants):
-                norm = _normalize_restaurant_name(rname).lower()
-                if not norm or norm in added_normalized or rname.lower() in existing_names:
-                    continue
-                added_normalized.add(norm)
-
-                # Check file cache first
-                if norm in places_cache:
-                    c_data = places_cache[norm]
-                    if c_data:
-                        competitors.append(c_data)
-                    continue
-
-                # Places lookup — only on first load (results get cached)
-                # Skip if no API key or if cache already has enough entries
-                if not api_key or len(places_cache) > 50:
-                    # Add without Places data
-                    comp_entry = {
-                        "place_name": rname,
-                        "place_address": f"{rest_city}, {rest_state}",
-                        "rating": None, "price_label": None, "price_level": None,
-                        "user_ratings": None, "latitude": None, "longitude": None,
-                        "cuisine_match": None, "place_id": None, "website_url": None,
-                    }
-                    competitors.append(comp_entry)
-                    places_cache[norm] = comp_entry
-                    cache_dirty = True
-                    continue
-                try:
-                    params = {
-                        "key": api_key,
-                        "input": f"{rname} restaurant {rest_city} {rest_state}",
-                        "inputtype": "textquery",
-                        "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
-                    }
-                    if our_lat and our_lng:
-                        params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
-                    resp = _rq.get("https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
-                                   params=params, timeout=5)
-                    if resp.status_code == 200:
-                        candidates = resp.json().get("candidates", [])
-                        if candidates:
-                            c = candidates[0]
-                            loc = c.get("geometry", {}).get("location", {})
-                            # Distance filter
-                            if our_lat and our_lng and loc.get("lat") and loc.get("lng"):
-                                import math
-                                dlat = math.radians(loc["lat"] - our_lat)
-                                dlng = math.radians(loc["lng"] - our_lng)
-                                a2 = math.sin(dlat/2)**2 + math.cos(math.radians(our_lat)) * math.cos(math.radians(loc["lat"])) * math.sin(dlng/2)**2
-                                dist_km = 6371 * 2 * math.atan2(math.sqrt(a2), math.sqrt(1-a2))
-                                if dist_km > 25:
-                                    continue
-                            # Cache it in price_comparison_results
-                            try:
-                                rid = draft.get("restaurant_id") or 0
-                                with db_connect() as conn2:
-                                    conn2.execute(
-                                        """INSERT OR IGNORE INTO price_comparison_results
-                                           (restaurant_id, place_id, place_name, place_address, price_level, price_label, rating, user_ratings, latitude, longitude)
-                                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                        (rid, c.get("place_id"), c.get("name", rname),
-                                         c.get("formatted_address", ""),
-                                         c.get("price_level"), {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(c.get("price_level")),
-                                         c.get("rating"), c.get("user_ratings_total"),
-                                         loc.get("lat"), loc.get("lng")),
-                                    )
-                                    conn2.commit()
-                            except Exception:
-                                pass
-                            # Get website URL via Place Details
-                            website_url = None
-                            pid = c.get("place_id")
-                            if pid:
-                                try:
-                                    from storage.price_intel import get_place_details
-                                    details = get_place_details(pid)
-                                    if details:
-                                        website_url = details.get("website")
-                                except Exception:
-                                    pass
-                            comp_entry = {
-                                "place_name": c.get("name", rname),
-                                "place_address": c.get("formatted_address", ""),
-                                "rating": c.get("rating"),
-                                "price_label": {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(c.get("price_level")),
-                                "price_level": c.get("price_level"),
-                                "user_ratings": c.get("user_ratings_total"),
-                                "latitude": loc.get("lat"),
-                                "longitude": loc.get("lng"),
-                                "cuisine_match": None,
-                                "place_id": pid,
-                                "website_url": website_url,
-                            }
-                            competitors.append(comp_entry)
-                            places_cache[norm] = comp_entry
-                            cache_dirty = True
-                except Exception:
-                    # Cache as None so we don't retry
-                    places_cache[norm] = None
-                    cache_dirty = True
-
-            # Save cache
-            if cache_dirty:
-                try:
-                    with open(cache_path, "w") as cf:
-                        cf.write(json.dumps(places_cache))
-                except Exception:
-                    pass
+    # Editor competitors — cached per-draft. _invalidate_editor_cache(draft_id)
+    # wipes the entry at every new run so fresh pipeline output is picked up.
+    with _EDITOR_COMPETITORS_LOCK:
+        competitors = _EDITOR_COMPETITORS_CACHE.get(draft_id)
+    if competitors is None:
+        competitors = _build_editor_competitors(draft, price_intel, restaurant)
+        with _EDITOR_COMPETITORS_LOCK:
+            _EDITOR_COMPETITORS_CACHE[draft_id] = competitors
 
     # Day 141.6: User restaurants + their drafts for the menu picker overlay
     user_restaurants = []
@@ -7181,9 +7310,37 @@ def wizard_finalize(draft_id: int):
 _PRICE_ANALYSIS_JOBS: dict = {}
 _PRICE_ANALYSIS_LOCK = threading.Lock()
 
+# Editor competitor-list cache. Built lazily on first render of the editor,
+# reused on every subsequent reload, blown away whenever a new price
+# analysis run starts. Saves ~5-10s per reload (avoids the Gemini-restaurant
+# Google Places enrichment). Keyed by draft_id.
+_EDITOR_COMPETITORS_CACHE: dict = {}
+_EDITOR_COMPETITORS_LOCK = threading.Lock()
+
+
+def _invalidate_editor_cache(draft_id: int, restaurant_id: int | None = None) -> None:
+    """Wipe all editor-side caches for a draft so the next render rebuilds
+    from fresh pipeline output. Call this at the start of every new run —
+    wizard finish, rerun button, or direct analyze trigger. Safe to call
+    even if nothing is cached yet."""
+    with _EDITOR_COMPETITORS_LOCK:
+        _EDITOR_COMPETITORS_CACHE.pop(draft_id, None)
+    # Nuke the per-restaurant Places temp file too — it's populated from
+    # the same Gemini sources and would otherwise keep serving stale
+    # coords/ratings alongside the freshly-computed results.
+    if restaurant_id:
+        try:
+            import tempfile as _tf
+            _gpc = os.path.join(_tf.gettempdir(), f"menuflow_places_cache_{restaurant_id}.json")
+            if os.path.exists(_gpc):
+                os.remove(_gpc)
+        except Exception:
+            pass
+
 
 def _run_price_analysis_job(draft_id: int, restaurant_id: int) -> None:
     """Background worker: runs Claude Call 4 and updates the status dict."""
+    _invalidate_editor_cache(draft_id, restaurant_id)
     try:
         result = ai_price_intel.analyze_menu_prices(
             draft_id=draft_id,
@@ -7265,15 +7422,29 @@ def rerun_price_analysis(draft_id: int):
     # - every cached competitor menu scrape (shared across restaurants, but
     #   for testing we clear globally so stale poisoned data can't linger)
     # - this draft's Claude Call 4 results + per-competitor comparisons
+    # Cache is keyed by (zip, cuisine) — resolve from the restaurant so we
+    # also clear empty-result cache rows (which have no price_comparison_results
+    # rows and would otherwise be invisible to a results-table subquery).
+    from storage.users import get_restaurant
+    _rest = get_restaurant(int(rid)) or {}
+    _zip = (_rest.get("zip_code") or "").strip().split("-", 1)[0]
+    _cuisine = (_rest.get("cuisine_type") or "other").strip().lower()
     with db_connect() as conn:
-        conn.execute("DELETE FROM price_comparison_cache WHERE id IN "
-                     "(SELECT cache_id FROM price_comparison_results WHERE restaurant_id=?)", (rid,))
+        if _zip:
+            conn.execute(
+                "DELETE FROM price_comparison_cache WHERE zip_code=? AND cuisine_type=?",
+                (_zip, _cuisine),
+            )
         conn.execute("DELETE FROM price_comparison_results WHERE restaurant_id=?", (rid,))
         conn.execute("DELETE FROM competitor_menus")
         conn.execute("DELETE FROM competitor_comparisons WHERE draft_id=?", (draft_id,))
         conn.execute("DELETE FROM price_intelligence_results WHERE draft_id=?", (draft_id,))
         conn.execute("DELETE FROM price_intelligence_summary WHERE draft_id=?", (draft_id,))
         conn.commit()
+
+    # Temp Places file + in-memory competitor list cache both get wiped
+    # by _run_price_analysis_job's call to _invalidate_editor_cache, so we
+    # don't need to duplicate that here.
 
     with _PRICE_ANALYSIS_LOCK:
         _PRICE_ANALYSIS_JOBS[draft_id] = {"status": "running", "error": None}
