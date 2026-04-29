@@ -8008,12 +8008,36 @@ def wizard_save_item(draft_id: int, item_id: int):
         return jsonify({"ok": False, "error": "Expected JSON"}), 400
     data = request.get_json(silent=True) or {}
 
+    incoming_category = (data.get("category") or "").strip()
+    # Defense in depth: reject the literal string "None" or empty values.
+    # Cheese-pizza-into-None bug (Day 141.9): the editor's wizSave was
+    # serializing Python's `current_category` (which is None for the All
+    # Items view) via Jinja, producing a literal "None" string in the
+    # JSON payload. JS fix is in draft_editor.html, but defending here
+    # guards every other code path too.
+    if incoming_category in ("", "None", "none", "null"):
+        # Look up the item's existing category and preserve it, rather
+        # than clobber to a junk value.
+        existing = drafts_store.get_draft_item(draft_id, item_id) if hasattr(
+            drafts_store, "get_draft_item"
+        ) else None
+        if existing and existing.get("category"):
+            incoming_category = existing["category"]
+        else:
+            with db_connect() as _conn:
+                row = _conn.execute(
+                    "SELECT category FROM draft_items WHERE id=? AND draft_id=?",
+                    (item_id, draft_id),
+                ).fetchone()
+                if row and row["category"]:
+                    incoming_category = row["category"]
+
     item = {
         "id": item_id,
         "name": (data.get("name") or "").strip(),
         "description": (data.get("description") or "").strip(),
         "price_cents": data.get("price_cents", 0),
-        "category": (data.get("category") or "").strip(),
+        "category": incoming_category,
     }
     if not item["name"]:
         return jsonify({"ok": False, "error": "Name is required"}), 400

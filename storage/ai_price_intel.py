@@ -730,6 +730,55 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
     ))
 
 
+def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool:
+    """Verify a Gemini source quote actually backs the cited price + item.
+
+    Two checks:
+      (a) The quote contains a recognizable form of the dollar amount.
+          We accept any of: "$14.99", "14.99", "$14", "14", or with
+          space/comma punctuation. False negatives possible (e.g.,
+          European-format "14,99") but rare for US menus.
+      (b) The quote contains at least one significant token from the
+          item name. "Significant" = a word longer than 3 chars that
+          isn't a generic stopword. Catches Gemini citing a price for
+          the wrong item (e.g., "Pepperoni Pizza $14.99" being credited
+          as a Cheese Pizza source).
+
+    Conservative: when in doubt, reject. The whole point is to cut
+    fabricated cites.
+    """
+    if not quote:
+        return False
+    q = quote.lower()
+
+    # Price match — try a few formats.
+    dollars = price_cents // 100
+    cents = price_cents % 100
+    formats = [
+        f"${dollars}.{cents:02d}",     # $14.99
+        f"{dollars}.{cents:02d}",       # 14.99
+    ]
+    if cents == 0:
+        formats.append(f"${dollars}")   # $14
+        formats.append(f" {dollars} ")  # ' 14 '
+    if not any(f in q for f in formats):
+        return False
+
+    # Item-name token match — require at least one significant token
+    # from the item name to appear in the quote. Skip generic words.
+    _STOP = {"the", "and", "with", "for", "size", "small", "large",
+             "medium", "regular", "personal", "mini", "pizza"}
+    tokens = [t for t in re.findall(r"[a-z]+", (item_name or "").lower())
+              if len(t) > 3 and t not in _STOP]
+    if not tokens:
+        # Fall back to ANY name token (item name was all stopwords)
+        tokens = [t for t in re.findall(r"[a-z]+", (item_name or "").lower())
+                  if len(t) > 2]
+    if tokens and not any(t in q for t in tokens):
+        return False
+    return True
+
+
 def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                           zip_code: str, cuisine: str,
                           address: str = "",
@@ -783,35 +832,56 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
-        prompt = f"""For each item below, give me a low-high price range using price data from 5 restaurants within 5 miles of {location}.
+        prompt = f"""For each item below, give me a low-high price range using REAL price data from restaurants within 5 miles of {location}.
 
 For items WITHOUT sizes, search: "(item name) (category) price near {location}"
 For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
 
 IMPORTANT: Only use restaurants within 5 miles of {location}. Do NOT include restaurants from other states or distant cities.
 
+VERBATIM QUOTES REQUIRED — this is the most important rule. For every
+single source you cite, include a "quote" field with the exact text from
+the restaurant's menu page where you saw the price. The quote must
+contain BOTH:
+  (a) the price you're citing (e.g. "$14.99" or "14.99")
+  (b) the item name or a clear synonym
+If you can't quote verbatim, DO NOT include the source. We'd rather have
+two real cites than ten fabricated ones.
+
+Per-size matching: if the source's menu uses different size labels than
+ours (e.g. their "Small" vs our "12 Sml"), only cite that source's price
+under our size if the SOURCE's size description is in your quote and is
+unambiguously the same item size. If a competitor's size doesn't map
+cleanly to ours, OMIT THE SOURCE for that size — don't approximate.
+
 Items:
 {item_lines}
 
 Return JSON only — an array:
 [{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null,
-   "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}, {{"restaurant": "Main St Pizzeria", "price_cents": 1200}}]
+   "sources": [
+     {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "Cheese Pizza  $8.99"}},
+     {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Cheese Pie - Large $12.00"}}
+   ]
 }}]
 
 For items with [sizes], include per-size ranges AND sources per size:
 {{"id": 123, "low_cents": 800, "high_cents": 2500, "median_cents": 1500,
-  "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}],
+  "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "Cheese Pizza  $8.99"}}],
   "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100,
-    "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899}}, {{"restaurant": "Main St Pizzeria", "price_cents": 1200}}]
+    "sources": [
+      {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "12\\" Cheese Pizza - $8.99"}},
+      {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Small (12 inch) cheese - $12.00"}}
+    ]
   }}}}
 }}
 
 Rules:
-- Use real price data from 5 restaurants within 5 miles of {location}
+- Use real price data from restaurants within 5 miles of {location}
+- Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
-- Include the actual restaurant name and price for each source you find
 - low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
-- If you can't find real data for an item, set low_cents to 0
+- If you can't find verifiable real data for an item, set low_cents to 0 and omit sources
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
@@ -905,26 +975,54 @@ Rules:
 
             results = json.loads(text)
             batch_out = {}
+            # Quick id → name lookup for quote validation
+            id_to_name = {it["item_id"]: it.get("item_name") or "" for it in batch}
+            quote_filter_stats = {"kept": 0, "no_quote": 0, "bad_quote": 0}
+
+            def _filter_sources(raw_sources, item_name, ctx):
+                """Drop sources without a verifiable verbatim quote."""
+                if not isinstance(raw_sources, list):
+                    return []
+                out = []
+                for s in raw_sources:
+                    if not isinstance(s, dict):
+                        continue
+                    rest = s.get("restaurant") or ""
+                    if not rest or _is_article_title(rest):
+                        continue
+                    quote = (s.get("quote") or "").strip()
+                    price = int(s.get("price_cents") or 0)
+                    if not quote:
+                        quote_filter_stats["no_quote"] += 1
+                        continue
+                    if not _quote_validates_price(quote, price, item_name):
+                        quote_filter_stats["bad_quote"] += 1
+                        continue
+                    quote_filter_stats["kept"] += 1
+                    out.append({
+                        "restaurant": rest,
+                        "price_cents": price,
+                        "quote": quote[:200],  # cap quote length for storage
+                    })
+                return out
+
             for r in results:
                 iid = _coerce_item_id(r.get("id"))
                 low = r.get("low_cents", 0)
                 high = r.get("high_cents", 0)
                 med = r.get("median_cents", 0)
                 if iid and low > 0 and high > 0 and med > 0:
+                    item_name = id_to_name.get(iid, "")
                     entry = {"low": int(low), "high": int(high), "median": int(med)}
-                    # Capture source restaurants. Drop obvious article-title
-                    # strings up front so pill citations and the editor map
-                    # never see them — Gemini's Google Search grounding
-                    # sometimes echoes list-page headlines instead of the
-                    # actual restaurant names cited in them.
-                    raw_sources = r.get("sources")
-                    if isinstance(raw_sources, list):
-                        entry["sources"] = [
-                            {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
-                            for s in raw_sources
-                            if isinstance(s, dict) and s.get("restaurant")
-                            and not _is_article_title(s.get("restaurant", ""))
-                        ]
+                    # Drop sources without verifiable verbatim quotes.
+                    # Day 141.9: Gemini's grounded search frequently fabricates
+                    # plausible-looking prices when it can't find an exact size
+                    # match; the quote field forces it to back each cite with
+                    # actual page text or omit the source.
+                    base_sources = _filter_sources(r.get("sources"), item_name, "base")
+                    if base_sources:
+                        entry["sources"] = base_sources
+
                     raw_sizes = r.get("sizes")
                     if isinstance(raw_sizes, dict):
                         sizes_out = {}
@@ -935,18 +1033,36 @@ Rules:
                                 sm = sdata.get("median_cents", 0)
                                 if sl > 0 and sh > 0 and sm > 0:
                                     size_entry = {"low": int(sl), "high": int(sh), "median": int(sm)}
-                                    ss = sdata.get("sources")
-                                    if isinstance(ss, list):
-                                        size_entry["sources"] = [
-                                            {"restaurant": s.get("restaurant", ""), "price_cents": s.get("price_cents", 0)}
-                                            for s in ss
-                                            if isinstance(s, dict) and s.get("restaurant")
-                                            and not _is_article_title(s.get("restaurant", ""))
-                                        ]
+                                    size_sources = _filter_sources(
+                                        sdata.get("sources"), item_name, f"size:{slabel}",
+                                    )
+                                    # If a size has zero validated sources,
+                                    # drop the size entirely — the range it
+                                    # claims isn't backed by anything we can
+                                    # verify.
+                                    if not size_sources:
+                                        continue
+                                    size_entry["sources"] = size_sources
                                     sizes_out[slabel] = size_entry
                         if sizes_out:
                             entry["sizes"] = sizes_out
+
+                    # If neither base nor any size has validated sources, drop
+                    # the whole item — there's no real data here.
+                    has_base = bool(entry.get("sources"))
+                    has_size = bool(entry.get("sizes"))
+                    if not has_base and not has_size:
+                        continue
+
                     batch_out[iid] = entry
+
+            if quote_filter_stats["no_quote"] or quote_filter_stats["bad_quote"]:
+                log.info(
+                    "Quote filter: kept=%d, no_quote=%d, bad_quote=%d",
+                    quote_filter_stats["kept"],
+                    quote_filter_stats["no_quote"],
+                    quote_filter_stats["bad_quote"],
+                )
             log.info(
                 "Gemini batch ok: %d/%d items returned (ids=%s)",
                 len(batch_out), len(batch), batch_ids,

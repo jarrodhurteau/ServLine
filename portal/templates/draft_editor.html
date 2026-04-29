@@ -2071,7 +2071,7 @@
         {% elif (not it.price_cents or it.price_cents == 0) and not hpv.found %}
           {% set needs_price = true %}
         {% endif %}
-        <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}{% if needs_price %} needs-price{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}">
+        <div class="wiz-item{% if it.low_confidence %} is-low{% endif %}{% if needs_price %} needs-price{% endif %}" data-item-id="{{ it.id }}" data-draft-id="{{ draft.id }}" data-category="{{ (it.category or '')|e }}">
           <!-- Display mode (click to edit) -->
           <div class="wiz-display" onclick="if(!event.target.closest('.wiz-drag-handle')&&!event.target.closest('.source-link')&&!event.target.closest('.source-popover')&&!event.target.closest('.ref-toggle'))wizEdit(this.parentElement)">
             <div class="wiz-item-header">
@@ -3098,12 +3098,18 @@
       btn.textContent = 'Saving...';
 
       try {
+        // Use the item's OWN category from its dataset, not the page-level
+        // `current_category`. The page-level value is `None` whenever the
+        // user is in the "All Items" view, and Jinja was rendering that as
+        // the literal string "None" — silently moving any item the user
+        // saved while in All Items into a phantom "None" category.
+        const itemCategory = card.dataset.category || '';
         const res = await fetch(`/api/drafts/${draftId}/wizard/item/${itemId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
           body: JSON.stringify({ name, description: desc, price_cents: priceCents,
-            category: '{{ current_category|e }}' })
+            category: itemCategory })
         });
         const data = await res.json();
         if (!data.ok) { wizToast(data.error || 'Save failed'); return; }
