@@ -48,8 +48,13 @@ MAX_RESULTS = 20
 # Note: unused when rankby=distance, kept for reference / future fallback.
 SEARCH_RADIUS_METERS = 8000
 
-# Rate limiting: max API calls per minute
-RATE_LIMIT_PER_MINUTE = 10
+# Rate limiting: max API calls per minute. Set conservatively in early
+# Day 134 when paid-tier quota was unfamiliar; turned out to be far too
+# tight for editor backfill bursts (10 parallel workers × 2 calls each
+# = 20 calls/sec spike). Google Places paid tier allows hundreds/sec
+# in practice. 600/min = 10/sec is well below the real quota and lets
+# parallel backfills complete without artificial throttling.
+RATE_LIMIT_PER_MINUTE = 600
 _call_timestamps: list[float] = []
 
 # Cuisine type → Google Places search keyword
