@@ -6444,11 +6444,48 @@ def _build_editor_competitors(draft, price_intel, restaurant):
     competitors = []
     if not draft.get("restaurant_id"):
         return competitors
+
+    # Determine if Gemini produced real cites for this draft. The 20
+    # Places-nearby list is Haiku reference data — we only want it in
+    # the editor sidebar when Haiku was actually used. When Gemini
+    # delivered real cites, the sidebar should show JUST the Gemini-
+    # sourced restaurants (the ones our pricing actually came from).
+    _gemini_real_count = 0
     try:
-        from storage.price_intel import get_cached_comparisons
-        competitors = get_cached_comparisons(draft["restaurant_id"])
+        if price_intel and price_intel.get("assessments"):
+            for a in price_intel["assessments"]:
+                ps = a.get("price_sources")
+                if isinstance(ps, str):
+                    try: ps = json.loads(ps)
+                    except: ps = []
+                if not isinstance(ps, list): continue
+                for src in ps:
+                    if not isinstance(src, dict): continue
+                    if any(s.get("restaurant") for s in (src.get("sources") or []) if isinstance(s, dict)):
+                        _gemini_real_count += 1
+                        break
+                    if any(
+                        any(s.get("restaurant") for s in (sz.get("sources") or []) if isinstance(s, dict))
+                        for sz in (src.get("sizes") or {}).values() if isinstance(sz, dict)
+                    ):
+                        _gemini_real_count += 1
+                        break
     except Exception:
         pass
+    _show_places_nearby = _gemini_real_count == 0
+
+    # Always fetch Places nearby — we need their lat/lng to compute the
+    # restaurant's geographic center for distance-filtering Gemini-cited
+    # restaurants. But we only ADD them to the competitors list when
+    # Haiku mode is active (no real Gemini cites).
+    _places_nearby = []
+    try:
+        from storage.price_intel import get_cached_comparisons
+        _places_nearby = get_cached_comparisons(draft["restaurant_id"])
+    except Exception:
+        pass
+    if _show_places_nearby:
+        competitors = _places_nearby
 
     import tempfile as _tf2
     _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")
@@ -6459,10 +6496,14 @@ def _build_editor_competitors(draft, price_intel, restaurant):
     _bf_city = _rest_for_bf.get("city", "") or ""
     _bf_state = _rest_for_bf.get("state", "") or ""
     _bf_api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    # Compute geographic center from Places nearby (always available, even
+    # when we're not adding them to the competitors list). Used for
+    # distance-filtering Gemini-cited entries.
     _bf_our_lat, _bf_our_lng = None, None
-    if competitors:
-        _lats = [c["latitude"] for c in competitors if c.get("latitude")]
-        _lngs = [c["longitude"] for c in competitors if c.get("longitude")]
+    _geo_source = competitors if competitors else _places_nearby
+    if _geo_source:
+        _lats = [c["latitude"] for c in _geo_source if c.get("latitude")]
+        _lngs = [c["longitude"] for c in _geo_source if c.get("longitude")]
         if _lats and _lngs:
             _bf_our_lat = sum(_lats) / len(_lats)
             _bf_our_lng = sum(_lngs) / len(_lngs)
@@ -6658,13 +6699,9 @@ def _build_editor_competitors(draft, price_intel, restaurant):
                 if suffix and n.lower().endswith(suffix.lower()):
                     n = n[:len(n) - len(suffix)].strip()
             return n.strip()
-        our_lat, our_lng = None, None
-        if competitors:
-            lats = [c["latitude"] for c in competitors if c.get("latitude")]
-            lngs = [c["longitude"] for c in competitors if c.get("longitude")]
-            if lats and lngs:
-                our_lat = sum(lats) / len(lats)
-                our_lng = sum(lngs) / len(lngs)
+        # Reuse the geo center we already computed (works whether or not
+        # Places nearby is included in `competitors`).
+        our_lat, our_lng = _bf_our_lat, _bf_our_lng
 
         existing_names = {c.get("place_name", "").lower() for c in competitors}
         added_normalized = set()
