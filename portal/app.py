@@ -6812,16 +6812,30 @@ def draft_editor(draft_id: int):
                             break
                     if has_real:
                         gemini_with_real_sources += 1
-    # Banner condition: less than 60% of assessed items have real source
-    # citations (i.e. >40% market-estimate fallback). Anything less than
-    # majority-real coverage means the user is mostly looking at estimates
-    # and should see the recovery banner.
-    _MARKET_DATA_DOWN_THRESHOLD = 0.60
-    if gemini_total_assessed > 0:
-        real_ratio = gemini_with_real_sources / gemini_total_assessed
-        market_data_down = real_ratio < _MARKET_DATA_DOWN_THRESHOLD
-    else:
-        market_data_down = False
+    # Banner condition: less than 60% of the batches in the most recent
+    # pricing run completed successfully. This measures whether Gemini's
+    # API was actually reachable, not how many items survived downstream
+    # quote-validation. Read from gemini_call_log (batch-level only, ts
+    # since the current run's stub was created).
+    _MARKET_DATA_DOWN_BATCH_THRESHOLD = 0.60
+    market_data_down = False
+    if price_intel and price_intel.get("created_at"):
+        try:
+            with db_connect() as _conn:
+                _stats = _conn.execute(
+                    "SELECT outcome, COUNT(*) c FROM gemini_call_log "
+                    "WHERE draft_id=? AND ts >= ? AND batch_size > 1 "
+                    "GROUP BY outcome",
+                    (draft_id, price_intel["created_at"]),
+                ).fetchall()
+            _ok = sum(r["c"] for r in _stats if r["outcome"] == "ok")
+            _total = sum(r["c"] for r in _stats)
+            if _total > 0:
+                market_data_down = (_ok / _total) < _MARKET_DATA_DOWN_BATCH_THRESHOLD
+        except Exception:
+            # If we can't read the log, fall back to no banner — better
+            # than a false alarm.
+            market_data_down = False
 
     # Restaurant info
     restaurant = None
