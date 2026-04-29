@@ -766,15 +766,36 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
 
     # Item-name token match — require at least one significant token
     # from the item name to appear in the quote. Skip generic words.
+    # Synonyms map: when our item is a common dish that competitors
+    # often list under a different name, accept either. Keeps quote
+    # validation strict on fabricated quotes while not rejecting
+    # legitimate cites where the source happens to use a synonym.
     _STOP = {"the", "and", "with", "for", "size", "small", "large",
              "medium", "regular", "personal", "mini", "pizza"}
-    tokens = [t for t in re.findall(r"[a-z]+", (item_name or "").lower())
+    _SYNONYMS = {
+        # Cheese pizza is variously called: plain, mozzarella, margherita,
+        # round, neapolitan. All point to the same product.
+        "cheese": ("plain", "mozzarella", "margherita", "neapolitan"),
+        "hamburger": ("burger",),
+        "cheeseburger": ("cheese burger",),
+    }
+    name_lower = (item_name or "").lower()
+    tokens = [t for t in re.findall(r"[a-z]+", name_lower)
               if len(t) > 3 and t not in _STOP]
     if not tokens:
         # Fall back to ANY name token (item name was all stopwords)
-        tokens = [t for t in re.findall(r"[a-z]+", (item_name or "").lower())
+        tokens = [t for t in re.findall(r"[a-z]+", name_lower)
                   if len(t) > 2]
-    if tokens and not any(t in q for t in tokens):
+    if not tokens:
+        # No usable tokens at all — accept on price match alone.
+        return True
+    # Expand each token to its synonym set; quote must match any expansion.
+    expanded = set()
+    for t in tokens:
+        expanded.add(t)
+        for syn in _SYNONYMS.get(t, ()):
+            expanded.add(syn)
+    if not any(e in q for e in expanded):
         return False
     return True
 
@@ -878,6 +899,18 @@ For items with [sizes], include per-size ranges AND sources per size:
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
+- AIM FOR AT LEAST 5 SOURCES PER ITEM. Common items (cheese pizza,
+  hamburger, caesar salad) should easily hit 5 — most local restaurants
+  have them. If you find fewer than 3 sources, search again with broader
+  terms before giving up.
+- Common items are often listed under SYNONYMS at other restaurants —
+  search for those too:
+    "Cheese Pizza" → also try "Plain", "Mozzarella", "Margherita",
+                          "Round Pie", "Cheese Pie"
+    "Hamburger"   → also try "Burger", "Plain Burger"
+    "Cheeseburger" → also try "Cheese Burger"
+  When you cite a synonym source, the quote should still match the
+  competitor's actual wording.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
 - low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
