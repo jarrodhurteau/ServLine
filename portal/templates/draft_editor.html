@@ -5621,9 +5621,17 @@
 
     // If this tab doesn't have an iframe yet and has a URL, create one
     const existingFrame = container.querySelector(`[data-tab-id="${id}"]`);
-    if (tab.url && existingFrame && existingFrame.src !== tab.url && !existingFrame.src.includes(tab.url)) {
-      // URL changed (e.g. API returned website) — update existing iframe
-      existingFrame.src = tab.url;
+    if (tab.url && existingFrame) {
+      const currentSrc = existingFrame.src || '';
+      // Only set src on a cold iframe (no src, or about:blank). Once an
+      // iframe has loaded anything, its `src` reflects the user's current
+      // in-iframe location — overwriting it back to tab.url would wipe
+      // scroll position and any sub-page navigation. The "URL changed
+      // because the API resolved a website" case is now handled by
+      // initializing the iframe with the resolved URL in the first place.
+      if (!currentSrc || currentSrc === 'about:blank') {
+        existingFrame.src = tab.url;
+      }
     }
     if (tab.url && !existingFrame) {
       const ld = document.getElementById('comp-loading');
