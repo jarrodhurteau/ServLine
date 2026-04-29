@@ -97,6 +97,7 @@ print("[App] Imported portal.ocr_worker")  # optional confirmation from app.py
 # App & Config
 # ------------------------
 app = Flask(__name__)
+log = app.logger
 
 # --- Config (dev) ---
 app.config["SECRET_KEY"] = "dev-secret-change-me"          # replace later with env var
