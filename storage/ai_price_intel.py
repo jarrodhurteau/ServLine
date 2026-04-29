@@ -730,6 +730,19 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
     ))
 
 
+def _count_market_sources(entry: Dict[str, Any]) -> int:
+    """Total sources backing a market-rate entry: base sources plus all
+    per-size sources. Used by the low-source retry pass to find items
+    that came back with too few citations to be trustworthy."""
+    if not isinstance(entry, dict):
+        return 0
+    n = len(entry.get("sources") or [])
+    for sz in (entry.get("sizes") or {}).values():
+        if isinstance(sz, dict):
+            n += len(sz.get("sources") or [])
+    return n
+
+
 def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool:
     """Verify a Gemini source quote actually backs the cited price + item.
 
@@ -1769,6 +1782,69 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 log.info("Per-item Gemini retry recovered %d items in %.1fs",
                          len(recovered), time.time() - _retry_t0)
                 item_market.update(recovered)
+
+        # Low-source retry: items that came back from Gemini with fewer
+        # than 3 citations. Same per-item retry path as missing-items, but
+        # the item already has a partial entry — we keep whichever response
+        # ends up with more sources. Skipped when Gemini is degraded
+        # (per-item calls would just pile onto the same throttling).
+        LOW_SOURCE_MIN = 3
+        if not gemini_degraded:
+            low_source = [
+                it for it in haiku_items
+                if it["item_id"] in item_market
+                and _count_market_sources(item_market[it["item_id"]]) < LOW_SOURCE_MIN
+            ]
+            if low_source:
+                log.info(
+                    "Low-source retry: %d items have <%d sources — retrying",
+                    len(low_source), LOW_SOURCE_MIN,
+                )
+                LOW_SOURCE_BUDGET_S = 60
+                from concurrent.futures import ThreadPoolExecutor as _LSPool
+                _ls_t0 = time.time()
+                ls_results: Dict[int, Dict[str, Any]] = {}
+                def _ls_one(it):
+                    return _gemini_search_prices(
+                        [it], city, state, zip_code, cuisine,
+                        address=full_address, draft_id=draft_id,
+                    )
+                with _LSPool(max_workers=2) as _lspool:
+                    _lsfutures = [_lspool.submit(_ls_one, it) for it in low_source]
+                    for _f in _lsfutures:
+                        _elapsed = time.time() - _ls_t0
+                        _remaining = LOW_SOURCE_BUDGET_S - _elapsed
+                        if _remaining <= 0:
+                            log.warning(
+                                "Low-source retry hit %ds budget — "
+                                "abandoning %d remaining",
+                                LOW_SOURCE_BUDGET_S,
+                                sum(1 for f in _lsfutures if not f.done()),
+                            )
+                            for f in _lsfutures:
+                                f.cancel()
+                            break
+                        try:
+                            ls_results.update(_f.result(timeout=_remaining))
+                        except Exception as e:
+                            log.error("Low-source retry raised: %s: %s",
+                                      type(e).__name__, e)
+                # Merge: keep whichever entry has more total sources. The
+                # retry sometimes finds nothing extra; in that case the
+                # existing entry stays.
+                upgraded = 0
+                for iid, new_entry in ls_results.items():
+                    old = item_market.get(iid)
+                    if not old:
+                        item_market[iid] = new_entry
+                        upgraded += 1
+                        continue
+                    if _count_market_sources(new_entry) > _count_market_sources(old):
+                        item_market[iid] = new_entry
+                        upgraded += 1
+                if upgraded:
+                    log.info("Low-source retry upgraded %d/%d items in %.1fs",
+                             upgraded, len(low_source), time.time() - _ls_t0)
 
         still_missing = [it for it in haiku_items if it["item_id"] not in item_market]
         if still_missing:
