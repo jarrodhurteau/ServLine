@@ -1579,13 +1579,18 @@
       /* Isolate scroll — prevents bleed to main page */
       overscroll-behavior: contain;
     }
-    /* Hide via visibility + absolute positioning (NOT display:none).
-       display:none on an iframe ancestor wipes the iframe's scroll
-       position when re-shown — visibility doesn't. is-hidden also goes
-       absolute so it doesn't take flex space; the visible panel keeps
-       flex:1 of the remaining (single) flex child. */
+    /* Hide via opacity + absolute positioning (NOT display:none, NOT
+       visibility:hidden).
+       - display:none on an iframe ancestor wipes iframe scroll when shown
+         again.
+       - visibility:hidden cascades to children, but iframes' inline
+         `visibility:visible` (set per-tab in compSwitchTab) overrides the
+         parent's hidden, leaking iframe content over the visible panel.
+       opacity:0 affects all descendants regardless of inline styles, and
+       pointer-events:none + position:absolute keep the panel inert and
+       out of the flex layout while preserving iframe state. */
     .preview-panel.is-hidden {
-      visibility: hidden;
+      opacity: 0;
       position: absolute;
       inset: 0;
       pointer-events: none;
