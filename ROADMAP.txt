@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-29 — Day 141.9 COMPLETE: Gemini Pro reliability,
+Last Updated: 2026-04-29 — Day 141.9 COMPLETE: Pro reliability,
               competitor browser with proxy, PDF viewer, AJAX editor, source
               restaurant links, 5-tier assessment pills, per-variant size ranges.
 
@@ -2728,6 +2728,15 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
           (e.g., Lisa's "Mozzarella Build Your Own Pizza" wouldn't
           validate as a "Cheese Pizza" source). Conservative by
           design; accept the precision/coverage trade-off.
+
+      COPY POLISH (post-wrap)
+        - Outage banner copy tightened:
+            "Live market data temporarily unavailable.
+             Showing estimated pricing for now. Rerun analysis later
+             to refresh with real-time local data."
+        - Removed all user-visible "Gemini" references. The product
+          name is "ServLine market analysis" — vendor branding stays
+          internal (variable names + source comments only).
 
 ================================================================================
 Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)

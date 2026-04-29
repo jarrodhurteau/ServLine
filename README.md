@@ -1902,7 +1902,7 @@ ServLine now has:
   - Health check before batch runs prevents wasted API calls
   - Column resizer with grip handle, sticky preview panel
 
-- **Day 141.9 — Gemini Pro Reliability + Editor UX Polish:** *** COMPLETE *** (April 27-29, 2026)
+- **Day 141.9 — Pro Reliability + Editor UX Polish:** *** COMPLETE *** (April 27-29, 2026)
   - **Root-cause bug:** every Gemini batch was succeeding at the API and being
     silently dropped at parse — Gemini echoed `#` prefix from prompt back in
     JSON `id` fields; `int("#19283")` raised ValueError; broad `except` swallowed.
@@ -1926,3 +1926,7 @@ ServLine now has:
   - **Bug fixes:** "Cheese Pizza → None category" save-path bug (Jinja's
     `{{ None }}` rendered as literal "None" string in JSON payload), AJAX nav
     rebinding after row-click change, src-reset on tab re-activation.
+  - **Copy polish:** outage banner tightened to "Live market data temporarily
+    unavailable. Showing estimated pricing for now. Rerun analysis later to
+    refresh with real-time local data." All user-visible vendor branding
+    (Gemini) removed — product name is "market analysis", vendor stays internal.
