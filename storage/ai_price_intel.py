@@ -930,15 +930,16 @@ For items with [sizes], include per-size ranges AND sources per size:
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
-- HARD MINIMUM: 3 sources per item. NOT aspirational — required.
-  Common items (cheese pizza, hamburger, caesar salad, wings, fries,
-  buffalo wings, chicken tenders, calzone) WILL have 3+ matches in any
-  US town with restaurants. If your first search returns fewer than 3,
-  you have NOT searched hard enough — broaden the query and search
-  again with synonyms before returning the item.
-- ONLY drop below 3 sources when the item is genuinely uncommon
-  (regional specialty, signature dish unique to one chain, etc.).
-  Items with 1-2 sources should be the exception, not the norm.
+- REQUIRED: every item MUST have at least 3 sources. No exceptions.
+  This is not a target — it's a contract. If you cannot find 3 sources
+  for an item, do not return it. Set low_cents to 0 and omit sources
+  (the item will be skipped). Returning an item with 1-2 sources is
+  worse than returning no item at all.
+- Before giving up on an item, you MUST broaden the search with
+  synonyms (see synonym list below) and try at least 2 different
+  query phrasings. Common items (cheese pizza, hamburger, wings,
+  fries, calzone) WILL have 3+ matches in any US town — if your
+  first search returns fewer than 3, you have not searched hard enough.
 - Common items are often listed under SYNONYMS at other restaurants —
   search for those too:
     "Cheese Pizza"  → "Plain", "Mozzarella", "Margherita",
@@ -1782,69 +1783,6 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 log.info("Per-item Gemini retry recovered %d items in %.1fs",
                          len(recovered), time.time() - _retry_t0)
                 item_market.update(recovered)
-
-        # Low-source retry: items that came back from Gemini with fewer
-        # than 3 citations. Same per-item retry path as missing-items, but
-        # the item already has a partial entry — we keep whichever response
-        # ends up with more sources. Skipped when Gemini is degraded
-        # (per-item calls would just pile onto the same throttling).
-        LOW_SOURCE_MIN = 3
-        if not gemini_degraded:
-            low_source = [
-                it for it in haiku_items
-                if it["item_id"] in item_market
-                and _count_market_sources(item_market[it["item_id"]]) < LOW_SOURCE_MIN
-            ]
-            if low_source:
-                log.info(
-                    "Low-source retry: %d items have <%d sources — retrying",
-                    len(low_source), LOW_SOURCE_MIN,
-                )
-                LOW_SOURCE_BUDGET_S = 60
-                from concurrent.futures import ThreadPoolExecutor as _LSPool
-                _ls_t0 = time.time()
-                ls_results: Dict[int, Dict[str, Any]] = {}
-                def _ls_one(it):
-                    return _gemini_search_prices(
-                        [it], city, state, zip_code, cuisine,
-                        address=full_address, draft_id=draft_id,
-                    )
-                with _LSPool(max_workers=2) as _lspool:
-                    _lsfutures = [_lspool.submit(_ls_one, it) for it in low_source]
-                    for _f in _lsfutures:
-                        _elapsed = time.time() - _ls_t0
-                        _remaining = LOW_SOURCE_BUDGET_S - _elapsed
-                        if _remaining <= 0:
-                            log.warning(
-                                "Low-source retry hit %ds budget — "
-                                "abandoning %d remaining",
-                                LOW_SOURCE_BUDGET_S,
-                                sum(1 for f in _lsfutures if not f.done()),
-                            )
-                            for f in _lsfutures:
-                                f.cancel()
-                            break
-                        try:
-                            ls_results.update(_f.result(timeout=_remaining))
-                        except Exception as e:
-                            log.error("Low-source retry raised: %s: %s",
-                                      type(e).__name__, e)
-                # Merge: keep whichever entry has more total sources. The
-                # retry sometimes finds nothing extra; in that case the
-                # existing entry stays.
-                upgraded = 0
-                for iid, new_entry in ls_results.items():
-                    old = item_market.get(iid)
-                    if not old:
-                        item_market[iid] = new_entry
-                        upgraded += 1
-                        continue
-                    if _count_market_sources(new_entry) > _count_market_sources(old):
-                        item_market[iid] = new_entry
-                        upgraded += 1
-                if upgraded:
-                    log.info("Low-source retry upgraded %d/%d items in %.1fs",
-                             upgraded, len(low_source), time.time() - _ls_t0)
 
         still_missing = [it for it in haiku_items if it["item_id"] not in item_market]
         if still_missing:
