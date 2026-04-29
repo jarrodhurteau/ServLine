@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-29 — Day 141.9 COMPLETE: Pro reliability,
+Last Updated: 2026-04-29 — Day 141.9 COMPLETE; Day 142 = Import Testing,
               competitor browser with proxy, PDF viewer, AJAX editor, source
               restaurant links, 5-tier assessment pills, per-variant size ranges.
 
@@ -2739,7 +2739,44 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
           internal (variable names + source comments only).
 
 ================================================================================
-Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
+Day 142 — IMPORT TESTING DAY
+================================================================================
+
+  STATUS: Next up after Day 141.9. Stress-test menu extraction with real
+  PDF menus before optimizing speed (Shortening Day) or building POS
+  exporters (Sprint 13.3.5). The whole product depends on reliable
+  extraction; we need confidence that any real menu PDF will parse
+  correctly before piling more work on top.
+
+  PLAN:
+  [ ] Use the competitor browser to find 10-15 nearby restaurants with
+      PDF menus
+  [ ] Download each PDF
+  [ ] Upload through the wizard
+  [ ] Check extraction quality: items, prices, categories, variants,
+      descriptions
+  [ ] Fix every failure pattern found — each major fix is a sub-day
+      (142.1, 142.2, etc.)
+  [ ] Build a regression test set from these menus
+
+  Sub-day numbering (142.1, 142.2, ...) lets each individual extraction
+  fix get its own commit/scope without polluting the day numbering of
+  later sprints. See project_day141_9_import_testing.md for the framing.
+
+================================================================================
+Shortening Day — Pipeline Parallelization
+================================================================================
+
+  STATUS: After Day 142 import testing settles, before Sprint 13.3.5 kicks
+  off. See project_shortening_plan.md.
+
+  Goal: parallelize API calls across the pipeline so the wizard-to-editor
+  wall-time drops further. Best executed when the extraction baseline is
+  stable (post-Day 142) so timing measurements aren't muddied by
+  extraction failures.
+
+================================================================================
+Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 143-148)
 ================================================================================
 
   STATUS: Kickoff of the exporter-first strategy locked in 2026-04-11. Goal:
@@ -2748,7 +2785,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   project_exporter_first_strategy.md and project_pre_launch_exporter_qa.md.
 
   IMPORTANT: Each "day" in this sprint is a workflow unit, NOT a calendar
-  day. Realistically each Day 142-146 spans 1-2 weeks of calendar time
+  day. Realistically each Day 143-147 spans 1-2 weeks of calendar time
   (extraction fixes, exporter rewrite, test menu library, sandbox iteration
   loop until errors hit zero across the corpus). The day-numbering is just
   the workflow shorthand the user prefers — "ready for the next day" works
@@ -2765,7 +2802,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
     ahead of substance (project_dual_view_architecture.md is PAUSED)
 
   ============================================================
-  Day 142 — Square Exporter
+  Day 143 — Square Exporter
   ============================================================
 
   [ ] Step 1: Internal model fix — toppings as section-wide modifier groups
@@ -2775,7 +2812,9 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
       once toppings stop being phantom items and become a single modifier
       group attached to every item in the section.
 
-      Full plan: project_day142_modifier_conversion.md. Highlights:
+      Full plan: project_day142_modifier_conversion.md (filename retained
+      from the pre-renumber draft; the work itself ships in Day 143).
+      Highlights:
         - Update Claude prompt to recognize "Build Your Own" sections
         - Treat base item (CHEESE row) as the build-your-own item
         - Recognize topping lists as modifier groups, not orderable items
@@ -2784,7 +2823,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
         - Wizard sidebar: "Toppings" labeled as modifier group, applies to N items
         - Wizard item card: expandable modifier group section under variants
 
-      Also pulls in the original Day 142 ingredient-list conversion work
+      Also pulls in the originally-planned ingredient-list conversion work
       ("comes with X, Y, Z" → modifier group with $0 default-on options).
       Both halves of the modifier model fix land here.
 
@@ -2813,13 +2852,13 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
 
   [ ] BULLETPROOF GATE: 15-20 varied real menus import into Square sandbox
       with ZERO errors. Only when this gate is hit does Square count as done.
-      Don't move to Day 143 before this gate passes.
+      Don't move to Day 144 before this gate passes.
 
   ============================================================
-  Day 143 — Toast Exporter
+  Day 144 — Toast Exporter
   ============================================================
 
-  [ ] Apply for Toast Developer Program access (do this EARLY during Day 142
+  [ ] Apply for Toast Developer Program access (do this EARLY during Day 143
       — approval can take weeks)
   [ ] storage/exporters/toast.py with Toast Configuration API field schema
       (nested: Menu > MenuGroup > MenuItem > MenuOptionGroup > MenuItem)
@@ -2830,7 +2869,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   [ ] BULLETPROOF GATE before moving on
 
   ============================================================
-  Day 144 — Clover Exporter
+  Day 145 — Clover Exporter
   ============================================================
 
   [ ] Clover Developer account + sandbox setup
@@ -2841,7 +2880,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   [ ] BULLETPROOF GATE before moving on
 
   ============================================================
-  Day 145 — Lightspeed Exporter
+  Day 146 — Lightspeed Exporter
   ============================================================
 
   [ ] Lightspeed Developer account (Restaurant K-Series target, NOT Retail)
@@ -2853,7 +2892,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   [ ] BULLETPROOF GATE before moving on
 
   ============================================================
-  Day 146 — TouchBistro Exporter
+  Day 147 — TouchBistro Exporter
   ============================================================
 
   [ ] TouchBistro Partner / Developer access (apply early)
@@ -2869,7 +2908,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   asks for it.
 
   ============================================================
-  Day 147 — POS Pro View Evaluation
+  Day 148 — POS Pro View Evaluation
   ============================================================
 
   ONLY after all five exporters are bulletproof:
@@ -2892,7 +2931,7 @@ Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)
   WORK MOVED OUT OF THIS SLOT (resumes after Sprint 13.3.5 completes)
   ============================================================
 
-  These items were originally planned for Days 143+ but are paused until
+  These items were originally planned for Days 144+ but are paused until
   the exporter sprint finishes. Sequence and scope unchanged, just shifted:
 
   [ ] Non-image format support (CSV/XLSX/JSON viewer with source-row highlight)
