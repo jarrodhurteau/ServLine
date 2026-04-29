@@ -2357,11 +2357,11 @@
            in 24 hours" instruction. TODO: gate the always-visible variant
            on monthly-subscriber tier once user_tier is plumbed to the
            editor template. #}
-        {% if show_admin or dev_tools or gemini_servers_down %}
+        {% if show_admin or dev_tools or market_data_down %}
         <form method="post" action="{{ url_for('rerun_price_analysis', draft_id=draft.id) }}"
               style="margin-left:auto;">
           <button type="submit"
-                  title="{% if gemini_servers_down %}Re-run market analysis with live Gemini data{% else %}Dev tool: clear price-intel cache + rerun full analyzer. Burns real API calls.{% endif %}"
+                  title="{% if market_data_down %}Re-run market analysis with live local data{% else %}Dev tool: clear price-intel cache + rerun full analyzer. Burns real API calls.{% endif %}"
                   style="padding:4px 10px; font-size:.72rem; font-weight:600; border:1px solid #B85C38; color:#B85C38; background:transparent; border-radius:6px; cursor:pointer;">
             &#x21bb; Rerun analysis
           </button>
@@ -2375,7 +2375,7 @@
            fully unreachable and Haiku had to estimate every price. Don't
            fire on partial degradation — only when 0 items got real source
            citations. Customer-facing copy + recovery instructions. #}
-        {% if gemini_servers_down %}
+        {% if market_data_down %}
         <div style="margin:0 0 14px 0; padding:14px 16px; border:1.5px solid #B85C38; background:rgba(184,92,56,0.08); border-radius:8px;">
           <div style="display:flex; align-items:flex-start; gap:10px;">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B85C38" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>

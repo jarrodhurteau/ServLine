@@ -6812,10 +6812,11 @@ def draft_editor(draft_id: int):
                             break
                     if has_real:
                         gemini_with_real_sources += 1
-    # Banner condition: assessed items exist but ZERO have real Gemini cites
-    # (i.e. 100% Haiku fallback). Don't fire on partial fallbacks — that's
-    # the normal degraded-Google case and not actionable for the user.
-    gemini_servers_down = (
+    # Banner condition: assessed items exist but ZERO have real source
+    # citations (i.e. 100% market-estimate fallback). Don't fire on partial
+    # fallbacks — that's the normal degraded case and not actionable for
+    # the user.
+    market_data_down = (
         gemini_total_assessed > 0 and gemini_with_real_sources == 0
     )
 
@@ -6941,7 +6942,7 @@ def draft_editor(draft_id: int):
         source_is_structured=source_is_structured,
         item_coordinates=item_coordinates,
         user_restaurants=user_restaurants,
-        gemini_servers_down=gemini_servers_down,
+        market_data_down=market_data_down,
     )
 
 
