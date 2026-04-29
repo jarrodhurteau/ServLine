@@ -917,13 +917,13 @@ For items with [sizes], include per-size ranges AND sources per size:
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
-- HARD MINIMUM: 5 sources per item. NOT aspirational — required.
+- HARD MINIMUM: 3 sources per item. NOT aspirational — required.
   Common items (cheese pizza, hamburger, caesar salad, wings, fries,
-  buffalo wings, chicken tenders, calzone) WILL have 5+ matches in any
-  US town with restaurants. If your first search returns fewer than 5,
+  buffalo wings, chicken tenders, calzone) WILL have 3+ matches in any
+  US town with restaurants. If your first search returns fewer than 3,
   you have NOT searched hard enough — broaden the query and search
   again with synonyms before returning the item.
-- ONLY drop below 5 sources when the item is genuinely uncommon
+- ONLY drop below 3 sources when the item is genuinely uncommon
   (regional specialty, signature dish unique to one chain, etc.).
   Items with 1-2 sources should be the exception, not the norm.
 - Common items are often listed under SYNONYMS at other restaurants —
