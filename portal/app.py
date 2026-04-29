@@ -6812,13 +6812,11 @@ def draft_editor(draft_id: int):
                             break
                     if has_real:
                         gemini_with_real_sources += 1
-    # Banner condition: less than 40% of assessed items have real source
-    # citations (i.e. ≥60% market-estimate fallback). Earlier version only
-    # fired at 100% fallback, but partial outages where Pro is heavily
-    # throttled produced runs with ~10% real coverage where the user
-    # genuinely needed the recovery banner. 40% is the floor for "the
-    # data we're showing is mostly estimates, not real local prices."
-    _MARKET_DATA_DOWN_THRESHOLD = 0.40
+    # Banner condition: less than 60% of assessed items have real source
+    # citations (i.e. >40% market-estimate fallback). Anything less than
+    # majority-real coverage means the user is mostly looking at estimates
+    # and should see the recovery banner.
+    _MARKET_DATA_DOWN_THRESHOLD = 0.60
     if gemini_total_assessed > 0:
         real_ratio = gemini_with_real_sources / gemini_total_assessed
         market_data_down = real_ratio < _MARKET_DATA_DOWN_THRESHOLD
