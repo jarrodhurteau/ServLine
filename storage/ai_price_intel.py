@@ -878,7 +878,21 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
-        prompt = f"""For each item below, give me a low-high price range using REAL price data from restaurants within 5 miles of {location}.
+        prompt = f"""You are pricing a menu against REAL competitor prices. Restaurant
+owners pay for this data because they need ACTUAL local benchmarks
+to set their prices. Estimates are useless to them — they can guess
+prices themselves. Your value is finding what real local restaurants
+actually charge, on their real menu pages, today.
+
+Read this twice: every price you return MUST be backed by a verbatim
+quote from a real restaurant's menu page on the open web. No
+estimates. No "typical range" guesses. No averages from articles. If
+you cannot find real prices on real menu pages, return zero for the
+item — that's the correct answer when real data isn't available, and
+infinitely better than a confident estimate that misleads the owner.
+
+For each item below, give me a low-high price range using REAL price
+data from restaurants within 5 miles of {location}.
 
 For items WITHOUT sizes, search: "(item name) (category) price near {location}"
 For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
@@ -893,6 +907,21 @@ contain BOTH:
   (b) the item name or a clear synonym
 If you can't quote verbatim, DO NOT include the source. We'd rather have
 two real cites than ten fabricated ones.
+
+Sources we REJECT (do not cite):
+  - "Average pizza price in Massachusetts" type articles or roundups
+  - Yelp/Google review snippets that don't quote the menu
+  - National chain pricing pages (unless that chain has a location
+    within 5 miles AND you can quote the local franchise's menu)
+  - Reddit threads, blog posts, news articles about restaurant pricing
+  - Your own training-data knowledge of "what cheese pizza usually costs"
+Sources we ACCEPT:
+  - The restaurant's own website menu page
+  - Online ordering platforms (Toast, Square, ChowNow, Slice, DoorDash,
+    Uber Eats, Grubhub) showing the restaurant's actual menu items
+  - PDF menus hosted on the restaurant's site
+The quote must come from one of these — not from your general
+knowledge of pricing.
 
 Per-size matching: if the source's menu uses different size labels than
 ours (e.g. their "Small" vs our "12 Sml"), only cite that source's price
@@ -955,11 +984,18 @@ Rules:
     "Sub"           → "Hoagie", "Grinder", "Hero", "Sandwich"
   When you cite a synonym source, the quote should still match the
   competitor's actual wording. SYNONYM SEARCHES ARE THE PRIMARY WAY
-  to hit the 5-source minimum on basic items — use them aggressively.
+  to hit the 3-source minimum on basic items — use them aggressively.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
-- low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
-- If you can't find verifiable real data for an item, set low_cents to 0 and omit sources
+- The low/high range comes from your real sources — low = cheapest
+  cited price, high = most expensive cited price. Do NOT widen, pad,
+  or smooth the range. If all your sources happen to land at the same
+  price, that's fine — set low and high equal. Inventing a wider
+  range is fabrication.
+- If you can't find 3 verifiable real prices for an item, set
+  low_cents to 0 and omit sources. The item will be skipped. This is
+  the RIGHT answer when real data isn't available — never substitute
+  estimates.
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
