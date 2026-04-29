@@ -6812,13 +6812,18 @@ def draft_editor(draft_id: int):
                             break
                     if has_real:
                         gemini_with_real_sources += 1
-    # Banner condition: assessed items exist but ZERO have real source
-    # citations (i.e. 100% market-estimate fallback). Don't fire on partial
-    # fallbacks — that's the normal degraded case and not actionable for
-    # the user.
-    market_data_down = (
-        gemini_total_assessed > 0 and gemini_with_real_sources == 0
-    )
+    # Banner condition: less than 40% of assessed items have real source
+    # citations (i.e. ≥60% market-estimate fallback). Earlier version only
+    # fired at 100% fallback, but partial outages where Pro is heavily
+    # throttled produced runs with ~10% real coverage where the user
+    # genuinely needed the recovery banner. 40% is the floor for "the
+    # data we're showing is mostly estimates, not real local prices."
+    _MARKET_DATA_DOWN_THRESHOLD = 0.40
+    if gemini_total_assessed > 0:
+        real_ratio = gemini_with_real_sources / gemini_total_assessed
+        market_data_down = real_ratio < _MARKET_DATA_DOWN_THRESHOLD
+    else:
+        market_data_down = False
 
     # Restaurant info
     restaurant = None

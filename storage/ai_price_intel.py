@@ -1114,6 +1114,40 @@ Rules:
             except Exception as e:
                 log.error("Gemini batch future raised: %s: %s", type(e).__name__, e)
 
+    # Batch-level retry pass: if SOME batches succeeded and others failed,
+    # Pro is partially up — retry the failed batches once. Catches the
+    # "Pro is heavily throttled but not fully down" case (observed Apr 29:
+    # 1/14 batches ok, 13 failed; the one success proves Pro is reachable).
+    # Skip when no batches succeeded (Pro is genuinely down → Haiku) and
+    # skip when all succeeded (nothing to retry).
+    if 0 < _GEMINI_LAST_RUN["batches_ok"] < _GEMINI_LAST_RUN["batches_total"]:
+        succeeded_ids = set(out.keys())
+        failed_batches = [
+            b for b in batches
+            if not any(it["item_id"] in succeeded_ids for it in b)
+        ]
+        if failed_batches:
+            log.info(
+                "Batch retry pass: %d batches failed, %d succeeded — "
+                "retrying failed batches sequentially (Pro may be partially recovering)",
+                len(failed_batches), _GEMINI_LAST_RUN["batches_ok"],
+            )
+            recovered = 0
+            for batch in failed_batches:
+                # Sequential with a small gap — gives Pro a moment between
+                # calls and avoids resurfacing whatever throttle hit on the
+                # first pass.
+                time.sleep(3 + random.uniform(0, 2))
+                try:
+                    result = _run_batch(batch)
+                    if result:
+                        out.update(result)
+                        recovered += len(result)
+                except Exception as e:
+                    log.warning("Retry batch raised: %s: %s", type(e).__name__, e)
+            if recovered:
+                log.info("Batch retry pass recovered %d items", recovered)
+
     _GEMINI_LAST_RUN["items_returned"] = len(out)
     _GEMINI_LAST_RUN["duration_s"] = round(time.time() - _start_t, 1)
     model_breakdown = ", ".join(
