@@ -5797,14 +5797,28 @@
   }
 
   function bindCatClicks() {
-    document.querySelectorAll('#cat-list .cat-label, #cat-list .subcat-label').forEach(label => {
-      const origOnclick = label.getAttribute('onclick');
+    // The clickable element is now the <li> itself (Day 141.9 — earlier
+    // commit made the whole row clickable so users don't have to land on
+    // the label text). Older builds put the onclick on .cat-label /
+    // .subcat-label spans; we still cover those for safety.
+    document.querySelectorAll(
+      '#cat-list li[onclick*="window.location"], ' +
+      '#cat-list .cat-label[onclick*="window.location"], ' +
+      '#cat-list .subcat-label[onclick*="window.location"]'
+    ).forEach(el => {
+      const origOnclick = el.getAttribute('onclick');
       if (!origOnclick) return;
       const match = origOnclick.match(/window\.location=['"](.*?)['"]/);
       if (!match) return;
       const url = match[1];
-      label.removeAttribute('onclick');
-      label.addEventListener('click', e => {
+      el.removeAttribute('onclick');
+      el.addEventListener('click', e => {
+        // Don't hijack clicks on inner action buttons (rename, delete,
+        // drag handle) — they have their own stopPropagation, but a
+        // belt-and-suspenders check here in case a future button forgets.
+        if (e.target.closest('.cat-rename, .cat-delete, .cat-drag, .cat-needs-price-count')) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         ajaxNav(url);
