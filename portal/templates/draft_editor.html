@@ -1579,6 +1579,17 @@
       /* Isolate scroll — prevents bleed to main page */
       overscroll-behavior: contain;
     }
+    /* Hide via visibility + absolute positioning (NOT display:none).
+       display:none on an iframe ancestor wipes the iframe's scroll
+       position when re-shown — visibility doesn't. is-hidden also goes
+       absolute so it doesn't take flex space; the visible panel keeps
+       flex:1 of the remaining (single) flex child. */
+    .preview-panel.is-hidden {
+      visibility: hidden;
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
     .competitor-list {
       flex: 1;
       overflow-y: auto;
@@ -2433,7 +2444,7 @@
       </div>
 
       <!-- Day 141.8: Competitor browser panel (hidden until a competitor tab is opened) -->
-      <div id="preview-comp-panel" class="preview-panel" style="display:none; flex-direction:column;">
+      <div id="preview-comp-panel" class="preview-panel is-hidden" style="flex-direction:column;">
         <div class="comp-tab-bar" id="comp-tab-bar"></div>
         <div class="comp-nav-bar" id="comp-nav-bar">
           <button class="comp-nav-btn" id="comp-back-btn" onclick="compGoBack()" title="Back">
@@ -2474,7 +2485,7 @@
 
       <!-- Original menu/file viewer (hidden by default, toggled) -->
       {% if source_job_id or source_is_structured %}
-      <div id="preview-menu-panel" class="preview-panel" style="display:none;">
+      <div id="preview-menu-panel" class="preview-panel is-hidden">
         {% if source_is_structured %}
         <!-- Day 141.6: Structured import — show file as table -->
         <div style="height:100%; display:flex; flex-direction:column; overflow:hidden; background:transparent;">
@@ -5171,6 +5182,13 @@
   });
 
   /* --- Preview toggle (map / original menu) --- */
+  // Helper: toggle a panel via the .is-hidden class instead of style.display.
+  // display:none on an iframe ancestor resets iframe scroll when re-shown;
+  // visibility:hidden + position:absolute doesn't.
+  function _setPanelVisible(panel, visible) {
+    if (!panel) return;
+    panel.classList.toggle('is-hidden', !visible);
+  }
   function editorTogglePreview(view) {
     const mapPanel = document.getElementById('preview-map-panel');
     const menuPanel = document.getElementById('preview-menu-panel');
@@ -5178,17 +5196,17 @@
     const mapBtn = document.getElementById('preview-map-btn');
     const menuBtn = document.getElementById('preview-menu-btn-top');
     // Hide comp panel when switching to map/menu (but keep tabs alive)
-    if (compPanel) compPanel.style.display = 'none';
+    _setPanelVisible(compPanel, false);
     const compBtn = document.getElementById('preview-comp-btn');
     if (compBtn) compBtn.classList.remove('active');
     if (view === 'map') {
-      if (mapPanel) mapPanel.style.display = '';
-      if (menuPanel) menuPanel.style.display = 'none';
+      _setPanelVisible(mapPanel, true);
+      _setPanelVisible(menuPanel, false);
       if (mapBtn) mapBtn.classList.add('active');
       if (menuBtn) menuBtn.classList.remove('active');
     } else {
-      if (mapPanel) mapPanel.style.display = 'none';
-      if (menuPanel) menuPanel.style.display = '';
+      _setPanelVisible(mapPanel, false);
+      _setPanelVisible(menuPanel, true);
       if (mapBtn) mapBtn.classList.remove('active');
       if (menuBtn) menuBtn.classList.add('active');
     }
@@ -5531,9 +5549,9 @@
     const mapPanel = document.getElementById('preview-map-panel');
     const menuPanel = document.getElementById('preview-menu-panel');
     const compPanel = document.getElementById('preview-comp-panel');
-    if (mapPanel) mapPanel.style.display = 'none';
-    if (menuPanel) menuPanel.style.display = 'none';
-    if (compPanel) compPanel.style.display = 'flex';
+    _setPanelVisible(mapPanel, false);
+    _setPanelVisible(menuPanel, false);
+    _setPanelVisible(compPanel, true);
     const mapBtn = document.getElementById('preview-map-btn');
     const menuBtn = document.getElementById('preview-menu-btn-top');
     const compBtn = document.getElementById('preview-comp-btn');
@@ -5594,9 +5612,9 @@
     const mapPanel = document.getElementById('preview-map-panel');
     const menuPanel = document.getElementById('preview-menu-panel');
     const compPanel = document.getElementById('preview-comp-panel');
-    if (mapPanel) mapPanel.style.display = 'none';
-    if (menuPanel) menuPanel.style.display = 'none';
-    if (compPanel) compPanel.style.display = 'flex';
+    _setPanelVisible(mapPanel, false);
+    _setPanelVisible(menuPanel, false);
+    _setPanelVisible(compPanel, true);
 
     // Update toggle buttons
     const mapBtn = document.getElementById('preview-map-btn');
@@ -5891,9 +5909,9 @@
     var mapPanel = document.getElementById('preview-map-panel');
     var menuPanel = document.getElementById('preview-menu-panel');
     var compPanel = document.getElementById('preview-comp-panel');
-    if (mapPanel) mapPanel.style.display = 'none';
-    if (menuPanel) menuPanel.style.display = 'none';
-    if (compPanel) compPanel.style.display = 'flex';
+    _setPanelVisible(mapPanel, false);
+    _setPanelVisible(menuPanel, false);
+    _setPanelVisible(compPanel, true);
     var compBtn = document.getElementById('preview-comp-btn');
     if (compBtn) { compBtn.classList.add('active'); compBtn.style.display = ''; }
     document.getElementById('preview-map-btn')?.classList.remove('active');
