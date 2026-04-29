@@ -2,7 +2,7 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-20 — Day 141.8 COMPLETE: Gemini+Google Search pricing,
+Last Updated: 2026-04-29 — Day 141.9 COMPLETE: Gemini Pro reliability,
               competitor browser with proxy, PDF viewer, AJAX editor, source
               restaurant links, 5-tier assessment pills, per-variant size ranges.
 
@@ -2627,6 +2627,107 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
         - Retry failed Gemini items without full rerun
         - User-facing "Gemini unavailable" banner
         - Shortening plan: max parallel API calls across pipeline
+
+  [x] Day 141.9: Gemini Pro reliability + editor UX polish (COMPLETE)
+      Date: 2026-04-27 → 2026-04-29
+
+      ROOT-CAUSE BUG (high impact):
+      Discovered that every Gemini batch was succeeding at the API and
+      being silently dropped at the parser. Our prompt formats items as
+      `- #19283 "Item Name"`; Gemini echoed the `#` prefix back in JSON
+      `id` fields; `int("#19283")` raised ValueError; broad `except`
+      swallowed it; batch was marked failed; all items went to Haiku.
+      Symptoms looked like "Google is down" — actually we were throwing
+      away every successful response. Fix: _coerce_item_id() strips `#`.
+
+      PRICING PIPELINE — pro-only architecture
+        - Deleted multi-model fallback chain (flash → flash-lite → pro).
+          flash 503'd consistently during Apr 2026 capacity events;
+          flash-lite returned 200 OK with empty body ~50% of grounded
+          calls; pro consistently returned clean cited results.
+        - _GEMINI_MODEL = "gemini-2.5-pro" — single constant. No probe,
+          no race, no chosen-model logic, no priors.
+        - 1 quick retry on transient 503 per batch. Per-item retry pass
+          (capped 120s) for items missed in the batched run. Haiku as
+          last resort when pro itself is down.
+        - 6:25 wall-time on a healthy day for a 158-item menu (was
+          ~21min during the broken weeks).
+
+      VERBATIM-QUOTE SOURCE VALIDATION
+        - Spot-check on draft 310 found ~60-80% of cited per-restaurant
+          prices were wrong — Gemini was citing real restaurants but
+          fabricating the prices, especially when our menu sizes
+          (10" Mini, 12" Sml) didn't appear verbatim on local menus.
+        - Prompt now requires every source to include a `quote` field
+          with the verbatim text from the menu page. The quote must
+          contain BOTH the price AND a fragment of the item name.
+        - _quote_validates_price() rejects sources whose quote doesn't
+          back up the cited price/item. Per-size entries with zero
+          surviving sources are dropped.
+        - Trade-off: lower coverage, much higher precision. Validator
+          logs `kept=X, no_quote=Y, bad_quote=Z` per batch.
+
+      AUDIT INFRASTRUCTURE
+        - New gemini_call_log SQLite table. Every grounded call logs
+          ts, model, outcome (ok/error/empty_body), error_type,
+          error_status (HTTP code), duration_s, batch_size, draft_id.
+          Append-only. Indexed by ts and model.
+        - Lets us verify pro's reliability over time and identify
+          outage windows after the fact.
+
+      CUSTOMER-FACING OUTAGE BANNER
+        - When 100% of items end up Haiku-estimated (zero real Gemini
+          source citations), the editor shows a themed warning at the
+          top of the map panel: "Market analysis temporarily unavailable
+          — these prices are estimates and may not accurately reflect
+          your local market. Please try Rerun analysis in 24 hours."
+        - Rerun analysis button visible to all users during outages
+          (was admin/dev-only otherwise) so the banner's instruction
+          is actionable.
+
+      DEAD CODE PURGE (~1,000 lines)
+        - Deleted Opus per-competitor comparison pipeline:
+          _preload_comparisons_async, _preload_one_comparison,
+          compare_with_competitor (170-line Opus matcher),
+          _build_comparison_prompt, _build_real_comparison_prompt,
+          _normalize_menu_category, _match_items, _fetch_competitor_menus,
+          and the /api/drafts/<id>/compare_competitor route.
+        - Reason: the editor UI never surfaced the data; the daemon
+          burned ~$6-10 per run, took 10-25 minutes, and produced
+          comparisons nobody saw.
+        - competitor_comparisons table kept (empty) so rerun handler
+          DELETEs remain harmless no-ops.
+
+      EDITOR UX FIXES
+        - Sidebar category rows fully clickable (was: only the label
+          text — users had to land cursor on text or click again).
+        - Scroll to top of new category on AJAX nav (was: preserved
+          previous scroll, dropped users mid-list of new category).
+        - "Cheese Pizza into None category" save-path bug. wizSave
+          was sending `{{ current_category }}` from Jinja, which is
+          `None` in All Items view → literal "None" string in payload.
+          Fix: read item's own category from card.dataset.category.
+          Plus backend defense rejects "None"/"null"/"" and looks up
+          existing DB value.
+        - Iframe scroll preserved across panel toggles. compSwitchTab
+          was resetting `existingFrame.src = tab.url` whenever they
+          differed — true after any in-iframe nav. Now only sets src
+          on cold (empty/about:blank) iframes.
+        - Panel toggle uses opacity:0 + position:absolute (not
+          display:none, not visibility:hidden). display:none wipes
+          iframe scroll on re-show; visibility cascades but iframe
+          inline `visibility:visible` (set per-tab) overrides parent
+          and leaks content over the visible panel.
+        - 12 commits, each surgical.
+
+      KNOWN LIMITATIONS
+        - Pro can have its own outage days (Apr 29 was one — every
+          batch 503'd). Banner + Haiku fallback handle this; no auto-
+          recovery beyond manual Rerun button.
+        - Verbatim-quote validator rejects synonym-named items
+          (e.g., Lisa's "Mozzarella Build Your Own Pizza" wouldn't
+          validate as a "Cheese Pizza" source). Conservative by
+          design; accept the precision/coverage trade-off.
 
 ================================================================================
 Sprint 13.3.5 — Bulletproof POS Exporter Sprint (Days 142-147)

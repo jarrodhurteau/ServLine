@@ -1901,3 +1901,28 @@ ServLine now has:
   - Anti-frame-busting, 403 detection, "Open in new tab" fallbacks
   - Health check before batch runs prevents wasted API calls
   - Column resizer with grip handle, sticky preview panel
+
+- **Day 141.9 — Gemini Pro Reliability + Editor UX Polish:** *** COMPLETE *** (April 27-29, 2026)
+  - **Root-cause bug:** every Gemini batch was succeeding at the API and being
+    silently dropped at parse — Gemini echoed `#` prefix from prompt back in
+    JSON `id` fields; `int("#19283")` raised ValueError; broad `except` swallowed.
+    Looked like "Google is down" for weeks. Fix: `_coerce_item_id()` strips `#`.
+  - **Pro-only architecture:** deleted multi-model fallback. Gemini Pro is the
+    sole grounded model. flash 503'd consistently; flash-lite returned empty
+    bodies on ~50% of grounded calls. ~80 lines of probe/race/switch logic gone.
+  - **Verbatim-quote source validation:** prompt requires every cited price to
+    include a `quote` field with verbatim text from the menu page. Parser drops
+    sources whose quote doesn't match price + item name. Caught 60-80% fabrication
+    rate on per-restaurant cites observed in production.
+  - **Persistent gemini_call_log table** for ongoing reliability auditing
+    (ts, model, outcome, error_type, status, duration, draft_id, batch_size).
+  - **Customer-facing "servers down" banner** when 100% of items fall to Haiku.
+    Rerun analysis button visible to all users during outages.
+  - **~1,000 lines of dead Opus per-competitor comparison code deleted** —
+    UI never surfaced it, daemon burned $6-10/run for invisible data.
+  - **Editor UX:** full-row clickable sidebar, scroll-to-top on AJAX nav,
+    iframe scroll preserved across panel toggles (opacity:0 + position:absolute,
+    not display:none which resets iframe state).
+  - **Bug fixes:** "Cheese Pizza → None category" save-path bug (Jinja's
+    `{{ None }}` rendered as literal "None" string in JSON payload), AJAX nav
+    rebinding after row-click change, src-reset on tab re-activation.
