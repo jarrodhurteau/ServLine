@@ -5789,6 +5789,11 @@
         }
         history.pushState(null, '', url);
         rebindEditorHandlers();
+        // Scroll the new category to the top — without this, category
+        // changes preserved the previous scroll position, dropping the
+        // user halfway down the new category's items.
+        mainCol.scrollTop = 0;
+        window.scrollTo({ top: 0, behavior: 'instant' });
       })
       .catch(err => {
         console.warn('AJAX nav failed, falling back:', err);
