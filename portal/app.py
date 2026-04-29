@@ -6823,7 +6823,158 @@ def _build_editor_competitors(draft, price_intel, restaurant):
             except Exception:
                 pass
 
+        # After the live build, do a single backfill sweep on whatever
+        # shells / no-website entries remain in the just-built cache.
+        # Reasons they exist after a fresh build:
+        #   - Overflow beyond LIVE_LOOKUP_CAP=30 was deliberately written
+        #     as shells. Backfill those now (capped separately) so the user
+        #     doesn't have to reload to see metadata.
+        #   - get_place_details may have lost the website_url race during
+        #     the parallel-burst.
+        # Without this, the first render after a rerun shows bare names
+        # for many restaurants and the in-memory editor cache then freezes
+        # that state until the next rerun.
+        try:
+            _post_build_backfill(places_cache, cache_path,
+                                  _bf_api_key, _bf_city, _bf_state,
+                                  _bf_our_lat, _bf_our_lng)
+        except Exception as _bbe:
+            log.warning("Post-build cache backfill failed: %s", _bbe)
+        # Re-load the freshly-saved cache into competitors so the caller
+        # gets the enriched entries (the for-loop above only added the
+        # original cached shells/None entries).
+        try:
+            with open(cache_path, "r") as _gcf2:
+                _enriched = json.loads(_gcf2.read())
+            _have = {c.get("place_name", "").lower() for c in competitors}
+            for _k, _cd in _enriched.items():
+                if not _cd: continue
+                if _looks_like_article_title(_cd.get("place_name", "")): continue
+                _name_lc = _cd.get("place_name", "").lower()
+                # Replace shell entries that were already in competitors with
+                # the enriched version (match by name).
+                for i, _existing in enumerate(competitors):
+                    if _existing.get("place_name", "").lower() == _name_lc:
+                        competitors[i] = _cd
+                        _name_lc = None
+                        break
+                if _name_lc and _name_lc not in _have:
+                    competitors.append(_cd)
+        except Exception:
+            pass
+
     return competitors
+
+
+def _post_build_backfill(places_cache: dict, cache_path: str,
+                         api_key: str, city: str, state: str,
+                         our_lat, our_lng) -> None:
+    """Shared backfill sweep for shells (no place_id) + no-website entries.
+    Modifies `places_cache` in place and persists if anything changed."""
+    if not api_key:
+        return
+    shells = [
+        (k, cd) for k, cd in places_cache.items()
+        if cd and cd.get("place_name") and not cd.get("place_id")
+    ]
+    no_urls = [
+        (k, cd) for k, cd in places_cache.items()
+        if cd and cd.get("place_id") and not cd.get("website_url")
+    ]
+    if not shells and not no_urls:
+        return
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from storage.price_intel import get_place_details
+    import requests as _bf_rq2
+    import math as _math2
+
+    def _shell_lookup(k, cd):
+        try:
+            _name = cd.get("place_name") or ""
+            _params = {
+                "key": api_key,
+                "input": f"{_name} restaurant {city} {state}",
+                "inputtype": "textquery",
+                "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
+            }
+            if our_lat and our_lng:
+                _params["locationbias"] = f"circle:16000@{our_lat},{our_lng}"
+            _r = _bf_rq2.get(
+                "https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
+                params=_params, timeout=8,
+            )
+            if _r.status_code != 200:
+                return k, None
+            cands = _r.json().get("candidates", [])
+            if not cands:
+                return k, None
+            _c = cands[0]
+            _loc = _c.get("geometry", {}).get("location", {})
+            if our_lat and our_lng and _loc.get("lat") and _loc.get("lng"):
+                _dl = _math2.radians(_loc["lat"] - our_lat)
+                _dn = _math2.radians(_loc["lng"] - our_lng)
+                _a = _math2.sin(_dl/2)**2 + _math2.cos(_math2.radians(our_lat)) * _math2.cos(_math2.radians(_loc["lat"])) * _math2.sin(_dn/2)**2
+                if 6371 * 2 * _math2.atan2(_math2.sqrt(_a), _math2.sqrt(1-_a)) > 25:
+                    return k, None
+            _pl = _c.get("price_level")
+            return k, {
+                "place_name": _c.get("name", _name),
+                "place_address": _c.get("formatted_address", ""),
+                "rating": _c.get("rating"),
+                "price_label": {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(_pl),
+                "price_level": _pl,
+                "user_ratings": _c.get("user_ratings_total"),
+                "latitude": _loc.get("lat"),
+                "longitude": _loc.get("lng"),
+                "cuisine_match": None,
+                "place_id": _c.get("place_id"),
+                "website_url": None,
+            }
+        except Exception:
+            return k, None
+
+    def _website_lookup(k, cd):
+        try:
+            details = get_place_details(cd["place_id"])
+            if details and details.get("website"):
+                return k, details["website"]
+        except Exception:
+            pass
+        return k, None
+
+    BACKFILL_CAP = 60
+    shells_filled = urls_filled = 0
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        s_futs = [pool.submit(_shell_lookup, k, cd) for k, cd in shells[:BACKFILL_CAP]]
+        u_futs = [pool.submit(_website_lookup, k, cd) for k, cd in no_urls[:BACKFILL_CAP]]
+        for fut in as_completed(s_futs):
+            try:
+                k, new = fut.result()
+            except Exception:
+                continue
+            if new and k in places_cache:
+                places_cache[k] = new
+                shells_filled += 1
+        for fut in as_completed(u_futs):
+            try:
+                k, ws = fut.result()
+            except Exception:
+                continue
+            if ws and k in places_cache and places_cache[k]:
+                places_cache[k]["website_url"] = ws
+                urls_filled += 1
+
+    if shells_filled or urls_filled:
+        try:
+            with open(cache_path, "w") as cf:
+                cf.write(json.dumps(places_cache))
+        except Exception:
+            pass
+        log.info(
+            "Editor cache backfill: shells %d/%d, websites %d/%d",
+            shells_filled, len(shells), urls_filled, len(no_urls),
+        )
 
 
 @app.get("/drafts/<int:draft_id>/edit")
@@ -7469,13 +7620,54 @@ def _invalidate_editor_cache(draft_id: int, restaurant_id: int | None = None) ->
 
 
 def _run_price_analysis_job(draft_id: int, restaurant_id: int) -> None:
-    """Background worker: runs Claude Call 4 and updates the status dict."""
+    """Background worker: runs Claude Call 4 and updates the status dict.
+
+    Status is set to "done" only after EVERYTHING the editor needs to
+    render fully is in place: pricing pipeline, Places nearby search,
+    editor competitor list (with shell + website backfills). The user
+    waits a bit longer on the loading screen but lands on a fully
+    populated editor — no shells, no missing websites, no race with
+    background daemons."""
     _invalidate_editor_cache(draft_id, restaurant_id)
     try:
         result = ai_price_intel.analyze_menu_prices(
             draft_id=draft_id,
             restaurant_id=restaurant_id,
         )
+        if result and not result.get("error"):
+            # Pre-warm the editor competitor cache so the first render is
+            # instant AND fully populated (shells/websites already filled
+            # in by _build_editor_competitors's backfill passes).
+            try:
+                _draft = drafts_store.get_draft(draft_id)
+                _restaurant = None
+                if _draft and _draft.get("restaurant_id"):
+                    with db_connect() as _conn:
+                        _r = _conn.execute(
+                            "SELECT id, name, address, city, state, zip_code, cuisine_type "
+                            "FROM restaurants WHERE id = ?",
+                            (_draft["restaurant_id"],),
+                        ).fetchone()
+                        if _r:
+                            _restaurant = dict(_r)
+                _price_intel = None
+                try:
+                    from storage.ai_price_intel import get_price_intelligence
+                    _price_intel = get_price_intelligence(draft_id)
+                except Exception:
+                    pass
+                if _draft:
+                    _comps = _build_editor_competitors(
+                        _draft, _price_intel, _restaurant,
+                    )
+                    with _EDITOR_COMPETITORS_LOCK:
+                        _EDITOR_COMPETITORS_CACHE[draft_id] = _comps
+            except Exception as _ce:
+                log.warning(
+                    "Editor competitor pre-warm failed for draft %d: %s",
+                    draft_id, _ce,
+                )
+
         with _PRICE_ANALYSIS_LOCK:
             if result and result.get("error"):
                 _PRICE_ANALYSIS_JOBS[draft_id] = {

@@ -1937,22 +1937,21 @@ def analyze_menu_prices(
     except Exception as e:
         log.warning("Gemini aggregation failed for draft %d: %s", draft_id, e)
 
-    # Background: only the Google Places nearby search. Cheap (~30s, single
-    # API call) and gives the editor map its 20 nearby-restaurant pins for
-    # the "similar restaurants" sidebar. Per-competitor Opus comparisons
-    # used to run here too but were deleted (Day 141.9): they computed
-    # data the editor UI never displayed, burned ~$6-10 per run, and the
-    # daemon's 10-25 min runtime created CPU contention with editor renders.
-    def _background_enrichment(_rid=restaurant_id, _tier=user_tier):
-        try:
-            from storage.price_intel import search_nearby_restaurants
-            comp_data = get_cached_comparisons(_rid)
-            if not comp_data and _tier == "premium":
-                search_nearby_restaurants(_rid, force_refresh=False)
-        except Exception as e:
-            log.warning("Background Places enrichment failed for rest %d: %s", _rid, e)
-    import threading as _threading
-    _threading.Thread(target=_background_enrichment, daemon=True).start()
+    # Synchronous Places nearby search — populates the editor map's 20
+    # nearby-restaurant pins. Was a fire-and-forget daemon, but that
+    # raced the editor render and the user landed on a half-populated
+    # map. ~30s extra on the loading screen vs. a missing map; the
+    # loading wait is the right place to absorb it.
+    try:
+        from storage.price_intel import search_nearby_restaurants
+        comp_data = get_cached_comparisons(restaurant_id)
+        if not comp_data and user_tier == "premium":
+            search_nearby_restaurants(restaurant_id, force_refresh=False)
+    except Exception as e:
+        log.warning(
+            "Places nearby search failed for rest %d: %s",
+            restaurant_id, e,
+        )
 
     # Return the freshly-aggregated results so callers see the real counts
     # instead of an empty shell.
