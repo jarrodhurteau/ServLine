@@ -778,6 +778,18 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
         "cheese": ("plain", "mozzarella", "margherita", "neapolitan"),
         "hamburger": ("burger",),
         "cheeseburger": ("cheese burger",),
+        # Wings — buffalo/chicken/hot/boneless are all the same product.
+        # Quote often just says "wings" with quantity prefix (e.g. "10 Wings").
+        "wings": ("buffalo", "boneless", "chicken", "wing"),
+        "buffalo": ("wings", "wing"),
+        # Fries — plain side of fries shows up under several names.
+        "fries": ("french", "side", "basket"),
+        # Calzone aliases (regional — stromboli in some areas).
+        "calzone": ("stromboli", "calz"),
+        # Sub sandwiches — major regional name variation.
+        "sub": ("hoagie", "grinder", "hero", "sandwich"),
+        "hoagie": ("sub", "grinder", "hero"),
+        "grinder": ("sub", "hoagie", "hero"),
     }
     name_lower = (item_name or "").lower()
     tokens = [t for t in re.findall(r"[a-z]+", name_lower)
@@ -882,7 +894,10 @@ Return JSON only — an array:
 [{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null,
    "sources": [
      {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "Cheese Pizza  $8.99"}},
-     {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Cheese Pie - Large $12.00"}}
+     {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Cheese Pie - Large $12.00"}},
+     {{"restaurant": "Tony's House of Pizza", "price_cents": 1099, "quote": "Plain Cheese - $10.99"}},
+     {{"restaurant": "Bella Napoli", "price_cents": 1350, "quote": "Margherita Pizza  $13.50"}},
+     {{"restaurant": "Slice Pizzeria", "price_cents": 950, "quote": "Cheese Pie  $9.50"}}
    ]
 }}]
 
@@ -892,25 +907,41 @@ For items with [sizes], include per-size ranges AND sources per size:
   "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100,
     "sources": [
       {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "12\\" Cheese Pizza - $8.99"}},
-      {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Small (12 inch) cheese - $12.00"}}
+      {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Small (12 inch) cheese - $12.00"}},
+      {{"restaurant": "Tony's House of Pizza", "price_cents": 1099, "quote": "Small Cheese 12in - $10.99"}},
+      {{"restaurant": "Bella Napoli", "price_cents": 1350, "quote": "12\\" Margherita - $13.50"}},
+      {{"restaurant": "Slice Pizzeria", "price_cents": 950, "quote": "Small (12\\") Cheese - $9.50"}}
     ]
   }}}}
 }}
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
-- AIM FOR AT LEAST 5 SOURCES PER ITEM. Common items (cheese pizza,
-  hamburger, caesar salad) should easily hit 5 — most local restaurants
-  have them. If you find fewer than 3 sources, search again with broader
-  terms before giving up.
+- HARD MINIMUM: 5 sources per item. NOT aspirational — required.
+  Common items (cheese pizza, hamburger, caesar salad, wings, fries,
+  buffalo wings, chicken tenders, calzone) WILL have 5+ matches in any
+  US town with restaurants. If your first search returns fewer than 5,
+  you have NOT searched hard enough — broaden the query and search
+  again with synonyms before returning the item.
+- ONLY drop below 5 sources when the item is genuinely uncommon
+  (regional specialty, signature dish unique to one chain, etc.).
+  Items with 1-2 sources should be the exception, not the norm.
 - Common items are often listed under SYNONYMS at other restaurants —
   search for those too:
-    "Cheese Pizza" → also try "Plain", "Mozzarella", "Margherita",
-                          "Round Pie", "Cheese Pie"
-    "Hamburger"   → also try "Burger", "Plain Burger"
-    "Cheeseburger" → also try "Cheese Burger"
+    "Cheese Pizza"  → "Plain", "Mozzarella", "Margherita",
+                      "Round Pie", "Cheese Pie", "Neapolitan"
+    "Hamburger"     → "Burger", "Plain Burger", "1/4 lb Burger"
+    "Cheeseburger"  → "Cheese Burger", "American Cheeseburger"
+    "Wings"         → "Buffalo Wings", "Chicken Wings", "Hot Wings",
+                      "Boneless Wings", "Wing Basket", "10 Wings",
+                      "6 Wings", "Wing Platter", "Jumbo Wings"
+    "Fries"         → "French Fries", "Side of Fries", "Basket of Fries"
+    "Calzone"       → "Stromboli" (regional), "Calz", "Cheese Calzone"
+    "Salad"         → "House Salad", "Garden Salad", "Tossed Salad"
+    "Sub"           → "Hoagie", "Grinder", "Hero", "Sandwich"
   When you cite a synonym source, the quote should still match the
-  competitor's actual wording.
+  competitor's actual wording. SYNONYM SEARCHES ARE THE PRIMARY WAY
+  to hit the 5-source minimum on basic items — use them aggressively.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
 - low_cents and high_cents MUST be different — if you only find one price, widen the range by +/- 15%
