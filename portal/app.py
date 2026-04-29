@@ -6455,6 +6455,55 @@ def _build_editor_competitors(draft, price_intel, restaurant):
     try:
         with open(_gpc, "r") as _gcf:
             _cached_places = json.loads(_gcf.read())
+        # Backfill missing website_url for cached entries that have a
+        # place_id but no website. Cause: the original parallel build
+        # burst sometimes loses the get_place_details follow-up call to
+        # rate limits, leaving website_url=None on entries whose Place
+        # Details actually exist. The editor's "click competitor → load
+        # website iframe" flow then shows "no website available" for
+        # restaurants that DO have websites. Self-heal on each render.
+        _missing = [
+            (k, _cd) for k, _cd in _cached_places.items()
+            if _cd and _cd.get("place_id") and not _cd.get("website_url")
+        ]
+        if _missing:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from storage.price_intel import get_place_details
+
+            def _backfill_one(k, cd):
+                try:
+                    details = get_place_details(cd["place_id"])
+                    if details and details.get("website"):
+                        return k, details["website"]
+                except Exception:
+                    pass
+                return k, None
+
+            BACKFILL_CAP = 30
+            backfilled = 0
+            with ThreadPoolExecutor(max_workers=10) as _pool:
+                futs = [_pool.submit(_backfill_one, k, cd)
+                        for k, cd in _missing[:BACKFILL_CAP]]
+                for fut in as_completed(futs):
+                    try:
+                        k, ws = fut.result()
+                    except Exception:
+                        continue
+                    if ws and k in _cached_places and _cached_places[k]:
+                        _cached_places[k]["website_url"] = ws
+                        backfilled += 1
+            if backfilled:
+                # Persist the enriched cache back to disk so subsequent
+                # loads don't have to re-do these calls.
+                try:
+                    with open(_gpc, "w") as _gcf:
+                        _gcf.write(json.dumps(_cached_places))
+                except Exception:
+                    pass
+                log.info(
+                    "Editor cache: backfilled website_url for %d/%d entries",
+                    backfilled, len(_missing),
+                )
         _existing_lower = {c.get("place_name", "").lower() for c in competitors}
         for _cn, _cd in _cached_places.items():
             if not _cd:
