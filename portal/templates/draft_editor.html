@@ -1896,8 +1896,9 @@
           {% if c.subcategory %}{% if sub_reviewed.update({(c.name + '||' + c.subcategory): c.reviewed}) %}{% endif %}{% endif %}
         {% endfor %}
         <ul class="cat-list" id="cat-list">
-          <li class="{% if not current_category %}active{% endif %}" style="font-weight:700;">
-            <span class="cat-label" onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id) }}'">All Items</span>
+          <li class="{% if not current_category %}active{% endif %}" style="font-weight:700; cursor:pointer;"
+              onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id) }}'">
+            <span class="cat-label">All Items</span>
             <span class="cat-count">{{ items|length }}</span>
           </li>
           {% for cat in progress.categories %}
@@ -1917,9 +1918,10 @@
             {% endif %}
           {% endfor %}
           <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}"
-              data-cat-name="{{ cat.name|e }}" draggable="true">
-            <span class="cat-drag" title="Drag to reorder">&#8942;</span>
-            <span class="cat-label" onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name) }}'">{{ cat.name|e }}</span>
+              data-cat-name="{{ cat.name|e }}" draggable="true" style="cursor:pointer;"
+              onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name) }}'">
+            <span class="cat-drag" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;</span>
+            <span class="cat-label">{{ cat.name|e }}</span>
             <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
             <span class="cat-count">{{ main_count }}</span>
             {% if mnc.n > 0 %}
@@ -1934,10 +1936,11 @@
           {% set snc = namespace(n=0) %}
           {% for it in cat_subs[sc] %}{% if needs_price(it)|trim %}{% set snc.n = snc.n + 1 %}{% endif %}{% endfor %}
           {% set sub_is_reviewed = sub_reviewed.get(cat.name + '||' + sc, false) %}
-          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
-            <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;">&#8942;</span>
+          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true" style="cursor:pointer;"
+              onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">
+            <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;" onclick="event.stopPropagation()">&#8942;</span>
             <span class="cat-sub-icon">&#9656;</span>
-            <span class="cat-label" onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">{{ sc|e }}</span>
+            <span class="cat-label">{{ sc|e }}</span>
             <span class="cat-count">{{ cat_subs[sc]|length }}</span>
             {% if snc.n > 0 %}
             <span class="cat-needs-price-count" title="{{ snc.n }} item{{ 's' if snc.n > 1 else '' }} need price review">{{ snc.n }}!</span>
