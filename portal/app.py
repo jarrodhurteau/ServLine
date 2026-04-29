@@ -6452,9 +6452,103 @@ def _build_editor_competitors(draft, price_intel, restaurant):
 
     import tempfile as _tf2
     _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")
+
+    # Pre-compute the lookup context that both backfill passes (shell +
+    # website) need. Cheaper to compute once than re-derive twice.
+    _rest_for_bf = restaurant or {}
+    _bf_city = _rest_for_bf.get("city", "") or ""
+    _bf_state = _rest_for_bf.get("state", "") or ""
+    _bf_api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    _bf_our_lat, _bf_our_lng = None, None
+    if competitors:
+        _lats = [c["latitude"] for c in competitors if c.get("latitude")]
+        _lngs = [c["longitude"] for c in competitors if c.get("longitude")]
+        if _lats and _lngs:
+            _bf_our_lat = sum(_lats) / len(_lats)
+            _bf_our_lng = sum(_lngs) / len(_lngs)
+
     try:
         with open(_gpc, "r") as _gcf:
             _cached_places = json.loads(_gcf.read())
+        # Backfill missing place_id metadata for "shell" entries — restaurants
+        # Gemini cited but the parallel-burst Places lookup either timed out,
+        # exceeded the per-render LIVE_LOOKUP_CAP, or got an empty candidates
+        # list. Symptom: sidebar entry shows only the name, no rating/$/
+        # address. Self-heal by retrying findplacefromtext.
+        _shells = [
+            (k, _cd) for k, _cd in _cached_places.items()
+            if _cd and _cd.get("place_name") and not _cd.get("place_id")
+        ]
+        if _shells and _bf_api_key:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import requests as _bf_rq
+
+            def _shell_lookup(k, cd):
+                try:
+                    _name = cd.get("place_name") or ""
+                    _params = {
+                        "key": _bf_api_key,
+                        "input": f"{_name} restaurant {_bf_city} {_bf_state}",
+                        "inputtype": "textquery",
+                        "fields": "place_id,name,formatted_address,geometry,rating,user_ratings_total,price_level",
+                    }
+                    if _bf_our_lat and _bf_our_lng:
+                        _params["locationbias"] = f"circle:16000@{_bf_our_lat},{_bf_our_lng}"
+                    _r = _bf_rq.get(
+                        "https://maps.googleapis.com/maps/api/place/findplacefromtext/json",
+                        params=_params, timeout=8,
+                    )
+                    if _r.status_code != 200:
+                        return k, None
+                    cands = _r.json().get("candidates", [])
+                    if not cands:
+                        return k, None
+                    _c = cands[0]
+                    _loc = _c.get("geometry", {}).get("location", {})
+                    if _bf_our_lat and _bf_our_lng and _loc.get("lat") and _loc.get("lng"):
+                        import math as _math
+                        _dl = _math.radians(_loc["lat"] - _bf_our_lat)
+                        _dn = _math.radians(_loc["lng"] - _bf_our_lng)
+                        _a = _math.sin(_dl/2)**2 + _math.cos(_math.radians(_bf_our_lat)) * _math.cos(_math.radians(_loc["lat"])) * _math.sin(_dn/2)**2
+                        _dist = 6371 * 2 * _math.atan2(_math.sqrt(_a), _math.sqrt(1-_a))
+                        if _dist > 25:
+                            return k, None
+                    _pl = _c.get("price_level")
+                    return k, {
+                        "place_name": _c.get("name", _name),
+                        "place_address": _c.get("formatted_address", ""),
+                        "rating": _c.get("rating"),
+                        "price_label": {1:"$",2:"$$",3:"$$$",4:"$$$$"}.get(_pl),
+                        "price_level": _pl,
+                        "user_ratings": _c.get("user_ratings_total"),
+                        "latitude": _loc.get("lat"),
+                        "longitude": _loc.get("lng"),
+                        "cuisine_match": None,
+                        "place_id": _c.get("place_id"),
+                        "website_url": None,
+                    }
+                except Exception:
+                    return k, None
+
+            SHELL_BACKFILL_CAP = 30
+            shells_filled = 0
+            with ThreadPoolExecutor(max_workers=10) as _spool:
+                _futs = [_spool.submit(_shell_lookup, k, cd)
+                         for k, cd in _shells[:SHELL_BACKFILL_CAP]]
+                for _fut in as_completed(_futs):
+                    try:
+                        _k, _new = _fut.result()
+                    except Exception:
+                        continue
+                    if _new and _k in _cached_places:
+                        _cached_places[_k] = _new
+                        shells_filled += 1
+            if shells_filled:
+                log.info(
+                    "Editor cache: backfilled %d/%d shell entries with Places metadata",
+                    shells_filled, len(_shells),
+                )
+
         # Backfill missing website_url for cached entries that have a
         # place_id but no website. Cause: the original parallel build
         # burst sometimes loses the get_place_details follow-up call to
