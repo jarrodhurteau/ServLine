@@ -860,6 +860,215 @@ def _quantity_mismatch(item_name: str, quote: str, tolerance: float = 0.5) -> bo
 PRICE_PLAUSIBILITY_CEILING_CENTS = 20_000
 
 
+def _apply_category_ranges(
+    our_rows: List[Any],
+    item_variants: Dict[int, List[Dict[str, Any]]],
+    item_market: Dict[int, Dict[str, Any]],
+    city: str,
+    state: str,
+    zip_code: str,
+    cuisine: str,
+    full_address: str,
+    draft_id: Optional[int] = None,
+) -> int:
+    """Override range data for size-variant items with category-wide
+    market data. Source citations (the cooler) stay per-item from the
+    earlier _gemini_search_prices call; only the range numbers (the
+    boat) get widened to the category level.
+
+    Identifies groupable items two ways:
+      1. Items with size variants → group by (category, variant_label)
+      2. Items with quantity in name (e.g., "30 Pcs Wings") → group by
+         (category, quantity_token)
+
+    For each group, runs ONE Gemini call asking for the category-wide
+    typical price range — not for the specific variant's price. Returns
+    the count of items whose ranges were replaced.
+    """
+    # Build the group → items mapping. Each group key is
+    # (category, size_label) or (category, qty_token).
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for row in our_rows:
+        iid = row["item_id"]
+        if iid not in item_market:
+            continue
+        cat = (row.get("item_category") or "").strip()
+        if not cat:
+            continue
+        # Items with size variants
+        if iid in item_variants:
+            for v in item_variants[iid]:
+                label = (v.get("label") or "").strip()
+                if not label:
+                    continue
+                key = (cat, label)
+                groups.setdefault(key, []).append({
+                    "item_id": iid,
+                    "item_name": row.get("item_name", ""),
+                    "variant_label": label,
+                    "kind": "size_variant",
+                })
+            continue
+        # Items with quantity-token in name (e.g. "30 Pcs Wings")
+        qty = _extract_quantity(row.get("item_name") or "")
+        if qty is not None:
+            key = (cat, f"{qty}pc")
+            groups.setdefault(key, []).append({
+                "item_id": iid,
+                "item_name": row.get("item_name", ""),
+                "kind": "qty_in_name",
+                "qty": qty,
+            })
+            continue
+        # Otherwise: not groupable — skip (keeps per-item range)
+
+    if not groups:
+        return 0
+    log.info("Category-range pass: %d groups across %d items",
+             len(groups), sum(len(v) for v in groups.values()))
+
+    # Run category search per group, in parallel (small calls)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results: Dict[tuple, Dict[str, Any]] = {}
+    location = full_address or f"{city}, {state} {zip_code}"
+
+    def _query_one(key):
+        cat, size_label = key
+        return key, _gemini_search_category_range(
+            category=cat, size_label=size_label,
+            location=location, cuisine=cuisine, draft_id=draft_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = [pool.submit(_query_one, k) for k in groups.keys()]
+        for fut in as_completed(futs):
+            try:
+                key, rng = fut.result()
+                if rng:
+                    results[key] = rng
+            except Exception as e:
+                log.warning("Category range query failed: %s", e)
+
+    if not results:
+        return 0
+
+    # Apply category ranges back to item_market entries
+    overridden = 0
+    for key, rng in results.items():
+        cat, size_label = key
+        for item_info in groups[key]:
+            iid = item_info["item_id"]
+            mr = item_market.get(iid)
+            if not mr:
+                continue
+            kind = item_info.get("kind")
+            if kind == "size_variant":
+                # Override the size-specific range, keep the size's sources
+                sizes = mr.get("sizes") or {}
+                target_size = sizes.get(size_label)
+                if not isinstance(target_size, dict):
+                    # Variant didn't get per-size data from per-item search;
+                    # create the size entry with the category range.
+                    sizes[size_label] = {
+                        "low": rng["low"],
+                        "high": rng["high"],
+                        "median": rng["median"],
+                        "category_range": True,
+                    }
+                else:
+                    target_size["low"] = rng["low"]
+                    target_size["high"] = rng["high"]
+                    target_size["median"] = rng["median"]
+                    target_size["category_range"] = True
+                mr["sizes"] = sizes
+                overridden += 1
+            elif kind == "qty_in_name":
+                # Override the base range, keep the per-item sources
+                mr["low"] = rng["low"]
+                mr["high"] = rng["high"]
+                mr["median"] = rng["median"]
+                mr["category_range"] = True
+                overridden += 1
+    return overridden
+
+
+def _gemini_search_category_range(
+    category: str,
+    size_label: str,
+    location: str,
+    cuisine: str,
+    draft_id: Optional[int] = None,
+) -> Optional[Dict[str, int]]:
+    """Single Gemini call asking for the category-wide typical price
+    range for `{size_label} {category}` in `{location}`. Wider net than
+    per-item search — we explicitly want the FULL spectrum of prices
+    across all variants in that category-size, not a specific item's
+    price.
+
+    Returns dict with low_cents/high_cents/median_cents, or None on
+    failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return None
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""For a {size_label} {category} at restaurants near
+{location}, what's the typical price range across the full spectrum
+of variants/styles? I'm asking for the category-wide market range —
+the LOWEST price you'd see for a basic version (e.g., plain cheese
+pizza) up to the HIGHEST price you'd see for a premium specialty
+version (e.g., loaded specialty pizza). Search local menus and give
+me the realistic range that captures both ends.
+
+Return JSON only, single object:
+{{"low_cents": 1100, "high_cents": 2500, "median_cents": 1700}}
+
+  - low_cents = cheapest typical price for the simplest version
+  - high_cents = most expensive typical price for premium versions
+  - median_cents = midpoint of the spread
+
+Use real local menu data. If the area has limited data, reason from
+nearby comparable markets but flag uncertainty by widening the range
+rather than guessing precisely. Return ONLY the JSON, no commentary."""
+
+    try:
+        resp = client.models.generate_content(
+            model=_GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.1,
+            ),
+        )
+        txt = (resp.text or "").strip() if resp else ""
+        if txt.startswith("```"):
+            txt = txt.split("\n", 1)[1] if "\n" in txt else txt[3:]
+        if txt.endswith("```"):
+            txt = txt.rsplit("```", 1)[0]
+        txt = txt.strip()
+        data = json.loads(txt)
+        low = int(data.get("low_cents") or 0)
+        high = int(data.get("high_cents") or 0)
+        median = int(data.get("median_cents") or 0)
+        if low <= 0 or high <= 0 or median <= 0:
+            return None
+        if low > high:
+            low, high = high, low
+        if median < low or median > high:
+            median = (low + high) // 2
+        return {"low": low, "high": high, "median": median}
+    except Exception as e:
+        log.warning("Category range query failed for %r %r: %s",
+                    category, size_label, e)
+        return None
+
+
 def _count_market_sources(entry: Dict[str, Any]) -> int:
     """Total sources backing a market-rate entry: base sources plus all
     per-size sources. Used by the low-source retry pass to find items
@@ -2305,6 +2514,34 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 "Gemini delivered 100%% coverage: %d/%d items, no Haiku fallback needed",
                 len(item_market), len(haiku_items),
             )
+
+        # The Boat / Cooler architecture for size-variant items.
+        # Per-item Gemini search tends to contaminate variant ranges —
+        # cheese pizza prices flow into Meat Lovers because base items
+        # dominate search results. Fix: for items with size variants
+        # (pizzas, calzones, wings, etc.), override the per-item RANGE
+        # with a category-wide range — "12 inch pizza market" applies
+        # to ALL 12-inch pizzas. Per-item search still runs (we keep
+        # its source citations — those go in the special cooler), but
+        # the boat (the range) is wider and contamination-free.
+        # Items WITHOUT size variants (appetizers, individual entrees,
+        # unique sandwiches) keep their per-item range — those don't
+        # have the variant-contamination problem.
+        try:
+            _category_count = _apply_category_ranges(
+                our_rows, item_variants, item_market,
+                city, state, zip_code, cuisine, full_address,
+                draft_id=draft_id,
+            )
+            if _category_count:
+                log.info(
+                    "Boat/cooler: replaced range on %d size-variant items "
+                    "with category-wide market data. Sources kept from "
+                    "per-item search.",
+                    _category_count,
+                )
+        except Exception as _ce_e:
+            log.warning("Category-range pass failed: %s", _ce_e)
 
         for row in our_rows:
             current_price = row["current_price"] or 0
