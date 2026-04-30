@@ -953,6 +953,30 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
             expanded.add(syn)
     if not any(e in q for e in expanded):
         return False
+
+    # PROXIMITY CHECK (Gemini's recommendation, round 10): the
+    # differentiator token must appear NEAR the cited price, not just
+    # anywhere in the quote. Catches the multi-item-on-one-line case:
+    #   quote: "Cheese Pizza $14.99 / Meat Lovers $19.99"
+    #   cited price: $14.99 with item "Meat Lovers Pizza"
+    # The previous check passed because "meat" appears somewhere in
+    # the quote — but it's near the WRONG price ($19.99). Proximity
+    # check requires the token to be within ~60 chars BEFORE the
+    # cited price, which corresponds to "the same line/cell as the
+    # price" on a typical menu layout.
+    price_idx = -1
+    for fmt in formats:
+        idx = q.find(fmt)
+        if idx >= 0:
+            price_idx = idx
+            break
+    if price_idx > 0:
+        # Window: 60 chars before the price + the price itself.
+        # Tighter than 25 words since menus pack many items per line.
+        window_start = max(0, price_idx - 60)
+        window = q[window_start:price_idx]
+        if not any(e in window for e in expanded):
+            return False
     return True
 
 
@@ -1456,14 +1480,24 @@ Rules:
                         if _quote_has_compound_size(quote):
                             quote_filter_stats["compound_size"] += 1
                             continue
-                    # Backstop 2b: quantity-mismatch rejection. Catches
-                    # "30 Pcs Wings" item being cited with a "6 Wings $X"
-                    # quote. Only fires when both item AND quote carry
-                    # piece-count tokens.
-                    if _quantity_mismatch(item_name, quote):
-                        quote_filter_stats.setdefault("qty_mismatch", 0)
-                        quote_filter_stats["qty_mismatch"] += 1
-                        continue
+                    # Backstop 2b: quantity rejection. Two cases:
+                    #   (i) Both sides have piece counts and they differ
+                    #       by more than tolerance → reject (catches
+                    #       "30 Pcs" item cited with "6 Wings" quote).
+                    #   (ii) Item has a piece count but quote does NOT
+                    #        → reject (can't verify quantity match;
+                    #        catches "30 Pcs Wings" being cited with
+                    #        a generic "Wings $14.99" quote that's
+                    #        actually for 6-piece pricing).
+                    item_has_qty = _extract_quantity(item_name) is not None
+                    if item_has_qty:
+                        quote_has_qty = _extract_quantity(quote) is not None
+                        if not quote_has_qty:
+                            quote_filter_stats["qty_mismatch"] += 1
+                            continue
+                        if _quantity_mismatch(item_name, quote):
+                            quote_filter_stats["qty_mismatch"] += 1
+                            continue
                     # Backstop 3: implausibility. Catches hallucinated
                     # absurd prices (e.g., $9999) or zero/negative parses.
                     if price <= 0 or price > PRICE_PLAUSIBILITY_CEILING_CENTS:
