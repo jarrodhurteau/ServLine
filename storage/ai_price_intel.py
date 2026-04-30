@@ -799,8 +799,9 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
         "fries": ("french", "side", "basket"),
         # Calzone aliases (regional — stromboli in some areas).
         "calzone": ("stromboli", "calz"),
-        # Sub sandwiches — major regional name variation.
-        "sub": ("hoagie", "grinder", "hero", "sandwich"),
+        # Sub sandwiches — major regional name variation. NOT including
+        # "sandwich" — too broad, would match any sandwich quote.
+        "sub": ("hoagie", "grinder", "hero"),
         "hoagie": ("sub", "grinder", "hero"),
         "grinder": ("sub", "hoagie", "hero"),
     }
@@ -941,19 +942,33 @@ return zero for the item.
 For each item below, give me a low-high price range using REAL price
 data from restaurants within 5 miles of {location}.
 {anchor_block}
-For items WITHOUT sizes, search: "(item name) (category) price near {location}"
-For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
+Search order (when an anchor list is present):
+  1. FIRST: the priority competitors above. Run a targeted search per
+     anchor restaurant — `"Restaurant Name" item-name price`. These
+     are confirmed local, vetted by Google Places.
+  2. THEN: if you need more data, broaden with the generic queries
+     below to find restaurants the anchor list missed.
+
+Generic broadening queries:
+  For items WITHOUT sizes:  "(item name) (category) price near {location}"
+  For items WITH sizes:     "(size) (item name) (category) price near {location}"
 
 IMPORTANT: Only use restaurants within 5 miles of {location}. Do NOT include restaurants from other states or distant cities.
 
-VERBATIM QUOTES REQUIRED — this is the most important rule. For every
-single source you cite, include a "quote" field with the exact text from
-the restaurant's menu page where you saw the price. The quote must
-contain BOTH:
+VERBATIM QUOTES — every entry in the SOURCES array MUST have a
+"quote" field with the exact text from the restaurant's menu page
+where you saw the price. The quote must contain BOTH:
   (a) the price you're citing (e.g. "$14.99" or "14.99")
   (b) the item name or a clear synonym
-If you can't quote verbatim, DO NOT include the source. We'd rather have
-two real cites than ten fabricated ones.
+If you can't quote verbatim, DO NOT include the source. ONE real
+verifiable cite beats ten fabricated ones.
+
+MENU FRESHNESS — only cite menus that look current. Reject menus
+dated from prior years, marked "summer 2020 specials" / "winter 2019",
+or showing pricing patterns clearly inconsistent with current local
+norms. If you can't tell how old a menu is, but the prices look
+reasonable for today's market, accept it. The bar is "doesn't look
+obviously stale" — not "must be dated this year".
 
 SOURCES ARRAY rules — what counts as a citeable source:
 
@@ -996,7 +1011,7 @@ Return JSON only — an array:
      {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Cheese Pie - Large $12.00"}},
      {{"restaurant": "Tony's House of Pizza", "price_cents": 1099, "quote": "Plain Cheese - $10.99"}},
      {{"restaurant": "Bella Napoli", "price_cents": 1350, "quote": "Margherita Pizza  $13.50"}},
-     {{"restaurant": "Slice Pizzeria", "price_cents": 950, "quote": "Cheese Pie  $9.50"}}
+     {{"restaurant": "Mama's Pizzeria", "price_cents": 950, "quote": "Cheese Pie  $9.50"}}
    ]
 }}]
 
@@ -1009,7 +1024,7 @@ For items with [sizes], include per-size ranges AND sources per size:
       {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Small (12 inch) cheese - $12.00"}},
       {{"restaurant": "Tony's House of Pizza", "price_cents": 1099, "quote": "Small Cheese 12in - $10.99"}},
       {{"restaurant": "Bella Napoli", "price_cents": 1350, "quote": "12\\" Margherita - $13.50"}},
-      {{"restaurant": "Slice Pizzeria", "price_cents": 950, "quote": "Small (12\\") Cheese - $9.50"}}
+      {{"restaurant": "Mama's Pizzeria", "price_cents": 950, "quote": "Small (12\\") Cheese - $9.50"}}
     ]
   }}}}
 }}
@@ -1040,7 +1055,7 @@ Rules:
     "Fries"         → "French Fries", "Side of Fries", "Basket of Fries"
     "Calzone"       → "Stromboli" (regional), "Calz", "Cheese Calzone"
     "Salad"         → "House Salad", "Garden Salad", "Tossed Salad"
-    "Sub"           → "Hoagie", "Grinder", "Hero", "Sandwich"
+    "Sub"           → "Hoagie", "Grinder", "Hero" (NOT generic "Sandwich")
   When you cite a synonym source, the quote should still match the
   competitor's actual wording. Use synonyms aggressively when looking
   for a 2nd, 3rd, 4th source — they're how you find the same item
