@@ -828,7 +828,9 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
 def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                           zip_code: str, cuisine: str,
                           address: str = "",
-                          draft_id: Optional[int] = None) -> Dict[int, Dict[str, Any]]:
+                          draft_id: Optional[int] = None,
+                          competitor_anchors: Optional[List[str]] = None,
+                          ) -> Dict[int, Dict[str, Any]]:
     """Use Gemini with Google Search grounding to get real market prices.
 
     Batches items and asks Gemini to search Google for actual local pricing.
@@ -878,6 +880,30 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
+
+        # Phase-1 anchor block — confirmed local competitors from Google
+        # Places. Inserts a literal list of restaurant names into the
+        # prompt so Gemini can run targeted searches ("Athena Pizza
+        # combination pizza price") instead of vague open-web discovery.
+        # When empty (anchors not available yet, or sparse area), the
+        # prompt falls back to the original generic search instructions.
+        if competitor_anchors:
+            anchor_block = (
+                "\nPRIORITY COMPETITORS — these are confirmed restaurants "
+                f"within 5 miles of {location}. Search THEIR menus FIRST "
+                "before broadening to open-web discovery. Use targeted "
+                'queries like \'"Restaurant Name" item price\' against '
+                "their websites. Each one is a real local business that "
+                "may serve the item you're pricing:\n"
+                + "\n".join(f"  - {n}" for n in competitor_anchors)
+                + "\n\nWhen you've exhausted these for an item, broaden "
+                "with synonyms or expand to other local restaurants you "
+                "find via search. The anchor list is a STARTING POINT, "
+                "not a hard limit.\n"
+            )
+        else:
+            anchor_block = ""
+
         prompt = f"""You are pricing a menu against REAL competitor prices. There
 are TWO things you produce per item, and they have different rules:
 
@@ -914,7 +940,7 @@ return zero for the item.
 
 For each item below, give me a low-high price range using REAL price
 data from restaurants within 5 miles of {location}.
-
+{anchor_block}
 For items WITHOUT sizes, search: "(item name) (category) price near {location}"
 For items WITH sizes, search EACH size separately: "(size) (item name) (category) price near {location}"
 
@@ -1772,6 +1798,27 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 entry["variants"] = item_variants[row["item_id"]]
             haiku_items.append(entry)
 
+        # Phase 1 anchors: pull the Places-nearby competitor list to feed
+        # into Gemini's prompt. These are confirmed local restaurants
+        # (already filtered by distance, rating, business status) that
+        # Gemini should search FIRST before broadening. Restaurant name
+        # is the key field — Gemini does targeted searches like
+        # "{name} {item} price" rather than open-web discovery.
+        rest_id_row = conn.execute(
+            "SELECT restaurant_id FROM drafts WHERE id = ?", (draft_id,),
+        ).fetchone()
+        competitor_anchors: List[str] = []
+        if rest_id_row and rest_id_row["restaurant_id"]:
+            try:
+                from storage.price_intel import get_cached_comparisons
+                _comps = get_cached_comparisons(rest_id_row["restaurant_id"])
+                competitor_anchors = [
+                    c["place_name"] for c in _comps
+                    if c.get("place_name")
+                ][:25]  # cap — prompt bloat past ~25 hurts more than helps
+            except Exception as e:
+                log.warning("Anchor fetch failed for draft %d: %s", draft_id, e)
+
         # Gemini with Google Search grounding — REAL prices from REAL menus.
         # Gemini is the product. Haiku is an emergency fallback that should
         # almost never run. The flow:
@@ -1782,7 +1829,8 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         #           loudly so this can be investigated.
         item_market = _gemini_search_prices(
             haiku_items, city, state, zip_code, cuisine,
-            address=full_address, draft_id=draft_id)
+            address=full_address, draft_id=draft_id,
+            competitor_anchors=competitor_anchors)
 
         # Circuit breaker: if more than half the batched calls failed,
         # Gemini is in a degraded state (sustained 503s, regional outage,
@@ -1825,6 +1873,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 return _gemini_search_prices(
                     [it], city, state, zip_code, cuisine,
                     address=full_address, draft_id=draft_id,
+                    competitor_anchors=competitor_anchors,
                 )
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(_one, it) for it in missing]
@@ -2041,19 +2090,13 @@ def analyze_menu_prices(
         competitor_count=market_summary.get("competitor_count", 0),
     )
 
-    # THE PRODUCT: synchronous Gemini aggregation. Pills + price_sources
-    # land before this function returns. ~30-90s for a typical menu.
-    try:
-        n = _aggregate_price_ranges(draft_id)
-        log.info("Gemini aggregation updated %d items for draft %d", n, draft_id)
-    except Exception as e:
-        log.warning("Gemini aggregation failed for draft %d: %s", draft_id, e)
-
-    # Synchronous Places nearby search — populates the editor map's 20
-    # nearby-restaurant pins. Was a fire-and-forget daemon, but that
-    # raced the editor render and the user landed on a half-populated
-    # map. ~30s extra on the loading screen vs. a missing map; the
-    # loading wait is the right place to absorb it.
+    # Phase 1 (Discovery): Places nearby search runs FIRST, before Gemini
+    # pricing. This is the architectural unlock Gemini itself recommended:
+    # instead of asking Gemini to do open-web discovery + extraction in
+    # one shot, we hand it a clean list of confirmed local competitors
+    # to anchor the searches against. Cuts Gemini's filtering load
+    # dramatically — it's no longer wading through Yelp/articles/distant
+    # chains, it's running targeted searches on known competitor names.
     try:
         from storage.price_intel import search_nearby_restaurants
         comp_data = get_cached_comparisons(restaurant_id)
@@ -2064,6 +2107,16 @@ def analyze_menu_prices(
             "Places nearby search failed for rest %d: %s",
             restaurant_id, e,
         )
+
+    # Phase 2 (Extraction): synchronous Gemini aggregation. The Places
+    # list from Phase 1 is now available to be passed into Gemini's
+    # prompt as competitor anchors. Pills + price_sources land before
+    # this function returns. ~30-90s for a typical menu.
+    try:
+        n = _aggregate_price_ranges(draft_id)
+        log.info("Gemini aggregation updated %d items for draft %d", n, draft_id)
+    except Exception as e:
+        log.warning("Gemini aggregation failed for draft %d: %s", draft_id, e)
 
     # Return the freshly-aggregated results so callers see the real counts
     # instead of an empty shell.
