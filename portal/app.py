@@ -6739,7 +6739,17 @@ def _build_editor_competitors(draft, price_intel, restaurant):
             if norm in places_cache:
                 c_data = places_cache[norm]
                 if c_data:
-                    competitors.append(c_data)
+                    # Dedupe by Places-resolved name. Multiple Gemini-cited
+                    # variants ("141 Main Street Restaurant & Catering" +
+                    # "141 Main Street Roka") often resolve to the same
+                    # actual business in Places API ("141 Main Street").
+                    # Without this check, the same restaurant got appended
+                    # twice — visible to the user as "27 results" with the
+                    # map only plotting 20 unique pins.
+                    pn_lower = (c_data.get("place_name") or "").lower()
+                    if pn_lower and pn_lower not in existing_names:
+                        competitors.append(c_data)
+                        existing_names.add(pn_lower)
                 continue
 
             if not api_key:
