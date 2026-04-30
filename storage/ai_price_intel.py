@@ -878,24 +878,39 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
-        prompt = f"""You are pricing a menu against REAL competitor prices. The
-restaurant owner is going to see every URL you cite and click through
-to verify it. If the price you claim isn't visibly there on the page
-they land on — or if the URL goes to a login wall, an ordering flow,
-a third-party platform, or anything they can't immediately verify —
-they assume the data is made up. ONE fake-looking citation kills
-trust in everything else we show. So the rule is simple:
+        prompt = f"""You are pricing a menu against REAL competitor prices. There
+are TWO things you produce per item, and they have different rules:
 
-  Every cited URL must be a page on the restaurant's own website
-  where the cited price visibly appears. No exceptions.
+  (1) The PRICE RANGE (low/high/median) — the numbers that drive the
+      "Below Market / Higher Range" badge the owner sees on each item.
+      Use as much real local pricing data as you can find from BOTH
+      restaurant websites AND third-party platforms (Toast, Slice,
+      ChowNow, DoorDash, Uber Eats, Grubhub). More data points = a
+      truer range. The range stays internal to the calculation — the
+      owner sees the numbers, not the underlying mix of sources.
 
-Read this twice: every price you return MUST be backed by a verbatim
-quote from a real restaurant's own menu page on the open web. No
-estimates. No "typical range" guesses. No averages from articles. No
-third-party platforms. If you cannot find a verifiable price on the
-restaurant's own site, return zero for the item — that's the correct
-answer when real data isn't available, and infinitely better than a
-confident estimate the owner can't verify.
+  (2) The CITED SOURCES array (the clickable list shown to the owner).
+      The owner is going to click each cited restaurant name and land
+      on that restaurant's actual website. If the price you cited
+      isn't visibly on that website, they think it's made up. So
+      sources in this array must ONLY contain quotes you found on the
+      restaurant's own menu page. No third-party platforms in this
+      array, ever — not Toast, not DoorDash, none of them.
+
+This split lets you cast a wide net for accurate ranges (the menu
+shows badges everywhere) while keeping every clickable cite
+trustworthy. If you find 5 prices on platforms and 1 on a restaurant
+website, the range uses all 6 prices but the sources array shows
+only the 1 verifiable cite. That's correct.
+
+Read this twice: every entry in the SOURCES array must be backed by
+a verbatim quote from the restaurant's OWN menu page. No estimates,
+no platform quotes, no "typical range" guesses, no averages from
+articles. The range itself can include platform prices internally —
+just don't surface them as cites.
+
+If you cannot find ANY data (zero direct sites AND zero platforms),
+return zero for the item.
 
 For each item below, give me a low-high price range using REAL price
 data from restaurants within 5 miles of {location}.
@@ -914,35 +929,30 @@ contain BOTH:
 If you can't quote verbatim, DO NOT include the source. We'd rather have
 two real cites than ten fabricated ones.
 
-Sources MUST be customer-verifiable. The owner is going to click the
-URL we cite and check that the price we claim is still on that page.
-If they can't, they assume we made it up — and one fake-looking cite
-ruins their trust in every other range we show. So the rule is:
-EVERY cited URL must lead directly to a page where the cited price
-visibly appears, with no login wall, no ordering flow, no
-"start order" button hiding the price.
+SOURCES ARRAY rules — what counts as a citeable source:
 
-Sources we ACCEPT:
+ACCEPT in the sources array:
   - The restaurant's own website menu page (HTML or text-based PDF
-    hosted on their domain). The URL must be clickable and show the
-    price immediately.
+    hosted on their domain). The owner must be able to click and
+    see the cited price immediately on that page.
 
-Sources we REJECT (no exceptions, even if the price looks accurate):
+REJECT from the sources array (these can still feed the price RANGE
+calculation, just not the cited list shown to the owner):
   - Third-party ordering and delivery platforms — Toast, Square,
-    ChowNow, Slice, DoorDash, Uber Eats, Grubhub, etc. The owner
-    can't easily verify these and customers find them suspicious.
-    Even if the menu data is on these platforms, do NOT cite them.
+    ChowNow, Slice, DoorDash, Uber Eats, Grubhub. Use them for the
+    range, never cite them.
   - Yelp, TripAdvisor, Google Maps, Zomato, or any review/aggregator
-    site. Their menu data is often outdated and not authoritative.
+    site. Outdated and unauthoritative — exclude from BOTH the range
+    and the sources array.
   - "Average pizza price in Massachusetts" type articles, roundups,
     blog posts, news pieces, Reddit threads, social media posts.
-  - National chain corporate pricing pages.
+    Exclude from BOTH range and sources.
+  - National chain corporate pricing pages (unless that chain has a
+    location within 5 miles AND the local franchise's menu shows the
+    price on their own page).
   - Image-only menus you can't extract a verbatim quote from.
   - Scanned/photocopied PDFs whose text extraction yields gibberish.
   - Your own training-data knowledge of typical prices.
-
-The quote must come from a URL the restaurant owner can click and
-verify in 5 seconds. If a source fails that test, it doesn't exist.
 
 Per-size matching: if the source's menu uses different size labels than
 ours (e.g. their "Small" vs our "12 Sml"), only cite that source's price
@@ -980,21 +990,18 @@ For items with [sizes], include per-size ranges AND sources per size:
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
-- MINIMUM: 1 verifiable source per item. If you find at least one
-  source on the restaurant's own website that meets the quality
-  standards above, return it. We accept single-source results — a
-  single verified competitor price is real data, not a failure.
-- AIM HIGHER when you can: 2-5 verifiable sources is ideal because it
-  lets the owner see a real range. Use the synonym list below and try
-  multiple query phrasings to get to 2+ when sources exist. But never
-  manufacture a second source by lowering the quality bar — outdated
-  menus, third-party platforms, and substituted items are forbidden
-  even if it leaves the item with only 1 source.
-- If you find ZERO verifiable sources on direct restaurant websites,
-  set low_cents to 0 and omit sources. Skipping is the right answer
-  when no clickable, verifiable price exists. The customer-facing UI
-  will mark the item as "no local data" and that's better than a fake
-  range from sources the owner can't verify.
+- RANGE: aim for 3-5+ price data points feeding the low/high range,
+  pulled from BOTH restaurant websites AND third-party platforms
+  (Toast/Slice/DoorDash/etc.). The wider the data, the truer the
+  range. The owner sees only the resulting numbers, not the mix.
+- SOURCES ARRAY: include only quotes from the restaurant's own
+  website. Zero from this set is OK — the range still gets shown.
+  Don't manufacture a citeable source by counting platform quotes,
+  outdated menus, or substituted items.
+- BOTH POOLS EMPTY: if there's literally no real local pricing data
+  (no platforms, no direct sites), set low_cents to 0 and omit
+  sources. The item will be skipped. This is rare — most common
+  items have at least platform data.
 - Common items are often listed under SYNONYMS at other restaurants —
   search for those too:
     "Cheese Pizza"  → "Plain", "Mozzarella", "Margherita",
@@ -1014,12 +1021,12 @@ Rules:
   across different restaurants' naming conventions.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
-- The low/high range comes from your real sources — low = cheapest
-  cited price, high = most expensive cited price. Do NOT widen, pad,
-  or smooth the range. If you only found 1 source, set low = high =
-  median = that single price. If multiple sources land at the same
-  price, low and high can also be equal. Inventing a wider range is
-  fabrication.
+- The low/high range comes from ALL real prices you found — both
+  restaurant websites AND third-party platforms. low = cheapest
+  price found anywhere, high = most expensive. Do NOT widen, pad,
+  or smooth the range. If you found only one price total (across
+  both pools), set low = high = median = that price. Inventing a
+  wider range is fabrication.
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
