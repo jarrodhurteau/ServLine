@@ -6446,47 +6446,22 @@ def _build_editor_competitors(draft, price_intel, restaurant):
     if not draft.get("restaurant_id"):
         return competitors
 
-    # Determine if Gemini produced real cites for this draft. The 20
-    # Places-nearby list is Haiku reference data — we only want it in
-    # the editor sidebar when Haiku was actually used. When Gemini
-    # delivered real cites, the sidebar should show JUST the Gemini-
-    # sourced restaurants (the ones our pricing actually came from).
-    _gemini_real_count = 0
-    try:
-        if price_intel and price_intel.get("assessments"):
-            for a in price_intel["assessments"]:
-                ps = a.get("price_sources")
-                if isinstance(ps, str):
-                    try: ps = json.loads(ps)
-                    except: ps = []
-                if not isinstance(ps, list): continue
-                for src in ps:
-                    if not isinstance(src, dict): continue
-                    if any(s.get("restaurant") for s in (src.get("sources") or []) if isinstance(s, dict)):
-                        _gemini_real_count += 1
-                        break
-                    if any(
-                        any(s.get("restaurant") for s in (sz.get("sources") or []) if isinstance(s, dict))
-                        for sz in (src.get("sizes") or {}).values() if isinstance(sz, dict)
-                    ):
-                        _gemini_real_count += 1
-                        break
-    except Exception:
-        pass
-    _show_places_nearby = _gemini_real_count == 0
-
-    # Always fetch Places nearby — we need their lat/lng to compute the
-    # restaurant's geographic center for distance-filtering Gemini-cited
-    # restaurants. But we only ADD them to the competitors list when
-    # Haiku mode is active (no real Gemini cites).
+    # Sidebar shows the UNION of Places-nearby anchors + Gemini-cited
+    # restaurants. Reasoning: Gemini's grounded search has high run-to-
+    # run variance (different runs cite different subsets of the same
+    # competitor universe). Hiding the anchor list when Gemini cited
+    # ANYTHING meant the visible sidebar shrunk and shuffled every
+    # rerun — Lisa's, Ferrentino's etc. would appear one run and not
+    # the next. Trust in cite popovers (which only show what was
+    # actually cited per item) is preserved either way; sidebar should
+    # be a stable "competitors near you" list, not a per-run cite snap.
     _places_nearby = []
     try:
         from storage.price_intel import get_cached_comparisons
         _places_nearby = get_cached_comparisons(draft["restaurant_id"])
     except Exception:
         pass
-    if _show_places_nearby:
-        competitors = _places_nearby
+    competitors = list(_places_nearby)
 
     import tempfile as _tf2
     _gpc = os.path.join(_tf2.gettempdir(), f"menuflow_places_cache_{draft['restaurant_id']}.json")

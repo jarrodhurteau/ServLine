@@ -213,18 +213,87 @@ def _is_inside_venue(place: Dict[str, Any]) -> bool:
     return False
 
 
-def _search_nearby(
+def _haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distance in miles between two lat/lng points."""
+    import math
+    R = 3958.8  # earth radius miles
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (math.sin(dlat/2)**2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng/2)**2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+
+def _search_nearby_with_border_coverage(
     lat: float,
     lng: float,
     keyword: str,
     api_key: str,
 ) -> List[Dict[str, Any]]:
-    """Search Google Places Nearby for restaurants matching keyword.
+    """Search Places Nearby from the restaurant's coords PLUS four
+    cardinal-direction offsets. Merges unique results by place_id and
+    sorts by true distance from the primary location.
 
-    Uses rankby=distance so the top N are the closest matches. We trust
-    Google's keyword match — whatever it returns first is what the user
-    sees. No post-filtering; simpler and less surprising.
+    Why offset searches: rankby=distance returns the 20 closest from
+    a single point. For restaurants near a state border (e.g., Agawam,
+    MA with Suffield, CT 4 miles south), the densest commercial
+    cluster is usually inland. The 20 closest from the user's exact
+    coords ends up all on one side of the border. Searching from
+    points shifted ~3 miles in each direction exposes the API to
+    competitors on every side and brings cross-state results into
+    the merged list when they exist.
+
+    For non-border cases, the offset searches mostly overlap with
+    primary — we dedupe and sort by distance, so the user-facing
+    result is still the closest unique businesses, just from a wider
+    candidate pool.
     """
+    OFFSET_DEG = 0.045  # ~3.1 miles in latitude (longitude varies, fine)
+    search_points = [
+        (lat, lng),                 # primary
+        (lat + OFFSET_DEG, lng),    # north
+        (lat - OFFSET_DEG, lng),    # south
+        (lat, lng + OFFSET_DEG),    # east
+        (lat, lng - OFFSET_DEG),    # west
+    ]
+    seen_pids: set = set()
+    combined: List[Dict[str, Any]] = []
+    for slat, slng in search_points:
+        _check_rate_limit()
+        results = _search_nearby_single(slat, slng, keyword, api_key)
+        _record_api_call()
+        for r in results:
+            pid = r.get("place_id")
+            if not pid or pid in seen_pids:
+                continue
+            seen_pids.add(pid)
+            # Stamp distance-from-primary so we can sort the merged
+            # set and keep the closest unique businesses on top.
+            if r.get("lat") and r.get("lng"):
+                r["_dist_miles"] = _haversine_miles(lat, lng, r["lat"], r["lng"])
+            else:
+                r["_dist_miles"] = 999.0
+            combined.append(r)
+
+    combined.sort(key=lambda r: r.get("_dist_miles", 999.0))
+    # Strip the helper field before returning
+    for r in combined:
+        r.pop("_dist_miles", None)
+    log.info(
+        "Places nearby (border-coverage): %d unique results across %d searches",
+        len(combined), len(search_points),
+    )
+    return combined[:MAX_RESULTS * 2]  # 40 max — enough for border markets
+
+
+def _search_nearby_single(
+    lat: float,
+    lng: float,
+    keyword: str,
+    api_key: str,
+) -> List[Dict[str, Any]]:
+    """Single Places Nearby call from one location point. Used as the
+    building block for _search_nearby_with_border_coverage."""
     params = urllib.parse.urlencode({
         "location": f"{lat},{lng}",
         "rankby": "distance",
@@ -512,9 +581,14 @@ def search_nearby_restaurants(
         keyword = "restaurant"
     else:
         keyword = f"{cuisine_clean} restaurant"
-    _check_rate_limit()
-    results = _search_nearby(location["lat"], location["lng"], keyword, api_key)
-    _record_api_call()
+    # Border-coverage variant: 5 nearby searches (primary + 4 cardinal
+    # offsets) merged by place_id and sorted by distance from primary.
+    # Handles state-border markets where the 20 closest from a single
+    # point all land on one side of the line. Rate-limit + API call
+    # accounting happens inside the wrapper.
+    results = _search_nearby_with_border_coverage(
+        location["lat"], location["lng"], keyword, api_key,
+    )
 
     # Step 3: cache results
     cache_id = _store_cache(zip_code, cuisine_type, results, restaurant_id)
