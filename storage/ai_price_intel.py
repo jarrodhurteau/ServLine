@@ -878,18 +878,24 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                 item_lines += f'- #{it["item_id"]} "{it["item_name"]}" ({it["category"]})\n'
 
         location = address or f"{city}, {state} {zip_code}"
-        prompt = f"""You are pricing a menu against REAL competitor prices. Restaurant
-owners pay for this data because they need ACTUAL local benchmarks
-to set their prices. Estimates are useless to them — they can guess
-prices themselves. Your value is finding what real local restaurants
-actually charge, on their real menu pages, today.
+        prompt = f"""You are pricing a menu against REAL competitor prices. The
+restaurant owner is going to see every URL you cite and click through
+to verify it. If the price you claim isn't visibly there on the page
+they land on — or if the URL goes to a login wall, an ordering flow,
+a third-party platform, or anything they can't immediately verify —
+they assume the data is made up. ONE fake-looking citation kills
+trust in everything else we show. So the rule is simple:
+
+  Every cited URL must be a page on the restaurant's own website
+  where the cited price visibly appears. No exceptions.
 
 Read this twice: every price you return MUST be backed by a verbatim
-quote from a real restaurant's menu page on the open web. No
-estimates. No "typical range" guesses. No averages from articles. If
-you cannot find real prices on real menu pages, return zero for the
-item — that's the correct answer when real data isn't available, and
-infinitely better than a confident estimate that misleads the owner.
+quote from a real restaurant's own menu page on the open web. No
+estimates. No "typical range" guesses. No averages from articles. No
+third-party platforms. If you cannot find a verifiable price on the
+restaurant's own site, return zero for the item — that's the correct
+answer when real data isn't available, and infinitely better than a
+confident estimate the owner can't verify.
 
 For each item below, give me a low-high price range using REAL price
 data from restaurants within 5 miles of {location}.
@@ -908,20 +914,35 @@ contain BOTH:
 If you can't quote verbatim, DO NOT include the source. We'd rather have
 two real cites than ten fabricated ones.
 
-Sources we REJECT (do not cite):
-  - "Average pizza price in Massachusetts" type articles or roundups
-  - Yelp/Google review snippets that don't quote the menu
-  - National chain pricing pages (unless that chain has a location
-    within 5 miles AND you can quote the local franchise's menu)
-  - Reddit threads, blog posts, news articles about restaurant pricing
-  - Your own training-data knowledge of "what cheese pizza usually costs"
+Sources MUST be customer-verifiable. The owner is going to click the
+URL we cite and check that the price we claim is still on that page.
+If they can't, they assume we made it up — and one fake-looking cite
+ruins their trust in every other range we show. So the rule is:
+EVERY cited URL must lead directly to a page where the cited price
+visibly appears, with no login wall, no ordering flow, no
+"start order" button hiding the price.
+
 Sources we ACCEPT:
-  - The restaurant's own website menu page
-  - Online ordering platforms (Toast, Square, ChowNow, Slice, DoorDash,
-    Uber Eats, Grubhub) showing the restaurant's actual menu items
-  - PDF menus hosted on the restaurant's site
-The quote must come from one of these — not from your general
-knowledge of pricing.
+  - The restaurant's own website menu page (HTML or text-based PDF
+    hosted on their domain). The URL must be clickable and show the
+    price immediately.
+
+Sources we REJECT (no exceptions, even if the price looks accurate):
+  - Third-party ordering and delivery platforms — Toast, Square,
+    ChowNow, Slice, DoorDash, Uber Eats, Grubhub, etc. The owner
+    can't easily verify these and customers find them suspicious.
+    Even if the menu data is on these platforms, do NOT cite them.
+  - Yelp, TripAdvisor, Google Maps, Zomato, or any review/aggregator
+    site. Their menu data is often outdated and not authoritative.
+  - "Average pizza price in Massachusetts" type articles, roundups,
+    blog posts, news pieces, Reddit threads, social media posts.
+  - National chain corporate pricing pages.
+  - Image-only menus you can't extract a verbatim quote from.
+  - Scanned/photocopied PDFs whose text extraction yields gibberish.
+  - Your own training-data knowledge of typical prices.
+
+The quote must come from a URL the restaurant owner can click and
+verify in 5 seconds. If a source fails that test, it doesn't exist.
 
 Per-size matching: if the source's menu uses different size labels than
 ours (e.g. their "Small" vs our "12 Sml"), only cite that source's price
@@ -959,16 +980,21 @@ For items with [sizes], include per-size ranges AND sources per size:
 
 Rules:
 - Use real price data from restaurants within 5 miles of {location}
-- REQUIRED: every item MUST have at least 3 sources. No exceptions.
-  This is not a target — it's a contract. If you cannot find 3 sources
-  for an item, do not return it. Set low_cents to 0 and omit sources
-  (the item will be skipped). Returning an item with 1-2 sources is
-  worse than returning no item at all.
-- Before giving up on an item, you MUST broaden the search with
-  synonyms (see synonym list below) and try at least 2 different
-  query phrasings. Common items (cheese pizza, hamburger, wings,
-  fries, calzone) WILL have 3+ matches in any US town — if your
-  first search returns fewer than 3, you have not searched hard enough.
+- MINIMUM: 1 verifiable source per item. If you find at least one
+  source on the restaurant's own website that meets the quality
+  standards above, return it. We accept single-source results — a
+  single verified competitor price is real data, not a failure.
+- AIM HIGHER when you can: 2-5 verifiable sources is ideal because it
+  lets the owner see a real range. Use the synonym list below and try
+  multiple query phrasings to get to 2+ when sources exist. But never
+  manufacture a second source by lowering the quality bar — outdated
+  menus, third-party platforms, and substituted items are forbidden
+  even if it leaves the item with only 1 source.
+- If you find ZERO verifiable sources on direct restaurant websites,
+  set low_cents to 0 and omit sources. Skipping is the right answer
+  when no clickable, verifiable price exists. The customer-facing UI
+  will mark the item as "no local data" and that's better than a fake
+  range from sources the owner can't verify.
 - Common items are often listed under SYNONYMS at other restaurants —
   search for those too:
     "Cheese Pizza"  → "Plain", "Mozzarella", "Margherita",
@@ -983,19 +1009,17 @@ Rules:
     "Salad"         → "House Salad", "Garden Salad", "Tossed Salad"
     "Sub"           → "Hoagie", "Grinder", "Hero", "Sandwich"
   When you cite a synonym source, the quote should still match the
-  competitor's actual wording. SYNONYM SEARCHES ARE THE PRIMARY WAY
-  to hit the 3-source minimum on basic items — use them aggressively.
+  competitor's actual wording. Use synonyms aggressively when looking
+  for a 2nd, 3rd, 4th source — they're how you find the same item
+  across different restaurants' naming conventions.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
 - The low/high range comes from your real sources — low = cheapest
   cited price, high = most expensive cited price. Do NOT widen, pad,
-  or smooth the range. If all your sources happen to land at the same
-  price, that's fine — set low and high equal. Inventing a wider
-  range is fabrication.
-- If you can't find 3 verifiable real prices for an item, set
-  low_cents to 0 and omit sources. The item will be skipped. This is
-  the RIGHT answer when real data isn't available — never substitute
-  estimates.
+  or smooth the range. If you only found 1 source, set low = high =
+  median = that single price. If multiple sources land at the same
+  price, low and high can also be equal. Inventing a wider range is
+  fabrication.
 - Use the item ID numbers exactly as given
 - Return ONLY the JSON array, no other text"""
 
