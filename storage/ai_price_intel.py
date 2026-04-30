@@ -1024,6 +1024,23 @@ under our size if the SOURCE's size description is in your quote and is
 unambiguously the same item size. If a competitor's size doesn't map
 cleanly to ours, OMIT THE SOURCE for that size — don't approximate.
 
+PRICING NUANCES — restaurant menus list prices in confusing ways.
+Stick to these rules so the data stays comparable:
+  - When a menu shows multiple prices (lunch/dinner, happy hour,
+    early bird, brunch), use the STANDARD à la carte dinner price.
+    Skip lunch specials, happy-hour discounts, and prix-fixe deals.
+  - Skip "from $X.XX" or "starting at $X.XX" pricing — that's a
+    floor, not a real price for any specific configuration. Find a
+    concrete price for the actual item, or skip the source.
+  - The price is for the BASE item as listed. Do not include
+    optional upcharges (e.g. "Burger $15, add bacon $3" — record
+    $15, not $18). Required toppings or "comes with" inclusions
+    that have no separate price are part of the base price.
+  - Skip catering / large-format pricing (whole-tray, half-pan,
+    by-the-dozen) unless the customer's item is explicitly that
+    format. A regular cheese pizza is not the same product as a
+    "5lb party pizza."
+
 Items:
 {item_lines}
 
