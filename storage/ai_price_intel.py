@@ -1058,7 +1058,15 @@ Generic broadening queries:
   For items WITHOUT sizes:  "(item name) (category) price near {location}"
   For items WITH sizes:     "(size) (item name) (category) price near {location}"
 
-IMPORTANT: Only use restaurants within 5 miles of {location}. Do NOT include restaurants from other states or distant cities.
+IMPORTANT: Only use restaurants within 5 miles of {location}. Distance
+is the rule — state lines do NOT matter. Many of our customers are on
+state borders (e.g., a restaurant in Agawam, MA has Suffield, CT
+within 4 miles). A pizzeria 3 miles south across the CT line is a
+local competitor; a pizzeria 25 miles north in the same state is not.
+Use geographic distance, not political boundaries.
+
+Do exclude: restaurants in genuinely distant cities (anything beyond
+~5 miles), even if they share the customer's state.
 
 VERBATIM QUOTES — every entry in the SOURCES array MUST have a
 "quote" field with the exact text from the restaurant's menu page
