@@ -2128,24 +2128,41 @@
             <div style="display:flex; align-items:baseline; gap:12px; min-height:1.2em;">
               <div class="wiz-item-desc" style="flex:1; min-width:0; margin:0;">{% if it.description %}{{ it.description|e }}{% endif %}</div>
               {% if pi and pi.suggested_low and pi.suggested_high and not it.variants %}
-              {% set ns_src = namespace(sources=none) %}
+              {% set ns_src = namespace(sources=none, dp=0) %}
               {% if pi.price_sources is iterable %}
-                {% for src in pi.price_sources if src is mapping and src.get('sources') %}
-                  {% set ns_src.sources = src.sources %}
+                {% for src in pi.price_sources if src is mapping %}
+                  {% if src.get('sources') %}{% set ns_src.sources = src.sources %}{% endif %}
+                  {% if src.get('total_data_points') %}{% set ns_src.dp = src.total_data_points %}{% endif %}
                 {% endfor %}
               {% endif %}
+              {% set src_count = (ns_src.sources|length) if ns_src.sources else 0 %}
+              {% set is_single_point = pi.suggested_low == pi.suggested_high %}
               <div style="margin:0; flex-shrink:0; margin-right:32px; text-align:right;">
                 <div class="market-range-line" style="margin:0; white-space:nowrap;">
-                  Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
-                  {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+                  {% if is_single_point %}
+                    Local Market ${{ '%.2f'|format(pi.suggested_low / 100) }}
+                    {% if src_count >= 2 %}
+                      (unanimous from {{ src_count }} sources)
+                    {% elif src_count == 1 %}
+                      (1 source)
+                    {% elif ns_src.dp > 0 %}
+                      (based on local market data)
+                    {% endif %}
+                  {% else %}
+                    Local Market Range ${{ '%.2f'|format(pi.suggested_low / 100) }}&ndash;${{ '%.2f'|format(pi.suggested_high / 100) }}
+                    {% if pi.median_price %}(median ${{ '%.2f'|format(pi.median_price / 100) }}){% endif %}
+                  {% endif %}
                   {% if ns_src.sources %}
-                  <a href="#" class="ref-toggle" onclick="event.preventDefault();event.stopPropagation();var sp=this.closest('div').parentElement.querySelector('.source-popover');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==sp)e.classList.add('hidden')});sp.classList.toggle('hidden')" style="margin-left:4px;">{{ ns_src.sources|length }} sources</a>
+                  <a href="#" class="ref-toggle" onclick="event.preventDefault();event.stopPropagation();var sp=this.closest('div').parentElement.querySelector('.source-popover');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==sp)e.classList.add('hidden')});sp.classList.toggle('hidden')" style="margin-left:4px;">{{ src_count }} src</a>
                   {% endif %}
                 </div>
                 {% if ns_src.sources %}
                 <div class="source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_src.sources %}
-                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row">
+                    <a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}
+                    {% if s.quote %}<div class="source-quote" style="font-size:.7rem;color:#888;padding-left:8px;line-height:1.3;font-style:italic;">&ldquo;{{ s.quote|e }}&rdquo;</div>{% endif %}
+                  </div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -2177,7 +2194,11 @@
               <div class="wiz-variant-row" data-variant-id="{{ v.id }}">
                 <span class="wiz-variant-label">{{ v.label|e }}</span>
                 {% if v.price_cents and v.label %}
-                  {# Only show pill if we have real size-specific data #}
+                  {# Match this variant against Gemini's per-size data.
+                     Display logic is now source-count-aware, NOT keyed
+                     off price equality (low==high also happens when
+                     multiple sources unanimously agree, which is the
+                     OPPOSITE of low confidence). #}
                   {% set ns_vm = namespace(match=none) %}
                   {% if sz_data.sizes %}
                     {% for slabel, sdata in sz_data.sizes.items() %}
@@ -2186,9 +2207,22 @@
                       {% endif %}
                     {% endfor %}
                   {% endif %}
-                  {% if ns_vm.match and ns_vm.match.low != ns_vm.match.high %}
+                  {% if ns_vm.match %}
+                    {% set vm_src_count = (ns_vm.match.sources|length) if ns_vm.match.sources else 0 %}
+                    {% set vm_dp = ns_vm.match.total_data_points or 0 %}
+                    {% set vm_single_point = ns_vm.match.low == ns_vm.match.high %}
                     <span class="variant-market-info">
-                    <span class="variant-range">${{ '%.2f'|format(ns_vm.match.low / 100) }}&ndash;${{ '%.2f'|format(ns_vm.match.high / 100) }}</span>
+                    <span class="variant-range">
+                      {% if vm_single_point %}
+                        ${{ '%.2f'|format(ns_vm.match.low / 100) }}
+                        {% if vm_src_count >= 2 %}<span style="color:#888;font-size:.85em;">({{ vm_src_count }} agree)</span>
+                        {% elif vm_src_count == 1 %}<span style="color:#888;font-size:.85em;">(1 src)</span>
+                        {% elif vm_dp > 0 %}<span style="color:#888;font-size:.85em;">(local data)</span>
+                        {% endif %}
+                      {% else %}
+                        ${{ '%.2f'|format(ns_vm.match.low / 100) }}&ndash;${{ '%.2f'|format(ns_vm.match.high / 100) }}
+                      {% endif %}
+                    </span>
                     {% if v.price_cents < ns_vm.match.low %}
                     <span class="wiz-price-tag price-below-market" style="font-size:.6rem;padding:1px 5px;">Below Market</span>
                     {% elif v.price_cents > ns_vm.match.high %}
@@ -2200,8 +2234,8 @@
                     {% else %}
                     <span class="wiz-price-tag price-fair" style="font-size:.6rem;padding:1px 5px;">Fair Range</span>
                     {% endif %}
-                    {% if ns_vm.match.sources is defined and ns_vm.match.sources %}
-                    <a href="#" class="ref-toggle" style="font-size:.6rem;" onclick="event.preventDefault();event.stopPropagation();var el=this.closest('.wiz-variant-row').querySelector('.var-sources');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==el)e.classList.add('hidden')});if(el)el.classList.toggle('hidden');">{{ ns_vm.match.sources|length }} src</a>
+                    {% if ns_vm.match.sources is defined and ns_vm.match.sources and not vm_single_point %}
+                    <a href="#" class="ref-toggle" style="font-size:.6rem;" onclick="event.preventDefault();event.stopPropagation();var el=this.closest('.wiz-variant-row').querySelector('.var-sources');document.querySelectorAll('.source-popover:not(.hidden)').forEach(function(e){if(e!==el)e.classList.add('hidden')});if(el)el.classList.toggle('hidden');">{{ vm_src_count }} src</a>
                     {% endif %}
                     </span>
                   {% endif %}
@@ -2214,7 +2248,10 @@
                 {% if ns_vm.match is defined and ns_vm.match and ns_vm.match.sources is defined and ns_vm.match.sources %}
                 <div class="var-sources source-popover hidden" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
                   {% for s in ns_vm.match.sources %}
-                  <div class="source-row"><a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}</div>
+                  <div class="source-row">
+                    <a href="#" class="source-link" data-restaurant="{{ s.restaurant|e }}" onmousedown="event.stopPropagation();" onclick="event.preventDefault();event.stopPropagation();clickSourceRestaurant(this.dataset.restaurant);return false;">{{ s.restaurant }}</a>: ${{ '%.2f'|format(s.price_cents / 100) }}
+                    {% if s.quote %}<div class="source-quote" style="font-size:.7rem;color:#888;padding-left:8px;line-height:1.3;font-style:italic;">&ldquo;{{ s.quote|e }}&rdquo;</div>{% endif %}
+                  </div>
                   {% endfor %}
                 </div>
                 {% endif %}

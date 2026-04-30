@@ -730,6 +730,88 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
     ))
 
 
+# Hardcoded REJECT list for the `restaurant` field in cited sources.
+# These should NEVER appear as the restaurant name on a citeable cite —
+# the prompt forbids them but rules can be soft-followed when Gemini
+# encounters edge cases (e.g., a small business whose only online menu
+# is on Toast). The deterministic backstop kicks in regardless. Lower-
+# cased substring match: any cite whose restaurant field contains one
+# of these tokens (or matches as a whole word) gets dropped.
+_FORBIDDEN_SOURCE_NAMES = frozenset({
+    # Delivery / ordering aggregators
+    "doordash", "grubhub", "uber eats", "ubereats", "uber-eats",
+    "postmates", "seamless", "caviar",
+    # Ordering platforms (cite-only forbidden — they still feed the range
+    # pool internally)
+    "toast", "toasttab", "toast tab",
+    "slice", "slicelife", "slice life", "slice.com",
+    "chownow", "chow now",
+    "square", "square space",
+    # Review / aggregator sites
+    "yelp", "tripadvisor", "trip advisor", "zomato",
+    "google maps", "google.com",
+})
+
+
+def _is_forbidden_source_name(name: str) -> bool:
+    """Return True when `name` matches a forbidden platform/aggregator.
+    Catches both whole-name matches and substring hits (e.g., 'Toast'
+    inside 'Toast Tab Pizza Co' would still hit). Lowercase normalized."""
+    if not name:
+        return True
+    n = name.lower().strip()
+    if not n:
+        return True
+    if n in _FORBIDDEN_SOURCE_NAMES:
+        return True
+    for forbidden in _FORBIDDEN_SOURCE_NAMES:
+        # Substring guard — "Toast Bistro" should pass (legitimate
+        # restaurant name containing 'toast'); only block when 'toast'
+        # appears as its own word/component.
+        if forbidden in n:
+            # Word-boundary check to avoid false positives like
+            # "Roastoria" containing "toast"
+            import re as _re
+            pattern = r"\b" + _re.escape(forbidden) + r"\b"
+            if _re.search(pattern, n):
+                return True
+    return False
+
+
+# Compound size labels we explicitly reject when matching against a
+# customer's single-size variant. Gemini's "Med" token in "Med/Large"
+# creates a strong false-match signal — backstop catches it.
+import re as _re_compound
+_COMPOUND_SIZE_PATTERN = _re_compound.compile(
+    r"\b(sm|small|md|med|medium|reg|regular|lg|large|xl|x-large)"
+    r"\s*/\s*"
+    r"(sm|small|md|med|medium|reg|regular|lg|large|xl|x-large|family|party)\b",
+    _re_compound.IGNORECASE,
+)
+
+
+def _quote_has_compound_size(quote: str) -> bool:
+    """Return True when the quote contains a compound size label like
+    'Small/Med' or 'Med/Large'. The customer's single-size variant
+    can't unambiguously match either side of the slash, so the cite
+    should be rejected to prevent the Nicky's-style misclassification.
+
+    NOTE: only call this when the customer's own variant label does
+    NOT contain a slash — otherwise legit compound-size customers
+    would lose all their cites.
+    """
+    if not quote:
+        return False
+    return bool(_COMPOUND_SIZE_PATTERN.search(quote))
+
+
+# Plausibility ceiling for cited prices. Catches hallucinated absurd
+# values ($9,999 menu items) and parser errors. $200 is generous for
+# any reasonable single menu item — adjust if we ever onboard fine-
+# dining or catering-only customers.
+PRICE_PLAUSIBILITY_CEILING_CENTS = 20_000
+
+
 def _count_market_sources(entry: Dict[str, Any]) -> int:
     """Total sources backing a market-rate entry: base sources plus all
     per-size sources. Used by the low-source retry pass to find items
@@ -1018,11 +1100,41 @@ calculation, just not the cited list shown to the owner):
   - Scanned/photocopied PDFs whose text extraction yields gibberish.
   - Your own training-data knowledge of typical prices.
 
-Per-size matching: if the source's menu uses different size labels than
-ours (e.g. their "Small" vs our "12 Sml"), only cite that source's price
-under our size if the SOURCE's size description is in your quote and is
-unambiguously the same item size. If a competitor's size doesn't map
-cleanly to ours, OMIT THE SOURCE for that size — don't approximate.
+Per-size matching: when an item has size variants, you MUST be strict
+about which competitor sizes count as matches. The single biggest
+mistake to avoid: approximating compound competitor sizes onto our
+single sizes.
+
+REJECT compound size labels for single-size matching. If the
+competitor's menu has a size like "Med/Large", "Small/Med",
+"Small/Reg", or any other compound label using a slash, those are
+NOT matches for our customer's "Medium", "Small", or "Large"
+variants. They are explicitly different categories — usually
+between two of our sizes — and approximating either way produces
+wrong comparisons.
+
+WORKED EXAMPLE (real case we got wrong before): Customer has
+"Medium" pizza at $13.95. Competitor "Nicky's Pizza" has FIVE
+sizes:
+   Small      $14.00
+   Small/Med  $17.00
+   Med/Large  $21.00
+   Large      $26.00
+   Party      $29.00
+The correct match for our Medium is Nicky's Small ($14) — closest
+in size and price. Med/Large ($21) and Large ($26) are LARGER
+sizes; do NOT cite them as our Medium. The compound label
+"Med/Large" must be rejected outright as ambiguous, even though
+its name shares the "Med" token with our "Medium".
+
+CONTEXTUAL ANALYSIS REQUIRED: before matching ANY single size,
+look at the competitor's full size run as an ordered sequence
+(by price ascending). Use the customer's variant's place in
+their own size run as guidance — if their Medium is a 12" pizza
+priced at $13.95, look for a competitor size in that diameter and
+price neighborhood. If no competitor size cleanly maps, OMIT THE
+SOURCE for that size. Returning fewer accurate cites is better
+than returning approximated wrong ones.
 
 PRICING NUANCES — restaurant menus list prices in confusing ways.
 Stick to these rules so the data stays comparable:
@@ -1217,10 +1329,30 @@ Rules:
             batch_out = {}
             # Quick id → name lookup for quote validation
             id_to_name = {it["item_id"]: it.get("item_name") or "" for it in batch}
-            quote_filter_stats = {"kept": 0, "no_quote": 0, "bad_quote": 0}
+            id_to_variants = {
+                it["item_id"]: [v.get("label", "").lower()
+                                for v in it.get("variants", [])
+                                if v.get("label")]
+                for it in batch
+            }
+            quote_filter_stats = {
+                "kept": 0, "no_quote": 0, "bad_quote": 0,
+                "platform_name": 0, "compound_size": 0, "implausible_price": 0,
+            }
 
-            def _filter_sources(raw_sources, item_name, ctx):
-                """Drop sources without a verifiable verbatim quote."""
+            def _filter_sources(raw_sources, item_name, ctx, customer_size_label=""):
+                """Drop sources without a verifiable verbatim quote PLUS the
+                programmatic backstops Gemini recommended (round 6 critique):
+                  - Reject when source's `restaurant` is a known platform
+                    name. These should never reach the cited list.
+                  - Reject when the source's quote contains a compound size
+                    label (Med/Large, Small/Med) and the customer's variant
+                    label is a single non-compound size. This catches
+                    Gemini's soft-following of per-size matching rules.
+                  - Reject when the cited price is implausible (<= $0 or
+                    above PRICE_PLAUSIBILITY_CEILING_CENTS).
+                Each rejection is counted in quote_filter_stats so we can
+                see how often each backstop is actually firing."""
                 if not isinstance(raw_sources, list):
                     return []
                 out = []
@@ -1230,6 +1362,12 @@ Rules:
                     rest = s.get("restaurant") or ""
                     if not rest or _is_article_title(rest):
                         continue
+                    # Backstop 1: hardcoded platform-name rejection. The
+                    # prompt forbids these but rules are soft-followed —
+                    # this is the deterministic safety net.
+                    if _is_forbidden_source_name(rest):
+                        quote_filter_stats["platform_name"] += 1
+                        continue
                     quote = (s.get("quote") or "").strip()
                     price = int(s.get("price_cents") or 0)
                     if not quote:
@@ -1237,6 +1375,19 @@ Rules:
                         continue
                     if not _quote_validates_price(quote, price, item_name):
                         quote_filter_stats["bad_quote"] += 1
+                        continue
+                    # Backstop 2: compound-size rejection. Only fires when
+                    # we're matching against a specific size slot AND that
+                    # slot's label isn't itself a compound. Catches the
+                    # Nicky's Med/Large -> our Medium misclassification.
+                    if customer_size_label and "/" not in customer_size_label:
+                        if _quote_has_compound_size(quote):
+                            quote_filter_stats["compound_size"] += 1
+                            continue
+                    # Backstop 3: implausibility. Catches hallucinated
+                    # absurd prices (e.g., $9999) or zero/negative parses.
+                    if price <= 0 or price > PRICE_PLAUSIBILITY_CEILING_CENTS:
+                        quote_filter_stats["implausible_price"] += 1
                         continue
                     quote_filter_stats["kept"] += 1
                     out.append({
@@ -1286,6 +1437,7 @@ Rules:
                                         size_entry["total_data_points"] = sz_dp
                                     size_sources = _filter_sources(
                                         sdata.get("sources"), item_name, f"size:{slabel}",
+                                        customer_size_label=slabel,
                                     )
                                     # Keep the size if it has either citeable
                                     # sources OR platform data (sz_dp > 0
@@ -1310,12 +1462,16 @@ Rules:
 
                     batch_out[iid] = entry
 
-            if quote_filter_stats["no_quote"] or quote_filter_stats["bad_quote"]:
+            if any(quote_filter_stats.values()):
                 log.info(
-                    "Quote filter: kept=%d, no_quote=%d, bad_quote=%d",
+                    "Quote filter: kept=%d, no_quote=%d, bad_quote=%d, "
+                    "platform_name=%d, compound_size=%d, implausible_price=%d",
                     quote_filter_stats["kept"],
                     quote_filter_stats["no_quote"],
                     quote_filter_stats["bad_quote"],
+                    quote_filter_stats["platform_name"],
+                    quote_filter_stats["compound_size"],
+                    quote_filter_stats["implausible_price"],
                 )
             # Two-pool architecture audit metric. Per-batch totals of
             # data points found vs cited sources — a healthy gap proves
