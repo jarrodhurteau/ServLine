@@ -867,6 +867,19 @@
     .source-row + .source-row { border-top: 1px solid rgba(0,0,0,.06); }
     .source-link { color: var(--brand, #B85C38); text-decoration: none; font-weight: 600; cursor: pointer; }
     .source-link:hover { text-decoration: underline; }
+    /* Verbatim source quote — needs to wrap because quotes are full
+       sentences ("Reuben Sandwich. Corned beef brisket, pastrami..."),
+       not single tokens. Override the parent .source-row's nowrap. */
+    .source-quote {
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-height: 60px;
+      overflow-y: auto;
+      margin-top: 2px;
+    }
+    /* Slightly wider popover so multi-line quotes don't feel cramped. */
+    .source-popover { max-width: 360px !important; }
     .wiz-variant-row { position: relative; }
     .wiz-item { position: relative; }
     /* Editable variant inputs */

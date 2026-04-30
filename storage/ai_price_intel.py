@@ -1410,15 +1410,20 @@ Rules:
                     # metric for the two-pool architecture: a healthy gap
                     # between this and len(sources) confirms platforms are
                     # widening the data set.
-                    base_dp = int(r.get("total_data_points") or 0)
-                    if base_dp > 0:
-                        entry["total_data_points"] = base_dp
                     # Drop sources without verifiable verbatim quotes.
                     # Day 141.9: Gemini's grounded search frequently fabricates
                     # plausible-looking prices when it can't find an exact size
                     # match; the quote field forces it to back each cite with
                     # actual page text or omit the source.
                     base_sources = _filter_sources(r.get("sources"), item_name, "base")
+                    # Defensive floor: Gemini sometimes omits total_data_points
+                    # entirely (we saw cited > reported in the audit metric on
+                    # the last run). Floor at len(base_sources) since we KNOW
+                    # that many data points exist (the cited, validated ones).
+                    base_dp = int(r.get("total_data_points") or 0)
+                    base_dp = max(base_dp, len(base_sources))
+                    if base_dp > 0:
+                        entry["total_data_points"] = base_dp
                     if base_sources:
                         entry["sources"] = base_sources
 
@@ -1432,13 +1437,15 @@ Rules:
                                 sm = sdata.get("median_cents", 0)
                                 if sl > 0 and sh > 0 and sm > 0:
                                     size_entry = {"low": int(sl), "high": int(sh), "median": int(sm)}
-                                    sz_dp = int(sdata.get("total_data_points") or 0)
-                                    if sz_dp > 0:
-                                        size_entry["total_data_points"] = sz_dp
                                     size_sources = _filter_sources(
                                         sdata.get("sources"), item_name, f"size:{slabel}",
                                         customer_size_label=slabel,
                                     )
+                                    # Same defensive floor as base.
+                                    sz_dp = int(sdata.get("total_data_points") or 0)
+                                    sz_dp = max(sz_dp, len(size_sources))
+                                    if sz_dp > 0:
+                                        size_entry["total_data_points"] = sz_dp
                                     # Keep the size if it has either citeable
                                     # sources OR platform data (sz_dp > 0
                                     # means real prices fed the range, even

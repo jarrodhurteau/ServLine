@@ -6653,8 +6653,16 @@ def _build_editor_competitors(draft, price_intel, restaurant):
                 _existing_lower.add(_cd.get("place_name", "").lower())
     except Exception:
         pass
+    # Always populate gemini_restaurants from price_intel — the loop below
+    # dedupes against places_cache so already-resolved entries are skipped.
+    # The previous `not os.path.exists(_gpc)` gate created a coverage gap:
+    # the first build resolved ~30 restaurants but Gemini cites often
+    # reference 50+ unique names, and subsequent renders never attempted
+    # the missing lookups because the cache file existed. User sees the
+    # symptom as "only 20 results in Similar Restaurants" — the count
+    # plateaus at whatever the first build managed to resolve.
     gemini_restaurants = set()
-    if not os.path.exists(_gpc) and price_intel and price_intel.get("assessments"):
+    if price_intel and price_intel.get("assessments"):
         import re as _re
         _norm_seen = {}
         for a in price_intel["assessments"]:
@@ -6749,7 +6757,9 @@ def _build_editor_competitors(draft, price_intel, restaurant):
 
             to_lookup.append((rname, norm))
 
-        LIVE_LOOKUP_CAP = 30
+        LIVE_LOOKUP_CAP = 60  # was 30 — Gemini routinely cites 50+ unique
+                              # restaurants on a 158-item menu. Cap of 30
+                              # was capping the editor sidebar artificially.
         for rname, norm in to_lookup[LIVE_LOOKUP_CAP:]:
             comp_entry = {
                 "place_name": rname,
