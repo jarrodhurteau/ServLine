@@ -830,7 +830,7 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
                           zip_code: str, cuisine: str,
                           address: str = "",
                           draft_id: Optional[int] = None,
-                          competitor_anchors: Optional[List[str]] = None,
+                          competitor_anchors: Optional[List[Dict[str, str]]] = None,
                           ) -> Dict[int, Dict[str, Any]]:
     """Use Gemini with Google Search grounding to get real market prices.
 
@@ -889,14 +889,28 @@ def _gemini_search_prices(items: List[Dict[str, Any]], city: str, state: str,
         # When empty (anchors not available yet, or sparse area), the
         # prompt falls back to the original generic search instructions.
         if competitor_anchors:
+            # Render each anchor as `Name (Address)` so Gemini's targeted
+            # searches disambiguate restaurants that share names across
+            # markets ("Joe's Pizza" matches dozens otherwise). The
+            # address came from Google Places — we know it's the right
+            # one for this location.
+            def _fmt_anchor(a):
+                if isinstance(a, dict):
+                    name = a.get("name") or ""
+                    addr = a.get("address") or ""
+                    return f"  - {name} ({addr})" if addr else f"  - {name}"
+                return f"  - {a}"
             anchor_block = (
                 "\nPRIORITY COMPETITORS — these are confirmed restaurants "
-                f"within 5 miles of {location}. Search THEIR menus FIRST "
-                "before broadening to open-web discovery. Use targeted "
-                'queries like \'"Restaurant Name" item price\' against '
-                "their websites. Each one is a real local business that "
-                "may serve the item you're pricing:\n"
-                + "\n".join(f"  - {n}" for n in competitor_anchors)
+                f"within 5 miles of {location}, vetted by Google Places. "
+                "Each anchor is shown as `Name (Address)`. Use BOTH the "
+                "name AND address in your targeted search to make sure "
+                "you're pulling pricing from the EXACT competitor we "
+                'identified — e.g. \'"Joe\'s Pizza 123 Main St" '
+                "combination pizza price`. There may be other restaurants "
+                "sharing the same name in nearby cities; the address is "
+                "how you confirm you've got the right one.\n"
+                + "\n".join(_fmt_anchor(a) for a in competitor_anchors)
                 + "\n\nWhen you've exhausted these for an item, broaden "
                 "with synonyms or expand to other local restaurants you "
                 "find via search. The anchor list is a STARTING POINT, "
@@ -935,6 +949,15 @@ a verbatim quote from the restaurant's OWN menu page. No estimates,
 no platform quotes, no "typical range" guesses, no averages from
 articles. The range itself can include platform prices internally —
 just don't surface them as cites.
+
+PHANTOM PRICE CASE — if every price you found came from third-party
+platforms (DoorDash/Toast/Slice/Grubhub/UberEats/ChowNow) and ZERO
+restaurant websites had the item: return the calculated low/high/
+median range from the platform data, with an EMPTY sources array.
+This is correct, intended output. The owner sees a price range
+badge with no clickable cites. Don't suppress the result, don't
+fabricate a website cite, don't skip the item — just return the
+range and empty sources.
 
 If you cannot find ANY data (zero direct sites AND zero platforms),
 return zero for the item.
@@ -1005,7 +1028,8 @@ Items:
 {item_lines}
 
 Return JSON only — an array:
-[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100, "sizes": null,
+[{{"id": 123, "low_cents": 800, "high_cents": 1400, "median_cents": 1100,
+   "total_data_points": 8, "sizes": null,
    "sources": [
      {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "Cheese Pizza  $8.99"}},
      {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Cheese Pie - Large $12.00"}},
@@ -1015,10 +1039,23 @@ Return JSON only — an array:
    ]
 }}]
 
-For items with [sizes], include per-size ranges AND sources per size:
+`total_data_points` is the count of REAL prices that fed the range
+calculation, including BOTH direct-site prices and platform prices
+(Toast/Slice/DoorDash/ChowNow/UberEats/Grubhub). The example above
+shows 8 total — 5 from restaurant websites (cited in the array) and
+3 from platforms (used for the range, not cited). This is how we
+audit whether the two-pool architecture is delivering: a healthy
+gap between total_data_points and len(sources) means platforms ARE
+widening the data set.
+
+For items with [sizes], include per-size ranges AND sources per size.
+total_data_points lives at the per-size level — count separately for
+each size:
 {{"id": 123, "low_cents": 800, "high_cents": 2500, "median_cents": 1500,
+  "total_data_points": 12,
   "sources": [{{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "Cheese Pizza  $8.99"}}],
   "sizes": {{"12\\" Sml": {{"low_cents": 800, "high_cents": 1400, "median_cents": 1100,
+    "total_data_points": 7,
     "sources": [
       {{"restaurant": "Joe's Pizza", "price_cents": 899, "quote": "12\\" Cheese Pizza - $8.99"}},
       {{"restaurant": "Main St Pizzeria", "price_cents": 1200, "quote": "Small (12 inch) cheese - $12.00"}},
@@ -1200,6 +1237,14 @@ Rules:
                 if iid and low > 0 and high > 0 and med > 0:
                     item_name = id_to_name.get(iid, "")
                     entry = {"low": int(low), "high": int(high), "median": int(med)}
+                    # Total real prices that fed this item's range, across
+                    # BOTH direct websites and platforms. Used as the audit
+                    # metric for the two-pool architecture: a healthy gap
+                    # between this and len(sources) confirms platforms are
+                    # widening the data set.
+                    base_dp = int(r.get("total_data_points") or 0)
+                    if base_dp > 0:
+                        entry["total_data_points"] = base_dp
                     # Drop sources without verifiable verbatim quotes.
                     # Day 141.9: Gemini's grounded search frequently fabricates
                     # plausible-looking prices when it can't find an exact size
@@ -1219,25 +1264,31 @@ Rules:
                                 sm = sdata.get("median_cents", 0)
                                 if sl > 0 and sh > 0 and sm > 0:
                                     size_entry = {"low": int(sl), "high": int(sh), "median": int(sm)}
+                                    sz_dp = int(sdata.get("total_data_points") or 0)
+                                    if sz_dp > 0:
+                                        size_entry["total_data_points"] = sz_dp
                                     size_sources = _filter_sources(
                                         sdata.get("sources"), item_name, f"size:{slabel}",
                                     )
-                                    # If a size has zero validated sources,
-                                    # drop the size entirely — the range it
-                                    # claims isn't backed by anything we can
-                                    # verify.
-                                    if not size_sources:
+                                    # Keep the size if it has either citeable
+                                    # sources OR platform data (sz_dp > 0
+                                    # means real prices fed the range, even
+                                    # if none came from direct sites).
+                                    if size_sources:
+                                        size_entry["sources"] = size_sources
+                                    if not size_sources and sz_dp <= 0:
                                         continue
-                                    size_entry["sources"] = size_sources
                                     sizes_out[slabel] = size_entry
                         if sizes_out:
                             entry["sizes"] = sizes_out
 
-                    # If neither base nor any size has validated sources, drop
-                    # the whole item — there's no real data here.
-                    has_base = bool(entry.get("sources"))
-                    has_size = bool(entry.get("sizes"))
-                    if not has_base and not has_size:
+                    # Keep the item if any real prices fed the range —
+                    # whether they're citeable (sources array) or platform-
+                    # only (total_data_points > 0). Drop only when nothing
+                    # backs the range at all (Gemini hallucinated).
+                    has_base_data = bool(entry.get("sources")) or base_dp > 0
+                    has_size_data = bool(entry.get("sizes"))
+                    if not has_base_data and not has_size_data:
                         continue
 
                     batch_out[iid] = entry
@@ -1249,9 +1300,27 @@ Rules:
                     quote_filter_stats["no_quote"],
                     quote_filter_stats["bad_quote"],
                 )
+            # Two-pool architecture audit metric. Per-batch totals of
+            # data points found vs cited sources — a healthy gap proves
+            # platforms ARE widening the data set. Equal numbers mean
+            # platforms aren't contributing and the design isn't paying
+            # for itself.
+            _total_dp = 0
+            _total_cites = 0
+            for _e in batch_out.values():
+                _total_dp += int(_e.get("total_data_points") or 0)
+                _total_cites += len(_e.get("sources") or [])
+                for _sz in (_e.get("sizes") or {}).values():
+                    if isinstance(_sz, dict):
+                        _total_dp += int(_sz.get("total_data_points") or 0)
+                        _total_cites += len(_sz.get("sources") or [])
             log.info(
-                "Gemini batch ok: %d/%d items returned (ids=%s)",
-                len(batch_out), len(batch), batch_ids,
+                "Gemini batch ok: %d/%d items returned. "
+                "Two-pool metric: %d total data points (range pool), "
+                "%d cited sources (direct sites only). gap=%d "
+                "(higher gap = platforms widening data).",
+                len(batch_out), len(batch),
+                _total_dp, _total_cites, _total_dp - _total_cites,
             )
             _GEMINI_LAST_RUN["batches_ok"] += 1
             return batch_out
@@ -1822,14 +1891,21 @@ def _aggregate_price_ranges(draft_id: int) -> int:
         rest_id_row = conn.execute(
             "SELECT restaurant_id FROM drafts WHERE id = ?", (draft_id,),
         ).fetchone()
-        competitor_anchors: List[str] = []
+        # Anchors include both name AND address. The address disambiguates
+        # restaurants that share names across markets — a critical
+        # correctness issue ("Joe's Pizza" matches dozens otherwise).
+        # When the cached entry has no address, fall back to name-only.
+        competitor_anchors: List[Dict[str, str]] = []
         if rest_id_row and rest_id_row["restaurant_id"]:
             try:
                 from storage.price_intel import get_cached_comparisons
                 _comps = get_cached_comparisons(rest_id_row["restaurant_id"])
                 competitor_anchors = [
-                    c["place_name"] for c in _comps
-                    if c.get("place_name")
+                    {
+                        "name": c["place_name"],
+                        "address": (c.get("place_address") or "").strip(),
+                    }
+                    for c in _comps if c.get("place_name")
                 ][:25]  # cap — prompt bloat past ~25 hurts more than helps
             except Exception as e:
                 log.warning("Anchor fetch failed for draft %d: %s", draft_id, e)
