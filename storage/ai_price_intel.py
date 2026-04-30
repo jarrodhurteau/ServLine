@@ -915,26 +915,22 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
     # legitimate cites where the source happens to use a synonym.
     _STOP = {"the", "and", "with", "for", "size", "small", "large",
              "medium", "regular", "personal", "mini", "pizza"}
+    # General principle: synonyms map ONLY to the SAME PRODUCT under a
+    # different name — not "similar items with different ingredients."
+    # If two items differ in ingredients (Margherita vs Cheese), prep
+    # method (Stromboli rolled vs Calzone folded), or core composition
+    # (Boneless wings = breaded chicken bites, NOT bone-in wings), they
+    # are DIFFERENT items even if names share tokens. Don't put them
+    # here. The cost of a missed legit cite is far lower than the cost
+    # of a wrong-item cross-cite that misleads the customer.
     _SYNONYMS = {
-        # Cheese pizza is sometimes called Plain or Mozzarella — same
-        # product. Margherita and Neapolitan are NOT synonyms despite
-        # surface similarity: they use fresh tomato/basil/mozzarella
-        # and are typically priced higher. Treating them as the same
-        # creates false "above market"/"below market" comparisons in
-        # both directions.
         "cheese": ("plain", "mozzarella"),
         "hamburger": ("burger",),
         "cheeseburger": ("cheese burger",),
-        # Wings — buffalo/chicken/hot/boneless are all the same product.
-        # Quote often just says "wings" with quantity prefix (e.g. "10 Wings").
-        "wings": ("buffalo", "boneless", "chicken", "wing"),
+        "wings": ("buffalo", "chicken", "wing"),
         "buffalo": ("wings", "wing"),
-        # Fries — plain side of fries shows up under several names.
         "fries": ("french", "side", "basket"),
-        # Calzone aliases (regional — stromboli in some areas).
-        "calzone": ("stromboli", "calz"),
-        # Sub sandwiches — major regional name variation. NOT including
-        # "sandwich" — too broad, would match any sandwich quote.
+        "calzone": ("calz",),
         "sub": ("hoagie", "grinder", "hero"),
         "hoagie": ("sub", "grinder", "hero"),
         "grinder": ("sub", "hoagie", "hero"),
@@ -1269,25 +1265,38 @@ Rules:
   (no platforms, no direct sites), set low_cents to 0 and omit
   sources. The item will be skipped. This is rare — most common
   items have at least platform data.
-- Common items are often listed under SYNONYMS at other restaurants —
-  search for those too:
-    "Cheese Pizza"  → "Plain", "Mozzarella", "Round Pie", "Cheese Pie"
-                      (NOT "Margherita" or "Neapolitan" — those are
-                      DIFFERENT items with fresh ingredients, usually
-                      priced higher; never cite them for plain cheese)
-    "Hamburger"     → "Burger", "Plain Burger", "1/4 lb Burger"
-    "Cheeseburger"  → "Cheese Burger", "American Cheeseburger"
-    "Wings"         → "Buffalo Wings", "Chicken Wings", "Hot Wings",
-                      "Boneless Wings", "Wing Basket", "10 Wings",
-                      "6 Wings", "Wing Platter", "Jumbo Wings"
-    "Fries"         → "French Fries", "Side of Fries", "Basket of Fries"
-    "Calzone"       → "Stromboli" (regional), "Calz", "Cheese Calzone"
-    "Salad"         → "House Salad", "Garden Salad", "Tossed Salad"
-    "Sub"           → "Hoagie", "Grinder", "Hero" (NOT generic "Sandwich")
-  When you cite a synonym source, the quote should still match the
-  competitor's actual wording. Use synonyms aggressively when looking
-  for a 2nd, 3rd, 4th source — they're how you find the same item
-  across different restaurants' naming conventions.
+- SYNONYM PRINCIPLE: a synonym is a different NAME for the EXACT SAME
+  product. Not a "similar item." Apply this strictly:
+    SAME product, different name → synonym, OK to cite:
+      Hamburger / Burger
+      Cheese Pizza / Plain / Mozzarella Pizza
+      Sub / Hoagie / Grinder / Hero (regional names for one sandwich)
+      Fries / French Fries / Side of Fries
+      Calzone / Calz
+      Wings / Buffalo Wings / Chicken Wings / Hot Wings (all bone-in)
+
+    DIFFERENT products that share name tokens → NOT synonyms, never
+    cross-cite:
+      Cheese Pizza ≠ Margherita Pizza (Margherita has fresh tomato,
+        fresh basil, fresh mozzarella; usually priced higher)
+      Cheese Pizza ≠ Neapolitan Pizza (different style, different
+        ingredients, different price point)
+      Calzone ≠ Stromboli (folded vs rolled, different prep)
+      Wings ≠ Boneless Wings (boneless = breaded chicken bites,
+        different protein product entirely)
+      Hamburger ≠ Cheeseburger (cheese is a substantive add)
+      Quarter-pound burger ≠ Half-pound burger (different size class)
+
+  When in doubt, treat them as different items and skip rather than
+  cross-cite. A missed legit source is recoverable; a wrong cross-
+  cite shows the customer a misleading "above/below market" pill.
+
+- QUANTITY MATCHING: when an item has a piece count or portion size
+  in its name (e.g., "30 Pcs Wings", "16 inch Pizza", "Half Rack
+  Ribs"), the cited source must reference the SAME quantity. Citing
+  a 6-piece wing price under a 30-piece variant is a quantity
+  mismatch — the absolute price will be way off and the comparison
+  is meaningless. Match piece-counts and size-classes strictly.
 - Every source MUST have a verbatim "quote" field — no quote, no source
 - Prices in US cents (e.g. $9.00 = 900)
 - The low/high range comes from ALL real prices you found — both
