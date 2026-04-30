@@ -805,6 +805,54 @@ def _quote_has_compound_size(quote: str) -> bool:
     return bool(_COMPOUND_SIZE_PATTERN.search(quote))
 
 
+# Quantity-mismatch detection — catches cases where Gemini cites a
+# small-quantity item (6 Wings $9.95) under a customer's large-quantity
+# variant (30 Pcs Wings). Wings are the canonical example: the same
+# competitor menu often has multiple quantity tiers and Gemini's loose
+# matching treats them as interchangeable. Pattern matches "N wings",
+# "N pcs", "N pieces", etc. — pulls the integer for comparison.
+_QTY_PATTERN = _re_compound.compile(
+    r"\b(\d{1,3})\s*(pcs?|pieces?|piece|wings?|count|ct)\b",
+    _re_compound.IGNORECASE,
+)
+
+
+def _extract_quantity(text: str) -> Optional[int]:
+    """Extract a leading piece-count from text. Returns None if no
+    quantity-like token found."""
+    if not text:
+        return None
+    m = _QTY_PATTERN.search(text)
+    if m:
+        try:
+            return int(m.group(1))
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _quantity_mismatch(item_name: str, quote: str, tolerance: float = 0.5) -> bool:
+    """True if the quote's quantity differs from the item's quantity
+    by more than `tolerance` (proportionally). E.g. customer's
+    "30 Pcs Wings" vs quote "10 Pieces Wings $9.99" — differs by 67%,
+    over the 50% tolerance, reject. Same number tolerated up to 50%
+    drift to allow loose matches like "20 Pcs" vs "20 piece" or
+    "20 Pcs Wings $X" vs "Wings (24) $Y".
+
+    Only fires when BOTH item_name and quote contain quantity tokens.
+    Items without piece counts (most menu items) skip this check
+    entirely.
+    """
+    item_qty = _extract_quantity(item_name)
+    quote_qty = _extract_quantity(quote)
+    if item_qty is None or quote_qty is None:
+        return False  # at least one side has no quantity → can't compare
+    if item_qty == 0:
+        return False
+    drift = abs(quote_qty - item_qty) / item_qty
+    return drift > tolerance
+
+
 # Plausibility ceiling for cited prices. Catches hallucinated absurd
 # values ($9,999 menu items) and parser errors. $200 is generous for
 # any reasonable single menu item — adjust if we ever onboard fine-
@@ -868,9 +916,13 @@ def _quote_validates_price(quote: str, price_cents: int, item_name: str) -> bool
     _STOP = {"the", "and", "with", "for", "size", "small", "large",
              "medium", "regular", "personal", "mini", "pizza"}
     _SYNONYMS = {
-        # Cheese pizza is variously called: plain, mozzarella, margherita,
-        # round, neapolitan. All point to the same product.
-        "cheese": ("plain", "mozzarella", "margherita", "neapolitan"),
+        # Cheese pizza is sometimes called Plain or Mozzarella — same
+        # product. Margherita and Neapolitan are NOT synonyms despite
+        # surface similarity: they use fresh tomato/basil/mozzarella
+        # and are typically priced higher. Treating them as the same
+        # creates false "above market"/"below market" comparisons in
+        # both directions.
+        "cheese": ("plain", "mozzarella"),
         "hamburger": ("burger",),
         "cheeseburger": ("cheese burger",),
         # Wings — buffalo/chicken/hot/boneless are all the same product.
@@ -1219,8 +1271,10 @@ Rules:
   items have at least platform data.
 - Common items are often listed under SYNONYMS at other restaurants —
   search for those too:
-    "Cheese Pizza"  → "Plain", "Mozzarella", "Margherita",
-                      "Round Pie", "Cheese Pie", "Neapolitan"
+    "Cheese Pizza"  → "Plain", "Mozzarella", "Round Pie", "Cheese Pie"
+                      (NOT "Margherita" or "Neapolitan" — those are
+                      DIFFERENT items with fresh ingredients, usually
+                      priced higher; never cite them for plain cheese)
     "Hamburger"     → "Burger", "Plain Burger", "1/4 lb Burger"
     "Cheeseburger"  → "Cheese Burger", "American Cheeseburger"
     "Wings"         → "Buffalo Wings", "Chicken Wings", "Hot Wings",
@@ -1346,6 +1400,7 @@ Rules:
             quote_filter_stats = {
                 "kept": 0, "no_quote": 0, "bad_quote": 0,
                 "platform_name": 0, "compound_size": 0, "implausible_price": 0,
+                "qty_mismatch": 0,
             }
 
             def _filter_sources(raw_sources, item_name, ctx, customer_size_label=""):
@@ -1392,6 +1447,14 @@ Rules:
                         if _quote_has_compound_size(quote):
                             quote_filter_stats["compound_size"] += 1
                             continue
+                    # Backstop 2b: quantity-mismatch rejection. Catches
+                    # "30 Pcs Wings" item being cited with a "6 Wings $X"
+                    # quote. Only fires when both item AND quote carry
+                    # piece-count tokens.
+                    if _quantity_mismatch(item_name, quote):
+                        quote_filter_stats.setdefault("qty_mismatch", 0)
+                        quote_filter_stats["qty_mismatch"] += 1
+                        continue
                     # Backstop 3: implausibility. Catches hallucinated
                     # absurd prices (e.g., $9999) or zero/negative parses.
                     if price <= 0 or price > PRICE_PLAUSIBILITY_CEILING_CENTS:
