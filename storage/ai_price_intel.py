@@ -2634,6 +2634,28 @@ _BASE_NAME_TOKENS_BY_CAT = {
 }
 
 
+def _is_by_the_slice(name: str) -> bool:
+    """Detect 'by the slice' pizza items vs whole pies. Whole pies
+    have slice counts in PARENTHESES as size descriptors ('(8 Slices)',
+    '(6 Slices)') — those are kept. By-the-slice items have 'slice'
+    or 'slices' in the main name without parentheses — those are
+    different products and shouldn't be cited under whole-pie clusters.
+
+    Examples:
+        'Cheese Pizza Personal (6 Slices)' → False (whole pie)
+        'Cheese Slice'                      → True  (single slice)
+        'Two Cheese Pizza Slices Lunch'     → True  (multi-slice deal)
+        'Pizza by the Slice'                → True
+        'Cheese Pizza Mini 10"'              → False (size, not slices)
+    """
+    if not name:
+        return False
+    # Strip parenthetical content — the slice count there describes
+    # the whole pie's size, not a by-the-slice product
+    no_parens = re.sub(r"\([^)]*\)", "", name).lower()
+    return bool(re.search(r"\bslices?\b", no_parens))
+
+
 def _is_specialty_item(name: str, category: str = "") -> bool:
     """True if item is specialty (has toppings/styles beyond the base).
 
@@ -3022,6 +3044,14 @@ def _aggregate_from_anchor_menus(
                 anch_tier = _size_tier(anch_name)
                 if anch_tier != "unknown" and anch_tier != cust_size_tier:
                     return False
+            # By-the-slice guard for pizza: whole-pie customer clusters
+            # shouldn't cite single-slice anchor items ('Cheese Slice',
+            # 'Two Pizza Slices Lunch'). The '(N Slices)' parenthetical
+            # descriptors that appear in some whole-pie names ('Pizza
+            # Personal (6 Slices)') are kept — those describe the whole
+            # pie's slice count, they're not by-the-slice products.
+            if "pizza" in cat_key and _is_by_the_slice(anch_name):
+                return False
             return True
 
         candidates_filtered = [
