@@ -70,44 +70,44 @@ def extract_menu_from_url(
 ) -> List[Dict[str, Any]]:
     """Top-level: navigate to URL, run platform-aware extraction.
 
-    Three-tier strategy:
+    Strategy ordered fastest → slowest. APIs are PRIMARY; browser
+    paths are FALLBACKS. When an API path fails unexpectedly we log
+    at WARNING level with prefix `EXTRACTOR_FAILURE` so a downstream
+    alert/monitoring rule can pick it up — that means a fast path
+    that was supposed to work didn't, and we want to know promptly
+    so it can be fixed.
 
-      1. **Slice modal click-through** (platform=Slice). Their items
-         are on the same page but size variants only appear when you
-         click — opens a React modal overlay. Tested and reliable.
-
-      2. **Universal click-through** (any platform with clickable
-         item cards). Clicks each item, handles BOTH modal overlays
-         AND new-page navigation (e.g., Allhungry navigates from
-         restaurant.com → restaurant.allhungry.com/menu/...). Parses
-         size variants deterministically from innerText.
-
-      3. **Screenshot + Claude vision** fallback. When click-through
-         finds nothing or fails, the generic full-page screenshot
-         approach catches whatever's visible (no size variants).
+      1. **Slice JSON API** — HTTP fetch + 1-2 API calls, ~5 sec
+      2. **Allhungry JSON API** — HTTP fetch + per-cat JSON, ~5 sec
+      3. **Slice modal click-through** — fallback if API fails
+      4. **Universal click-through** — slow, generic
+      5. **Screenshot + Claude vision** — last resort, no sizes
 
     Returns: list of {name, price_cents, category} dicts.
     """
     if not url:
         return []
 
-    # Tier 1a: Slice-specific (proven path, keep as-is)
+    # === PRIMARY: API-based extractors ===
+
     if platform == "Slice":
         try:
-            items = _extract_slice_via_modals(url, place_name)
+            items = _extract_slice_via_api(url, place_name)
             if items:
-                log.info("Slice extractor: %s → %d items", place_name, len(items))
+                log.info("Slice API: %s → %d items", place_name, len(items))
                 return items
-            log.info("Slice extractor returned 0 for %s — trying universal",
-                     place_name)
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Slice path=api place=%r url=%r "
+                "reason=zero_items_returned — falling back to modal click",
+                place_name, url,
+            )
         except Exception as e:
-            log.warning("Slice extractor failed for %s: %s", place_name, e)
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Slice path=api place=%r url=%r "
+                "reason=%s: %s — falling back to modal click",
+                place_name, url, type(e).__name__, e,
+            )
 
-    # Tier 1b: Allhungry-specific via direct API. Allhungry is a
-    # React SPA — clicking each item navigates to a new page, which
-    # via Playwright takes ~12 minutes for a 282-item menu. Their
-    # public JSON API returns the same data in ~3 seconds. Same
-    # endpoint their own frontend hits.
     if platform == "Allhungry":
         try:
             items = _extract_allhungry_via_api(url, place_name)
@@ -115,22 +115,44 @@ def extract_menu_from_url(
                 log.info("Allhungry API: %s → %d items",
                          place_name, len(items))
                 return items
-            log.info("Allhungry API returned 0 for %s — trying universal",
-                     place_name)
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Allhungry path=api place=%r "
+                "url=%r reason=zero_items_returned — falling back to clicks",
+                place_name, url,
+            )
         except Exception as e:
-            log.warning("Allhungry API failed for %s: %s", place_name, e)
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Allhungry path=api place=%r "
+                "url=%r reason=%s: %s — falling back to clicks",
+                place_name, url, type(e).__name__, e,
+            )
 
-    # Tier 2: Universal click-through (modal OR page-nav)
+    # === FALLBACK 1: Slice modal click-through ===
+
+    if platform == "Slice":
+        try:
+            items = _extract_slice_via_modals(url, place_name)
+            if items:
+                log.info("Slice modal-click (fallback): %s → %d items",
+                         place_name, len(items))
+                return items
+        except Exception as e:
+            log.warning("Slice modal-click fallback failed for %s: %s",
+                        place_name, e)
+
+    # === FALLBACK 2: Universal click-through (modal OR page-nav) ===
+
     try:
         items = _extract_via_clickthroughs(url, place_name)
         if items:
-            log.info("Click-through extractor: %s → %d items",
+            log.info("Click-through (fallback): %s → %d items",
                      place_name, len(items))
             return items
     except Exception as e:
-        log.warning("Click-through extractor failed for %s: %s", place_name, e)
+        log.warning("Click-through fallback failed for %s: %s", place_name, e)
 
-    # Tier 3: Generic screenshot + Claude vision
+    # === FALLBACK 3: Screenshot + Claude vision (no sizes captured) ===
+
     try:
         chunks = _capture_menu_screenshots(url)
     except Exception as e:
@@ -141,6 +163,10 @@ def extract_menu_from_url(
         return []
     try:
         items = _extract_with_claude(chunks, place_name)
+        if items:
+            log.info("Vision (last-resort): %s → %d items",
+                     place_name, len(items))
+        return items
     except Exception as e:
         log.warning("VLM Claude call failed for %s: %s", place_name, e)
         return []
@@ -150,7 +176,6 @@ def extract_menu_from_url(
                 c.unlink(missing_ok=True)
             except Exception:
                 pass
-    return items
 
 
 # ---------------------------------------------------------------------------
@@ -1181,3 +1206,200 @@ def _extract_allhungry_via_api(url: str, place_name: str) -> List[Dict[str, Any]
     log.info("Allhungry API: %s → %d rows extracted",
              place_name, len(all_rows))
     return all_rows
+
+
+# ---------------------------------------------------------------------------
+# Slice direct-API extractor
+# ---------------------------------------------------------------------------
+# Slice (slicelife.com) embeds the menu in the initial HTML's
+# `window._initialDataContext` and fetches size variants via:
+#   https://consumer.prod.slicelife.com/services/core/api/v3/menus/
+#     <web_slug>/product-types?id=X&id=Y...
+# with header `x-api-key: <REACT_APP_CONSUMER_API_KEY>` (also in the
+# initial HTML).
+#
+# Total time: ~3-5 sec for a 400-item menu vs ~5 min via modal-click.
+
+_SLICE_API_BASE = "https://consumer.prod.slicelife.com/services/core/api/v3/menus"
+
+
+def _extract_slice_via_api(url: str, place_name: str) -> List[Dict[str, Any]]:
+    """Pull a full Slice menu via their public API.
+
+    1. HTTP fetch the main page.
+    2. Parse `window._initialDataContext` to extract:
+         - web_slug ("ct/enfield/06082/enfield-pizza")
+         - all categories, products with productTypeIds
+       And from the embedded REACT_APP_CONSUMER_API_KEY:
+         - x-api-key header value
+    3. Batch all productTypeIds into one product-types API call.
+    4. Map productTypeId → sizes, build items list.
+    """
+    body = _http_get(url, timeout=10)
+    if not body:
+        return []
+
+    # Extract API key. It's embedded server-side in a config block.
+    m = _re_allhungry.search(
+        r'REACT_APP_CONSUMER_API_KEY["\']?\s*:\s*["\']([A-Za-z0-9_-]+)["\']',
+        body,
+    )
+    if not m:
+        log.warning("Slice API: REACT_APP_CONSUMER_API_KEY not found at %s",
+                    url)
+        return []
+    api_key = m.group(1)
+
+    # Extract _initialDataContext via balanced-bracket parser
+    ctx = _extract_initial_data_context(body)
+    if not ctx:
+        log.warning("Slice API: _initialDataContext not parseable at %s", url)
+        return []
+    try:
+        shop = ctx["0"]["data"]["primaryShopRequest"]["data"]
+        web_slug = shop.get("web_slug")
+        categories = ctx["0"]["data"]["menuRequest"]["data"]["categories"]
+    except (KeyError, TypeError):
+        log.warning("Slice API: unexpected initialDataContext shape at %s",
+                    url)
+        return []
+    if not web_slug or not categories:
+        log.warning("Slice API: missing web_slug or categories at %s", url)
+        return []
+
+    # Collect every productTypeId with its (category, product name)
+    pt_to_meta: Dict[int, Dict[str, Any]] = {}
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = (cat.get("name") or "").strip() or "Menu"
+        for prod in cat.get("products", []) or []:
+            if not isinstance(prod, dict):
+                continue
+            name = (prod.get("name") or "").strip()
+            if not name:
+                continue
+            base_price_str = prod.get("price") or ""
+            base_cents = _to_cents(
+                base_price_str.replace("$", "").strip()
+                if isinstance(base_price_str, str) else str(base_price_str)
+            )
+            for pt_id in prod.get("productTypeIds") or []:
+                pt_to_meta[int(pt_id)] = {
+                    "name": name,
+                    "category": cat_name,
+                    "base_cents": base_cents,
+                }
+
+    if not pt_to_meta:
+        # Single-price products with no productTypeIds — emit the base
+        # price for each.
+        rows = []
+        for cat in categories:
+            cat_name = (cat.get("name") or "").strip() or "Menu"
+            for prod in cat.get("products", []) or []:
+                price = prod.get("price") or ""
+                if not isinstance(price, str):
+                    continue
+                cents = _to_cents(price.replace("$", "").strip())
+                if cents > 0:
+                    rows.append({
+                        "name": prod.get("name", "").strip(),
+                        "price_cents": cents,
+                        "category": cat_name,
+                    })
+        return rows
+
+    # Batch product-types lookup. The query string can be long; chunk
+    # in 50-id groups to be polite + URL-length-safe.
+    all_pt_ids = list(pt_to_meta.keys())
+    rows: List[Dict[str, Any]] = []
+    for i in range(0, len(all_pt_ids), 50):
+        chunk = all_pt_ids[i:i + 50]
+        qs = "&".join(f"id={pid}" for pid in chunk)
+        api_url = f"{_SLICE_API_BASE}/{web_slug}/product-types?{qs}"
+        try:
+            req = _urllib_request.Request(api_url, headers={
+                **_HTTP_HEADERS_REALISTIC,
+                "x-api-key": api_key,
+                "referer": url,
+            })
+            with _urllib_request.urlopen(req, timeout=15) as resp:
+                pt_data = _json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            log.warning("Slice API: product-types call failed (%s): %s",
+                        api_url[:120], e)
+            continue
+
+        # Slice's response shape:
+        #   {"shopId": ..., "productTypes": [{"id", "name", "price",
+        #     "productId", "addonIds"}, ...], "relationships": {...}}
+        # Each productType IS a single size (NOT a parent with sub-
+        # sizes). For a multi-size item like "Enfield Special Pizza",
+        # the product has multiple productTypeIds, and each ID resolves
+        # to a separate productType entry with its own size label
+        # ("Mini 10\"", "Small 12\"", etc.) and price (already in cents).
+        if not isinstance(pt_data, dict):
+            continue
+        for pt in pt_data.get("productTypes") or []:
+            if not isinstance(pt, dict):
+                continue
+            pt_id = pt.get("id")
+            if pt_id is None:
+                continue
+            meta = pt_to_meta.get(int(pt_id))
+            if not meta:
+                continue
+            size_name = (pt.get("name") or "").strip()
+            price = pt.get("price")
+            if not isinstance(price, (int, float)) or price <= 0:
+                continue
+            cents = int(price)  # Slice serves prices in cents already
+            rows.append({
+                "name": (f"{meta['name']} {size_name}".strip()
+                          if size_name and size_name.lower() != meta['name'].lower()
+                          else meta['name']),
+                "price_cents": cents,
+                "category": meta["category"],
+            })
+
+    log.info("Slice API: %s → %d rows extracted", place_name, len(rows))
+    return rows
+
+
+def _extract_initial_data_context(html: str) -> Optional[Dict[str, Any]]:
+    """Parse `window._initialDataContext = {...}` from a Slice page.
+    Uses balanced-bracket scanning since the JSON contains escaped
+    quotes that confuse a simple regex."""
+    m = _re_allhungry.search(r'window\._initialDataContext\s*=\s*', html)
+    if not m:
+        return None
+    start = m.end()
+    if start >= len(html) or html[start] != "{":
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(html)):
+        ch = html[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return _json.loads(html[start:i + 1])
+                except _json.JSONDecodeError:
+                    return None
+    return None
