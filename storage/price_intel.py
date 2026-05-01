@@ -702,6 +702,227 @@ _MENU_CACHE_TTL_DAYS = 30
 _ensure_menu_scrape_schema()
 
 
+# ---------------------------------------------------------------------------
+# Anchor URL tiering (Day 141.9)
+#
+# Before spending a Claude web-search call on each competitor, classify
+# the URL by quality: known SaaS ordering platforms (Slice, Toast,
+# etc.) → Tier A, custom sites with visible menus → Tier B, brochure
+# sites with no menu → Tier C. Skip Tier C entirely; that's pure cost
+# savings AND removes a known source of synthesized garbage.
+# ---------------------------------------------------------------------------
+
+# Platforms where we have a FAST clean-data extractor (API direct or
+# fast modal-click). Only these qualify for Tier A. Other detected
+# platforms drop to Tier B because the wizard can't afford to wait
+# for slow Playwright click-throughs or screenshot+vision passes.
+# Add to this list when you ship a fast extractor for a new platform.
+_FAST_EXTRACT_PLATFORMS = frozenset({
+    "Slice",        # modal click + DOM parse, ~3-5 min for 400 items
+    "Allhungry",    # direct JSON API, ~3-5 sec for 300 items
+})
+
+
+# Each entry: (platform_name, [tokens to match against page HTML+scripts])
+_TIER_PLATFORMS = [
+    ("Slice",         ["slicelife.com", "mypizza-assets", "powered by slice"]),
+    ("Toast",         ["toasttab.com", "toaststatic.com"]),
+    ("Square Online", ["square.site", "squareup.com/online", "weeblycloud"]),
+    ("ChowNow",       ["chownow.com", "cn-images"]),
+    ("Clover",        ["clover.com/online", "clover-cdn"]),
+    ("Beyond Menu",   ["beyondmenu.com"]),
+    ("MenuStar",      ["menustar.us", "menustar.com"]),
+    ("HungerRush",    ["hungerrush.com", "ordering.hungerrush"]),
+    ("GloriaFood",    ["gloriafood.com", "addmenu.com"]),
+    ("Popmenu",       ["popmenu.com"]),
+    ("BentoBox",      ["getbento.com", "bentobox.cdn"]),
+    ("Olo",           ["olo.com", "olocdn"]),
+    ("Foodtec",       ["foodtecsolutions.com"]),
+    ("Restaurant.com",["restaurant.com"]),
+    ("DoorDash",      ["doordash.com/store", "doordash.com/menu"]),
+    ("Grubhub",       ["grubhub.com/restaurant"]),
+    ("Wix Restaurants",["wix-restaurants", "wixstatic.com/restaurants"]),
+    ("MenuFy",        ["menufy.com"]),
+    ("Allhungry",     ["allhungry.com"]),
+]
+
+_TIER_TTL_DAYS = 30
+
+
+def _ensure_anchor_tier_schema() -> None:
+    """Cache table for URL → tier classification."""
+    with db_connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anchor_url_tier (
+                url             TEXT PRIMARY KEY,
+                tier            TEXT NOT NULL,
+                platform        TEXT,
+                price_count     INTEGER DEFAULT 0,
+                title           TEXT,
+                error           TEXT,
+                checked_at      TEXT NOT NULL,
+                expires_at      TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+
+_ensure_anchor_tier_schema()
+
+
+def _normalize_tier_url(url: str) -> str:
+    """Cache key: strip query string + fragment so equivalent URLs
+    share one entry."""
+    if not url:
+        return ""
+    u = url.strip().lower()
+    for sep in ("?", "#"):
+        if sep in u:
+            u = u.split(sep, 1)[0]
+    return u.rstrip("/")
+
+
+def _get_cached_tier(url: str) -> Optional[Dict[str, Any]]:
+    key = _normalize_tier_url(url)
+    if not key:
+        return None
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT tier, platform, price_count, title, error, expires_at "
+            "FROM anchor_url_tier WHERE url = ?",
+            (key,),
+        ).fetchone()
+    if not row:
+        return None
+    if row["expires_at"] and row["expires_at"] < datetime.utcnow().isoformat():
+        return None
+    return {
+        "tier": row["tier"],
+        "platform": row["platform"],
+        "price_count": row["price_count"] or 0,
+        "title": row["title"] or "",
+        "error": row["error"],
+    }
+
+
+def _save_tier_cache(url: str, info: Dict[str, Any]) -> None:
+    key = _normalize_tier_url(url)
+    if not key:
+        return
+    now = datetime.utcnow().isoformat()
+    expires = (datetime.utcnow().timestamp() + _TIER_TTL_DAYS * 86400)
+    expires_iso = datetime.utcfromtimestamp(expires).isoformat()
+    with db_connect() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO anchor_url_tier
+               (url, tier, platform, price_count, title, error,
+                checked_at, expires_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (key, info["tier"], info.get("platform"),
+             info.get("price_count", 0), info.get("title", "")[:200],
+             info.get("error"), now, expires_iso),
+        )
+        conn.commit()
+
+
+def _probe_url_tier(url: str) -> Dict[str, Any]:
+    """Headless Playwright load → extract platform fingerprint + count
+    visible $ signs. Returns {tier, platform, price_count, title,
+    error}."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"tier": "?", "platform": None, "price_count": 0,
+                "title": "", "error": "playwright_missing"}
+
+    js = """
+    () => {
+        const html = document.documentElement.outerHTML.toLowerCase();
+        const scripts = Array.from(document.querySelectorAll('script[src]'))
+            .map(s => (s.src || '').toLowerCase()).join('\\n');
+        const text = (document.body.innerText || '').toLowerCase();
+        const priceMatches = text.match(/\\$\\d+/g) || [];
+        const idx = text.indexOf('powered by');
+        return {
+            haystack: html + '\\n' + scripts,
+            poweredBy: idx >= 0 ? text.substr(idx, 80) : '',
+            priceCount: priceMatches.length,
+            title: document.title || '',
+        };
+    }
+    """
+    out: Dict[str, Any] = {
+        "tier": "?", "platform": None, "price_count": 0,
+        "title": "", "error": None,
+    }
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True)
+            try:
+                ctx = b.new_context(
+                    viewport={"width": 1280, "height": 1200},
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                )
+                page = ctx.new_page()
+                page.set_default_timeout(15000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(1500)
+                info = page.evaluate(js)
+            finally:
+                b.close()
+        out["price_count"] = info.get("priceCount", 0)
+        out["title"] = (info.get("title") or "")[:200]
+        blob = (info.get("haystack") or "") + " " + (info.get("poweredBy") or "")
+        for plat_name, tokens in _TIER_PLATFORMS:
+            if any(tok in blob for tok in tokens):
+                out["platform"] = plat_name
+                break
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+
+    # Tier classification. Tier A is reserved for platforms where we
+    # have a FAST clean-data extractor (API direct or quick modal-
+    # click). A known platform without a fast extractor drops to
+    # Tier B because a wizard-time scrape would take too long.
+    if out["error"]:
+        out["tier"] = "?"
+    elif out["platform"] and out["platform"] in _FAST_EXTRACT_PLATFORMS:
+        out["tier"] = "A"
+    elif out["platform"]:
+        # Known platform but no fast extractor → Tier B (slow, skip
+        # in wizard, possibly use in background pre-fetch later)
+        out["tier"] = "B"
+    elif out["price_count"] >= 25:
+        out["tier"] = "B"
+    elif out["price_count"] >= 5:
+        out["tier"] = "B?"
+    else:
+        out["tier"] = "C"
+    return out
+
+
+def classify_anchor_url(url: str, *, force_refresh: bool = False) -> Dict[str, Any]:
+    """Return tier info for a URL: {tier: 'A'|'B'|'B?'|'C'|'?',
+    platform: str|None, price_count, title, error}. Cached per-URL for
+    30 days. Re-probes errored entries sooner (since the error might
+    have been transient)."""
+    if not url:
+        return {"tier": "?", "platform": None, "price_count": 0,
+                "title": "", "error": "no_url"}
+    if not force_refresh:
+        cached = _get_cached_tier(url)
+        # Don't trust cached errors for long — try again
+        if cached and not cached.get("error"):
+            return cached
+    info = _probe_url_tier(url)
+    _save_tier_cache(url, info)
+    return info
+
+
 def get_place_details(place_id: str) -> Optional[Dict[str, Any]]:
     """Fetch website URL and other details from Google Place Details API."""
     try:
@@ -1014,22 +1235,27 @@ def scrape_competitor_menu(
     *,
     force_refresh: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Get a competitor's real menu prices using Claude web search.
-    Claude searches Grubhub, DoorDash, MenuPages, Yelp, restaurant websites,
-    and any other source to find actual menu items with real prices.
+    """Get a competitor's real menu prices.
 
-    Results are cached per place_id.
+    Strategy (Day 141.9): try Playwright + Claude vision FIRST — when
+    we have a website URL, screenshotting the rendered menu page and
+    asking Claude Opus to read it gives much cleaner data than web
+    search synthesis. Falls back to the prior Claude-web-search path
+    only when the VLM route returns nothing (no website on file, page
+    didn't render a menu, etc.).
+
+    Results cached per place_id for 30 days. The cache `scrape_status`
+    column records which path succeeded ('vlm' | 'web_search' |
+    'not_found').
     """
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Check cache first
     if not force_refresh:
         cached = _get_cached_menu(place_id)
         if cached:
             return cached
 
-    # Get address for search context
+    # Address for fallback search context
     address = ""
     try:
         with db_connect() as conn:
@@ -1042,15 +1268,50 @@ def scrape_competitor_menu(
     except Exception:
         pass
 
-    # Claude web search — finds real prices from any online source
-    log.info("Searching for %s menu via Claude web search", place_name)
-    items = _claude_web_search_menu(place_name, address)
-    if items:
-        items = [it for it in items if it.get("price_cents") and it["price_cents"] > 0]
+    items: List[Dict[str, Any]] = []
+    source_used: Optional[str] = None
+    menu_url: Optional[str] = None
+
+    # Step 1: try the VLM path. Requires a website URL and a Tier A/B
+    # classification (so we don't waste a Playwright run on a brochure
+    # site). The tiering filter upstream already drops Tier C anchors,
+    # but check here too in case scrape_competitor_menu is called from
+    # a path that bypassed tiering.
+    details = get_place_details(place_id)
+    website = (details or {}).get("website") if details else None
+    if website:
+        try:
+            tier_info = classify_anchor_url(website)
+            if tier_info.get("tier") in ("A", "B"):
+                from .menu_vlm import extract_menu_from_url
+                platform = tier_info.get("platform")
+                log.info("VLM extract: %s (platform=%s, %s)",
+                         place_name, platform, website)
+                vlm_items = extract_menu_from_url(
+                    website, place_name, platform=platform,
+                )
+                if vlm_items:
+                    items = vlm_items
+                    source_used = "vlm"
+                    menu_url = website
+        except Exception as e:
+            log.warning("VLM path failed for %s: %s", place_name, e)
+
+    # Step 2: fall back to Claude web search if VLM produced nothing
+    if not items:
+        log.info("Web-search fallback: %s", place_name)
+        try:
+            ws_items = _claude_web_search_menu(place_name, address)
+            if ws_items:
+                items = [it for it in ws_items
+                         if it.get("price_cents") and it["price_cents"] > 0]
+                if items:
+                    source_used = "web_search"
+        except Exception as e:
+            log.warning("Web-search fallback failed for %s: %s", place_name, e)
 
     # Day 141.7: classify roles + canonical names so downstream can skip
-    # sauce ramekins and collapse size variants. Safe to skip on failure —
-    # consumers fall back to raw items when role is None.
+    # sauce ramekins and collapse size variants. Safe to skip on failure.
     if items:
         try:
             from .menu_classifier import classify_menu_items
@@ -1060,19 +1321,19 @@ def scrape_competitor_menu(
             log.warning("Classifier failed for %s: %s", place_name, e)
 
     if items:
-        _save_menu_cache(place_id, place_name, None, None, items,
-                         "web_search", None, now)
+        _save_menu_cache(place_id, place_name, website, menu_url, items,
+                         source_used or "web_search", None, now)
         return {
             "place_id": place_id,
             "place_name": place_name,
-            "menu_url": None,
+            "menu_url": menu_url,
             "items": items,
-            "source": "scraped",
+            "source": source_used or "scraped",
             "from_cache": False,
         }
 
-    _save_menu_cache(place_id, place_name, None, None, [],
-                     "not_found", "No menu found via web search", now)
+    _save_menu_cache(place_id, place_name, website, None, [],
+                     "not_found", "No menu found via VLM or web search", now)
     return {
         "place_id": place_id,
         "place_name": place_name,
@@ -1508,7 +1769,9 @@ def _get_cached_menu(place_id: str) -> Optional[Dict[str, Any]]:
             "place_name": row["place_name"],
             "menu_url": row["menu_url"],
             "items": items,
-            "source": "scraped" if row["scrape_status"] in ("scraped", "web_search") else "not_found",
+            "source": (row["scrape_status"]
+                       if row["scrape_status"] in ("vlm", "web_search", "scraped")
+                       else "not_found"),
             "from_cache": True,
         }
     except Exception:

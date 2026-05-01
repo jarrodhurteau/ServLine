@@ -871,22 +871,27 @@ def _apply_category_ranges(
     full_address: str,
     draft_id: Optional[int] = None,
 ) -> int:
-    """Override range data for size-variant items with category-wide
-    market data. Source citations (the cooler) stay per-item from the
-    earlier _gemini_search_prices call; only the range numbers (the
-    boat) get widened to the category level.
+    """Apply a shared market range to items that cluster at the same
+    (category, size_label, customer_price). Source citations (the
+    cooler) stay per-item from the earlier _gemini_search_prices call;
+    only the range numbers (the boat) get replaced with the cluster
+    range.
 
-    Identifies groupable items two ways:
-      1. Items with size variants → group by (category, variant_label)
-      2. Items with quantity in name (e.g., "30 Pcs Wings") → group by
-         (category, quantity_token)
+    Data-driven batching: the menu itself decides what's a batch
+    category. If a restaurant prices all its specialty pizzas at $17.95
+    for 12" Sml, those 6 items form a group of 6 and share one search.
+    If appetizers are all at varying prices, each forms a singleton and
+    keeps its per-item range. No hardcoded "batch this category" lists.
 
-    For each group, runs ONE Gemini call asking for the category-wide
-    typical price range — not for the specific variant's price. Returns
-    the count of items whose ranges were replaced.
+    Group key:
+      - Items with variants → (category, variant_label, variant_price)
+      - Items without variants → (category, "", current_price)
+
+    Singletons (1 item at a unique price in their category) keep the
+    per-item range. Only groups with 2+ members get the cluster
+    override. Returns the count of items whose ranges were replaced.
     """
-    # Build the group → items mapping. Each group key is
-    # (category, size_label) or (category, qty_token).
+    # Build the group → items mapping.
     groups: Dict[tuple, List[Dict[str, Any]]] = {}
     for row in our_rows:
         iid = row["item_id"]
@@ -895,37 +900,44 @@ def _apply_category_ranges(
         cat = (row.get("item_category") or "").strip()
         if not cat:
             continue
-        # Items with size variants
+        # Items with variants: group by (cat, label, variant_price)
         if iid in item_variants:
             for v in item_variants[iid]:
                 label = (v.get("label") or "").strip()
-                if not label:
+                vprice = int(v.get("price") or 0)
+                if not label or vprice <= 0:
                     continue
-                key = (cat, label)
+                key = (cat, label, vprice)
                 groups.setdefault(key, []).append({
                     "item_id": iid,
                     "item_name": row.get("item_name", ""),
                     "variant_label": label,
-                    "kind": "size_variant",
+                    "variant_price": vprice,
+                    "kind": "variant",
                 })
             continue
-        # Items with quantity-token in name (e.g. "30 Pcs Wings")
-        qty = _extract_quantity(row.get("item_name") or "")
-        if qty is not None:
-            key = (cat, f"{qty}pc")
-            groups.setdefault(key, []).append({
-                "item_id": iid,
-                "item_name": row.get("item_name", ""),
-                "kind": "qty_in_name",
-                "qty": qty,
-            })
+        # Items without variants: group by (cat, "", current_price)
+        cur_price = int(row.get("current_price") or 0)
+        if cur_price <= 0:
             continue
-        # Otherwise: not groupable — skip (keeps per-item range)
+        key = (cat, "", cur_price)
+        groups.setdefault(key, []).append({
+            "item_id": iid,
+            "item_name": row.get("item_name", ""),
+            "current_price": cur_price,
+            "kind": "non_variant",
+        })
 
-    if not groups:
+    # Only groups with 2+ items get the shared range; singletons keep
+    # their per-item search result.
+    batch_groups = {k: v for k, v in groups.items() if len(v) >= 2}
+    if not batch_groups:
         return 0
-    log.info("Category-range pass: %d groups across %d items",
-             len(groups), sum(len(v) for v in groups.values()))
+    log.info("Category-range pass: %d batch groups across %d items "
+             "(of %d total groups)",
+             len(batch_groups),
+             sum(len(v) for v in batch_groups.values()),
+             len(groups))
 
     # Run category search per group, in parallel (small calls)
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -933,14 +945,17 @@ def _apply_category_ranges(
     location = full_address or f"{city}, {state} {zip_code}"
 
     def _query_one(key):
-        cat, size_label = key
+        cat, size_label, price_cents = key
+        examples = [it["item_name"] for it in batch_groups[key]
+                    if it.get("item_name")][:5]
         return key, _gemini_search_category_range(
             category=cat, size_label=size_label,
+            price_cents=price_cents, examples=examples,
             location=location, cuisine=cuisine, draft_id=draft_id,
         )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futs = [pool.submit(_query_one, k) for k in groups.keys()]
+        futs = [pool.submit(_query_one, k) for k in batch_groups.keys()]
         for fut in as_completed(futs):
             try:
                 key, rng = fut.result()
@@ -955,20 +970,19 @@ def _apply_category_ranges(
     # Apply category ranges back to item_market entries
     overridden = 0
     for key, rng in results.items():
-        cat, size_label = key
-        for item_info in groups[key]:
+        cat, size_label, _price = key
+        for item_info in batch_groups[key]:
             iid = item_info["item_id"]
             mr = item_market.get(iid)
             if not mr:
                 continue
             kind = item_info.get("kind")
-            if kind == "size_variant":
-                # Override the size-specific range, keep the size's sources
+            if kind == "variant":
+                # Override the variant-specific range, keep the
+                # variant's per-item sources
                 sizes = mr.get("sizes") or {}
                 target_size = sizes.get(size_label)
                 if not isinstance(target_size, dict):
-                    # Variant didn't get per-size data from per-item search;
-                    # create the size entry with the category range.
                     sizes[size_label] = {
                         "low": rng["low"],
                         "high": rng["high"],
@@ -982,7 +996,7 @@ def _apply_category_ranges(
                     target_size["category_range"] = True
                 mr["sizes"] = sizes
                 overridden += 1
-            elif kind == "qty_in_name":
+            elif kind == "non_variant":
                 # Override the base range, keep the per-item sources
                 mr["low"] = rng["low"]
                 mr["high"] = rng["high"]
@@ -995,15 +1009,17 @@ def _apply_category_ranges(
 def _gemini_search_category_range(
     category: str,
     size_label: str,
+    price_cents: int,
+    examples: List[str],
     location: str,
     cuisine: str,
     draft_id: Optional[int] = None,
 ) -> Optional[Dict[str, int]]:
-    """Single Gemini call asking for the category-wide typical price
-    range for `{size_label} {category}` in `{location}`. Wider net than
-    per-item search — we explicitly want the FULL spectrum of prices
-    across all variants in that category-size, not a specific item's
-    price.
+    """Single Gemini call for the typical price range of a price-tier
+    cluster: `{size_label} {category}` items priced near
+    `${price_cents/100}` in `{location}`. Anchored to the customer's
+    price tier so $17.95 specialty pizzas get a different range than
+    $11 cheese pizzas, even though both are "12 inch Pizza".
 
     Returns dict with low_cents/high_cents/median_cents, or None on
     failure.
@@ -1018,23 +1034,32 @@ def _gemini_search_category_range(
         return None
     client = genai.Client(api_key=api_key)
 
-    prompt = f"""For a {size_label} {category} at restaurants near
-{location}, what's the typical price range across the full spectrum
-of variants/styles? I'm asking for the category-wide market range —
-the LOWEST price you'd see for a basic version (e.g., plain cheese
-pizza) up to the HIGHEST price you'd see for a premium specialty
-version (e.g., loaded specialty pizza). Search local menus and give
-me the realistic range that captures both ends.
+    price_dollars = price_cents / 100.0
+    if size_label:
+        descriptor = f"{size_label} {category}"
+    else:
+        descriptor = category
+    examples_line = ""
+    if examples:
+        examples_line = (
+            f"\nExamples of items at this tier on the source menu: "
+            f"{', '.join(examples)}.\n"
+        )
 
+    prompt = f"""For {descriptor} priced near ${price_dollars:.2f} at
+restaurants near {location}, what's the typical market price range
+for items in this tier? Search local menus for {descriptor} that sell
+around ${price_dollars:.2f} and report the realistic LOW-HIGH spread
+across competitors.{examples_line}
 Return JSON only, single object:
 {{"low_cents": 1100, "high_cents": 2500, "median_cents": 1700}}
 
-  - low_cents = cheapest typical price for the simplest version
-  - high_cents = most expensive typical price for premium versions
+  - low_cents = cheapest typical price for items in this tier locally
+  - high_cents = most expensive typical price for items in this tier
   - median_cents = midpoint of the spread
 
 Use real local menu data. If the area has limited data, reason from
-nearby comparable markets but flag uncertainty by widening the range
+nearby comparable markets and widen the range to flag uncertainty
 rather than guessing precisely. Return ONLY the JSON, no commentary."""
 
     try:
@@ -1064,8 +1089,8 @@ rather than guessing precisely. Return ONLY the JSON, no commentary."""
             median = (low + high) // 2
         return {"low": low, "high": high, "median": median}
     except Exception as e:
-        log.warning("Category range query failed for %r %r: %s",
-                    category, size_label, e)
+        log.warning("Category range query failed for %r %r @ %d: %s",
+                    category, size_label, price_cents, e)
         return None
 
 
@@ -2308,7 +2333,831 @@ Rules:
         return {}
 
 
-def _aggregate_price_ranges(draft_id: int) -> int:
+# Number followed by up to 3 words, then a piece/wing keyword. Catches:
+#   "20 Pcs"         → 20
+#   "12 Boneless Wings" → 12
+#   "BONELESS BUFFALO WINGS 15 Pieces" → 15
+# Doesn't match pizza slice counts ("Pizza 8 Slices" excluded by keyword
+# list) since slice counts are about the pie, not the variant size.
+# Menu-abbreviation synonym dict. Maps shortform → canonical token so
+# rapidfuzz's token comparison treats "Combo Pizza" and "Combination
+# Pizza" as the same product. Hand-curated for restaurant menus —
+# there's no comprehensive open-source equivalent that covers food
+# abbreviations specifically. Conservative: only adds entries where
+# the abbreviation is unambiguous in restaurant context.
+_MENU_SYNONYMS = {
+    "combo": "combination",
+    "spec": "special",
+    "spcl": "special",
+    "ckn": "chicken",
+    "chkn": "chicken",
+    "pep": "pepperoni",
+    "pepp": "pepperoni",
+    "veggie": "vegetable",
+    "veg": "vegetable",
+    "mush": "mushroom",
+    "mshrm": "mushroom",
+    "marg": "margherita",
+    "marghr": "margherita",
+    "sup": "supreme",
+    "supr": "supreme",
+    "buff": "buffalo",
+    "bbq": "barbecue",
+    "stk": "steak",
+    "shrmp": "shrimp",
+    "pinap": "pineapple",
+    "pin": "pineapple",
+    "trad": "traditional",
+    "med": "medium",
+    "mdm": "medium",
+    "lrg": "large",
+    "lg": "large",
+    "sml": "small",
+    "sm": "small",
+    "xl": "extra-large",
+    "xlg": "extra-large",
+    "pcs": "pieces",
+    "pc": "piece",
+    "fav": "favorite",
+    "grnd": "grinder",
+    "grdr": "grinder",
+    "swch": "sandwich",
+    "sndwch": "sandwich",
+    "parm": "parmesan",
+    "alf": "alfredo",
+    "calz": "calzone",
+}
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# Tokens stripped before similarity comparison. These don't
+# distinguish between menu items — every calzone has "calzone" in the
+# name, every pizza has "pizza", so leaving them in inflates token-set
+# similarity to ~75 even when the distinguishing words share nothing.
+_GENERIC_NAME_TOKENS = frozenset({
+    # Category nouns
+    "pizza", "pie", "calzone", "calzones", "sandwich", "sandwiches",
+    "sub", "subs", "grinder", "grinders", "hoagie", "wrap", "wraps",
+    "salad", "salads", "burger", "burgers", "hamburger", "pita",
+    "platter", "platters", "dinner", "entree",
+    # Size nouns
+    "personal", "small", "medium", "large", "party", "family",
+    "regular", "deluxe", "mini", "size", "sized",
+    # Quantity descriptors
+    "slices", "slice", "pieces", "piece", "pcs", "pc", "inch",
+    # Common menu connectors
+    "with", "and", "the", "a", "an", "of", "to", "for", "or",
+    "served", "side",
+})
+
+
+def _normalize_menu_name(name: str) -> str:
+    """Lowercase, expand menu abbreviations, strip generic category /
+    size / connector tokens, and singularize. The result contains
+    only the DISTINGUISHING tokens — those that identify the specific
+    product, not the category noun.
+
+    'Chicken Bacon Ranch Calzone'   → 'chicken bacon ranch'
+    'COMBO PIZZA Small (8 Slices)'  → 'combination'
+    "MEAT LOVER'S PIZZA"            → 'meat lover'  (apostrophe-s + plural fold)
+    'Cheeseburger Melt'             → 'melt'        (cheeseburger generic)
+    """
+    if not name:
+        return ""
+    n = name.lower()
+    tokens = _TOKEN_RE.findall(n)
+    out = []
+    for t in tokens:
+        full = _MENU_SYNONYMS.get(t, t)
+        if full in _GENERIC_NAME_TOKENS:
+            continue
+        if full.isdigit():
+            continue
+        if len(full) <= 1:        # apostrophe-s leftovers
+            continue
+        # Singularize: 'lovers'→'lover', 'wings'→'wing', 'melts'→'melt'
+        if len(full) > 3 and full.endswith("s") and not full.endswith("ss"):
+            full = full[:-1]
+        out.append(full)
+    return " ".join(out)
+
+
+# Product-type words pulled from category to enrich the similarity
+# tokens. When a customer names an item just by protein ("Tuna" in
+# "Club Sandwiches"), the category tells us it's a club. Adding
+# 'club' to the customer's effective token set means anchors must
+# also be clubs (or have 'club' in their name/category) to score
+# high. Without this, "Tuna" customer matched "Tuna Melt", "Tuna
+# Salad Sandwich" — different products that happen to share the
+# protein word.
+#
+# Only "type-distinguishing" words go here; brand/quality words like
+# "Angus" or "Gourmet" aren't included because they don't distinguish
+# product types, just qualities of the same type.
+_CATEGORY_TYPE_WORDS = frozenset({
+    "club", "melt", "panini", "hoagie", "wrap", "sub", "grinder",
+    "pita", "platter", "dinner", "stromboli", "frittata",
+    "specialty", "gourmet",
+})
+
+
+def _category_type_tokens(category: str) -> set:
+    """Pull the type-distinguishing token from a category. 'Club
+    Sandwiches' → {'club'}. 'Melt Sandwiches' → {'melt'}. '6 Oz
+    Angus Burgers' → {} (no type word). 'Wraps' → {} (wrap stripped
+    as generic noun)."""
+    if not category:
+        return set()
+    n = _normalize_cat(category)
+    out = set()
+    for t in n.split():
+        if t in _CATEGORY_TYPE_WORDS and t not in _GENERIC_NAME_TOKENS:
+            out.add(t)
+    return out
+
+
+def _name_similarity(cust_name: str, anch_name: str,
+                      cust_cat: str = "", anch_cat: str = "") -> int:
+    """Asymmetric token coverage (0-100): what fraction of the
+    customer's distinguishing tokens appear in the anchor's name.
+
+    Why asymmetric (not Jaccard, not rapidfuzz token_set_ratio):
+      * token_set_ratio returns 100 when one set is a subset of the
+        other — 'Cheeseburger Melt' vs 'Cheeseburger' scored 100,
+        which let plain burgers contaminate Melt Sandwich sources.
+      * Jaccard penalizes anchors that have EXTRA descriptive words
+        ('Cheese Pizza' customer vs 'TRADITIONAL CHEESE PIZZA' anchor
+        scored 50 even though they're the same product).
+      * Asymmetric coverage is correct for both: it asks "does the
+        anchor contain everything the customer's name calls for?"
+        Extra anchor tokens are fine (Cheese Pizza customer matches
+        TRADITIONAL CHEESE PIZZA at 100%), but missing customer
+        tokens drop the score (Cheeseburger Melt customer vs plain
+        Cheeseburger anchor scores 0 — anchor is missing 'melt').
+
+    Examples (threshold 60):
+      'Combination'           vs 'COMBO PIZZA'             → 100
+      'Combination'           vs 'VEGGIE COMBO PIZZA'      → 100  (anchor superset)
+      'Cheese Pizza'          vs 'TRADITIONAL CHEESE PIZZA' → 100
+      'Cheeseburger Melt'     vs 'Cheeseburger'            →   0   (missing 'melt')
+      'Manhattan Club'        vs 'Hamburger Club Swch'     →  50   (only 'club' shared)
+      'Steak & Cheese Melt'   vs 'STEAK & CHEESE SANDWICH' →  67
+      'Steak & Cheese Melt'   vs 'HAM & CHEESE SANDWICH'   →  33
+      'Honey Mustard ChickenBacon' vs 'Honey Mustard Grilled Chicken Bacon' → 100
+    """
+    n1 = _normalize_menu_name(cust_name)
+    n2 = _normalize_menu_name(anch_name)
+    t1 = set(n1.split()) if n1 else set()
+    t2 = set(n2.split()) if n2 else set()
+    # Enrich both sides with type-distinguishing tokens from category
+    # ("Club Sandwiches" → {'club'}). Closes the gap when the customer
+    # name is just an ingredient ("Tuna") and the type comes only
+    # from the category.
+    t1 |= _category_type_tokens(cust_cat)
+    t2 |= _category_type_tokens(anch_cat)
+    if not t1:
+        return 0
+    overlap = len(t1 & t2)
+    return int(round(100 * overlap / len(t1)))
+
+
+# Size-tier classifier. Resolves ambiguity by checking EXPLICIT size
+# words first (small/medium/large/party), then falling back to inch
+# numbers. This way "12\" Sml" is small (because of 'sml') even though
+# "12\"" alone could be either small or medium depending on style.
+_SIZE_TIER_WORD_PATTERNS = [
+    ("party", [
+        r"\bparty\b", r"\bfamily\b", r"\bx[\s-]?large\b",
+        r"\bxlarge\b", r"\bextra[\s-]large\b", r"\bsuper\b",
+        r"\bjumbo\b",
+    ]),
+    ("large",  [r"\blarge\b", r"\blrg\b", r"\blg\b"]),
+    ("medium", [r"\bmedium\b", r"\bmed\b", r"\bmdm\b"]),
+    ("small",  [r"\bsmall\b", r"\bsml\b", r"\bpersonal\b",
+                r"\bmini\b"]),
+]
+_SIZE_TIER_INCH_PATTERNS = [
+    ("party",  [r"\b(?:18|20|22|24|26|28)['\"]", r"\b17x24\b"]),
+    ("large",  [r"\b16['\"]"]),
+    ("medium", [r"\b14['\"]"]),
+    ("small",  [r"\b(?:8|10|12)['\"]"]),
+]
+
+
+def _size_tier(text: str) -> str:
+    """Classify a label/name into small/medium/large/party tier.
+    Returns 'unknown' if no size info found — unknown matches any tier
+    so anchor items without explicit size still contribute."""
+    if not text:
+        return "unknown"
+    t = text.lower()
+    # Explicit size words win.
+    for tier, patterns in _SIZE_TIER_WORD_PATTERNS:
+        for p in patterns:
+            if re.search(p, t):
+                return tier
+    # Inch fallback for items like "16\" Hawaiian" that have no word.
+    for tier, patterns in _SIZE_TIER_INCH_PATTERNS:
+        for p in patterns:
+            if re.search(p, t):
+                return tier
+    return "unknown"
+
+
+_PIECE_COUNT_RE = re.compile(
+    r'\b(\d+)(?:\s+\w+){0,3}?\s+(?:pc|pcs|piece|pieces|wing|wings)\b',
+    re.IGNORECASE,
+)
+
+# Specialty-pizza markers — words that indicate a specialty/topping
+# pizza vs a plain cheese. Used to keep customer "Combination Pizza"
+# from being cited against anchor "Cheese Pizza Large" just because
+# the prices align.
+_SPECIALTY_MARKERS = frozenset({
+    "pepperoni", "sausage", "bacon", "ham", "hawaiian", "philly",
+    "buffalo", "bbq", "taco", "mexican", "mediterranean", "mushroom",
+    "veggie", "vegetarian", "supreme", "special", "deluxe", "gourmet",
+    "combo", "combination", "meat", "lovers", "margherita", "pesto",
+    "alfredo", "parmesan", "florentine", "ranch", "broccoli",
+    "spinach", "garlic", "chicken", "steak", "burger", "souvlaki",
+    "stromboli", "white",
+})
+
+
+def _extract_piece_count(name: str) -> Optional[int]:
+    """Pull '20 Pcs', '15 Pieces', '10 Wings' etc. as integer count.
+    Returns None if no count found. Used for strict piece-count
+    matching so '20 Pcs Wings' doesn't cite '12 Pcs' or '50 Pcs' as
+    sources."""
+    if not name:
+        return None
+    m = _PIECE_COUNT_RE.search(name)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
+# Categories where specialty/plain matters for matching. Anchor items
+# are filtered to the same specialty-status as the customer's item.
+# Add cautiously — only categories where "plain baseline + topping
+# variants" is the real product structure.
+_SPECIALTY_FILTERED_CATS = ("pizza", "calzone", "burger", "dog", "omelet")
+
+# Tokens that are the BASE NAME (not a specialty marker) for the
+# base-noun categories. "Cheeseburger" alone is plain; "Bacon
+# Cheeseburger" is specialty because of "bacon". "Cheese Omelet" is
+# plain; "Western Omelet" / "Bacon Cheese Omelet" is specialty.
+# Pizza/calzone use the marker list instead — different pattern.
+_BASE_NAME_TOKENS_BY_CAT = {
+    "burger": frozenset({"burger", "hamburger", "cheeseburger",
+                          "cheese", "plain", "kid", "kids", "angus",
+                          "oz", "beef"}),
+    "dog":    frozenset({"dog", "hot", "hotdog", "frank",
+                          "frankfurter", "cheese", "plain",
+                          "kid", "kids"}),
+    "omelet": frozenset({"omelet", "omelette", "egg", "eggs",
+                          "cheese", "plain", "kid", "kids"}),
+}
+
+
+def _is_specialty_item(name: str, category: str = "") -> bool:
+    """True if item is specialty (has toppings/styles beyond the base).
+
+    Pizza/calzone: marker-based. Looks for pepperoni/sausage/buffalo/
+    combination/etc. tokens. 'Cheese Pizza' / 'Plain Calzone' → False;
+    'Combination Pizza' / 'Buffalo Chicken Calzone' → True.
+
+    Burger/hot dog: base-name-based. Anything beyond burger/hamburger/
+    cheeseburger (or hot dog/frank) tokens is specialty. 'Burger' /
+    'Cheeseburger' / 'Crestview Burger' (just brand+base) → False;
+    'Bacon Burger' / 'Mama\\'s Burger' / 'Chili Dog' → True.
+
+    Other categories: returns False (filter doesn't apply)."""
+    if not name:
+        return False
+    n = name.lower()
+    cat = (category or "").lower()
+
+    # Burger / hot-dog: distinguishing tokens beyond the base name
+    for cat_key, base_tokens in _BASE_NAME_TOKENS_BY_CAT.items():
+        if cat_key in cat:
+            tokens = _TOKEN_RE.findall(n)
+            for t in tokens:
+                full = _MENU_SYNONYMS.get(t, t)
+                if full in _GENERIC_NAME_TOKENS:
+                    continue
+                if full in base_tokens:
+                    continue
+                if full.isdigit():
+                    continue
+                # Found a distinguishing token (e.g. "bacon", "mama")
+                return True
+            return False
+
+    # Pizza / calzone: marker-based
+    for marker in _SPECIALTY_MARKERS:
+        if marker in n:
+            return True
+    if re.search(r'\b(four|three|4|3)\s*cheese\b', n):
+        return True
+    return False
+
+
+# Backwards-compat alias.
+_is_specialty_pizza = _is_specialty_item
+
+
+def _normalize_cat(cat: str) -> str:
+    """Lowercase, strip punctuation, simple plural normalize so 'Pizzas',
+    'Pizza', "Pizza's" all map to the same key. Used to match customer
+    categories against anchor menu categories (which use whatever
+    headers each anchor's menu uses)."""
+    c = (cat or "").lower().strip()
+    c = c.replace("'", "").replace('"', "").replace("&", "and")
+    c = c.strip()
+    # English plural normalization tuned so customer's "Sandwiches" and
+    # an anchor's "Sandwich" both land on "sandwich". Don't strip "es"
+    # blindly — that breaks "Calzones" → "calzon" while "Calzone" stays
+    # "calzone".
+    if c.endswith("ies") and len(c) > 4:
+        c = c[:-3] + "y"
+    elif (c.endswith("ches") or c.endswith("shes") or c.endswith("xes")
+          or c.endswith("zes") or c.endswith("sses")) and len(c) > 4:
+        c = c[:-2]
+    elif c.endswith("s") and len(c) > 2:
+        c = c[:-1]
+    return c
+
+
+def _aggregate_from_anchor_menus(
+    our_rows: List[Any],
+    item_variants: Dict[int, List[Dict[str, Any]]],
+    competitor_anchors: List[Dict[str, str]],
+    *,
+    target_anchor_count: int = 8,
+    max_attempts: int = 15,
+    force_refresh: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+    """Pull menu items from up to N anchor restaurants, then for each
+    customer item-cluster (grouped by category + size + price tier),
+    compute the low/high range from anchor items in the matching
+    category at a similar price tier. Cite the specific anchors and
+    items used.
+
+    Replaces the old per-item grounded-search pipeline (which produced
+    noisy, non-deterministic ranges that varied per item even when the
+    items were structurally identical). Same 5 anchors → same range,
+    every time. Cited prices are real items from real menus, not
+    synthesized.
+
+    Returns: {item_id: {"low", "high", "median", "sources",
+                        "sizes": {label: {"low", "high", "median",
+                                          "sources"}}}}
+    """
+    try:
+        from storage.price_intel import (scrape_competitor_menu,
+                                          classify_anchor_url,
+                                          get_place_details)
+    except ImportError:
+        log.warning("scrape_competitor_menu not importable — anchor "
+                    "aggregation disabled")
+        return {}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Step 0: tier filter — drop Tier C anchors (brochure sites,
+    # country clubs, places with no public menu) before paying for
+    # menu extraction. Both the URL-resolve and the tier check are
+    # cached, so this is fast on repeat runs.
+    raw_candidates = [a for a in competitor_anchors if a.get("place_id")]
+
+    def _classify(anchor):
+        try:
+            details = get_place_details(anchor["place_id"])
+            url = (details or {}).get("website")
+            if not url:
+                return None
+            info = classify_anchor_url(url)
+            tier = info.get("tier")
+            # Tier A only — these are platforms with FAST extractors
+            # (Slice modal-click, Allhungry API). Tier B platforms
+            # (Toast/Foodtec/etc. without fast extractors) take too
+            # long to scrape during the wizard. They can be added
+            # back later if we ship fast extractors for them, or
+            # pre-fetched in the background during onboarding.
+            if tier != "A":
+                return None
+            return {
+                **anchor,
+                "_url": url,
+                "_tier": tier,
+                "_platform": info.get("platform"),
+            }
+        except Exception as e:
+            log.warning("Tier classify failed for %s: %s",
+                        anchor.get("name"), e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        tiered = list(pool.map(_classify, raw_candidates))
+    quality_anchors = [a for a in tiered if a]
+    by_tier: Dict[str, int] = {}
+    for a in quality_anchors:
+        by_tier[a["_tier"]] = by_tier.get(a["_tier"], 0) + 1
+    log.info("Anchor tiering: %d/%d are Tier A/B (%s)",
+             len(quality_anchors), len(raw_candidates),
+             ", ".join(f"{k}={v}" for k, v in sorted(by_tier.items())))
+
+    # Step 1: pull anchor menus, in parallel, until we have N with
+    # actual items. Try up to max_attempts anchors total.
+    anchor_menus: List[Dict[str, Any]] = []
+    candidates = quality_anchors[:max_attempts]
+
+    def _fetch(anchor):
+        try:
+            res = scrape_competitor_menu(
+                anchor["place_id"], anchor["name"],
+                force_refresh=force_refresh,
+            )
+            items = res.get("items") or []
+            if not items:
+                return None
+            return {
+                "place_id": anchor["place_id"],
+                "name": anchor["name"],
+                "address": anchor.get("address", ""),
+                "items": items,
+            }
+        except Exception as e:
+            log.warning("Anchor menu fetch failed for %s: %s",
+                        anchor.get("name"), e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = [pool.submit(_fetch, a) for a in candidates]
+        for fut in as_completed(futs):
+            r = fut.result()
+            if r:
+                anchor_menus.append(r)
+                if len(anchor_menus) >= target_anchor_count:
+                    break
+        # Cancel any still-pending futures past our target
+        for f in futs:
+            if not f.done():
+                f.cancel()
+
+    if not anchor_menus:
+        log.warning("No usable anchor menus fetched (tried %d)",
+                    len(candidates))
+        return {}
+
+    log.info("Anchor menus: %d restaurants, %d total priced items",
+             len(anchor_menus),
+             sum(len(m["items"]) for m in anchor_menus))
+
+    # Step 2: index anchor items by normalized category. Skip non-main
+    # roles (sauces, toppings, sides) — those would contaminate ranges.
+    anchor_by_cat: Dict[str, List[tuple]] = {}
+    for menu in anchor_menus:
+        for it in menu["items"]:
+            role = it.get("role")
+            if role in ("sauce_choice", "topping_choice", "side_choice",
+                        "modifier"):
+                continue
+            price = int(it.get("price_cents") or 0)
+            if price <= 0:
+                continue
+            cat = (it.get("category") or "").strip()
+            if not cat:
+                continue
+            cat_key = _normalize_cat(cat)
+            anchor_by_cat.setdefault(cat_key, []).append((menu, it))
+
+    # Step 3: cluster customer items by (cat, label, customer_price).
+    # Same logic as the old _apply_category_ranges but applied to ALL
+    # items (no per-item search to fall through to anymore).
+    clusters: Dict[tuple, List[Dict[str, Any]]] = {}
+    for row in our_rows:
+        iid = row["item_id"]
+        cat = ((row["item_category"] if "item_category" in row.keys() else "") or "").strip()
+        if not cat:
+            continue
+        item_name = ((row["item_name"] if "item_name" in row.keys() else "") or "")
+        if iid in item_variants:
+            for v in item_variants[iid]:
+                label = (v.get("label") or "").strip()
+                vprice = int(v.get("price") or 0)
+                if not label or vprice <= 0:
+                    continue
+                key = (cat, label, vprice)
+                clusters.setdefault(key, []).append({
+                    "item_id": iid, "kind": "variant",
+                    "name": item_name,
+                    "label": label, "price": vprice,
+                })
+            continue
+        cur_price = int((row["current_price"] if "current_price" in row.keys() else 0) or 0)
+        if cur_price <= 0:
+            continue
+        key = (cat, "", cur_price)
+        clusters.setdefault(key, []).append({
+            "item_id": iid, "kind": "non_variant",
+            "name": item_name, "price": cur_price,
+        })
+
+    # Build a flat all-items index for the name-token fallback below.
+    # Used when a customer category has too few anchor matches (e.g.,
+    # "6 Oz Angus Burgers" → only 1 anchor has a Burger category, but
+    # "Cheeseburger Grinder" hides in Grinders).
+    all_anchor_items: List[tuple] = []
+    for menu in anchor_menus:
+        for it in menu["items"]:
+            role = it.get("role")
+            if role in ("sauce_choice", "topping_choice", "side_choice",
+                        "modifier"):
+                continue
+            if int(it.get("price_cents") or 0) <= 0:
+                continue
+            all_anchor_items.append((menu, it))
+
+    # Step 4: for each cluster, find anchor matches → range + sources
+    item_market: Dict[int, Dict[str, Any]] = {}
+    for (cat, label, cust_price), items_in_cluster in clusters.items():
+        cat_key = _normalize_cat(cat)
+        # Token-substring category matching. Customer "6 Oz Angus
+        # Burgers" → token 'burger' matches anchor categories
+        # 'Burgers', 'Hamburger', 'Land & Burgers', '6oz. Angus
+        # Burgers' (different formatting/spellings all share the
+        # 'burger' substring inside a token). Plain string-containment
+        # (the previous approach) failed for most of these because
+        # the FULL category strings don't contain each other.
+        cust_cat_tokens = [t for t in cat_key.split()
+                           if len(t) > 3 and t not in {"with", "and", "the"}]
+        candidates_anchor: List[tuple] = []
+        seen_ids: set = set()
+        for c, lst in anchor_by_cat.items():
+            if not c:
+                continue
+            anch_cat_tokens = [t for t in c.split()
+                               if len(t) > 3 and t not in {"with", "and", "the"}]
+            matched = False
+            for ct in cust_cat_tokens:
+                for at in anch_cat_tokens:
+                    if ct in at or at in ct:
+                        matched = True
+                        break
+                if matched:
+                    break
+            if not matched:
+                continue
+            for entry in lst:
+                iid_e = id(entry[1])
+                if iid_e in seen_ids:
+                    continue
+                seen_ids.add(iid_e)
+                candidates_anchor.append(entry)
+
+        # Name-token fallback: extract the key noun from the customer's
+        # category (last word, normalized — "6 Oz Angus Burgers" →
+        # "burger") and find anchor items whose name OR category
+        # contains it. Catches items hiding in unexpected categories
+        # (Cheeseburger Grinder under "Grinders") that share the noun.
+        # Skips when noun is too generic (≤3 chars) to avoid noise.
+        # Also skips anchor items in a DIFFERENT specialty-filtered
+        # category — e.g., "Bacon Cheeseburger Pizza" shouldn't enter
+        # the Burger candidate pool just because it has "burger" in
+        # the name.
+        words = cat_key.split()
+        key_noun = words[-1] if words else ""
+        cust_filtered_cat_words = [c for c in _SPECIALTY_FILTERED_CATS
+                                    if c in cat_key]
+        # Always run name-token enrichment (was: only when <5
+        # candidates). Cross-product items like "Cheeseburger Grinder"
+        # under the Grinders category are valid burger peers and
+        # should be added regardless of how full the burger-cat
+        # candidates already are. Pizza/calzone-cat items are still
+        # rejected by the filtered-cat check below.
+        if key_noun and len(key_noun) > 3:
+            seen_ids = {id(it) for (_, it) in candidates_anchor}
+            for menu, it in all_anchor_items:
+                if id(it) in seen_ids:
+                    continue
+                nm = (it.get("name") or "").lower()
+                cc = _normalize_cat(it.get("category") or "")
+                if not (key_noun in nm or key_noun in cc):
+                    continue
+                # Reject anchor items in a DIFFERENT specialty-
+                # filtered category. A Pizza menu item shouldn't
+                # enter the Burger pool even if its name has "burger".
+                anch_filtered_cat_words = [
+                    c for c in _SPECIALTY_FILTERED_CATS if c in cc
+                ]
+                if (anch_filtered_cat_words
+                        and not set(anch_filtered_cat_words)
+                                & set(cust_filtered_cat_words)):
+                    continue
+                candidates_anchor.append((menu, it))
+
+        if not candidates_anchor:
+            continue
+
+        # Product-similarity gate: kill the noise from price-tier
+        # matches that are the wrong PRODUCT. Two real failures we saw:
+        #   - "20 Pcs Wings" citing "10 Pcs" / "50 Pcs" / "Salerno
+        #     Combo" because their prices happen to fall in tolerance
+        #   - Specialty pizzas (Combination, Philly Steak) citing plain
+        #     "Cheese Pizza Large" because the prices align
+        # Both are solved by filtering candidates by name signal before
+        # price-tier matching kicks in.
+        cust_name = (items_in_cluster[0].get("name") or ""
+                     if items_in_cluster else "")
+        cust_pcs = _extract_piece_count(cust_name)
+        cust_is_specialty = _is_specialty_item(cust_name, cat)
+        # Specialty/plain filter fires on pizza, calzone, burger, hot
+        # dog, omelet — categories where "plain base + topping
+        # variants" is the real product structure.
+        is_specialty_filtered = any(c in cat_key
+                                     for c in _SPECIALTY_FILTERED_CATS)
+        # Size-tier guard for variants: customer's "Family Size 17x24\""
+        # (party tier) shouldn't be matched against anchor "Large (16
+        # Slices)" (large tier) just because the prices align. Take
+        # the cluster label as the customer's tier.
+        cust_size_tier = _size_tier(label) if label else "unknown"
+
+        def _product_match(it) -> bool:
+            anch_name = it.get("name") or ""
+            # Piece-count strict — if customer has a count, anchor must
+            # have the same count. Anchors without a count are
+            # rejected (they're typically combos/single-portion items
+            # we don't want to compare against piece-counted wings).
+            if cust_pcs is not None:
+                anch_pcs = _extract_piece_count(anch_name)
+                if anch_pcs != cust_pcs:
+                    return False
+            # Specialty/plain guard — applies to pizza, calzone,
+            # burger, hot dog, omelet. Anchor classified using the
+            # customer's category so the same base-name rules apply
+            # to both sides.
+            if is_specialty_filtered:
+                anch_is_specialty = _is_specialty_item(anch_name, cat)
+                if cust_is_specialty != anch_is_specialty:
+                    return False
+            # Size-tier guard. Allow 'unknown' (no size info in anchor
+            # name) since those should still contribute. Reject
+            # cross-tier matches (party vs large, small vs medium).
+            if cust_size_tier != "unknown":
+                anch_tier = _size_tier(anch_name)
+                if anch_tier != "unknown" and anch_tier != cust_size_tier:
+                    return False
+            return True
+
+        candidates_filtered = [
+            (a, it) for (a, it) in candidates_anchor if _product_match(it)
+        ]
+        if not candidates_filtered:
+            # No same-product anchors at all → don't fabricate sources
+            # by widening to wrong products. Drop the cluster.
+            continue
+
+        # Price-tier matching with progressive widening. The "fall back
+        # to all candidates" path was removed because it produced the
+        # exact failure mode we just gated above.
+        def _within(candidates, tol):
+            return [(a, it) for (a, it) in candidates
+                    if abs(int(it["price_cents"]) - cust_price) <= tol]
+
+        matches = _within(candidates_filtered, max(int(cust_price * 0.30), 300))
+        if len(matches) < 3:
+            matches = _within(candidates_filtered, max(int(cust_price * 0.50), 500))
+        if len(matches) < 3:
+            # Try one more widening to ±100% before giving up — covers
+            # markets where a customer's outlier price has limited
+            # comparable anchors. Beyond this, the cluster is dropped.
+            matches = _within(candidates_filtered, max(int(cust_price * 1.0), 800))
+
+        if len(matches) < 2:
+            # Below 2 product-matched anchor items: no meaningful range.
+            # Skip the cluster — UI will show no market data, which is
+            # truthful when we can't find peer products in the area.
+            continue
+
+        prices = [int(it["price_cents"]) for (_, it) in matches]
+        low, high = min(prices), max(prices)
+        median = sorted(prices)[len(prices) // 2]
+
+        # Per-item source lists. Range is shared across the cluster
+        # (all $17.95 specialty pizzas get the same low/high — that's
+        # the point of clustering by price). But sources are RANKED
+        # PER ITEM by name similarity to that specific item.
+        #
+        # Silent range vs visible sources split:
+        #   The RANGE is computed from ALL `matches` (which includes
+        #   name-dissimilar but price/category-comparable items, e.g.
+        #   "16\" White Pizza" informing a Combination's range). That
+        #   ranges in extra market signal.
+        #   The DISPLAYED sources are filtered to high name-similarity
+        #   only (>= NAME_SIM_THRESHOLD). Showing "16\" White Pizza"
+        #   under "Combination" degrades trust — better to silently
+        #   use it for the range and not display it.
+        # Threshold tuned to user's "trust line": same product gets
+        # cited, different specialty silently informs the range. At
+        # 70+: exact name matches + abbreviations (Combo→Combination =
+        # 100, Veggie Combo = 100). At 60-70: cross-specialty same
+        # category (Buffalo Chicken vs Chicken Bacon Ranch = 64) —
+        # excluded as displayed sources by user request.
+        NAME_SIM_THRESHOLD = 70
+        def _build_sources_for(item_name_local: str) -> List[Dict[str, Any]]:
+            # Plain items whose name IS the category noun (e.g.
+            # "Burger", "Hot Dog") strip to empty after normalization,
+            # which makes name-similarity fail for everything. In
+            # that case skip the similarity filter — any anchor
+            # already passing category + price + specialty + size
+            # filters is a valid plain-tier peer.
+            cust_norm = _normalize_menu_name(item_name_local)
+            cust_cat_extra = _category_type_tokens(cat)
+            if not cust_norm.strip() and not cust_cat_extra:
+                # Customer name + category have no distinguishing
+                # tokens (e.g., "Burger" in "Burgers" — both strip to
+                # nothing). Fall back to accepting all matches.
+                ranked = [(100, a, it) for (a, it) in matches]
+            else:
+                scored = [
+                    (_name_similarity(
+                        item_name_local, it.get("name") or "",
+                        cust_cat=cat, anch_cat=it.get("category") or ""),
+                     a, it)
+                    for (a, it) in matches
+                ]
+                ranked = [(s, a, it) for s, a, it in scored
+                          if s >= NAME_SIM_THRESHOLD]
+            if not ranked:
+                return []
+            ranked.sort(key=lambda t: (
+                -t[0],
+                abs(int(t[2]["price_cents"]) - cust_price),
+            ))
+            high = ranked  # local rename to keep diversity loop intact
+            per_rest: Dict[str, int] = {}
+            seen_pair: set = set()
+            picked: List[tuple] = []
+            for _score, a, it in high:
+                rname = a["name"]
+                if per_rest.get(rname, 0) >= 2:
+                    continue
+                # Dedupe identical (restaurant, item, price) — avoids
+                # the lunch/dinner double-list seen in some menus.
+                pair = (rname, (it.get("name") or "").strip().lower(),
+                        int(it["price_cents"]))
+                if pair in seen_pair:
+                    continue
+                seen_pair.add(pair)
+                picked.append((a, it))
+                per_rest[rname] = per_rest.get(rname, 0) + 1
+                if len(picked) >= 8:
+                    break
+            return [{
+                "restaurant": a["name"],
+                "address": a.get("address", ""),
+                "price_cents": int(it["price_cents"]),
+                "quote": it.get("name", ""),
+            } for (a, it) in picked]
+
+        # Apply uniformly to every item in the cluster
+        for item_info in items_in_cluster:
+            iid = item_info["item_id"]
+            sources = _build_sources_for(item_info.get("name", ""))
+            mr = item_market.setdefault(iid, {
+                "low": low, "high": high, "median": median,
+                "sources": [], "sizes": {},
+            })
+            if item_info["kind"] == "variant":
+                mr["sizes"][label] = {
+                    "low": low, "high": high, "median": median,
+                    "sources": sources,
+                }
+                # Stretch the base range to span all variant ranges so
+                # the assessment pill (which reads from base low/high)
+                # reflects the widest envelope.
+                if low < mr.get("low", low):
+                    mr["low"] = low
+                if high > mr.get("high", high):
+                    mr["high"] = high
+                mr["median"] = (mr["low"] + mr["high"]) // 2
+            else:
+                mr["low"] = low
+                mr["high"] = high
+                mr["median"] = median
+                mr["sources"] = sources
+
+    log.info("Anchor aggregation: %d clusters → %d items priced",
+             len(clusters), len(item_market))
+    return item_market
+
+
+def _aggregate_price_ranges(draft_id: int, *, force_refresh: bool = False) -> int:
     """Set market ranges for all items using per-item Haiku estimates.
 
     Day 141.8: Per-item estimates — each item gets its own range based on
@@ -2357,7 +3206,7 @@ def _aggregate_price_ranges(draft_id: int) -> int:
             """SELECT div.item_id, div.label, div.price_cents
                FROM draft_item_variants div
                JOIN draft_items di ON di.id = div.item_id
-               WHERE di.draft_id = ? AND div.kind = 'size' AND div.label IS NOT NULL""",
+               WHERE di.draft_id = ? AND div.label IS NOT NULL""",
             (draft_id,),
         ).fetchall()
         item_variants: Dict[int, List[Dict[str, Any]]] = {}
@@ -2405,143 +3254,39 @@ def _aggregate_price_ranges(draft_id: int) -> int:
                 _comps = get_cached_comparisons(rest_id_row["restaurant_id"])
                 competitor_anchors = [
                     {
+                        "place_id": c.get("place_id"),
                         "name": c["place_name"],
                         "address": (c.get("place_address") or "").strip(),
                     }
                     for c in _comps if c.get("place_name")
-                ][:25]  # cap — prompt bloat past ~25 hurts more than helps
+                ]
+                # No cap. The old 25-cap existed because anchors were
+                # injected into a Gemini prompt where bloat hurt. Now
+                # anchors are scrape targets, and the tiering filter
+                # below drops Tier C automatically — bigger pool just
+                # means more Tier A/B candidates surface.
             except Exception as e:
                 log.warning("Anchor fetch failed for draft %d: %s", draft_id, e)
 
-        # Gemini with Google Search grounding — REAL prices from REAL menus.
-        # Gemini is the product. Haiku is an emergency fallback that should
-        # almost never run. The flow:
-        #   Pass 1: Batched Gemini (~10 items per call, parallel)
-        #   Pass 2: Per-item Gemini retry for what Pass 1 missed (smaller
-        #           prompts, far higher per-call success rate)
-        #   Pass 3: Haiku estimates ONLY for what's still missing — logged
-        #           loudly so this can be investigated.
-        item_market = _gemini_search_prices(
-            haiku_items, city, state, zip_code, cuisine,
-            address=full_address, draft_id=draft_id,
-            competitor_anchors=competitor_anchors)
-
-        # Circuit breaker: if more than half the batched calls failed,
-        # Gemini is in a degraded state (sustained 503s, regional outage,
-        # whatever). Per-item retries against a degraded Gemini are pure
-        # waste — each one will exhaust the same 9-attempt fallback chain
-        # we already ran, just smaller. Bail to Haiku immediately so the
-        # user sees pills in seconds instead of an hour-long grind.
-        batches_total = _GEMINI_LAST_RUN.get("batches_total", 0) or 1
-        batches_failed = _GEMINI_LAST_RUN.get("batches_failed", 0)
-        # Tightened from 50% to 25% — once a quarter of batches are failing,
-        # per-item retries will only make the throttling worse. Bail to Haiku.
-        gemini_degraded = batches_failed >= max(1, batches_total // 4)
-
-        missing = [it for it in haiku_items if it["item_id"] not in item_market]
-        if missing and gemini_degraded:
+        # Anchor-menu aggregation: pull menus from ~5 local anchors,
+        # cluster customer items by (category, size, price tier), and
+        # compute each cluster's range from anchor items in the matching
+        # category at a similar price tier. Replaces the prior per-item
+        # grounded-search pipeline (which was non-deterministic and
+        # produced different ranges for structurally identical items).
+        #
+        # Same 5 anchors → same ranges every time. Cited prices are real
+        # items from real menus, not synthesized.
+        item_market = _aggregate_from_anchor_menus(
+            our_rows, item_variants, competitor_anchors,
+            force_refresh=force_refresh,
+        )
+        if not item_market:
             log.warning(
-                "Gemini circuit breaker open: %d/%d batches failed — skipping "
-                "per-item retry, going straight to Haiku for %d missing items",
-                batches_failed, batches_total, len(missing),
+                "Anchor aggregation returned no priced items — likely no "
+                "anchor menus could be fetched. %d items will lack ranges.",
+                len(haiku_items),
             )
-        elif missing:
-            log.warning(
-                "Gemini batched run missed %d/%d items — running per-item retry pass",
-                len(missing), len(haiku_items),
-            )
-            # Per-item retry: 1 item per call so each Gemini request has a
-            # tiny prompt and fast response. Items that fail inside a
-            # 10-item batch (deadline, parse error on huge response) often
-            # succeed when asked individually. Cap concurrency at 2 so per-
-            # item retries don't themselves overload Gemini.
-            #
-            # Hard wall-clock cap: 120s. If Gemini degrades partway through,
-            # we don't want to grind on it forever. Anything not recovered
-            # in that window falls through to Haiku.
-            PER_ITEM_BUDGET_S = 120
-            from concurrent.futures import ThreadPoolExecutor
-            per_item: Dict[int, Dict[str, Any]] = {}
-            _retry_t0 = time.time()
-            def _one(it):
-                return _gemini_search_prices(
-                    [it], city, state, zip_code, cuisine,
-                    address=full_address, draft_id=draft_id,
-                    competitor_anchors=competitor_anchors,
-                )
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = [pool.submit(_one, it) for it in missing]
-                for fut in futures:
-                    elapsed = time.time() - _retry_t0
-                    remaining = PER_ITEM_BUDGET_S - elapsed
-                    if remaining <= 0:
-                        log.warning(
-                            "Per-item Gemini retry hit %ds budget — abandoning "
-                            "remaining %d futures, falling to Haiku",
-                            PER_ITEM_BUDGET_S,
-                            sum(1 for f in futures if not f.done()),
-                        )
-                        for f in futures:
-                            f.cancel()
-                        break
-                    try:
-                        per_item.update(fut.result(timeout=remaining))
-                    except Exception as e:
-                        log.error("Per-item Gemini retry raised: %s: %s", type(e).__name__, e)
-            recovered = {iid: d for iid, d in per_item.items() if iid not in item_market}
-            if recovered:
-                log.info("Per-item Gemini retry recovered %d items in %.1fs",
-                         len(recovered), time.time() - _retry_t0)
-                item_market.update(recovered)
-
-        still_missing = [it for it in haiku_items if it["item_id"] not in item_market]
-        if still_missing:
-            # Haiku — last resort. Loud warning because this means Gemini
-            # genuinely couldn't deliver and the user is getting estimated
-            # prices instead of real local prices for these items.
-            log.warning(
-                "GEMINI FALLBACK: using Haiku estimates for %d/%d items "
-                "(Gemini exhausted after batch + per-item retries). "
-                "These items will lack real source citations.",
-                len(still_missing), len(haiku_items),
-            )
-            fallback = _estimate_item_market_rates(still_missing, city, state, zip_code, cuisine)
-            for iid, data in fallback.items():
-                if iid not in item_market:
-                    item_market[iid] = data
-        else:
-            log.info(
-                "Gemini delivered 100%% coverage: %d/%d items, no Haiku fallback needed",
-                len(item_market), len(haiku_items),
-            )
-
-        # The Boat / Cooler architecture for size-variant items.
-        # Per-item Gemini search tends to contaminate variant ranges —
-        # cheese pizza prices flow into Meat Lovers because base items
-        # dominate search results. Fix: for items with size variants
-        # (pizzas, calzones, wings, etc.), override the per-item RANGE
-        # with a category-wide range — "12 inch pizza market" applies
-        # to ALL 12-inch pizzas. Per-item search still runs (we keep
-        # its source citations — those go in the special cooler), but
-        # the boat (the range) is wider and contamination-free.
-        # Items WITHOUT size variants (appetizers, individual entrees,
-        # unique sandwiches) keep their per-item range — those don't
-        # have the variant-contamination problem.
-        try:
-            _category_count = _apply_category_ranges(
-                our_rows, item_variants, item_market,
-                city, state, zip_code, cuisine, full_address,
-                draft_id=draft_id,
-            )
-            if _category_count:
-                log.info(
-                    "Boat/cooler: replaced range on %d size-variant items "
-                    "with category-wide market data. Sources kept from "
-                    "per-item search.",
-                    _category_count,
-                )
-        except Exception as _ce_e:
-            log.warning("Category-range pass failed: %s", _ce_e)
 
         for row in our_rows:
             current_price = row["current_price"] or 0
@@ -2735,7 +3480,7 @@ def analyze_menu_prices(
     # prompt as competitor anchors. Pills + price_sources land before
     # this function returns. ~30-90s for a typical menu.
     try:
-        n = _aggregate_price_ranges(draft_id)
+        n = _aggregate_price_ranges(draft_id, force_refresh=force_refresh)
         log.info("Gemini aggregation updated %d items for draft %d", n, draft_id)
     except Exception as e:
         log.warning("Gemini aggregation failed for draft %d: %s", draft_id, e)
