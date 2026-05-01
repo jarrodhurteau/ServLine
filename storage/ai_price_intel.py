@@ -2606,6 +2606,17 @@ def _extract_piece_count(name: str) -> Optional[int]:
 # variants" is the real product structure.
 _SPECIALTY_FILTERED_CATS = ("pizza", "calzone", "burger", "dog", "omelet")
 
+# Product-type categories — anchors in different product types
+# shouldn't cross-cite. A "Hamburger Pita" (Pita category) shouldn't
+# appear as a source for a customer's "Burger" because they're
+# different product types, even though both have "hamburger" in name.
+# This is a SUPERSET of _SPECIALTY_FILTERED_CATS.
+_PRODUCT_TYPE_CATS = (
+    "pizza", "calzone", "burger", "dog", "omelet",
+    "pita", "grinder", "sandwich", "wrap", "sub", "hoagie", "salad",
+    "soup", "wing", "platter", "stromboli",
+)
+
 # Tokens that are the BASE NAME (not a specialty marker) for the
 # base-noun categories. "Cheeseburger" alone is plain; "Bacon
 # Cheeseburger" is specialty because of "bacon". "Cheese Omelet" is
@@ -2932,14 +2943,13 @@ def _aggregate_from_anchor_menus(
         # the name.
         words = cat_key.split()
         key_noun = words[-1] if words else ""
-        cust_filtered_cat_words = [c for c in _SPECIALTY_FILTERED_CATS
+        cust_product_type_words = [c for c in _PRODUCT_TYPE_CATS
                                     if c in cat_key]
-        # Always run name-token enrichment (was: only when <5
-        # candidates). Cross-product items like "Cheeseburger Grinder"
-        # under the Grinders category are valid burger peers and
-        # should be added regardless of how full the burger-cat
-        # candidates already are. Pizza/calzone-cat items are still
-        # rejected by the filtered-cat check below.
+        # Always run name-token enrichment. Cross-PRODUCT-TYPE items
+        # are rejected — Pita/Grinder/Pizza items shouldn't enter the
+        # Burger pool just because they have "burger" in their name
+        # ("Hamburger Pita Regular", "Cheeseburger Grinder", etc.
+        # are pitas/grinders, not burgers).
         if key_noun and len(key_noun) > 3:
             seen_ids = {id(it) for (_, it) in candidates_anchor}
             for menu, it in all_anchor_items:
@@ -2949,15 +2959,15 @@ def _aggregate_from_anchor_menus(
                 cc = _normalize_cat(it.get("category") or "")
                 if not (key_noun in nm or key_noun in cc):
                     continue
-                # Reject anchor items in a DIFFERENT specialty-
-                # filtered category. A Pizza menu item shouldn't
-                # enter the Burger pool even if its name has "burger".
-                anch_filtered_cat_words = [
-                    c for c in _SPECIALTY_FILTERED_CATS if c in cc
+                # Reject anchor items in a DIFFERENT product-type
+                # category. Pita-category items don't belong in the
+                # Burger pool even though they have "burger" in name.
+                anch_product_type_words = [
+                    c for c in _PRODUCT_TYPE_CATS if c in cc
                 ]
-                if (anch_filtered_cat_words
-                        and not set(anch_filtered_cat_words)
-                                & set(cust_filtered_cat_words)):
+                if (anch_product_type_words
+                        and not set(anch_product_type_words)
+                                & set(cust_product_type_words)):
                     continue
                 candidates_anchor.append((menu, it))
 
