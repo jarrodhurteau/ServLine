@@ -2634,6 +2634,24 @@ _BASE_NAME_TOKENS_BY_CAT = {
 }
 
 
+def _is_modifier_subcategory(subcat: str) -> bool:
+    """Detect modifier/add-on sub-categories that shouldn't get pricing
+    intel. These are ingredient options or preparation choices, not
+    standalone menu items — the customer doesn't sell 'Pepperoni'
+    alone, they sell pizzas with pepperoni as a $1.50 add-on.
+
+    Matches: Toppings, Sauce Options, Wing Sauces, Bread Options,
+    Tortilla Options, Preparation, Add-Ons, Sides, Modifiers, etc.
+    """
+    if not subcat:
+        return False
+    s = subcat.lower().strip()
+    return any(p in s for p in (
+        "topping", "sauce", "preparation", "add-on", "addon", "add on",
+        "modifier", "options", "tortilla", "bread option",
+    ))
+
+
 def _is_by_the_slice(name: str) -> bool:
     """Detect 'by the slice' pizza items vs whole pies. Whole pies
     have slice counts in PARENTHESES as size descriptors ('(8 Slices)',
@@ -2875,6 +2893,15 @@ def _aggregate_from_anchor_menus(
     clusters: Dict[tuple, List[Dict[str, Any]]] = {}
     for row in our_rows:
         iid = row["item_id"]
+        # Skip MODIFIER sub-items (toppings, sauces, bread options,
+        # tortilla options, wing preparation, add-ons). These are
+        # ingredients/options sold as add-ons, not standalone menu
+        # items. Comparing "Pepperoni $1.50" topping to anchor menus
+        # produces meaningless matches.
+        subcat = (row["subcategory"] if "subcategory" in row.keys()
+                  else None) or ""
+        if _is_modifier_subcategory(subcat):
+            continue
         cat = ((row["item_category"] if "item_category" in row.keys() else "") or "").strip()
         if not cat:
             continue
