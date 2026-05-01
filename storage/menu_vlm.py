@@ -1093,17 +1093,29 @@ def _extract_allhungry_via_api(url: str, place_name: str) -> List[Dict[str, Any]
     """
     base = _allhungry_base(url)
     if "allhungry.com" not in base:
-        # The customer's main domain might link to allhungry — find
-        # the allhungry sub-domain by loading the main page.
+        # Customer's main domain links to allhungry. Find the menu
+        # sub-domain by loading the main page. SKIP image/asset CDN
+        # subdomains (images.allhungry.com etc.) — those don't have
+        # a menu API.
         main_html = _http_get(url)
         if not main_html:
             return []
-        m = _re_allhungry.search(
-            r'https?://[a-z0-9-]+\.allhungry\.com', main_html, _re_allhungry.I,
+        # Find all .allhungry.com sub-domains, skip CDN/asset hosts.
+        # The findall captures bare sub-domain strings (no trailing
+        # dot), so excludes are bare names too.
+        EXCLUDE_HOSTS = {"images", "assets", "cdn", "static",
+                         "fonts", "img", "media"}
+        candidates = _re_allhungry.findall(
+            r'https?://([a-z0-9-]+)\.allhungry\.com', main_html, _re_allhungry.I,
         )
-        if not m:
+        menu_host = None
+        for sub in candidates:
+            if sub.lower() not in EXCLUDE_HOSTS:
+                menu_host = sub
+                break
+        if not menu_host:
             return []
-        base = m.group(0)
+        base = f"https://{menu_host}.allhungry.com"
         log.info("Allhungry: redirected from %s → %s", url, base)
 
     # 1. Find restaurant ID
@@ -1245,9 +1257,35 @@ def _extract_slice_via_api(url: str, place_name: str) -> List[Dict[str, Any]]:
         body,
     )
     if not m:
-        log.warning("Slice API: REACT_APP_CONSUMER_API_KEY not found at %s",
-                    url)
-        return []
+        # Not a Slice-hosted page. Custom restaurant domains often link
+        # to slicelife.com via an "Order Online" button:
+        #   https://slicelife.com/restaurants/<state>/<city>/<zip>/<slug>/menu
+        # Find the link and re-fetch from there.
+        m_link = _re_allhungry.search(
+            r'https?://slicelife\.com/restaurants/[a-z]{2}/[a-z0-9-]+/'
+            r'\d+/[a-z0-9-]+(?:/menu)?',
+            body, _re_allhungry.I,
+        )
+        if not m_link:
+            log.info(
+                "Slice API: no slicelife.com link on %s — not Slice-hosted",
+                url,
+            )
+            return []
+        slice_url = m_link.group(0)
+        log.info("Slice: redirected from %s → %s", url, slice_url)
+        body = _http_get(slice_url, timeout=10)
+        if not body:
+            return []
+        m = _re_allhungry.search(
+            r'REACT_APP_CONSUMER_API_KEY["\']?\s*:\s*["\']([A-Za-z0-9_-]+)["\']',
+            body,
+        )
+        if not m:
+            log.warning("Slice API: REACT_APP_CONSUMER_API_KEY not found "
+                        "even on slicelife.com page %s", slice_url)
+            return []
+        url = slice_url  # use the resolved URL for referer header below
     api_key = m.group(1)
 
     # Extract _initialDataContext via balanced-bracket parser
