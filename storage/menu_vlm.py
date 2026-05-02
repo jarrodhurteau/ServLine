@@ -127,6 +127,44 @@ def extract_menu_from_url(
                 place_name, url, type(e).__name__, e,
             )
 
+    if platform == "ChowNow":
+        try:
+            items = _extract_chownow_via_api(url, place_name)
+            if items:
+                log.info("ChowNow API: %s → %d items",
+                         place_name, len(items))
+                return items
+            log.warning(
+                "EXTRACTOR_FAILURE platform=ChowNow path=api place=%r "
+                "url=%r reason=zero_items_returned — falling back to clicks",
+                place_name, url,
+            )
+        except Exception as e:
+            log.warning(
+                "EXTRACTOR_FAILURE platform=ChowNow path=api place=%r "
+                "url=%r reason=%s: %s — falling back to clicks",
+                place_name, url, type(e).__name__, e,
+            )
+
+    if platform == "Clover":
+        try:
+            items = _extract_clover_via_html(url, place_name)
+            if items:
+                log.info("Clover Online: %s → %d items",
+                         place_name, len(items))
+                return items
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Clover path=html place=%r "
+                "url=%r reason=zero_items_returned — falling back to clicks",
+                place_name, url,
+            )
+        except Exception as e:
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Clover path=html place=%r "
+                "url=%r reason=%s: %s — falling back to clicks",
+                place_name, url, type(e).__name__, e,
+            )
+
     # === FALLBACK 1: Slice modal click-through ===
 
     if platform == "Slice":
@@ -1441,3 +1479,264 @@ def _extract_initial_data_context(html: str) -> Optional[Dict[str, Any]]:
                 except _json.JSONDecodeError:
                     return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Clover Online extractor
+# ---------------------------------------------------------------------------
+# Clover's online ordering pages (<slug>.cloveronline.com/menu/all) embed
+# the entire menu in a Next.js Server Component payload inside the
+# initial HTML response. The data is unicode-escaped (\\" instead of ")
+# but otherwise structured JSON. We extract categories and items via
+# regex over the unescaped body — single HTTP call, no auth.
+#
+# Schema:
+#   Categories: {"<id>":{"id":"<id>","name":"...","items":[item_ids]}}
+#   Items:      {"id":"X","name":"Y","price":N,"options":[],
+#                "modifierGroupIds":[],"categoryIds":[...]}
+#   Prices already in CENTS (e.g. 364 = $3.64)
+#   Size variants in `options` array (empty when item has only one size)
+
+_CLOVER_ITEM_RE = _re_allhungry.compile(
+    r'\{"id":"([A-Z0-9]+)","name":"([^"]+)","itemType":[^,]*,'
+    r'"description":(?:null|"[^"]*"),"options":(\[[^\]]*\]),"price":(\d+),'
+)
+_CLOVER_CAT_BLOCK_RE = _re_allhungry.compile(
+    r'"([A-Z0-9]+)":\{"id":"\1","name":"([^"]+)","sortOrder":\d+,'
+    r'"items":(\[[^\]]*\])'
+)
+
+
+def _extract_clover_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
+    """Pull a full Clover Online menu via the embedded JSON in the
+    initial HTML. ~1 sec per restaurant, no API calls needed."""
+    base_url = url
+    if "cloveronline.com" not in url:
+        # Customer's main domain may link to a Clover Online sub-domain
+        main_html = _http_get(url)
+        if not main_html:
+            return []
+        m = _re_allhungry.search(
+            r'https?://[a-z0-9-]+\.cloveronline\.com[^\"\'\s>]*',
+            main_html, _re_allhungry.I,
+        )
+        if not m:
+            return []
+        base_url = m.group(0)
+        # Trim to /menu/all if the link goes to a sub-page
+        if "/menu" not in base_url:
+            base_url = base_url.rstrip("/") + "/menu/all"
+        log.info("Clover: redirected from %s → %s", url, base_url)
+
+    body = _http_get(base_url, timeout=10)
+    if not body:
+        return []
+
+    # The data is unicode-escaped inside Next.js __next_f.push() calls.
+    # Decode escape sequences to get readable JSON.
+    try:
+        unescaped = body.encode("utf-8", errors="replace").decode(
+            "unicode_escape", errors="replace"
+        )
+    except Exception as e:
+        log.warning("Clover: unicode_escape decode failed for %s: %s",
+                    place_name, e)
+        return []
+
+    # Build category index (item_id → category_name)
+    cat_for_item: Dict[str, str] = {}
+    for m in _CLOVER_CAT_BLOCK_RE.finditer(unescaped):
+        cat_id, cat_name, items_raw = m.groups()
+        # items_raw is like ["id1","id2","id3"] — extract IDs
+        for iid in _re_allhungry.findall(r'"([A-Z0-9]+)"', items_raw):
+            cat_for_item[iid] = cat_name
+
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+    for m in _CLOVER_ITEM_RE.finditer(unescaped):
+        iid, name, options_raw, price_str = m.groups()
+        try:
+            price_cents = int(price_str)
+        except ValueError:
+            continue
+        if price_cents <= 0:
+            continue
+        cat = cat_for_item.get(iid, "Menu")
+        # Dedupe by (id, price) — items appear multiple times in
+        # Next.js RSC chunks
+        key = (iid, price_cents)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Size variants live in options[] when populated
+        if options_raw == "[]":
+            rows.append({
+                "name": name,
+                "price_cents": price_cents,
+                "category": cat,
+            })
+            continue
+        # Parse options: [{"id":"X","name":"Small","price":1199},...]
+        opt_re = _re_allhungry.compile(
+            r'\{"id":"[A-Z0-9]+","name":"([^"]+)","price":(\d+)'
+        )
+        opts = list(opt_re.finditer(options_raw))
+        if not opts:
+            # Fallback to base price if option parsing fails
+            rows.append({
+                "name": name,
+                "price_cents": price_cents,
+                "category": cat,
+            })
+            continue
+        for om in opts:
+            opt_name = om.group(1)
+            opt_cents = int(om.group(2))
+            if opt_cents <= 0:
+                continue
+            rows.append({
+                "name": f"{name} {opt_name}".strip(),
+                "price_cents": opt_cents,
+                "category": cat,
+            })
+
+    log.info("Clover Online: %s → %d rows extracted", place_name, len(rows))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# ChowNow extractor
+# ---------------------------------------------------------------------------
+# ChowNow exposes a public JSON API at:
+#   api.chownow.com/api/restaurant/<location_id>/menu
+#
+# No auth required. Restaurant URL pattern:
+#   chownow.com/order/<company_id>/locations/<location_id>
+#
+# Schema:
+#   {"menu_categories": [{"name", "items": [{"name", "price", "size",
+#                                              "modifier_categories":[mc_ids]}]}],
+#    "modifier_categories": [{"id", "name", "modifiers":[mod_ids]}],
+#    "modifiers": [{"id", "name", "price"}]}
+#
+# Items with price > 0 = single-size — emit directly.
+# Items with price == 0 (meta) = expand the first modifier_category
+# whose options are price-bearing — those are the size/variant choices.
+# Prices are in DOLLARS (float), not cents — multiply by 100.
+
+_CHOWNOW_URL_RE = _re_allhungry.compile(
+    r'chownow\.com/order/(\d+)/locations/(\d+)', _re_allhungry.I,
+)
+
+
+def _extract_chownow_via_api(url: str, place_name: str) -> List[Dict[str, Any]]:
+    """Pull a full ChowNow menu via /api/restaurant/<id>/menu.
+    ~2-3 sec per restaurant, no auth."""
+    location_id = _resolve_chownow_location_id(url)
+    if not location_id:
+        return []
+
+    api_url = f"https://api.chownow.com/api/restaurant/{location_id}/menu"
+    body = _http_get(api_url, timeout=12)
+    if not body:
+        return []
+    try:
+        data = _json.loads(body)
+    except _json.JSONDecodeError as e:
+        log.warning("ChowNow: JSON parse failed for %s: %s", place_name, e)
+        return []
+
+    cats = data.get("menu_categories") or []
+    mcs_by_id = {mc["id"]: mc for mc in (data.get("modifier_categories") or [])
+                 if isinstance(mc, dict) and "id" in mc}
+    mods_by_id = {m["id"]: m for m in (data.get("modifiers") or [])
+                  if isinstance(m, dict) and "id" in m}
+
+    rows: List[Dict[str, Any]] = []
+    for cat in cats:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = (cat.get("name") or "").strip() or "Menu"
+        for it in cat.get("items", []) or []:
+            if not isinstance(it, dict):
+                continue
+            item_name = (it.get("name") or "").strip()
+            if not item_name:
+                continue
+            price = it.get("price") or 0
+            try:
+                price_cents = int(round(float(price) * 100))
+            except (ValueError, TypeError):
+                price_cents = 0
+
+            if price_cents > 0:
+                # Single-price item
+                rows.append({
+                    "name": item_name,
+                    "price_cents": price_cents,
+                    "category": cat_name,
+                })
+                continue
+
+            # Meta item — sizes live in the first modifier category
+            # whose options have non-zero prices. Walk in order until
+            # we find one.
+            mc_ids = it.get("modifier_categories") or []
+            for mc_id in mc_ids:
+                mc = mcs_by_id.get(mc_id)
+                if not mc:
+                    continue
+                opt_refs = mc.get("modifiers") or []
+                # Resolve modifier IDs → modifier dicts (may be inline
+                # or referenced)
+                opts: List[Dict[str, Any]] = []
+                for ref in opt_refs:
+                    if isinstance(ref, str):
+                        m = mods_by_id.get(ref)
+                        if m:
+                            opts.append(m)
+                    elif isinstance(ref, dict):
+                        opts.append(ref)
+                # Check if at least one option has a real price
+                has_priced = any(
+                    (o.get("price") or 0) > 0 for o in opts
+                )
+                if not has_priced:
+                    continue
+                # This is the size/variant modifier — emit each option
+                for o in opts:
+                    o_name = (o.get("name") or "").strip()
+                    o_price = o.get("price") or 0
+                    try:
+                        o_cents = int(round(float(o_price) * 100))
+                    except (ValueError, TypeError):
+                        o_cents = 0
+                    if o_cents <= 0 or not o_name:
+                        continue
+                    rows.append({
+                        "name": f"{item_name} {o_name}".strip(),
+                        "price_cents": o_cents,
+                        "category": cat_name,
+                    })
+                break  # only walk the first price-bearing modifier
+
+    log.info("ChowNow API: %s → %d rows extracted", place_name, len(rows))
+    return rows
+
+
+def _resolve_chownow_location_id(url: str) -> Optional[str]:
+    """Extract the ChowNow location_id from a URL. Customer's main
+    domain may not be on chownow.com — in that case fetch the page
+    and look for the redirect URL."""
+    m = _CHOWNOW_URL_RE.search(url)
+    if m:
+        return m.group(2)
+    # Customer's main domain — find the chownow link
+    body = _http_get(url, timeout=10)
+    if not body:
+        return None
+    m = _CHOWNOW_URL_RE.search(body)
+    if not m:
+        return None
+    return m.group(2)

@@ -720,6 +720,8 @@ _ensure_menu_scrape_schema()
 _FAST_EXTRACT_PLATFORMS = frozenset({
     "Slice",        # modal click + DOM parse, ~3-5 min for 400 items
     "Allhungry",    # direct JSON API, ~3-5 sec for 300 items
+    "ChowNow",      # direct JSON API, ~2-3 sec
+    "Clover",       # embedded JSON in initial HTML, ~1 sec
 })
 
 
@@ -728,8 +730,10 @@ _TIER_PLATFORMS = [
     ("Slice",         ["slicelife.com", "mypizza-assets", "powered by slice"]),
     ("Toast",         ["toasttab.com", "toaststatic.com"]),
     ("Square Online", ["square.site", "squareup.com/online", "weeblycloud"]),
-    ("ChowNow",       ["chownow.com", "cn-images"]),
-    ("Clover",        ["clover.com/online", "clover-cdn"]),
+    ("ChowNow",       ["chownow.com/order", "api.chownow.com",
+                       "cn-images"]),
+    ("Clover",        ["cloveronline.com", "clover.com/online",
+                       "clover-cdn"]),
     ("Beyond Menu",   ["beyondmenu.com"]),
     ("MenuStar",      ["menustar.us", "menustar.com"]),
     ("HungerRush",    ["hungerrush.com", "ordering.hungerrush"]),
