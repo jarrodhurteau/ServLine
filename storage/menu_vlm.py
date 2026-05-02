@@ -1518,11 +1518,34 @@ def _extract_initial_data_context(html: str) -> Optional[Dict[str, Any]]:
 _CLOVER_ITEM_RE = _re_allhungry.compile(
     r'\{"id":"([A-Z0-9]+)","name":"([^"]+)","itemType":[^,]*,'
     r'"description":(?:null|"[^"]*"),"options":(\[[^\]]*\]),"price":(\d+),'
+    r'.*?"modifierGroupIds":\[([^\]]*)\]'
 )
 _CLOVER_CAT_BLOCK_RE = _re_allhungry.compile(
     r'"([A-Z0-9]+)":\{"id":"\1","name":"([^"]+)","sortOrder":\d+,'
     r'"items":(\[[^\]]*\])'
 )
+# Modifier group definitions: "<gid>":{"id":"<gid>","name":"<name>",
+# "minRequired":N,"maxAllowed":N
+_CLOVER_GROUP_DEF_RE = _re_allhungry.compile(
+    r'"([A-Z0-9]{10,15})":\{"id":"\1","name":"([^"]+)",'
+    r'"minRequired":(\d+),"maxAllowed":(\d+)'
+)
+# Modifier options: "name":"<n>","price":N,"groupId":"<gid>"
+_CLOVER_MOD_OPT_RE = _re_allhungry.compile(
+    r'"name":"([^"]+)","price":(\d+),"groupId":"([A-Z0-9]+)"'
+)
+# Heuristic: option-name tokens that indicate a size variant. When a
+# group's options match these, treat the group as a size group even if
+# its name doesn't contain "size" (e.g. "Pizza Choice" with Small/Large).
+_CLOVER_SIZE_TOKENS = {
+    "small", "medium", "large", "x-large", "xl", "xs", "regular",
+    "kids", "personal", "single", "double", "triple",
+    "1 piece", "2 pieces", "3 pieces", "1 pc", "2 pc", "3 pc",
+    "one", "two", "three", "half", "whole", "full",
+    "10\"", "12\"", "14\"", "16\"", "18\"",
+    "10 inch", "12 inch", "14 inch", "16 inch", "18 inch",
+    "12oz", "16oz", "20oz", "24oz", "32oz",
+}
 
 
 def _extract_clover_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
@@ -1569,55 +1592,109 @@ def _extract_clover_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
         for iid in _re_allhungry.findall(r'"([A-Z0-9]+)"', items_raw):
             cat_for_item[iid] = cat_name
 
+    # Build modifier-group → name and modifier-group → options[] maps
+    # (sizes live in modifier groups, separate from items)
+    group_name: Dict[str, str] = {}
+    group_min_required: Dict[str, int] = {}
+    group_max_allowed: Dict[str, int] = {}
+    for m in _CLOVER_GROUP_DEF_RE.finditer(unescaped):
+        gid = m.group(1)
+        if gid in group_name:
+            continue
+        group_name[gid] = m.group(2)
+        group_min_required[gid] = int(m.group(3))
+        group_max_allowed[gid] = int(m.group(4))
+
+    opts_by_group: Dict[str, List[tuple]] = {}
+    seen_opt: set = set()
+    for m in _CLOVER_MOD_OPT_RE.finditer(unescaped):
+        opt_name = m.group(1)
+        opt_price = int(m.group(2))
+        gid = m.group(3)
+        # Dedupe — RSC chunks repeat
+        key = (gid, opt_name, opt_price)
+        if key in seen_opt:
+            continue
+        seen_opt.add(key)
+        opts_by_group.setdefault(gid, []).append((opt_name, opt_price))
+
+    def _is_size_group(gid: str) -> bool:
+        """A modifier group is a size group when (1) the customer must
+        pick exactly one option, AND (2) either the group name says
+        "size" or the option names look like sizes."""
+        if group_min_required.get(gid, 0) != 1:
+            return False
+        if group_max_allowed.get(gid, 0) != 1:
+            return False
+        opts = opts_by_group.get(gid, [])
+        if len(opts) < 2:
+            return False
+        gname = group_name.get(gid, "").lower()
+        if "size" in gname:
+            return True
+        opt_names = {n.lower() for n, _ in opts}
+        return bool(opt_names & _CLOVER_SIZE_TOKENS)
+
     rows: List[Dict[str, Any]] = []
     seen: set = set()
     for m in _CLOVER_ITEM_RE.finditer(unescaped):
-        iid, name, options_raw, price_str = m.groups()
+        iid, name, options_raw, price_str, group_ids_raw = m.groups()
         try:
             price_cents = int(price_str)
         except ValueError:
             continue
-        if price_cents <= 0:
-            continue
         cat = cat_for_item.get(iid, "Menu")
-        # Dedupe by (id, price) — items appear multiple times in
-        # Next.js RSC chunks
-        key = (iid, price_cents)
-        if key in seen:
+        # Dedupe by item id — items appear multiple times in Next.js RSC
+        # chunks. Was (iid, price_cents); items with price=0 + size
+        # group all collide on the same key — drop price from the key.
+        if iid in seen:
             continue
-        seen.add(key)
+        seen.add(iid)
 
-        # Size variants live in options[] when populated
-        if options_raw == "[]":
-            rows.append({
-                "name": name,
-                "price_cents": price_cents,
-                "category": cat,
-            })
+        # Look for a size group among this item's modifierGroupIds
+        item_gids = _re_allhungry.findall(r'"([A-Z0-9]+)"', group_ids_raw)
+        size_gid = next((g for g in item_gids if _is_size_group(g)), None)
+
+        if size_gid:
+            # Emit one row per size option; sizes are absolute prices
+            for opt_name, opt_price in opts_by_group[size_gid]:
+                if opt_price <= 0:
+                    continue
+                rows.append({
+                    "name": f"{name} {opt_name}".strip(),
+                    "price_cents": opt_price,
+                    "category": cat,
+                })
             continue
-        # Parse options: [{"id":"X","name":"Small","price":1199},...]
-        opt_re = _re_allhungry.compile(
-            r'\{"id":"[A-Z0-9]+","name":"([^"]+)","price":(\d+)'
-        )
-        opts = list(opt_re.finditer(options_raw))
-        if not opts:
-            # Fallback to base price if option parsing fails
-            rows.append({
-                "name": name,
-                "price_cents": price_cents,
-                "category": cat,
-            })
+
+        if price_cents <= 0:
+            # No size group AND no base price → skip (configurator-only)
             continue
-        for om in opts:
-            opt_name = om.group(1)
-            opt_cents = int(om.group(2))
-            if opt_cents <= 0:
+
+        # Inline options[] (rare on Clover; usually empty)
+        if options_raw != "[]":
+            opt_re = _re_allhungry.compile(
+                r'\{"id":"[A-Z0-9]+","name":"([^"]+)","price":(\d+)'
+            )
+            opts = list(opt_re.finditer(options_raw))
+            if opts:
+                for om in opts:
+                    opt_name = om.group(1)
+                    opt_cents = int(om.group(2))
+                    if opt_cents <= 0:
+                        continue
+                    rows.append({
+                        "name": f"{name} {opt_name}".strip(),
+                        "price_cents": opt_cents,
+                        "category": cat,
+                    })
                 continue
-            rows.append({
-                "name": f"{name} {opt_name}".strip(),
-                "price_cents": opt_cents,
-                "category": cat,
-            })
+
+        rows.append({
+            "name": name,
+            "price_cents": price_cents,
+            "category": cat,
+        })
 
     log.info("Clover Online: %s → %d rows extracted", place_name, len(rows))
     return rows
@@ -1689,13 +1766,24 @@ def _extract_chownow_via_api(url: str, place_name: str) -> List[Dict[str, Any]]:
                   if isinstance(m, dict) and "id" in m}
 
     rows: List[Dict[str, Any]] = []
+    seen_item_ids: set = set()
     for cat in cats:
         if not isinstance(cat, dict):
             continue
         cat_name = (cat.get("name") or "").strip() or "Menu"
+        # ChowNow puts featured items in "Popular Items" AND their real
+        # category — skip the curated subset so each item appears once
+        # under its true category.
+        if cat_name.lower() == "popular items":
+            continue
         for it in cat.get("items", []) or []:
             if not isinstance(it, dict):
                 continue
+            item_id = it.get("id")
+            if item_id and item_id in seen_item_ids:
+                continue
+            if item_id:
+                seen_item_ids.add(item_id)
             item_name = (it.get("name") or "").strip()
             if not item_name:
                 continue
@@ -1839,10 +1927,14 @@ def _chownow_next_pickup_ts(
 # MenuItem and MenuGrouping records rather than parse the full JSON
 # (the brace structure is hairy with escape sequences).
 #
+# Size variants don't live in the initial Apollo state — only the
+# `prices` array (e.g. [low, high, default]) without size labels. To
+# get labeled sizes we replay Toast's MenuItemDetails GraphQL call for
+# each item with multi-value prices. We reuse the Playwright context's
+# cookies (and Cloudflare clearance) for the GraphQL replay.
+#
 # MenuItem fields used: name, itemGroupGuid, prices[]
 # MenuGrouping fields used: name, guid
-# prices[0] is the canonical price (smallest size when multiple
-# variants exist).
 
 _TOAST_GROUP_RE = _re_allhungry.compile(
     r'"__typename":"MenuGrouping","name":"([^"]+)","guid":"([a-f0-9-]+)"'
@@ -1852,11 +1944,26 @@ _TOAST_NAME_RE = _re_allhungry.compile(r'"name":"([^"]+)"')
 _TOAST_GROUP_GUID_RE = _re_allhungry.compile(r'"itemGroupGuid":"([a-f0-9-]+)"')
 _TOAST_GUID_RE = _re_allhungry.compile(r'"guid":"([a-f0-9-]+)"')
 _TOAST_PRICES_RE = _re_allhungry.compile(r'"prices":\[([0-9.,]+)\]')
+_TOAST_RESTAURANT_GUID_RE = _re_allhungry.compile(
+    r'"RestaurantLocation:([a-f0-9-]+)"'
+)
+
+# Persisted query hash for MenuItemDetails (Apollo client version 3297
+# as of 2026-05-02). When Toast bumps client version, this hash may
+# change and the size-variant fetch will return errors — the extractor
+# logs EXTRACTOR_FAILURE and the self-heal agent picks it up.
+_TOAST_PQ_HASH = "4590a1ec01f58177c81719d60f26d9b959a17673"
+_TOAST_GRAPHQL_URL = (
+    "https://ws-api.toasttab.com/do-federated-gateway/v1/graphql"
+)
 
 
 def _extract_toast_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
     """Pull Toast menu from window.__APOLLO_STATE__ in initial HTML.
-    ~10-12 sec per restaurant including Cloudflare bypass."""
+    Items with single-value `prices` emit one row at the base price.
+    Items with multi-value `prices` get a per-item GraphQL replay to
+    pull the labeled size options. ~12 sec base + ~0.5s per multi-
+    price item."""
     try:
         from playwright_stealth import Stealth
     except ImportError:
@@ -1867,6 +1974,9 @@ def _extract_toast_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
         )
         return []
     from playwright.sync_api import sync_playwright
+    import datetime as _dt
+
+    rows: List[Dict[str, Any]] = []
 
     with Stealth().use_sync(sync_playwright()) as p:
         b = p.chromium.launch(headless=True)
@@ -1876,52 +1986,211 @@ def _extract_toast_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
             page.goto(url, wait_until="domcontentloaded", timeout=25000)
             page.wait_for_timeout(10000)
             body = page.content()
+            # Toast's GraphQL gateway requires a `toast-session-id`
+            # header that's set by an early API call and stored on
+            # window._session_id. Fetch it before any replay.
+            try:
+                session_id = page.evaluate(
+                    "() => window._session_id || ''"
+                ) or ""
+            except Exception:
+                session_id = ""
+
+            # Build guid → category name map
+            guid_to_cat: Dict[str, str] = {}
+            for m in _TOAST_GROUP_RE.finditer(body):
+                name = m.group(1).encode("utf-8", "replace").decode(
+                    "unicode_escape", "replace",
+                ).strip()
+                guid = m.group(2)
+                if guid not in guid_to_cat:
+                    guid_to_cat[guid] = name
+
+            # Restaurant guid for the GraphQL replay — embedded in the
+            # Apollo state under "RestaurantLocation:<guid>"
+            rg_m = _TOAST_RESTAURANT_GUID_RE.search(body)
+            restaurant_guid = rg_m.group(1) if rg_m else ""
+
+            # First pass: enumerate items, collect those needing
+            # size expansion (multi-value prices)
+            base_items: List[Dict[str, Any]] = []
+            multi_price_items: List[Dict[str, Any]] = []
+            seen: set = set()
+            for m in _TOAST_ITEM_START_RE.finditer(body):
+                block = body[m.start():m.start() + 800]
+                guid_m = _TOAST_GUID_RE.search(block)
+                if not guid_m:
+                    continue
+                guid = guid_m.group(1)
+                if guid in seen:
+                    continue
+                seen.add(guid)
+
+                name_m = _TOAST_NAME_RE.search(block)
+                prices_m = _TOAST_PRICES_RE.search(block)
+                if not (name_m and prices_m):
+                    continue
+                try:
+                    prices = [float(x) for x in prices_m.group(1).split(",")
+                              if x.strip()]
+                except ValueError:
+                    continue
+                if not prices or prices[0] <= 0:
+                    continue
+
+                gguid_m = _TOAST_GROUP_GUID_RE.search(block)
+                group_guid = gguid_m.group(1) if gguid_m else ""
+                cat = guid_to_cat.get(group_guid, "Menu")
+                rec = {
+                    "guid": guid,
+                    "group_guid": group_guid,
+                    "name": name_m.group(1),
+                    "category": cat,
+                    "prices": prices,
+                }
+                # >1 unique price → has size variants. prices[0] ==
+                # prices[1] just means [base, base] — single size.
+                if len(set(prices)) > 1:
+                    multi_price_items.append(rec)
+                else:
+                    base_items.append(rec)
+
+            # Emit base rows for single-price items
+            for it in base_items:
+                rows.append({
+                    "name": it["name"],
+                    "price_cents": int(round(it["prices"][0] * 100)),
+                    "category": it["category"],
+                })
+
+            # Replay MenuItemDetails for each multi-price item to pull
+            # labeled size options. Skip if we couldn't extract the
+            # restaurant guid or the session id (means the page didn't
+            # fully load).
+            if restaurant_guid and session_id and multi_price_items:
+                now_iso = _dt.datetime.utcnow().strftime(
+                    "%Y-%m-%dT%H:%M:%S+0000",
+                )
+                expanded = 0
+                for it in multi_price_items:
+                    try:
+                        size_rows = _toast_fetch_size_variants(
+                            ctx, restaurant_guid, session_id, it,
+                            now_iso, url,
+                        )
+                    except Exception as e:
+                        log.debug(
+                            "Toast size fetch failed for %r: %s",
+                            it["name"], e,
+                        )
+                        size_rows = []
+                    if size_rows:
+                        rows.extend(size_rows)
+                        expanded += 1
+                    else:
+                        # Fall back to base price only
+                        rows.append({
+                            "name": it["name"],
+                            "price_cents": int(round(it["prices"][0] * 100)),
+                            "category": it["category"],
+                        })
+                log.info(
+                    "Toast: %s — expanded sizes for %d/%d multi-price items",
+                    place_name, expanded, len(multi_price_items),
+                )
+            else:
+                # No GraphQL replay possible — emit base prices
+                for it in multi_price_items:
+                    rows.append({
+                        "name": it["name"],
+                        "price_cents": int(round(it["prices"][0] * 100)),
+                        "category": it["category"],
+                    })
         finally:
             b.close()
 
-    # Build guid → category name map
-    guid_to_cat: Dict[str, str] = {}
-    for m in _TOAST_GROUP_RE.finditer(body):
-        name = m.group(1).encode("utf-8", "replace").decode(
-            "unicode_escape", "replace",
-        ).strip()
-        guid = m.group(2)
-        if guid not in guid_to_cat:
-            guid_to_cat[guid] = name
-
-    rows: List[Dict[str, Any]] = []
-    seen: set = set()
-    for m in _TOAST_ITEM_START_RE.finditer(body):
-        block = body[m.start():m.start() + 800]
-        guid_m = _TOAST_GUID_RE.search(block)
-        if not guid_m:
-            continue
-        guid = guid_m.group(1)
-        if guid in seen:
-            continue
-        seen.add(guid)
-
-        name_m = _TOAST_NAME_RE.search(block)
-        prices_m = _TOAST_PRICES_RE.search(block)
-        if not (name_m and prices_m):
-            continue
-        try:
-            prices = [float(x) for x in prices_m.group(1).split(",")
-                      if x.strip()]
-        except ValueError:
-            continue
-        if not prices or prices[0] <= 0:
-            continue
-
-        gguid_m = _TOAST_GROUP_GUID_RE.search(block)
-        cat_guid = gguid_m.group(1) if gguid_m else ""
-        cat = guid_to_cat.get(cat_guid, "Menu")
-
-        rows.append({
-            "name": name_m.group(1),
-            "price_cents": int(round(prices[0] * 100)),
-            "category": cat,
-        })
-
     log.info("Toast: %s → %d rows extracted", place_name, len(rows))
     return rows
+
+
+def _toast_fetch_size_variants(
+    ctx, restaurant_guid: str, session_id: str,
+    item: Dict[str, Any], now_iso: str, page_url: str,
+) -> List[Dict[str, Any]]:
+    """POST a MenuItemDetails GraphQL request and parse out size-group
+    options. Returns one row per size, or [] if no size group found
+    (caller falls back to base price)."""
+    payload = [{
+        "operationName": "MenuItemDetails",
+        "variables": {
+            "input": {
+                "itemGuid": item["guid"],
+                "itemGroupGuid": item["group_guid"],
+                "restaurantGuid": restaurant_guid,
+                "dateTime": now_iso,
+            },
+            "nestingLevel": 10,
+        },
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": _TOAST_PQ_HASH,
+            },
+        },
+    }]
+    resp = ctx.request.post(
+        _TOAST_GRAPHQL_URL,
+        data=_json.dumps(payload),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "apollographql-client-name": "sites-web-client",
+            "apollographql-client-version": "3297",
+            "toast-graphql-operation": "MenuItemDetails",
+            "toast-persistent-query-hash": _TOAST_PQ_HASH,
+            "toast-session-id": session_id,
+            "Referer": page_url,
+        },
+        timeout=8000,
+    )
+    if resp.status != 200:
+        return []
+    try:
+        data = _json.loads(resp.text())
+    except _json.JSONDecodeError:
+        return []
+    if not isinstance(data, list) or not data:
+        return []
+    item_data = (data[0].get("data") or {}).get("menuItemDetails") or {}
+    mod_groups = item_data.get("modifierGroups") or []
+    # Find the size group — name "Size" or contains "Size", with
+    # min=1, max=1 and price-bearing options
+    for mg in mod_groups:
+        if not isinstance(mg, dict):
+            continue
+        gname = (mg.get("name") or "").lower()
+        if mg.get("minSelections") != 1:
+            continue
+        if mg.get("maxSelections") != 1:
+            continue
+        opts = mg.get("items") or mg.get("modifiers") or []
+        priced = [(o.get("name"), o.get("price"))
+                  for o in opts if isinstance(o, dict)
+                  and (o.get("price") or 0) > 0]
+        # Heuristic: this is a size group
+        if "size" not in gname and len(priced) < 2:
+            continue
+        if not priced:
+            continue
+        rows: List[Dict[str, Any]] = []
+        for opt_name, opt_price in priced:
+            if not opt_name:
+                continue
+            rows.append({
+                "name": f"{item['name']} {opt_name}".strip(),
+                "price_cents": int(round(float(opt_price) * 100)),
+                "category": item["category"],
+            })
+        if rows:
+            return rows
+    return []
