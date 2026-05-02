@@ -722,6 +722,7 @@ _FAST_EXTRACT_PLATFORMS = frozenset({
     "Allhungry",    # direct JSON API, ~3-5 sec for 300 items
     "ChowNow",      # direct JSON API, ~2-3 sec
     "Clover",       # embedded JSON in initial HTML, ~1 sec
+    "Toast",        # Apollo state in HTML (stealth + ~10-12 sec)
 })
 
 

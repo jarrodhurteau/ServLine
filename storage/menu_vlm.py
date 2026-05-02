@@ -165,6 +165,24 @@ def extract_menu_from_url(
                 place_name, url, type(e).__name__, e,
             )
 
+    if platform == "Toast":
+        try:
+            items = _extract_toast_via_html(url, place_name)
+            if items:
+                log.info("Toast: %s → %d items", place_name, len(items))
+                return items
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Toast path=html place=%r "
+                "url=%r reason=zero_items_returned — falling back to clicks",
+                place_name, url,
+            )
+        except Exception as e:
+            log.warning(
+                "EXTRACTOR_FAILURE platform=Toast path=html place=%r "
+                "url=%r reason=%s: %s — falling back to clicks",
+                place_name, url, type(e).__name__, e,
+            )
+
     # === FALLBACK 1: Slice modal click-through ===
 
     if platform == "Slice":
@@ -1808,3 +1826,102 @@ def _chownow_next_pickup_ts(
         except (ValueError, AttributeError):
             continue
     return None
+
+
+# ---------------------------------------------------------------------------
+# Toast extractor
+# ---------------------------------------------------------------------------
+# Toast online ordering (order.toasttab.com) sits behind Cloudflare bot
+# detection — vanilla headless Chromium gets a 403 challenge page.
+# playwright-stealth patches the browser fingerprint enough to slip
+# through. The full menu is server-side rendered and embedded in
+# window.__APOLLO_STATE__ as ~600KB of GraphQL cache; we regex-extract
+# MenuItem and MenuGrouping records rather than parse the full JSON
+# (the brace structure is hairy with escape sequences).
+#
+# MenuItem fields used: name, itemGroupGuid, prices[]
+# MenuGrouping fields used: name, guid
+# prices[0] is the canonical price (smallest size when multiple
+# variants exist).
+
+_TOAST_GROUP_RE = _re_allhungry.compile(
+    r'"__typename":"MenuGrouping","name":"([^"]+)","guid":"([a-f0-9-]+)"'
+)
+_TOAST_ITEM_START_RE = _re_allhungry.compile(r'"__typename":"MenuItem"')
+_TOAST_NAME_RE = _re_allhungry.compile(r'"name":"([^"]+)"')
+_TOAST_GROUP_GUID_RE = _re_allhungry.compile(r'"itemGroupGuid":"([a-f0-9-]+)"')
+_TOAST_GUID_RE = _re_allhungry.compile(r'"guid":"([a-f0-9-]+)"')
+_TOAST_PRICES_RE = _re_allhungry.compile(r'"prices":\[([0-9.,]+)\]')
+
+
+def _extract_toast_via_html(url: str, place_name: str) -> List[Dict[str, Any]]:
+    """Pull Toast menu from window.__APOLLO_STATE__ in initial HTML.
+    ~10-12 sec per restaurant including Cloudflare bypass."""
+    try:
+        from playwright_stealth import Stealth
+    except ImportError:
+        log.warning(
+            "Toast: playwright-stealth not installed — "
+            "Cloudflare will block. Install with `pip install "
+            "playwright-stealth`."
+        )
+        return []
+    from playwright.sync_api import sync_playwright
+
+    with Stealth().use_sync(sync_playwright()) as p:
+        b = p.chromium.launch(headless=True)
+        try:
+            ctx = b.new_context()
+            page = ctx.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(10000)
+            body = page.content()
+        finally:
+            b.close()
+
+    # Build guid → category name map
+    guid_to_cat: Dict[str, str] = {}
+    for m in _TOAST_GROUP_RE.finditer(body):
+        name = m.group(1).encode("utf-8", "replace").decode(
+            "unicode_escape", "replace",
+        ).strip()
+        guid = m.group(2)
+        if guid not in guid_to_cat:
+            guid_to_cat[guid] = name
+
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+    for m in _TOAST_ITEM_START_RE.finditer(body):
+        block = body[m.start():m.start() + 800]
+        guid_m = _TOAST_GUID_RE.search(block)
+        if not guid_m:
+            continue
+        guid = guid_m.group(1)
+        if guid in seen:
+            continue
+        seen.add(guid)
+
+        name_m = _TOAST_NAME_RE.search(block)
+        prices_m = _TOAST_PRICES_RE.search(block)
+        if not (name_m and prices_m):
+            continue
+        try:
+            prices = [float(x) for x in prices_m.group(1).split(",")
+                      if x.strip()]
+        except ValueError:
+            continue
+        if not prices or prices[0] <= 0:
+            continue
+
+        gguid_m = _TOAST_GROUP_GUID_RE.search(block)
+        cat_guid = gguid_m.group(1) if gguid_m else ""
+        cat = guid_to_cat.get(cat_guid, "Menu")
+
+        rows.append({
+            "name": name_m.group(1),
+            "price_cents": int(round(prices[0] * 100)),
+            "category": cat,
+        })
+
+    log.info("Toast: %s → %d rows extracted", place_name, len(rows))
+    return rows

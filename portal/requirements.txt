@@ -22,3 +22,6 @@ anthropic>=0.79.0
 
 # --- Utils ---
 python-dotenv==1.0.1  # load .env for TESSERACT_CMD, POPPLER_PATH, secrets
+
+# --- Browser scraping (Toast extractor needs stealth for Cloudflare) ---
+playwright-stealth==2.0.3
