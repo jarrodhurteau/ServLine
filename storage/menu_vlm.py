@@ -1631,13 +1631,30 @@ _CHOWNOW_URL_RE = _re_allhungry.compile(
 
 
 def _extract_chownow_via_api(url: str, place_name: str) -> List[Dict[str, Any]]:
-    """Pull a full ChowNow menu via /api/restaurant/<id>/menu.
-    ~2-3 sec per restaurant, no auth."""
+    """Pull a full ChowNow menu via /api/restaurant/<id>/menu/<ts>.
+    ~2-3 sec per restaurant, no auth.
+
+    ChowNow gates the menu endpoint on a future pickup-slot timestamp
+    (YYYYMMDDhhmm in restaurant local time). The legacy /menu (no ts)
+    returns {} now. We pull the next available slot from
+    /api/restaurant/<id>'s order_ahead.days[].pickup_index_ranges and
+    construct the timestamp from there."""
     location_id = _resolve_chownow_location_id(url)
     if not location_id:
         return []
 
-    api_url = f"https://api.chownow.com/api/restaurant/{location_id}/menu"
+    pickup_ts = _chownow_next_pickup_ts(location_id, place_name)
+    if not pickup_ts:
+        log.warning(
+            "ChowNow: %s — could not determine next pickup slot",
+            place_name,
+        )
+        return []
+
+    api_url = (
+        f"https://api.chownow.com/api/restaurant/{location_id}"
+        f"/menu/{pickup_ts}"
+    )
     body = _http_get(api_url, timeout=12)
     if not body:
         return []
@@ -1740,3 +1757,54 @@ def _resolve_chownow_location_id(url: str) -> Optional[str]:
     if not m:
         return None
     return m.group(2)
+
+
+def _chownow_next_pickup_ts(
+    location_id: str, place_name: str,
+) -> Optional[str]:
+    """Compute the YYYYMMDDhhmm token for the restaurant's next
+    available pickup slot. ChowNow's /menu endpoint requires this.
+    Walks order_ahead.days; for each day finds the first 1-bit in
+    pickup_index_ranges and converts (index × precision_minutes) to
+    a clock time."""
+    info_url = f"https://api.chownow.com/api/restaurant/{location_id}"
+    body = _http_get(info_url, timeout=10)
+    if not body:
+        return None
+    try:
+        info = _json.loads(body)
+    except _json.JSONDecodeError:
+        return None
+
+    order_ahead = info.get("order_ahead") or {}
+    days = order_ahead.get("days") or []
+    # Precision lives on the delivery/pickup fulfillment branch
+    fulfillment = info.get("fulfillment") or {}
+    pickup_branch = (fulfillment.get("pickup")
+                     or fulfillment.get("delivery") or {})
+    inner = pickup_branch.get("order_ahead") or {}
+    precision = int(inner.get("precision") or 15)
+
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        ranges = day.get("pickup_index_ranges") or []
+        if not ranges:
+            continue
+        first = ranges[0]
+        if not isinstance(first, dict) or "from" not in first:
+            continue
+        idx = int(first["from"])
+        date_str = day.get("date") or ""
+        if not date_str:
+            continue
+        # date_str: "YYYY-MM-DD"; idx is # of `precision`-minute slots
+        # from midnight in the restaurant's local timezone.
+        try:
+            y, mo, d = date_str.split("-")
+            mins = idx * precision
+            hh, mm = divmod(mins, 60)
+            return f"{y}{mo}{d}{hh:02d}{mm:02d}"
+        except (ValueError, AttributeError):
+            continue
+    return None
