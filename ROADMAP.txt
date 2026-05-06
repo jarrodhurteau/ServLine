@@ -2,9 +2,11 @@
                          SERVLINE DEVELOPMENT ROADMAP
 ================================================================================
 
-Last Updated: 2026-04-29 — Day 141.9 COMPLETE; Day 142 = Import Testing,
-              competitor browser with proxy, PDF viewer, AJAX editor, source
-              restaurant links, 5-tier assessment pills, per-variant size ranges.
+Last Updated: 2026-05-06 — Day 141.9.1 COMPLETE: 5-platform competitor
+              menu extractors (Slice/Allhungry/ChowNow/Clover/Toast) with
+              full size variants, weekly self-heal agent live, wizard/
+              editor polish sweep (delete persistence, sidebar nav,
+              outline-fill confirm button, drop indicators).
 
 ================================================================================
 PROJECT MISSION
@@ -2737,6 +2739,87 @@ Sprint 13.3 — Guided Onboarding Wizard (Days 137-141.6)
         - Removed all user-visible "Gemini" references. The product
           name is "ServLine market analysis" — vendor branding stays
           internal (variable names + source comments only).
+
+  [x] Day 141.9.1: Competitor Menu Extractors + Wizard/Editor Polish (COMPLETE)
+      Date: 2026-05-01 → 2026-05-06
+
+      COMPETITOR DATA — five direct platform extractors live:
+        - Slice (slicelife.com) via API — 700+ items
+        - Allhungry (*.allhungry.com) via API — 400+ items
+        - ChowNow (api.chownow.com) via API + next-pickup-slot timestamp
+          gating — 48+ items, full modifier-driven size expansion
+        - Clover Online (*.cloveronline.com) via embedded Next.js RSC
+          payload + modifierGroupIds parsing — 55+ items with size
+          variants (Small/Large, etc.)
+        - Toast (order.toasttab.com) via playwright-stealth (Cloudflare
+          bypass) + window.__APOLLO_STATE__ regex extraction + per-item
+          MenuItemDetails GraphQL replay — 172+ rows with full size
+          variants (Medium Thin / X-Large Thin / Gluten Free etc.)
+
+        National coverage: ~38% of restaurants nationally (8-city, 38-
+        anchor sample) hit one of the five platforms. Toast at 26% was
+        the biggest unlock — previously dismissed as "fragile" but
+        the only hard part was Cloudflare; the data is the cleanest of
+        any platform.
+
+      SELF-HEAL AGENT LIVE
+        - Routine trig_01HfmdLP2ELcitUYYyPDjBu9 enabled
+        - Cron: 0 4 * * 1 (Mondays 04:00 UTC)
+        - Probes all 5 canary anchors weekly
+        - Auto-fixes API drift (schema rename, endpoint move, key
+          rotation, persisted-query hash rotation)
+        - Opens PR for fixes, GitHub issue for unrecoverable failures
+        - Toast canary specifically validates the GraphQL replay path
+          via the multi-price expansion ratio — catches PQ hash drift
+
+      WIZARD/EDITOR POLISH SWEEP
+        - Wizard sidebar resize handle ported from editor (visible
+          teal grip pill, 8px column, full-height vertical line)
+        - Editor Save now reloads page so server-computed state
+          (pricing intel pills, source counts, market range pills)
+          populates without manual refresh
+        - Delete Card persistence: soft-deleted state survives
+          category navigation (root cause: restoreDeletedState was
+          filtering pending IDs to current-DOM-only, dropping
+          cross-category entries). Hard delete commits on Save
+          (editor) / Confirm & Next (wizard).
+        - Wizard sidebar 2-click nav fixed (whole row clickable;
+          ported from editor cc23ec2)
+        - Categories drag confined to ⋮ handle in both wizard +
+          editor (was on whole <li>, accidental click+jitter
+          triggered drag-reorder)
+        - Auto-uncheck category review on any edit in a confirmed
+          category (wizMarkDirty helper hooks wizSave, wizSaveVariant,
+          wizDelete, wizAddVariant, wizClearVariantPrice,
+          wizDeleteVariant, wizAddItem, drag-reorder). Updates
+          sidebar checkmark, progress counter, button state, banner.
+        - Confirm & Next button: outlined-by-default, fills in when
+          category confirmed. Single form, server-side idempotent.
+        - Server route now advances to the NEXT sidebar entry
+          regardless of review status (was: only advanced to next
+          UNREVIEWED, leaving the user stuck after re-confirm)
+        - Reviewed-banner copy updated with "you can still make
+          edits, just don't forget to confirm again" guidance
+        - Last-entry button morphs into "Complete Review" with
+          inline complete logic in wizard_confirm_category (single
+          click instead of confirm + complete-review-button two-step)
+        - Drop indicator now appears above OR below the hovered
+          row based on cursor half — fixes "drag to bottom" being
+          confusing because line always appeared above target
+        - Jinja {% set %} loop-scope bug in is_reviewed
+          calculation fixed via namespace pattern (button class
+          never reflected DB state before)
+
+      DEPENDENCY ADDED: playwright-stealth==2.0.3
+        (added to portal/requirements.txt for Cloudflare bypass)
+
+      KEY COMMITS:
+        - e06e7e6: Slice + Allhungry direct-API extractors
+        - 6d8517f: First working prototype anchor (recovery commit)
+        - e08b66b: ChowNow + Clover initial extractors
+        - 0a44433: ChowNow timestamp fix
+        - b863206: Toast extractor via stealth + Apollo state
+        - ee51950: Size variants for ChowNow + Clover + Toast
 
 ================================================================================
 Day 142 — IMPORT TESTING DAY

@@ -43,18 +43,20 @@
     }
     /* Column resizer handles (between sidebar/main and main/preview) */
     .col-resizer {
-      width: 6px;
+      width: 8px;
       flex-shrink: 0;
       cursor: col-resize;
       background: transparent;
       transition: background .15s;
       position: relative;
       z-index: 10;
+      overflow: visible;
     }
     .col-resizer:hover, .col-resizer.dragging {
-      background: rgba(184, 92, 56, 0.25);
+      background: rgba(184, 92, 56, 0.15);
     }
-    .col-resizer::after {
+    /* Vertical line */
+    .col-resizer::before {
       content: '';
       position: absolute;
       top: 0;
@@ -62,21 +64,70 @@
       transform: translateX(-50%);
       width: 2px;
       height: 100%;
-      background: #8B4513;
-      opacity: .7;
+      background: var(--line, #E8DACA);
+      transition: background .15s;
+    }
+    .col-resizer:hover::before, .col-resizer.dragging::before {
+      background: #B85C38;
+    }
+    /* Grab handle — always-visible, sticks to viewport center */
+    .resizer-grip {
+      position: sticky;
+      top: 50vh;
+      transform: translateX(-5px);
+      width: 18px;
+      height: 36px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      background: var(--bg, #FAF4EC);
+      border: 1px solid #d4c8b8;
+      border-radius: 9px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      z-index: 11;
+      pointer-events: none;
+      transition: border-color .2s, box-shadow .2s, background .2s;
+    }
+    /* Three vertical lines inside the grip (indicating horizontal drag) */
+    .resizer-grip::before,
+    .resizer-grip::after {
+      content: '';
+      width: 1.5px;
+      height: 14px;
+      background: #B85C38;
       border-radius: 1px;
-      transition: opacity .15s, background .15s, width .15s;
+      opacity: .45;
+      transition: opacity .2s;
     }
-    .col-resizer:hover::after, .col-resizer.dragging::after {
-      opacity: 1;
-      width: 3px;
+    .resizer-grip span.grip-mid {
+      width: 1.5px;
+      height: 14px;
       background: #B85C38;
+      border-radius: 1px;
+      opacity: .45;
+      transition: opacity .2s;
+      font-size: 0;
     }
-    .col-resizer:hover::after, .col-resizer.dragging::after {
+    .col-resizer:hover .resizer-grip, .col-resizer.dragging .resizer-grip {
+      border-color: #B85C38;
       background: #B85C38;
+      box-shadow: 0 2px 8px rgba(184,92,56,.25);
+    }
+    .col-resizer:hover .resizer-grip::before,
+    .col-resizer:hover .resizer-grip::after,
+    .col-resizer:hover .resizer-grip .grip-mid,
+    .col-resizer.dragging .resizer-grip::before,
+    .col-resizer.dragging .resizer-grip::after,
+    .col-resizer.dragging .resizer-grip .grip-mid {
+      background: #fff;
+      opacity: .9;
     }
     body.col-resizing { cursor: col-resize !important; user-select: none; }
     body.col-resizing * { cursor: col-resize !important; }
+    /* Block iframe from stealing mouse events during drag */
+    body.col-resizing iframe { pointer-events: none !important; }
 
     /* ===== Progress Header ===== */
     .wizard-header {
@@ -204,6 +255,7 @@
     .cat-list li:hover .cat-rename { opacity: .5; }
     .cat-rename:hover { opacity: 1 !important; }
     .cat-list li.cat-drag-over { border-top: 2px solid #B85C38; }
+    .cat-list li.cat-drag-over-bottom { border-bottom: 2px solid #B85C38; }
     .cat-new-btn {
       text-align: center;
       padding: 8px;
@@ -792,18 +844,36 @@
       transition: all .15s;
     }
     .wizard-actions .btn:hover { border-color: var(--muted); }
+    /* Confirm & Next: outlined by default, fills in once the category
+       is confirmed. Toggle the .confirmed class to flip states. */
     .wizard-actions .btn-confirm {
+      background: transparent;
+      border-color: #2E5B5E;
+      color: #2E5B5E;
+    }
+    .wizard-actions .btn-confirm:hover {
+      background: rgba(46, 91, 94, 0.08);
+    }
+    .wizard-actions .btn-confirm.confirmed {
       background: #2E5B5E;
       border-color: #2E5B5E;
       color: #fff;
     }
-    .wizard-actions .btn-confirm:hover { background: #24504f; }
+    .wizard-actions .btn-confirm.confirmed:hover { background: #24504f; }
     body.theme-customer .wizard-actions .btn-confirm {
+      background: transparent !important;
+      border-color: #2E5B5E !important;
+      color: #2E5B5E !important;
+    }
+    body.theme-customer .wizard-actions .btn-confirm:hover {
+      background: rgba(46, 91, 94, 0.08) !important;
+    }
+    body.theme-customer .wizard-actions .btn-confirm.confirmed {
       background: #2E5B5E !important;
       border-color: #2E5B5E !important;
       color: #fff !important;
     }
-    body.theme-customer .wizard-actions .btn-confirm:hover {
+    body.theme-customer .wizard-actions .btn-confirm.confirmed:hover {
       background: #24504f !important;
     }
     body.theme-customer .wizard-actions .btn:not(.btn-confirm):not(.btn-skip) {
@@ -1724,10 +1794,11 @@
             {% endif %}
           {% endfor %}
           <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}{% if cat.reviewed %} reviewed{% endif %}"
-              data-cat-name="{{ cat.name|e }}" draggable="true">
-            <span class="cat-drag" title="Drag to reorder">&#8942;</span>
+              data-cat-name="{{ cat.name|e }}" style="cursor:pointer;"
+              onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">
+            <span class="cat-drag" title="Drag to reorder" draggable="true" onclick="event.stopPropagation()" style="cursor:grab;">&#8942;</span>
             <span class="cat-check">{% if cat.reviewed %}&#10003;{% endif %}</span>
-            <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name) }}'">{{ cat.name|e }}</span>
+            <span class="cat-label">{{ cat.name|e }}</span>
             <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
             <span class="cat-count">{{ main_count }}</span>
             {% if mnc.n > 0 %}
@@ -1742,11 +1813,12 @@
           {% set snc = namespace(n=0) %}
           {% for it in cat_subs[sc] %}{% if needs_price(it)|trim %}{% set snc.n = snc.n + 1 %}{% endif %}{% endfor %}
           {% set sub_is_reviewed = sub_reviewed.get(cat.name + '||' + sc, false) %}
-          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}{% if sub_is_reviewed %} reviewed{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true">
-            <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;">&#8942;</span>
+          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}{% if sub_is_reviewed %} reviewed{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" style="cursor:pointer;"
+              onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">
+            <span class="cat-drag" title="Drag to reorder" draggable="true" style="margin-left:-6px; cursor:grab;" onclick="event.stopPropagation()">&#8942;</span>
             <span class="cat-check">{% if sub_is_reviewed %}&#10003;{% endif %}</span>
             <span class="cat-sub-icon">&#9656;</span>
-            <span class="cat-label" onclick="window.location='{{ url_for('draft_wizard', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">{{ sc|e }}</span>
+            <span class="cat-label">{{ sc|e }}</span>
             <span class="cat-count">{{ cat_subs[sc]|length }}</span>
             {% if snc.n > 0 %}
             <span class="cat-needs-price-count" title="{{ snc.n }} item{{ 's' if snc.n > 1 else '' }} need price review">{{ snc.n }}!</span>
@@ -1794,7 +1866,7 @@
       </div>
     </div>
 
-    <div class="col-resizer" data-resizer="left" title="Drag to resize"></div>
+    <div class="col-resizer" data-resizer="left" title="Drag to resize"><span class="resizer-grip"><span class="grip-mid"></span></span></div>
 
     <!-- ===== Main: Current Category Items ===== -->
     <div class="wizard-main">
@@ -1836,17 +1908,21 @@
         </div>
       </div>
 
-      {# Show banner if the current category OR subcategory has been reviewed #}
-      {% set is_reviewed = false %}
+      {# Show banner if the current category OR subcategory has been reviewed.
+         Use a namespace so the inner {% set %} survives the for-loop scope
+         (plain {% set %} inside {% for %} is loop-local and was always
+         leaving is_reviewed = false, which kept the button outlined). #}
+      {% set rv = namespace(reviewed=false) %}
       {% for c in progress.categories %}
         {% if c.name == current_category and (c.subcategory or None) == (current_subcategory or None) and c.reviewed %}
-          {% set is_reviewed = true %}
+          {% set rv.reviewed = true %}
         {% endif %}
       {% endfor %}
+      {% set is_reviewed = rv.reviewed %}
 
       {% if is_reviewed %}
       <div class="reviewed-banner">
-        &#10003; This {% if current_subcategory %}subcategory{% else %}category{% endif %} has been reviewed
+        &#10003; This {% if current_subcategory %}subcategory{% else %}category{% endif %} has been reviewed. You can still make edits, just don&rsquo;t forget to confirm it again at the bottom.
         <form method="POST" action="{{ url_for('wizard_unconfirm_category', draft_id=draft.id) }}" style="margin-left:auto;">
           <input type="hidden" name="category" value="{{ current_category|e }}" />
           {% if current_subcategory %}<input type="hidden" name="subcategory" value="{{ current_subcategory|e }}" />{% endif %}
@@ -2035,38 +2111,40 @@
         <span></span>
         {% endif %}
 
-        {# Confirm / Next — find the next unreviewed entry after current #}
-        {% set next_entry = namespace(cat=None, sub=None, found=false, passed_current=false) %}
+        {# Day 141: Confirm & Next always goes forward.
+           The button is outlined by default, fills in when reviewed.
+           The same form is posted in either state — server marks
+           reviewed (idempotent) and advances to the next sidebar
+           entry regardless of its review status.
+
+           Day 141.9: when the user is on the LAST sidebar entry
+           (whether main category or subcategory, regardless of
+           reordering or new categories added), the button morphs into
+           "Complete Review". Posting with the `complete=1` flag tells
+           the server to run complete_review logic after marking. The
+           "is_last_entry" check uses a namespace because plain
+           {% set %} inside {% for %} is loop-local. #}
+        {% set last_ns = namespace(idx=-1) %}
         {% for c in progress.categories %}
-          {% if next_entry.passed_current and not c.reviewed and not next_entry.found %}
-            {% set next_entry.cat = c.name %}
-            {% set next_entry.sub = c.subcategory %}
-            {% set next_entry.found = true %}
-          {% endif %}
           {% if c.name == current_category and (c.subcategory or None) == (current_subcategory or None) %}
-            {% set next_entry.passed_current = true %}
+            {% set last_ns.idx = loop.index0 %}
           {% endif %}
         {% endfor %}
-
-        {# Day 141: Confirm & Next always goes forward.
-           The escape hatch is the "Complete Review" button in the sidebar,
-           which is locked until every category is confirmed. #}
-        {% if not is_reviewed %}
+        {% set is_last_entry = (last_ns.idx >= 0 and last_ns.idx == progress.categories|length - 1) %}
         <form method="POST" action="{{ url_for('wizard_confirm_category', draft_id=draft.id) }}">
           <input type="hidden" name="category" value="{{ current_category|e }}" />
           {% if current_subcategory %}<input type="hidden" name="subcategory" value="{{ current_subcategory|e }}" />{% endif %}
-          <button type="submit" class="btn btn-confirm">
-            Confirm &amp; Next &rarr;
+          {% if is_last_entry %}<input type="hidden" name="complete" value="1" />{% endif %}
+          <button type="submit" id="wiz-confirm-btn"
+                  data-is-last="{{ '1' if is_last_entry else '0' }}"
+                  class="btn btn-confirm{% if is_reviewed %} confirmed{% endif %}">
+            {% if is_last_entry %}
+              {% if is_reviewed %}&#10003; Complete Review{% else %}Complete Review &rarr;{% endif %}
+            {% else %}
+              {% if is_reviewed %}Next &rarr;{% else %}Confirm &amp; Next &rarr;{% endif %}
+            {% endif %}
           </button>
         </form>
-        {% else %}
-          {% if next_entry.found %}
-          {% set next_label = next_entry.sub if next_entry.sub else next_entry.cat %}
-          <a href="{{ url_for('draft_wizard', draft_id=draft.id, category=next_entry.cat, subcategory=next_entry.sub) if next_entry.sub else url_for('draft_wizard', draft_id=draft.id, category=next_entry.cat) }}" class="btn btn-confirm">
-            Next &rarr; {{ next_label|e }}
-          </a>
-          {% endif %}
-        {% endif %}
       </div>
 
       {% else %}
@@ -2077,7 +2155,7 @@
       {% endif %}
     </div>
 
-    <div class="col-resizer" data-resizer="right" title="Drag to resize"></div>
+    <div class="col-resizer" data-resizer="right" title="Drag to resize"><span class="resizer-grip"><span class="grip-mid"></span></span></div>
 
     <!-- ===== Right Column: Original Menu/File Viewer + Selected Panel ===== -->
     <div class="wizard-preview">
@@ -2442,9 +2520,11 @@
           card.appendChild(actionsDiv);
         }
       }
-      // Clean up any stale IDs
-      const validIds = pending.filter(id => document.querySelector(`.wiz-item[data-item-id="${id}"]`));
-      sessionStorage.setItem('wizPendingDeletes', JSON.stringify(validIds));
+      // Don't filter pending IDs based on the current page's DOM — items
+      // queued for deletion in OTHER categories aren't in the current
+      // DOM, but their queue entries must survive category navigation.
+      // Stale IDs (already-flushed deletes) are cleared by the bulk
+      // sessionStorage.removeItem in the flush handler, not here.
       wizRenumber();
 
       // Auto-open newly created item in edit mode with name cleared
@@ -2656,6 +2736,65 @@
       }
     }
 
+    /* ===== Mark current category dirty after any user edit =====
+       If the category was previously confirmed (✓ checkmark in sidebar),
+       any subsequent edit revokes the confirmation. The user must hit
+       Confirm & Next again to re-mark it reviewed. Both visual sidebar
+       state and server-side review record are updated. */
+    async function wizMarkDirty() {
+      const cat = '{{ current_category|e }}';
+      const subcat = '{{ current_subcategory|e }}';
+      if (!cat) return;
+      const draftId = document.querySelector('.wiz-item')?.dataset.draftId;
+      if (!draftId) return;
+      // Find the sidebar row for this (category, subcategory)
+      const sel = subcat
+        ? `.cat-list li.cat-subcat[data-cat-name="${cat}"][data-subcat-name="${subcat}"]`
+        : `.cat-list li[data-cat-name="${cat}"]:not(.cat-subcat)`;
+      const li = document.querySelector(sel);
+      if (li && !li.classList.contains('reviewed')) return;  // already dirty
+      if (li) {
+        li.classList.remove('reviewed');
+        const check = li.querySelector('.cat-check');
+        if (check) check.textContent = '';
+        // Decrement "X / Y categories reviewed" counter + progress bar
+        const lbl = document.querySelector('.progress-label');
+        if (lbl) {
+          const m = lbl.textContent.match(/(\d+)\s*\/\s*(\d+)/);
+          if (m) {
+            const cur = Math.max(0, parseInt(m[1]) - 1);
+            const total = parseInt(m[2]);
+            lbl.textContent = `${cur} / ${total} categories reviewed`;
+            const fill = document.querySelector('.progress-fill');
+            if (fill && total > 0) fill.style.width = (cur * 100 / total) + '%';
+          }
+        }
+        // Flip the Confirm & Next button back to its outlined state
+        // and restore the right text. On the LAST sidebar entry the
+        // button is "Complete Review →" instead of "Confirm & Next →";
+        // the data-is-last attr is rendered server-side.
+        const btn = document.getElementById('wiz-confirm-btn');
+        if (btn) {
+          btn.classList.remove('confirmed');
+          btn.innerHTML = btn.dataset.isLast === '1'
+            ? 'Complete Review &rarr;'
+            : 'Confirm &amp; Next &rarr;';
+        }
+        // Hide the "reviewed" green banner if it's visible
+        const banner = document.querySelector('.reviewed-banner');
+        if (banner) banner.style.display = 'none';
+      }
+      // Server-side unmark (idempotent — safe even if already unmarked)
+      try {
+        await fetch(`/drafts/${draftId}/wizard/unconfirm`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'same-origin',
+          body: JSON.stringify({ category: cat, subcategory: subcat || '' }),
+        });
+      } catch (e) { /* silent */ }
+    }
+
     async function wizSave(btn) {
       if (_applyInProgress) return;
       const card = btn.closest('.wiz-item');
@@ -2688,6 +2827,7 @@
         });
         const data = await res.json();
         if (!data.ok) { wizToast(data.error || 'Save failed'); return; }
+        wizMarkDirty();
 
         // Update display values
         const display = card.querySelector('.wiz-display');
@@ -2753,14 +2893,17 @@
       const card = btn.closest('.wiz-item');
       const itemId = parseInt(card.dataset.itemId);
 
-      // Grey out card (NO server delete — that happens on Confirm & Next)
+      // Soft delete — grey out and queue. Real DB delete happens when
+      // the user clicks "Confirm & Next" (flush handler at form submit).
       card.classList.add('deleted');
       card.classList.remove('editing');
 
-      // Persist to sessionStorage so it survives reloads
+      // Persist queue to sessionStorage so the greyed state survives
+      // category navigation. Cleared on flush after Confirm & Next.
       const pending = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
       if (!pending.includes(itemId)) pending.push(itemId);
       sessionStorage.setItem('wizPendingDeletes', JSON.stringify(pending));
+      wizMarkDirty();
 
       // Inject undo + move-to-bottom buttons on the deleted card
       const actionsDiv = document.createElement('div');
@@ -2791,7 +2934,6 @@
       actionsDiv.appendChild(moveBtn);
       card.appendChild(actionsDiv);
       wizRenumber();
-      wizSaveOrder();
     }
 
     // Allow Enter to save, Escape to cancel
@@ -2917,6 +3059,7 @@
         });
         const data = await res.json();
         if (data.ok) {
+          wizMarkDirty();
           // Find or create variants container in edit form
           let editForm = card.querySelector('.wiz-edit-form');
           let variantsDiv = editForm.querySelector('.wiz-variants');
@@ -2990,6 +3133,7 @@
             credentials: 'same-origin',
             body: JSON.stringify({ label, price_cents: 0 })
           });
+          wizMarkDirty();
         } catch (e) { /* silent */ }
       }
 
@@ -3026,6 +3170,7 @@
         });
         const data = await res.json();
         if (data.ok) {
+          wizMarkDirty();
           // Remove from edit form
           row.remove();
           // Remove from display view
@@ -3065,6 +3210,7 @@
           credentials: 'same-origin',
           body: JSON.stringify({ label, price_cents: priceCents })
         });
+        wizMarkDirty();
 
         // Update the display-mode variant row too
         const card = row.closest('.wiz-item');
@@ -3698,6 +3844,7 @@
         dragItem = null;
         wizRenumber();
         wizSaveOrder();
+        wizMarkDirty();
       });
 
       item.addEventListener('dragover', e => {
@@ -3733,7 +3880,10 @@
     }
 
     async function wizSaveOrder() {
-      const items = document.querySelectorAll('.wizard-items .wiz-item');
+      // Skip deleted cards — they're already gone from the DB and
+      // including stale IDs would just make the reorder a no-op for
+      // them (or worse, surprise some future caller).
+      const items = document.querySelectorAll('.wizard-items .wiz-item:not(.deleted)');
       const order = [...items].map(el => parseInt(el.dataset.itemId)).filter(id => !isNaN(id));
       const draftId = items[0]?.dataset.draftId;
       if (!draftId || !order.length) return;
@@ -3764,6 +3914,7 @@
         if (data.ok) {
           // Remember new item ID so we auto-open it in edit mode after reload
           if (data.item_id) sessionStorage.setItem('wizNewItemId', String(data.item_id));
+          await wizMarkDirty();
           window.location.reload();
         } else {
           wizToast(data.error || 'Failed to add item');
@@ -4256,36 +4407,59 @@
         list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
         if (!dragLi) return;
         const cats = [...list.querySelectorAll('li:not(.cat-subcat)')].map(l => l.dataset.catName);
+        // Reload after the reorder lands so the Confirm & Next /
+        // Complete Review button text reflects the new "last entry"
+        // (and Back button label, etc.).
         fetch(`/drafts/${draftId}/reorder_categories`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
           body: JSON.stringify({ categories: cats })
-        }).catch(() => {});
+        }).then(() => window.location.reload()).catch(() => {});
         dragLi = null;
       });
+
+      // Helper: figure out whether the cursor is in the top or bottom
+      // half of the hovered <li>. Top half → drop ABOVE this row;
+      // bottom half → drop BELOW this row. Mirrors the visual indicator
+      // so dropping at the very end of the list reads correctly.
+      function _dropPosition(li, clientY) {
+        const rect = li.getBoundingClientRect();
+        return clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+      }
+      function _clearDropIndicators() {
+        list.querySelectorAll('.cat-drag-over, .cat-drag-over-bottom')
+          .forEach(el => el.classList.remove(
+            'cat-drag-over', 'cat-drag-over-bottom',
+          ));
+      }
 
       list.addEventListener('dragover', e => {
         e.preventDefault();
         const li = e.target.closest('li');
-        if (li && li !== dragLi) {
-          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
-          li.classList.add('cat-drag-over');
-        }
+        if (!li || li === dragLi) return;
+        _clearDropIndicators();
+        const pos = _dropPosition(li, e.clientY);
+        li.classList.add(
+          pos === 'after' ? 'cat-drag-over-bottom' : 'cat-drag-over',
+        );
       });
 
       list.addEventListener('dragleave', e => {
         const li = e.target.closest('li');
-        if (li) li.classList.remove('cat-drag-over');
+        if (li) {
+          li.classList.remove('cat-drag-over', 'cat-drag-over-bottom');
+        }
       });
 
       list.addEventListener('drop', e => {
         e.preventDefault();
         const dropLi = e.target.closest('li');
         if (!dropLi || !dragLi || dropLi === dragLi) {
-          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+          _clearDropIndicators();
           return;
         }
+        const pos = _dropPosition(dropLi, e.clientY);
         const isSubcatDrag = dragLi.classList.contains('cat-subcat');
         const isMainDrop = !dropLi.classList.contains('cat-subcat');
         if (isSubcatDrag && isMainDrop) {
@@ -4308,13 +4482,13 @@
             dragLi = null;
           }
         } else {
-          const items = [...list.querySelectorAll('li')];
-          const dragIdx = items.indexOf(dragLi);
-          const dropIdx = items.indexOf(dropLi);
-          if (dragIdx < dropIdx) { dropLi.insertAdjacentElement('afterend', dragLi); }
-          else { dropLi.insertAdjacentElement('beforebegin', dragLi); }
+          if (pos === 'after') {
+            dropLi.insertAdjacentElement('afterend', dragLi);
+          } else {
+            dropLi.insertAdjacentElement('beforebegin', dragLi);
+          }
         }
-        list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+        _clearDropIndicators();
       });
     })();
 

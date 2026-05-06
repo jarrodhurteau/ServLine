@@ -7500,20 +7500,38 @@ def wizard_confirm_category(draft_id: int):
     drafts_store.mark_category_reviewed(draft_id, category, subcategory)
     progress = drafts_store.get_wizard_progress(draft_id)
 
-    # Day 141: Confirm & Next NEVER leaves the wizard. Only the
-    # "Complete Review" button in the sidebar can send the user to the editor.
-    # If the user just confirmed the last unreviewed entry, stay put on the
-    # current category so they can click Complete Review.
-    if progress["complete"]:
-        kwargs = {"draft_id": draft_id, "category": category}
-        if subcategory:
-            kwargs["subcategory"] = subcategory
-        return redirect(url_for("draft_wizard", **kwargs))
+    # Day 141.9: when the form's button was the last-entry "Complete
+    # Review" variant it sends complete=1. Run the complete-review
+    # logic inline rather than redirecting to the separate endpoint,
+    # so the user gets a single click instead of two.
+    complete_flag = (request.form.get("complete") or "").strip() == "1"
+    if complete_flag:
+        if progress["complete"]:
+            drafts_store.mark_wizard_completed(draft_id)
+            return redirect(url_for(
+                "draft_wizard", draft_id=draft_id, step="confirmation",
+            ))
+        # Other entries are still unreviewed — bounce to the first one.
+        flash(
+            "Some categories still need review before you can complete.",
+            "error",
+        )
+        for c in progress["categories"]:
+            if not c["reviewed"]:
+                kwargs = {"draft_id": draft_id, "category": c["name"]}
+                if c.get("subcategory"):
+                    kwargs["subcategory"] = c["subcategory"]
+                return redirect(url_for("draft_wizard", **kwargs))
+        # Fall through to the normal advance logic if somehow nothing
+        # is unreviewed but progress["complete"] was false (shouldn't
+        # happen but don't get stuck).
 
-    # Day 141: advance FORWARD only — find the next unreviewed entry that
-    # comes AFTER the one we just confirmed. If nothing forward is unreviewed,
-    # fall back to the first unreviewed at the top of the list (so the user
-    # eventually finishes everything they skipped).
+    # Day 141: Confirm & Next always advances to the NEXT sidebar entry
+    # in order — regardless of its review status — so re-confirming an
+    # already-reviewed category still moves the user forward. Falls
+    # back to the first unreviewed entry if we're at the end of the
+    # sidebar; if everything is reviewed and we're at the end, stay put
+    # so the user can hit Complete Review.
     cats = progress["categories"]
     current_idx = -1
     for i, c in enumerate(cats):
@@ -7522,14 +7540,13 @@ def wizard_confirm_category(draft_id: int):
             break
 
     next_entry = None
-    # Search forward from the position right after the current entry
-    if current_idx >= 0:
-        for c in cats[current_idx + 1 :]:
-            if not c["reviewed"]:
-                next_entry = c
-                break
+    # Search forward from the position right after the current entry,
+    # ignoring reviewed status (advance regardless).
+    if current_idx >= 0 and current_idx + 1 < len(cats):
+        next_entry = cats[current_idx + 1]
 
-    # No forward entry → fall back to the first unreviewed anywhere
+    # At the end of the sidebar — fall back to the first unreviewed
+    # anywhere so the user can clean up anything they skipped.
     if next_entry is None:
         for c in cats:
             if not c["reviewed"]:
@@ -7542,7 +7559,12 @@ def wizard_confirm_category(draft_id: int):
             kwargs["subcategory"] = next_entry["subcategory"]
         return redirect(url_for("draft_wizard", **kwargs))
 
-    return redirect(url_for("draft_wizard", draft_id=draft_id))
+    # Everything reviewed and we're at the end → stay put. The
+    # "Complete Review" button in the sidebar is the escape hatch.
+    kwargs = {"draft_id": draft_id, "category": category}
+    if subcategory:
+        kwargs["subcategory"] = subcategory
+    return redirect(url_for("draft_wizard", **kwargs))
 
 
 @app.post("/drafts/<int:draft_id>/wizard/complete_review")
@@ -8364,12 +8386,23 @@ def copy_draft_to_restaurant(source_draft_id: int):
 @app.post("/drafts/<int:draft_id>/wizard/unconfirm")
 @login_required
 def wizard_unconfirm_category(draft_id: int):
-    """Unmark a category (or subcategory) to allow re-review."""
+    """Unmark a category (or subcategory) to allow re-review.
+    Supports both form-redirect (legacy, sidebar trash) and JSON (AJAX
+    auto-dirty after edits)."""
     _require_drafts_storage()
-    category = (request.form.get("category") or "").strip()
-    subcategory = (request.form.get("subcategory") or "").strip() or None
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        category = (data.get("category") or "").strip()
+        subcategory = (data.get("subcategory") or "").strip() or None
+    else:
+        category = (request.form.get("category") or "").strip()
+        subcategory = (request.form.get("subcategory") or "").strip() or None
     if category:
         drafts_store.unmark_category_reviewed(draft_id, category, subcategory)
+    if request.is_json:
+        return jsonify({
+            "ok": True, "category": category, "subcategory": subcategory,
+        })
     kwargs = {"draft_id": draft_id, "category": category}
     if subcategory:
         kwargs["subcategory"] = subcategory

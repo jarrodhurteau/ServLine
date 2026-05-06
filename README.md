@@ -1930,3 +1930,71 @@ ServLine now has:
     unavailable. Showing estimated pricing for now. Rerun analysis later to
     refresh with real-time local data." All user-visible vendor branding
     (Gemini) removed — product name is "market analysis", vendor stays internal.
+
+- **Day 141.9.1 — Competitor Menu Extractors + Wizard/Editor Polish:** *** COMPLETE *** (May 1-6, 2026)
+  - **Five direct platform extractors live** in `storage/menu_vlm.py`,
+    all returning `{name, price_cents, category}` rows with full size
+    variants:
+    - **Slice** (slicelife.com) via API — 700+ items, ~3-5s
+    - **Allhungry** (*.allhungry.com) via API — 400+ items, ~3-5s
+    - **ChowNow** (api.chownow.com) via API + next-pickup-slot timestamp
+      gate (server returns `{}` without timestamp; computed from
+      `order_ahead.days[].pickup_index_ranges[0].from × precision_minutes`)
+    - **Clover Online** (*.cloveronline.com) via embedded Next.js RSC
+      payload + modifier-group resolution (size groups detected via
+      minRequired=1/maxAllowed=1 + name/option heuristics)
+    - **Toast** (order.toasttab.com) via `playwright-stealth` for
+      Cloudflare bypass + `window.__APOLLO_STATE__` regex extraction +
+      per-item `MenuItemDetails` GraphQL replay for size variants
+      (requires `toast-session-id` from `window._session_id` and the
+      persisted-query SHA hash header)
+  - **National coverage validated:** 8-city / 38-anchor sample. Toast
+    is 26% of national pizza-restaurant anchors (biggest single
+    platform); revisited despite earlier "fragile" call because volume
+    math forced it.
+  - **Self-heal monitoring agent live** (routine
+    `trig_01HfmdLP2ELcitUYYyPDjBu9`, weekly Mondays 04:00 UTC).
+    Probes all 5 canaries, auto-fixes API drift (schema rename,
+    endpoint move, persisted-query hash rotation), opens PR or GitHub
+    issue.
+  - **Wizard/editor polish sweep:**
+    - Wizard sidebar resize handle ported from editor (visible teal
+      grip pill on column boundaries).
+    - Editor Save reloads page so server-computed state (price intel
+      pills, source counts, market range pills) populates without
+      manual refresh.
+    - Delete Card persistence fixed — soft-deleted state survives
+      category navigation; commits on Save (editor) / Confirm & Next
+      (wizard). Root cause was `restoreDeletedState` filtering pending
+      IDs to current-DOM-only, dropping cross-category entries.
+    - Wizard sidebar 2-click navigation fixed (whole row clickable,
+      ported from editor's prior cc23ec2 fix).
+    - Categories drag confined to ⋮ handle in both wizard + editor —
+      previously the entire `<li>` was draggable, so a click + tiny
+      mouse-jitter triggered an accidental drag-reorder.
+    - Auto-uncheck category review on any edit in a confirmed
+      category. `wizMarkDirty()` helper hooks every wizard edit
+      function, optimistically updates the sidebar checkmark + progress
+      counter + button state + reviewed banner, and calls a new
+      AJAX-friendly `unconfirm` endpoint.
+    - Confirm & Next button: outlined-by-default, fills in (solid
+      teal) when category confirmed. Single form posted in both states;
+      server is idempotent on already-reviewed.
+    - Server route now advances to the next sidebar entry regardless
+      of review status (was advancing only to next UNREVIEWED, leaving
+      the user stuck on a re-confirm).
+    - Last sidebar entry's button morphs into "Complete Review" with
+      inline complete-review logic in `wizard_confirm_category` —
+      single click instead of two-step. Reevaluated on every render +
+      after category drag-reorder.
+    - Drop indicator now appears above OR below the hovered row based
+      on cursor's vertical half — fixes "drop at the very bottom"
+      being confusing because the line always appeared above the
+      target. Applied to both wizard + editor.
+    - Reviewed banner copy updated with edit-allowed guidance.
+    - **Jinja loop-scope bug fixed:** `is_reviewed` was always false
+      because `{% set %}` inside `{% for %}` is loop-local; wrapped
+      in a `namespace` so the inner set survives. The button class
+      had never reflected DB state before.
+  - **Dependency added:** `playwright-stealth==2.0.3` for Toast's
+    Cloudflare bypass.

@@ -259,6 +259,7 @@
     .cat-list li:hover .cat-rename { opacity: .5; }
     .cat-rename:hover { opacity: 1 !important; }
     .cat-list li.cat-drag-over { border-top: 2px solid #B85C38; }
+    .cat-list li.cat-drag-over-bottom { border-bottom: 2px solid #B85C38; }
     .cat-new-btn {
       text-align: center;
       padding: 8px;
@@ -1947,9 +1948,9 @@
             {% endif %}
           {% endfor %}
           <li class="{% if is_active and not current_subcategory %}active{% elif is_active and current_subcategory %} cat-parent-of-active{% endif %}"
-              data-cat-name="{{ cat.name|e }}" draggable="true" style="cursor:pointer;"
+              data-cat-name="{{ cat.name|e }}" style="cursor:pointer;"
               onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name) }}'">
-            <span class="cat-drag" title="Drag to reorder" onclick="event.stopPropagation()">&#8942;</span>
+            <span class="cat-drag" title="Drag to reorder" draggable="true" onclick="event.stopPropagation()" style="cursor:grab;">&#8942;</span>
             <span class="cat-label">{{ cat.name|e }}</span>
             <span class="cat-rename" onclick="event.stopPropagation(); wizRenameCat(this.closest('li').querySelector('.cat-label'), '{{ cat.name|e }}')" title="Rename category"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
             <span class="cat-count">{{ main_count }}</span>
@@ -1965,9 +1966,9 @@
           {% set snc = namespace(n=0) %}
           {% for it in cat_subs[sc] %}{% if needs_price(it)|trim %}{% set snc.n = snc.n + 1 %}{% endif %}{% endfor %}
           {% set sub_is_reviewed = sub_reviewed.get(cat.name + '||' + sc, false) %}
-          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" draggable="true" style="cursor:pointer;"
+          <li class="cat-subcat{% if is_active and current_subcategory == sc %} active{% endif %}" data-cat-name="{{ cat.name|e }}" data-subcat-name="{{ sc|e }}" style="cursor:pointer;"
               onclick="window.location='{{ url_for('draft_editor', draft_id=draft.id, category=cat.name, subcategory=sc) }}'">
-            <span class="cat-drag" title="Drag to reorder" style="margin-left:-6px;" onclick="event.stopPropagation()">&#8942;</span>
+            <span class="cat-drag" title="Drag to reorder" draggable="true" style="margin-left:-6px; cursor:grab;" onclick="event.stopPropagation()">&#8942;</span>
             <span class="cat-sub-icon">&#9656;</span>
             <span class="cat-label">{{ sc|e }}</span>
             <span class="cat-count">{{ cat_subs[sc]|length }}</span>
@@ -2928,9 +2929,11 @@
           card.appendChild(actionsDiv);
         }
       }
-      // Clean up any stale IDs
-      const validIds = pending.filter(id => document.querySelector(`.wiz-item[data-item-id="${id}"]`));
-      sessionStorage.setItem('wizPendingDeletes', JSON.stringify(validIds));
+      // Don't filter pending IDs based on the current page's DOM — items
+      // queued for deletion in OTHER categories aren't in the current
+      // DOM, but their queue entries must survive category navigation.
+      // Stale IDs (already-flushed deletes) are cleared by the bulk
+      // sessionStorage.removeItem in _flushPendingDeletes, not here.
       wizRenumber();
 
       // Auto-open newly created item in edit mode with name cleared
@@ -3245,11 +3248,13 @@
       const card = btn.closest('.wiz-item');
       const itemId = parseInt(card.dataset.itemId);
 
-      // Grey out card (NO server delete — that happens on Confirm & Next)
+      // Soft delete — grey out and queue. Real DB delete happens when
+      // the user clicks Save (flush handler in editorSave).
       card.classList.add('deleted');
       card.classList.remove('editing');
 
-      // Persist to sessionStorage so it survives reloads
+      // Persist queue to sessionStorage so the greyed state survives
+      // category navigation. Cleared on flush after Save.
       const pending = JSON.parse(sessionStorage.getItem('wizPendingDeletes') || '[]');
       if (!pending.includes(itemId)) pending.push(itemId);
       sessionStorage.setItem('wizPendingDeletes', JSON.stringify(pending));
@@ -3283,7 +3288,6 @@
       actionsDiv.appendChild(moveBtn);
       card.appendChild(actionsDiv);
       wizRenumber();
-      wizSaveOrder();
     }
 
     // Allow Enter to save, Escape to cancel
@@ -4225,7 +4229,8 @@
     }
 
     async function wizSaveOrder() {
-      const items = document.querySelectorAll('.editor-items .wiz-item');
+      // Skip deleted cards — already removed from DB on delete click.
+      const items = document.querySelectorAll('.editor-items .wiz-item:not(.deleted)');
       const order = [...items].map(el => parseInt(el.dataset.itemId)).filter(id => !isNaN(id));
       const draftId = items[0]?.dataset.draftId;
       if (!draftId || !order.length) return;
@@ -4768,27 +4773,47 @@
         dragLi = null;
       });
 
+      // Helper: figure out whether the cursor is in the top or bottom
+      // half of the hovered <li>. Top half → drop ABOVE this row;
+      // bottom half → drop BELOW this row. Mirrors the visual indicator
+      // so dropping at the very end of the list reads correctly.
+      function _dropPosition(li, clientY) {
+        const rect = li.getBoundingClientRect();
+        return clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+      }
+      function _clearDropIndicators() {
+        list.querySelectorAll('.cat-drag-over, .cat-drag-over-bottom')
+          .forEach(el => el.classList.remove(
+            'cat-drag-over', 'cat-drag-over-bottom',
+          ));
+      }
+
       list.addEventListener('dragover', e => {
         e.preventDefault();
         const li = e.target.closest('li');
-        if (li && li !== dragLi) {
-          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
-          li.classList.add('cat-drag-over');
-        }
+        if (!li || li === dragLi) return;
+        _clearDropIndicators();
+        const pos = _dropPosition(li, e.clientY);
+        li.classList.add(
+          pos === 'after' ? 'cat-drag-over-bottom' : 'cat-drag-over',
+        );
       });
 
       list.addEventListener('dragleave', e => {
         const li = e.target.closest('li');
-        if (li) li.classList.remove('cat-drag-over');
+        if (li) {
+          li.classList.remove('cat-drag-over', 'cat-drag-over-bottom');
+        }
       });
 
       list.addEventListener('drop', e => {
         e.preventDefault();
         const dropLi = e.target.closest('li');
         if (!dropLi || !dragLi || dropLi === dragLi) {
-          list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+          _clearDropIndicators();
           return;
         }
+        const pos = _dropPosition(dropLi, e.clientY);
         const isSubcatDrag = dragLi.classList.contains('cat-subcat');
         const isMainDrop = !dropLi.classList.contains('cat-subcat');
         if (isSubcatDrag && isMainDrop) {
@@ -4811,13 +4836,13 @@
             dragLi = null;
           }
         } else {
-          const items = [...list.querySelectorAll('li')];
-          const dragIdx = items.indexOf(dragLi);
-          const dropIdx = items.indexOf(dropLi);
-          if (dragIdx < dropIdx) { dropLi.insertAdjacentElement('afterend', dragLi); }
-          else { dropLi.insertAdjacentElement('beforebegin', dragLi); }
+          if (pos === 'after') {
+            dropLi.insertAdjacentElement('afterend', dragLi);
+          } else {
+            dropLi.insertAdjacentElement('beforebegin', dragLi);
+          }
         }
-        list.querySelectorAll('.cat-drag-over').forEach(el => el.classList.remove('cat-drag-over'));
+        _clearDropIndicators();
       });
     })();
 
@@ -5214,11 +5239,10 @@
       btn.textContent = 'Saved!';
       btn.classList.add('saved');
       document.getElementById('editor-last-saved').textContent = 'Last saved just now';
-      setTimeout(() => {
-        btn.textContent = 'Save';
-        btn.classList.remove('saved');
-        btn.disabled = false;
-      }, 2000);
+      // Brief pause so the user sees the confirmation, then reload so the
+      // page reflects server-side computed changes (price intel, source
+      // counts, market-range pills, etc.) without manual refresh.
+      setTimeout(() => { window.location.reload(); }, 700);
     } catch (e) {
       btn.textContent = 'Save';
       btn.disabled = false;
