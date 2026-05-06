@@ -718,11 +718,12 @@ _ensure_menu_scrape_schema()
 # for slow Playwright click-throughs or screenshot+vision passes.
 # Add to this list when you ship a fast extractor for a new platform.
 _FAST_EXTRACT_PLATFORMS = frozenset({
-    "Slice",        # modal click + DOM parse, ~3-5 min for 400 items
-    "Allhungry",    # direct JSON API, ~3-5 sec for 300 items
-    "ChowNow",      # direct JSON API, ~2-3 sec
-    "Clover",       # embedded JSON in initial HTML, ~1 sec
-    "Toast",        # Apollo state in HTML (stealth + ~10-12 sec)
+    "Slice",                # modal click + DOM parse, ~3-5 min for 400 items
+    "Allhungry",            # direct JSON API, ~3-5 sec for 300 items
+    "ChowNow",              # direct JSON API, ~2-3 sec
+    "Clover",               # embedded JSON in initial HTML, ~1 sec
+    "Toast",                # Apollo state in HTML (stealth + ~10-12 sec)
+    "DoorDash Storefront",  # rendered HTML attrs (stealth + ~10 sec)
 })
 
 
@@ -744,6 +745,11 @@ _TIER_PLATFORMS = [
     ("Olo",           ["olo.com", "olocdn"]),
     ("Foodtec",       ["foodtecsolutions.com"]),
     ("Restaurant.com",["restaurant.com"]),
+    # DoorDash Storefront (white-label) is order.online; the public
+    # marketplace is doordash.com — keep them as separate platforms
+    # because they have different code paths and only Storefront has
+    # an extractor.
+    ("DoorDash Storefront", ["order.online/store", "order.online/graphql"]),
     ("DoorDash",      ["doordash.com/store", "doordash.com/menu"]),
     ("Grubhub",       ["grubhub.com/restaurant"]),
     ("Wix Restaurants",["wix-restaurants", "wixstatic.com/restaurants"]),

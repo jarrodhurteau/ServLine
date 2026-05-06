@@ -183,6 +183,26 @@ def extract_menu_from_url(
                 place_name, url, type(e).__name__, e,
             )
 
+    if platform == "DoorDash Storefront":
+        try:
+            items = _extract_doordash_storefront_via_html(url, place_name)
+            if items:
+                log.info("DoorDash Storefront: %s → %d items",
+                         place_name, len(items))
+                return items
+            log.warning(
+                "EXTRACTOR_FAILURE platform=DoorDashStorefront path=html "
+                "place=%r url=%r reason=zero_items_returned — falling "
+                "back to clicks",
+                place_name, url,
+            )
+        except Exception as e:
+            log.warning(
+                "EXTRACTOR_FAILURE platform=DoorDashStorefront path=html "
+                "place=%r url=%r reason=%s: %s — falling back to clicks",
+                place_name, url, type(e).__name__, e,
+            )
+
     # === FALLBACK 1: Slice modal click-through ===
 
     if platform == "Slice":
@@ -2194,3 +2214,148 @@ def _toast_fetch_size_variants(
         if rows:
             return rows
     return []
+
+
+# ---------------------------------------------------------------------------
+# DoorDash Storefront extractor
+# ---------------------------------------------------------------------------
+# DoorDash Storefront (`order.online/store/<id>`) is DoorDash's white-label
+# ordering platform sold to restaurants for direct ordering on their own
+# sites — NOT the public DoorDash marketplace (doordash.com/store/...),
+# which is a different surface with its own auth requirements.
+#
+# Like Toast, the page sits behind Cloudflare bot detection — vanilla
+# Playwright gets a 403 challenge. playwright-stealth slips through.
+# Once past Cloudflare, the menu is rendered as plain HTML in the
+# initial response: each item has
+#   <div data-testid="MenuItem" data-item-id="<id>">
+#     ...
+#     <button aria-label="<name> $<price>" ...>
+# So a single regex over `aria-label` extracts every item with name +
+# price. Categories are plain `<h2>` headers in document order; we walk
+# the HTML linearly and assign each item to the most recent <h2> seen.
+# Carousel sections like "Featured Items" / "Most Ordered" are skipped
+# (they duplicate items already listed under their real category).
+#
+# Size variants live in optionLists fetched via the per-item `itemPage`
+# GraphQL query. For the common case where sizes are baked into item
+# names (e.g. "Mozzarella Sticks 6 Pieces"), the base extraction is
+# already complete. A future enhancement can replay itemPage for items
+# where the page indicates HAS_NESTED_OPTIONS — same pattern as Toast's
+# MenuItemDetails replay.
+
+_DDSF_ITEM_RE = _re_allhungry.compile(
+    r'data-testid="MenuItem"\s+data-item-id="(\d+)"'
+    r'.*?aria-label="([^"]+?)\s+\$([\d.]+)"',
+    _re_allhungry.DOTALL,
+)
+_DDSF_H2_RE = _re_allhungry.compile(r'<h2[^>]*>([^<]+?)</h2>')
+_DDSF_URL_RE = _re_allhungry.compile(
+    r'https?://(?:www\.)?order\.online/store/\d+', _re_allhungry.I,
+)
+# Carousel section headers that duplicate items from real categories;
+# items found before/inside these sections are skipped to avoid dupes.
+_DDSF_SKIP_SECTIONS = {
+    "featured items", "most ordered", "popular items", "top picks",
+    "recommended for you", "recommended", "favorites",
+}
+
+
+def _extract_doordash_storefront_via_html(
+    url: str, place_name: str,
+) -> List[Dict[str, Any]]:
+    """Pull a DoorDash Storefront menu from the rendered HTML.
+    ~10-12 sec per restaurant including Cloudflare bypass."""
+    try:
+        from playwright_stealth import Stealth
+    except ImportError:
+        log.warning(
+            "DoorDash Storefront: playwright-stealth not installed — "
+            "Cloudflare will block. Install with `pip install "
+            "playwright-stealth`.",
+        )
+        return []
+    from playwright.sync_api import sync_playwright
+
+    # Resolve custom domains that link/redirect to order.online
+    target_url = url
+    if "order.online/store/" not in url:
+        try:
+            main_html = _http_get(url, timeout=10)
+        except Exception:
+            main_html = None
+        if main_html:
+            m = _DDSF_URL_RE.search(main_html)
+            if m:
+                target_url = m.group(0)
+                log.info(
+                    "DoorDash Storefront: redirected from %s → %s",
+                    url, target_url,
+                )
+        if "order.online/store/" not in target_url:
+            return []
+
+    with Stealth().use_sync(sync_playwright()) as p:
+        b = p.chromium.launch(headless=True)
+        try:
+            ctx = b.new_context()
+            page = ctx.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(8000)
+            body = page.content()
+        finally:
+            b.close()
+
+    # Walk the HTML in order, tracking the current category from the
+    # most recent <h2> header. Skip carousel sections; they duplicate
+    # items that also appear under their real category below.
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    # Find all h2 headers and item matches with their offsets, then
+    # interleave by position so each item picks up its true category.
+    headers = [(m.start(), m.group(1).strip())
+               for m in _DDSF_H2_RE.finditer(body)]
+    items = list(_DDSF_ITEM_RE.finditer(body))
+
+    current_category = "Menu"
+    skip_current = False
+    h_idx = 0
+
+    for item_m in items:
+        item_pos = item_m.start()
+        # Advance the category pointer to the latest h2 before this item
+        while h_idx < len(headers) and headers[h_idx][0] < item_pos:
+            current_category = headers[h_idx][1]
+            skip_current = (
+                current_category.lower() in _DDSF_SKIP_SECTIONS
+            )
+            h_idx += 1
+
+        if skip_current:
+            continue
+
+        item_id = item_m.group(1)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+
+        name = item_m.group(2).strip()
+        try:
+            price_cents = int(round(float(item_m.group(3)) * 100))
+        except ValueError:
+            continue
+        if price_cents <= 0 or not name:
+            continue
+
+        rows.append({
+            "name": name,
+            "price_cents": price_cents,
+            "category": current_category,
+        })
+
+    log.info(
+        "DoorDash Storefront: %s → %d rows extracted",
+        place_name, len(rows),
+    )
+    return rows
